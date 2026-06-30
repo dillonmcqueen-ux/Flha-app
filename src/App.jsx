@@ -71,20 +71,40 @@ export default function FLHAApp() {
   const [sopData, setSopData] = useState(FALLBACK_SOPS);
   const [sopsLoading, setSopsLoading] = useState(true);
   const [companyName, setCompanyName] = useState(FALLBACK_SOPS.company);
+  const [debugInfo, setDebugInfo] = useState("");
 
   // Load company + SOPs from Supabase on first render.
   // Assumes one row in `companies` for now — swap for a login/company-select
   // step once you have multiple companies using the app.
   useEffect(() => {
     async function loadSops() {
-      const { data: companies, error: companyErr } = await supabase
+      // Try both "name" and "Name" since column casing varies depending on
+      // how the table was created in the Supabase UI.
+      let companies, companyErr;
+      ({ data: companies, error: companyErr } = await supabase
         .from("companies")
         .select("id, name")
-        .limit(1);
+        .limit(1));
 
       if (companyErr || !companies?.length) {
+        ({ data: companies, error: companyErr } = await supabase
+          .from("companies")
+          .select('id, "Name"')
+          .limit(1));
+        if (companies?.length) {
+          companies = companies.map(c => ({ id: c.id, name: c.Name }));
+        }
+      }
+
+      if (companyErr) {
+        setDebugInfo(`companies query error: ${companyErr.message}`);
         setSopsLoading(false);
-        return; // keep fallback
+        return;
+      }
+      if (!companies?.length) {
+        setDebugInfo("companies table returned 0 rows");
+        setSopsLoading(false);
+        return;
       }
 
       const company = companies[0];
@@ -93,14 +113,25 @@ export default function FLHAApp() {
         .select("policy_text")
         .eq("company_id", company.id);
 
-      if (!sopsErr && sops?.length) {
-        setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
-        setCompanyName(company.name);
+      if (sopsErr) {
+        setDebugInfo(`sops query error: ${sopsErr.message}`);
+        setSopsLoading(false);
+        return;
       }
+      if (!sops?.length) {
+        setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
+        setSopsLoading(false);
+        return;
+      }
+
+      setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
+      setCompanyName(company.name);
+      setDebugInfo(""); // success, clear debug
       setSopsLoading(false);
     }
     loadSops();
   }, []);
+
 
   const [workerName, setWorkerName] = useState("");
   const [jobSite, setJobSite] = useState("");
@@ -253,6 +284,12 @@ Identify 3-5 real hazards based on the task described. Make sopRef cite the actu
         <div style={styles.card}>
           <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Site & Worker Info</div>
           <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 18 }}>Pre-loaded with <strong>{sopData.company}</strong> SOPs ({sopData.policies.length} policies)</div>
+
+          {debugInfo && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 16, fontSize: 12, color: "#991B1B", fontFamily: "monospace" }}>
+              DEBUG: {debugInfo}
+            </div>
+          )}
 
           <label style={styles.label}>Worker Name</label>
           <input style={{ ...styles.input, marginBottom: 14 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
