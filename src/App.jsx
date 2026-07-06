@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { generateAndUploadFLHA } from "./generatePDF";
 
 // Fallback used only if Supabase has no data yet (e.g. first run)
 const FALLBACK_SOPS = {
@@ -78,8 +79,9 @@ export default function FLHAApp() {
   // step once you have multiple companies using the app.
   useEffect(() => {
     async function loadSops() {
-      // Try both "name" and "Name" since column casing varies depending on
-      // how the table was created in the Supabase UI.
+      // Try both lowercase "companies" and capitalized "Companies" since
+      // table/column casing varies depending on how tables were created
+      // in the Supabase UI (capitalized names need quotes in Postgres).
       let companies, companyErr;
       ({ data: companies, error: companyErr } = await supabase
         .from("companies")
@@ -88,7 +90,7 @@ export default function FLHAApp() {
 
       if (companyErr || !companies?.length) {
         ({ data: companies, error: companyErr } = await supabase
-          .from("companies")
+          .from("Companies")
           .select('id, "Name"')
           .limit(1));
         if (companies?.length) {
@@ -235,15 +237,27 @@ Identify 3-5 real hazards based on the task described. Make sopRef cite the actu
     setLoading(false);
   };
 
-  // Save the completed, signed FLHA back to Supabase
+  // Save the completed, signed FLHA back to Supabase + generate PDF
   const saveFLHA = async () => {
     if (!flha) return;
+
+    // Generate PDF and upload to Supabase Storage
+    const pdfUrl = await generateAndUploadFLHA({
+      flha,
+      workerName,
+      jobSite,
+      signName,
+      companyName,
+    });
+
+    // Save FLHA record with PDF URL
     await supabase.from("flhas").insert({
       worker_name: workerName,
       job_site: jobSite,
       task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
       hazards_json: flha,
       signed_by: signName,
+      pdf_url: pdfUrl || null,
     });
   };
 
@@ -440,12 +454,17 @@ Identify 3-5 real hazards based on the task described. Make sopRef cite the actu
             <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 20 }}>
               Submitted {new Date().toLocaleString("en-CA")} by <strong>{signName}</strong>
             </div>
-            <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: 16, marginBottom: 20, textAlign: "left" }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", marginBottom: 8 }}>WHAT HAPPENS NEXT (in full app)</div>
-              {["✉️ PDF emailed to supervisor & safety officer", "🗂 Stored in company FLHA database", "📊 Hazard trends tracked by site", "🔔 Non-compliance alerts flagged automatically"].map((n, i) => (
+            <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: 16, marginBottom: 16, textAlign: "left" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", marginBottom: 8 }}>SUBMITTED SUCCESSFULLY</div>
+              {["🗂 Saved to company FLHA database", "📄 PDF generated and stored for supervisor", "📊 Hazard data recorded for site trends", "🔔 Available in supervisor dashboard"].map((n, i) => (
                 <div key={i} style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>{n}</div>
               ))}
             </div>
+            <a href="/dashboard" style={{
+              display: "block", background: "#F97316", color: "#fff", borderRadius: 9,
+              padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
+              marginBottom: 10, textAlign: "center"
+            }}>View Dashboard →</a>
             <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setWorkerName(""); setJobSite(""); }}>
               Start New FLHA
             </button>
@@ -455,3 +474,4 @@ Identify 3-5 real hazards based on the task described. Make sopRef cite the actu
     </div>
   );
 }
+
