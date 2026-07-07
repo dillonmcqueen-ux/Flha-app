@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import AdminPanel from "./AdminPanel.jsx";
 
 const RISK_COLOR = {
   High: { bg: "#FEF2F2", border: "#FCA5A5", text: "#991B1B", dot: "#DC2626" },
@@ -261,7 +262,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12 }}>
           <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
+          {isAdmin && (
+            <button style={styles.tab(activeTab === "manage")} onClick={() => setActiveTab("manage")}>⚙️ Manage</button>
+          )}
         </div>
+
+        {activeTab === "manage" && isAdmin && <AdminPanel />}
 
         {/* FLHAs tab */}
         {activeTab === "flhas" && (
