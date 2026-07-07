@@ -67,35 +67,31 @@ function Stepper({ step }) {
   );
 }
 
-export default function FLHAApp() {
+export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   const [step, setStep] = useState("company");
   const [sopData, setSopData] = useState(FALLBACK_SOPS);
   const [sopsLoading, setSopsLoading] = useState(true);
   const [companyName, setCompanyName] = useState(FALLBACK_SOPS.company);
+  const [companyId, setCompanyId] = useState(forcedCompanyId);
   const [debugInfo, setDebugInfo] = useState("");
 
   // Load company + SOPs from Supabase on first render.
-  // Assumes one row in `companies` for now — swap for a login/company-select
-  // step once you have multiple companies using the app.
+  // If forcedCompanyId is provided (from login), load that specific company.
   useEffect(() => {
     async function loadSops() {
-      // Try both lowercase "companies" and capitalized "Companies" since
-      // table/column casing varies depending on how tables were created
-      // in the Supabase UI (capitalized names need quotes in Postgres).
       let companies, companyErr;
-      ({ data: companies, error: companyErr } = await supabase
-        .from("companies")
-        .select("id, name")
-        .limit(1));
 
-      if (companyErr || !companies?.length) {
+      if (forcedCompanyId) {
         ({ data: companies, error: companyErr } = await supabase
-          .from("Companies")
-          .select('id, "Name"')
+          .from("companies")
+          .select("id, name")
+          .eq("id", forcedCompanyId)
           .limit(1));
-        if (companies?.length) {
-          companies = companies.map(c => ({ id: c.id, name: c.Name }));
-        }
+      } else {
+        ({ data: companies, error: companyErr } = await supabase
+          .from("companies")
+          .select("id, name")
+          .limit(1));
       }
 
       if (companyErr) {
@@ -110,6 +106,7 @@ export default function FLHAApp() {
       }
 
       const company = companies[0];
+      setCompanyId(company.id);
       const { data: sops, error: sopsErr } = await supabase
         .from("sops")
         .select("policy_text")
@@ -128,11 +125,11 @@ export default function FLHAApp() {
 
       setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
       setCompanyName(company.name);
-      setDebugInfo(""); // success, clear debug
+      setDebugInfo("");
       setSopsLoading(false);
     }
     loadSops();
-  }, []);
+  }, [forcedCompanyId]);
 
 
   const [workerName, setWorkerName] = useState("");
@@ -268,6 +265,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       hazards_json: flha,
       signed_by: signName,
       pdf_url: pdfUrl || null,
+      company_id: companyId,
     });
   };
 
@@ -290,7 +288,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
   return (
     <div style={styles.wrap}>
-      <div style={styles.header}>
+      <div style={{ ...styles.header, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 28 }}>🦺</span>
           <div>
@@ -298,6 +296,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <div style={{ fontSize: 13, opacity: 0.8 }}>AI-powered Field Level Hazard Assessment</div>
           </div>
         </div>
+        {onLogout && (
+          <button onClick={onLogout} style={{
+            background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8,
+            padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
+          }}>Exit</button>
+        )}
       </div>
 
       <div style={styles.card}>
