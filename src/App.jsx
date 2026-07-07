@@ -231,7 +231,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       setFlha(parsed);
       setStep("review");
     } catch (err) {
-      console.error("FLHA generation failed, using fallback:", err);
+      console.error("FLHA error:", err); alert("FLHA Error: " + err.message);
       // fallback demo data — lets you keep demoing even if the API/key isn't set up yet
       setFlha({
         taskSummary: cleanTranscript || "Excavation and trenching work at site perimeter",
