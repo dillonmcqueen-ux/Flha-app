@@ -120,6 +120,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [selectedFlha, setSelectedFlha] = useState(null);
   const [activeTab, setActiveTab] = useState("flhas");
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [sortBy, setSortBy] = useState("newest");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [groupBy, setGroupBy] = useState("none");
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
@@ -173,6 +177,60 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
+  // Helper: highest risk level in an FLHA (for sorting)
+  const riskRank = (f) => {
+    const hz = f.hazards_json?.hazards || [];
+    if (hz.some(h => h.risk === "High")) return 3;
+    if (hz.some(h => h.risk === "Medium")) return 2;
+    return 1;
+  };
+
+  // ── Apply date filter ────────────────────────────────────
+  const now = new Date();
+  const inDateRange = (f) => {
+    if (dateFilter === "all") return true;
+    const d = new Date(f.created_at);
+    const diffDays = (now - d) / (1000 * 60 * 60 * 24);
+    if (dateFilter === "today") return d.toDateString() === now.toDateString();
+    if (dateFilter === "week") return diffDays <= 7;
+    if (dateFilter === "month") return diffDays <= 31;
+    return true;
+  };
+
+  // ── Apply search ─────────────────────────────────────────
+  const matchesSearch = (f) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (f.worker_name || "").toLowerCase().includes(q) ||
+           (f.job_site || "").toLowerCase().includes(q);
+  };
+
+  // ── Filter + sort ────────────────────────────────────────
+  let processedFlhas = companyFlhas.filter(f => inDateRange(f) && matchesSearch(f));
+
+  processedFlhas = [...processedFlhas].sort((a, b) => {
+    switch (sortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "worker": return (a.worker_name || "").localeCompare(b.worker_name || "");
+      case "site": return (a.job_site || "").localeCompare(b.job_site || "");
+      case "risk": return riskRank(b) - riskRank(a);
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  // ── Group ────────────────────────────────────────────────
+  const grouped = {};
+  if (groupBy === "none") {
+    grouped["All Assessments"] = processedFlhas;
+  } else {
+    processedFlhas.forEach(f => {
+      const key = groupBy === "site" ? (f.job_site || "No location") : (f.worker_name || "Unknown worker");
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(f);
+    });
+  }
+
   const highRiskCount = companyFlhas.filter(f => {
     const hazards = f.hazards_json?.hazards || [];
     return hazards.some(h => h.risk === "High");
@@ -195,6 +253,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       background: active ? "#1E3A5F" : "transparent", color: active ? "#fff" : "#6B7280"
     }),
     flhaRow: { padding: "12px 14px", borderBottom: "1px solid #F3F4F6", cursor: "pointer" },
+    select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", outline: "none" },
   };
 
   if (loading) return (
@@ -272,12 +331,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         {/* FLHAs tab */}
         {activeTab === "flhas" && (
           <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
                   {company?.name} — Field Assessments
                 </div>
-                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any row to view full report</div>
+                <div style={{ fontSize: 13, color: "#6B7280" }}>
+                  {processedFlhas.length} of {companyFlhas.length} shown
+                </div>
               </div>
               {selectedIds.size > 0 && (
                 <button onClick={exportSelected} style={{
@@ -287,51 +348,89 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               )}
             </div>
 
-            {companyFlhas.length === 0 ? (
+            {/* Search */}
+            <input
+              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" }}
+              placeholder="🔍 Search worker or site…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+
+            {/* Controls: sort / date / group */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="worker">Worker (A–Z)</option>
+                <option value="site">Site (A–Z)</option>
+                <option value="risk">Highest risk</option>
+              </select>
+              <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={styles.select}>
+                <option value="all">All time</option>
+                <option value="today">Today</option>
+                <option value="week">Past 7 days</option>
+                <option value="month">Past 31 days</option>
+              </select>
+              <select value={groupBy} onChange={e => setGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="site">Group by site</option>
+                <option value="worker">Group by worker</option>
+              </select>
+            </div>
+
+            {processedFlhas.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
-                No FLHAs submitted yet for this company.
+                {companyFlhas.length === 0 ? "No FLHAs submitted yet for this company." : "No FLHAs match your filters."}
               </div>
             ) : (
-              companyFlhas.map((f, i) => {
-                const hazards = f.hazards_json?.hazards || [];
-                const highRisk = hazards.filter(h => h.risk === "High").length;
-                const medRisk = hazards.filter(h => h.risk === "Medium").length;
-                return (
-                  <div key={f.id} style={{
-                    ...styles.flhaRow,
-                    borderBottom: i < companyFlhas.length - 1 ? "1px solid #F3F4F6" : "none",
-                    borderRadius: i === companyFlhas.length - 1 ? "0 0 8px 8px" : 0,
-                    display: "flex", alignItems: "flex-start", gap: 10,
-                    background: selectedIds.has(f.id) ? "#F0F9FF" : "transparent"
-                  }}>
-                    <input type="checkbox" checked={selectedIds.has(f.id)}
-                      onChange={() => toggleSelect(f.id)}
-                      style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
-                      onClick={e => e.stopPropagation()}
-                    />
-                    <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
-                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                            {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                          {highRisk > 0 && <RiskBadge risk="High" />}
-                          {medRisk > 0 && <RiskBadge risk="Medium" />}
-                          {highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
-                          <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
-                            {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
+              Object.entries(grouped).map(([groupName, groupFlhas]) => (
+                <div key={groupName} style={{ marginBottom: groupBy === "none" ? 0 : 12 }}>
+                  {groupBy !== "none" && (
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 }}>
+                      {groupBy === "site" ? "📍" : "👷"} {groupName} ({groupFlhas.length})
+                    </div>
+                  )}
+                  {groupFlhas.map((f, i) => {
+                    const hazards = f.hazards_json?.hazards || [];
+                    const highRisk = hazards.filter(h => h.risk === "High").length;
+                    const medRisk = hazards.filter(h => h.risk === "Medium").length;
+                    return (
+                      <div key={f.id} style={{
+                        ...styles.flhaRow,
+                        borderBottom: i < groupFlhas.length - 1 ? "1px solid #F3F4F6" : "none",
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        background: selectedIds.has(f.id) ? "#F0F9FF" : "transparent"
+                      }}>
+                        <input type="checkbox" checked={selectedIds.has(f.id)}
+                          onChange={() => toggleSelect(f.id)}
+                          style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+                          onClick={e => e.stopPropagation()}
+                        />
+                        <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
+                              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
+                              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                                {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                              {highRisk > 0 && <RiskBadge risk="High" />}
+                              {medRisk > 0 && <RiskBadge risk="Medium" />}
+                              {highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
+                              <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
+                                {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })
+                    );
+                  })}
+                </div>
+              ))
             )}
           </div>
         )}
