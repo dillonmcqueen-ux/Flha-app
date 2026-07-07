@@ -24,12 +24,34 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   const W = 210, margin = 16, contentW = W - margin * 2;
   let y = 20;
+
+  // Try to load the company logo (remote URL → data URL) before drawing
+  let logoDataUrl = null;
+  if (companyLogo) {
+    try {
+      logoDataUrl = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          c.getContext("2d").drawImage(img, 0, 0);
+          resolve(c.toDataURL("image/png"));
+        };
+        img.onerror = () => reject(new Error("logo load failed"));
+        img.src = companyLogo;
+      });
+    } catch (e) {
+      logoDataUrl = null; // skip logo if it can't load
+    }
+  }
 
   // ── Header ──────────────────────────────────────────────
   doc.setFillColor(30, 58, 95); // #1E3A5F
@@ -41,7 +63,17 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text("Field Level Hazard Assessment", margin, 20);
-  doc.text(new Date().toLocaleString("en-CA"), W - margin, 13, { align: "right" });
+
+  // Logo top-right (if available), else date
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, "PNG", W - margin - 20, 5, 20, 20);
+    } catch (e) {}
+    doc.setFontSize(7);
+    doc.text(new Date().toLocaleDateString("en-CA"), W - margin, 28, { align: "right" });
+  } else {
+    doc.text(new Date().toLocaleString("en-CA"), W - margin, 13, { align: "right" });
+  }
   y = 40;
 
   // ── Company / Worker info ────────────────────────────────
