@@ -255,7 +255,7 @@ export default function Dashboard() {
                         {highRisk > 0 && <RiskBadge risk="High" />}
                         {medRisk > 0 && <RiskBadge risk="Medium" />}
                         {highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
-                        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{hazards.length} hazards →</div>
+                        <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>{f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →</div>
                       </div>
                     </div>
                   </div>
