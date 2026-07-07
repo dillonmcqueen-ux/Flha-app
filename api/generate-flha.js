@@ -26,7 +26,7 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-haiku-4-5",
         max_tokens: 1500,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -38,6 +38,12 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
+
+    // Log key details for debugging in Vercel logs
+    console.log("Anthropic stop_reason:", data.stop_reason);
+    console.log("Anthropic usage:", JSON.stringify(data.usage));
+    console.log("Response text length:", data.content?.[0]?.text?.length);
+
     res.status(200).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
