@@ -142,6 +142,8 @@ export default function FLHAApp() {
   const [transcript, setTranscript] = useState("");
   const [flha, setFlha] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [genError, setGenError] = useState(false);
+  const [sopsOpen, setSopsOpen] = useState(false);
   const [signed, setSigned] = useState(false);
   const [signName, setSignName] = useState("");
   const recognitionRef = useRef(null);
@@ -183,6 +185,7 @@ export default function FLHAApp() {
 
   const generateFLHA = async () => {
     setLoading(true);
+    setGenError(false);
     const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
     const prompt = `You are an experienced field safety officer reviewing a worker's task description before they begin work. Your job is to identify ONLY the hazards that are genuinely relevant to what this specific worker has described — not a generic list.
 
@@ -224,36 +227,22 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       const data = await res.json();
 
       if (data.error) {
-        throw new Error(`API error: ${data.error}`);
+        throw new Error(data.error);
       }
 
       const text = data.content?.map(b => b.text || "").join("") || "";
-
       const firstBrace = text.indexOf("{");
       const lastBrace = text.lastIndexOf("}");
       if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error(`No JSON braces found. Raw text (${text.length} chars): ${text.slice(0, 500)}`);
+        throw new Error("Invalid response format");
       }
-      const clean = text.slice(firstBrace, lastBrace + 1);
-
-      let parsed;
-      try {
-        parsed = JSON.parse(clean);
-      } catch (parseErr) {
-        throw new Error(`Parse failed: ${parseErr.message}. Extracted (${clean.length} chars): ${clean.slice(0, 500)}`);
-      }
+      const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
       setFlha(parsed);
       setStep("review");
     } catch (err) {
-      setFlha({
-        taskSummary: "DEBUG: " + err.message,
-        hazards: [{ hazard: "See task summary above for full error", risk: "Low", control: "Check the error text above", sopRef: null }],
-        sopAlerts: [],
-        ppeRequired: [],
-        additionalNotes: null
-      });
-      setStep("review");
+      console.error("FLHA generation error:", err);
+      setGenError(true);
     }
     setLoading(false);
   };
@@ -320,23 +309,30 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Site & Worker Info</div>
           <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 18 }}>Pre-loaded with <strong>{sopData.company}</strong> SOPs ({sopData.policies.length} policies)</div>
 
-          {debugInfo && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 16, fontSize: 12, color: "#991B1B", fontFamily: "monospace" }}>
-              DEBUG: {debugInfo}
-            </div>
-          )}
-
           <label style={styles.label}>Worker Name</label>
           <input style={{ ...styles.input, marginBottom: 14 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
 
           <label style={styles.label}>Job Site / Location</label>
           <input style={{ ...styles.input, marginBottom: 22 }} placeholder="e.g. Hwy 2 & 42 Ave, Red Deer" value={jobSite} onChange={e => setJobSite(e.target.value)} />
 
-          <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 22 }}>
-            <div style={{ fontWeight: 600, fontSize: 13, color: "#0369A1", marginBottom: 6 }}>📋 Loaded Company SOPs</div>
-            {sopData.policies.map((p, i) => (
-              <div key={i} style={{ fontSize: 12, color: "#374151", marginBottom: 3 }}>• {p}</div>
-            ))}
+          <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, marginBottom: 22, overflow: "hidden" }}>
+            <button
+              onClick={() => setSopsOpen(o => !o)}
+              style={{
+                width: "100%", background: "transparent", border: "none", cursor: "pointer",
+                padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center",
+                fontWeight: 600, fontSize: 13, color: "#0369A1"
+              }}>
+              <span>📋 Loaded Company SOPs ({sopData.policies.length})</span>
+              <span style={{ fontSize: 12, transform: sopsOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+            </button>
+            {sopsOpen && (
+              <div style={{ padding: "0 14px 12px", maxHeight: 240, overflowY: "auto" }}>
+                {sopData.policies.map((p, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "#374151", marginBottom: 5 }}>• {p}</div>
+                ))}
+              </div>
+            )}
           </div>
 
           <button style={styles.btn("#F97316")} onClick={() => { if (workerName && jobSite) setStep("voice"); }}>
@@ -390,6 +386,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             value={taskDesc}
             onChange={e => setTaskDesc(e.target.value)}
           />
+
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Something went wrong generating the assessment. Please check your connection and try again.
+            </div>
+          )}
 
           <button
             style={styles.btn(loading ? "#9CA3AF" : "#16A34A")}
