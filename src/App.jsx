@@ -73,6 +73,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   const [sopsLoading, setSopsLoading] = useState(true);
   const [companyName, setCompanyName] = useState(FALLBACK_SOPS.company);
   const [companyId, setCompanyId] = useState(forcedCompanyId);
+  const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
 
   // Load company + SOPs from Supabase on first render.
@@ -84,13 +85,13 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
       if (forcedCompanyId) {
         ({ data: companies, error: companyErr } = await supabase
           .from("companies")
-          .select("id, name")
+          .select("id, name, logo_url")
           .eq("id", forcedCompanyId)
           .limit(1));
       } else {
         ({ data: companies, error: companyErr } = await supabase
           .from("companies")
-          .select("id, name")
+          .select("id, name, logo_url")
           .limit(1));
       }
 
@@ -107,6 +108,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
 
       const company = companies[0];
       setCompanyId(company.id);
+      setCompanyLogo(company.logo_url || "");
       const { data: sops, error: sopsErr } = await supabase
         .from("sops")
         .select("policy_text")
@@ -311,6 +313,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       signName,
       companyName,
       signatureDataUrl,
+      companyLogo,
     });
 
     // Save FLHA record with PDF URL
@@ -346,7 +349,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     <div style={styles.wrap}>
       <div style={{ ...styles.header, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 28 }}>🦺</span>
+          {companyLogo
+            ? <img src={companyLogo} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", background: "#fff" }} />
+            : <span style={{ fontSize: 28 }}>🦺</span>}
           <div>
             <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>SafeField FLHA</div>
             <div style={{ fontSize: 13, opacity: 0.8 }}>AI-powered Field Level Hazard Assessment</div>
