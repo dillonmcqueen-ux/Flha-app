@@ -29,19 +29,28 @@ function FLHACard({ flha, onClose }) {
         background: "#fff", borderRadius: 14, padding: 24, width: "100%",
         maxWidth: 640, marginTop: 8
       }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", gap: 8 }}>
-  {flha.pdf_url && (
-    <a href={flha.pdf_url} target="_blank" rel="noreferrer" style={{
-      background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
-      padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
-      textDecoration: "none"
-    }}>⬇ PDF</a>
-  )}
-  <button onClick={onClose} style={{
-    background: "#F3F4F6", border: "none", borderRadius: 8,
-    padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
-  }}>✕ Close</button>
-</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>FLHA Report</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>
+              {new Date(flha.created_at).toLocaleString("en-CA")} · {flha.job_site}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {flha.pdf_url && (
+              <a href={flha.pdf_url} target="_blank" rel="noreferrer" style={{
+                background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
+                padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+                textDecoration: "none"
+              }}>⬇ PDF</a>
+            )}
+            <button onClick={onClose} style={{
+              background: "#F3F4F6", border: "none", borderRadius: 8,
+              padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
+            }}>✕ Close</button>
+          </div>
+        </div>
+
         <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#0369A1", marginBottom: 4 }}>WORKER</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: "#1E3A5F" }}>{flha.worker_name}</div>
@@ -101,7 +110,7 @@ function FLHACard({ flha, onClose }) {
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [sops, setSops] = useState([]);
@@ -109,25 +118,58 @@ export default function Dashboard() {
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
   const [activeTab, setActiveTab] = useState("flhas");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const exportSelected = () => {
+    const toExport = companyFlhas.filter(f => selectedIds.has(f.id) && f.pdf_url);
+    if (!toExport.length) {
+      alert("No PDFs available for selected FLHAs. PDFs are only generated for FLHAs submitted after this feature was added.");
+      return;
+    }
+    toExport.forEach((f, i) => {
+      setTimeout(() => {
+        const a = document.createElement("a");
+        a.href = f.pdf_url;
+        a.target = "_blank";
+        a.download = `FLHA_${f.worker_name}_${new Date(f.created_at).toLocaleDateString("en-CA")}.pdf`;
+        a.click();
+      }, i * 500); // stagger downloads
+    });
+    setSelectedIds(new Set());
+  };
 
   useEffect(() => {
     async function loadAll() {
       const [{ data: cos }, { data: fs }, { data: ss }] = await Promise.all([
         supabase.from("companies").select("*"),
-        supabase.from("flhas").select("*").order("created_at", { ascending: false }),
+        supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
       ]);
-      setCompanies(cos || []);
+
+      // Supervisors only see their own company; admins see all.
+      const visibleCompanies = forcedCompanyId
+        ? (cos || []).filter(c => c.id === forcedCompanyId)
+        : (cos || []);
+
+      setCompanies(visibleCompanies);
       setFlhas(fs || []);
       setSops(ss || []);
-      if (cos?.length) setSelectedCompany(cos[0].id);
+      if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
     }
     loadAll();
-  }, []);
+  }, [forcedCompanyId]);
 
   const company = companies.find(c => c.id === selectedCompany);
-  const companyFlhas = flhas.filter(f => f.company_id === selectedCompany || !f.company_id);
+  const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
   const highRiskCount = companyFlhas.filter(f => {
@@ -170,17 +212,19 @@ export default function Dashboard() {
       <div style={styles.header}>
         <div>
           <div style={{ fontWeight: 800, fontSize: 18 }}>🦺 SafeField Dashboard</div>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>Supervisor View</div>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>{isAdmin ? "Admin View — All Companies" : "Supervisor View"}</div>
         </div>
-        <a href="/" style={{ color: "#fff", fontSize: 13, textDecoration: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8 }}>
-          + New FLHA
-        </a>
+        {onLogout && (
+          <button onClick={onLogout} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+            Exit
+          </button>
+        )}
       </div>
 
       <div style={{ padding: 16 }}>
 
-        {/* Company selector */}
-        {companies.length > 1 && (
+        {/* Company selector — admin only */}
+        {isAdmin && companies.length > 1 && (
           <div style={styles.card}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8 }}>COMPANY</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -222,10 +266,20 @@ export default function Dashboard() {
         {/* FLHAs tab */}
         {activeTab === "flhas" && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
-              {company?.name} — Field Assessments
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                  {company?.name} — Field Assessments
+                </div>
+                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any row to view full report</div>
+              </div>
+              {selectedIds.size > 0 && (
+                <button onClick={exportSelected} style={{
+                  background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer", flexShrink: 0
+                }}>⬇ Export {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
+              )}
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any row to view full report</div>
 
             {companyFlhas.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
@@ -241,21 +295,32 @@ export default function Dashboard() {
                   <div key={f.id} style={{
                     ...styles.flhaRow,
                     borderBottom: i < companyFlhas.length - 1 ? "1px solid #F3F4F6" : "none",
-                    borderRadius: i === companyFlhas.length - 1 ? "0 0 8px 8px" : 0
-                  }} onClick={() => setSelectedFlha(f)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
-                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                          {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                    borderRadius: i === companyFlhas.length - 1 ? "0 0 8px 8px" : 0,
+                    display: "flex", alignItems: "flex-start", gap: 10,
+                    background: selectedIds.has(f.id) ? "#F0F9FF" : "transparent"
+                  }}>
+                    <input type="checkbox" checked={selectedIds.has(f.id)}
+                      onChange={() => toggleSelect(f.id)}
+                      style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+                      onClick={e => e.stopPropagation()}
+                    />
+                    <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
+                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                            {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                          </div>
                         </div>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                        {highRisk > 0 && <RiskBadge risk="High" />}
-                        {medRisk > 0 && <RiskBadge risk="Medium" />}
-                        {highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
-                        <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>{f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                          {highRisk > 0 && <RiskBadge risk="High" />}
+                          {medRisk > 0 && <RiskBadge risk="Medium" />}
+                          {highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
+                          <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
+                            {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
