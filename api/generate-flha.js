@@ -1,8 +1,11 @@
-// This runs on Vercel's server, NOT in the browser — so your Anthropic
-// API key stays secret. The frontend calls /api/generate-flha, and this
-// function calls Anthropic on its behalf.
-//
+// Vercel serverless function — calls Anthropic API securely server-side.
 // Set ANTHROPIC_API_KEY in Vercel: Project Settings -> Environment Variables
+
+// Extend Vercel function timeout to 30 seconds (requires Pro on Vercel,
+// but maxDuration up to 10s works on Hobby — we'll also shorten the prompt)
+export const config = {
+  maxDuration: 30,
+};
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -23,11 +26,16 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4000,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
         messages: [{ role: "user", content: prompt }],
       }),
     });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(500).json({ error: `Anthropic API error: ${response.status} ${errText}` });
+    }
 
     const data = await response.json();
     res.status(200).json(data);
