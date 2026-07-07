@@ -143,7 +143,60 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   const [sopsOpen, setSopsOpen] = useState(false);
   const [signed, setSigned] = useState(false);
   const [signName, setSignName] = useState("");
+  const [hasSignature, setHasSignature] = useState(false);
   const recognitionRef = useRef(null);
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+
+  // ── Signature pad drawing handlers ───────────────────────
+  const getCanvasPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return {
+      x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+      y: (touch.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  };
+
+  const startDraw = (e) => {
+    e.preventDefault();
+    drawingRef.current = true;
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getCanvasPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const draw = (e) => {
+    if (!drawingRef.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getCanvasPos(e);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = "#1E3A5F";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    setHasSignature(true);
+  };
+
+  const endDraw = () => { drawingRef.current = false; };
+
+  const clearSignature = () => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    setHasSignature(false);
+  };
+
+  const getSignatureDataUrl = () => {
+    if (!canvasRef.current || !hasSignature) return null;
+    return canvasRef.current.toDataURL("image/png");
+  };
 
   const hasSpeech = typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
 
@@ -248,6 +301,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
   const saveFLHA = async () => {
     if (!flha) return;
 
+    const signatureDataUrl = getSignatureDataUrl();
+
     // Generate PDF and upload to Supabase Storage
     const pdfUrl = await generateAndUploadFLHA({
       flha,
@@ -255,6 +310,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       jobSite,
       signName,
       companyName,
+      signatureDataUrl,
     });
 
     // Save FLHA record with PDF URL
@@ -462,10 +518,42 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Worker Acknowledgement</div>
             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
-            <label style={styles.label}>Full Name (electronic signature)</label>
-            <input style={{ ...styles.input, marginBottom: 14 }} placeholder="Type your full name to sign" value={signName} onChange={e => setSignName(e.target.value)} />
-            <button style={styles.btn(signed ? "#16A34A" : signName ? "#F97316" : "#9CA3AF")}
-              disabled={!signName || signed}
+
+            <label style={styles.label}>Printed Name</label>
+            <input style={{ ...styles.input, marginBottom: 14 }} placeholder="Type your full name" value={signName} onChange={e => setSignName(e.target.value)} />
+
+            <label style={styles.label}>Signature</label>
+            <div style={{ position: "relative", marginBottom: 6 }}>
+              <canvas
+                ref={canvasRef}
+                width={600}
+                height={180}
+                style={{
+                  width: "100%", height: 150, border: "1.5px solid #E5E7EB",
+                  borderRadius: 10, background: "#fff", touchAction: "none", display: "block"
+                }}
+                onMouseDown={startDraw}
+                onMouseMove={draw}
+                onMouseUp={endDraw}
+                onMouseLeave={endDraw}
+                onTouchStart={startDraw}
+                onTouchMove={draw}
+                onTouchEnd={endDraw}
+              />
+              {!hasSignature && (
+                <div style={{
+                  position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)",
+                  textAlign: "center", color: "#9CA3AF", fontSize: 14, pointerEvents: "none"
+                }}>Sign here with your finger</div>
+              )}
+            </div>
+            <button onClick={clearSignature} style={{
+              background: "transparent", border: "none", color: "#6B7280",
+              fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 14, padding: 0
+            }}>Clear signature</button>
+
+            <button style={styles.btn(signed ? "#16A34A" : (signName && hasSignature) ? "#F97316" : "#9CA3AF")}
+              disabled={!signName || !hasSignature || signed}
               onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
               {signed ? "✓ Signed" : "Sign & Submit FLHA"}
             </button>
@@ -492,7 +580,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setWorkerName(""); setJobSite(""); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); }}>
               Start New FLHA
             </button>
           </div>
