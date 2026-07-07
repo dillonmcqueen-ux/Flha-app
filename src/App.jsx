@@ -184,28 +184,36 @@ export default function FLHAApp() {
   const generateFLHA = async () => {
     setLoading(true);
     const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
-    const prompt = `You are a safety officer AI. A field worker has described their work task verbally. Cross-reference it with the company SOPs and generate a structured FLHA (Field Level Hazard Assessment).
+    const prompt = `You are an experienced field safety officer reviewing a worker's task description before they begin work. Your job is to identify ONLY the hazards that are genuinely relevant to what this specific worker has described — not a generic list.
 
 Company: ${companyName}
 Worker: ${workerName}
 Job Site: ${jobSite}
-Task Description (from voice/text): "${cleanTranscript}"
+Task Description: "${cleanTranscript}"
 
 Company SOPs and Policies:
 ${sopData.policies.map((p, i) => `${i + 1}. ${p}`).join("\n")}
 
-Respond ONLY with a valid JSON object (no markdown, no backticks) with this structure:
-{
-  "taskSummary": "short summary of task",
-  "hazards": [
-    { "hazard": "hazard name", "risk": "Low|Medium|High", "control": "control measure aligned with SOP", "sopRef": "which SOP this references or null" }
-  ],
-  "sopAlerts": ["any SOP requirements triggered by this task"],
-  "ppeRequired": ["list of required PPE"],
-  "additionalNotes": "any other safety notes"
-}
+INSTRUCTIONS:
+- Read the task description carefully. Only flag hazards that are directly present or likely given what the worker described.
+- Do NOT include generic hazards that have nothing to do with this task.
+- If the worker mentions excavation, flag excavation hazards. If they don't mention heights, don't flag fall hazards.
+- For sopAlerts, only include SOPs that are specifically triggered by this task — e.g. if no hot work is mentioned, don't include the hot work SOP.
+- For ppeRequired, only list PPE actually needed for this specific task.
+- Identify 2-5 hazards maximum. Quality over quantity.
+- Risk levels: High = could cause serious injury or death, Medium = could cause injury, Low = minor risk.
+- If a hazard is already well-controlled by the worker's described approach, rate it Lower.
 
-Identify 3-5 real hazards based on the task described. Make sopRef cite the actual SOP text if relevant.`;
+Respond ONLY with a valid JSON object (no markdown, no backticks):
+{
+  "taskSummary": "one sentence summary of what the worker is doing",
+  "hazards": [
+    { "hazard": "specific hazard name", "risk": "Low|Medium|High", "control": "specific control measure for this task", "sopRef": "exact SOP text this references, or null" }
+  ],
+  "sopAlerts": ["only SOPs specifically triggered by this task"],
+  "ppeRequired": ["only PPE needed for this specific task"],
+  "additionalNotes": "any task-specific safety notes the worker should know, or null"
+}`;
 
     try {
       // NOTE: this calls a serverless function (/api/generate-flha), not
@@ -474,4 +482,3 @@ Identify 3-5 real hazards based on the task described. Make sopRef cite the actu
     </div>
   );
 }
-
