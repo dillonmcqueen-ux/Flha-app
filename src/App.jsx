@@ -216,29 +216,42 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 }`;
 
     try {
-      // NOTE: this calls a serverless function (/api/generate-flha), not
-      // Anthropic's API directly. Never put an Anthropic API key in
-      // frontend code — see api/generate-flha.js for the real call.
       const res = await fetch("/api/generate-flha", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt })
       });
       const data = await res.json();
+
+      if (data.error) {
+        throw new Error(`API error: ${data.error}`);
+      }
+
       const text = data.content?.map(b => b.text || "").join("") || "";
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
+
+      const firstBrace = text.indexOf("{");
+      const lastBrace = text.lastIndexOf("}");
+      if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error(`No JSON braces found. Raw text (${text.length} chars): ${text.slice(0, 500)}`);
+      }
+      const clean = text.slice(firstBrace, lastBrace + 1);
+
+      let parsed;
+      try {
+        parsed = JSON.parse(clean);
+      } catch (parseErr) {
+        throw new Error(`Parse failed: ${parseErr.message}. Extracted (${clean.length} chars): ${clean.slice(0, 500)}`);
+      }
+
       setFlha(parsed);
       setStep("review");
     } catch (err) {
-      console.error("FLHA error:", err); alert("FLHA Error: " + err.message);
-      // fallback demo data — lets you keep demoing even if the API/key isn't set up yet
       setFlha({
-        taskSummary: cleanTranscript || "Excavation and trenching work at site perimeter",
-        hazards: sampleHazards.slice(0, 4).map(h => ({ ...h, risk: "Medium", sopRef: sopData.policies[0] || null })),
-        sopAlerts: ["LOTO required before servicing pump", "Excavation >1.5m requires shoring", "Call 811 before digging"],
-        ppeRequired: ["Hard hat", "Safety vest", "Steel-toed boots", "Gloves", "Safety glasses"],
-        additionalNotes: "Ensure check-in with dispatch every 2 hours. Incident reporting within 1 hour if any near-miss occurs."
+        taskSummary: "DEBUG: " + err.message,
+        hazards: [{ hazard: "See task summary above for full error", risk: "Low", control: "Check the error text above", sopRef: null }],
+        sopAlerts: [],
+        ppeRequired: [],
+        additionalNotes: null
       });
       setStep("review");
     }
