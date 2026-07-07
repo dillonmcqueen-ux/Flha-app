@@ -34,10 +34,17 @@ export default function AdminPanel() {
   const [sopCompanyId, setSopCompanyId] = useState(null);
   const [sopText, setSopText] = useState("");
 
+  // Profile editing state
+  const [profileId, setProfileId] = useState(null);
+  const [profile, setProfile] = useState({
+    name: "", contact_name: "", contact_email: "", contact_phone: "", address: "", logo_url: "",
+  });
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
   const loadCompanies = async () => {
     const { data } = await supabase
       .from("companies")
-      .select("id, name, worker_code, supervisor_code")
+      .select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url")
       .order("id", { ascending: true });
     setCompanies(data || []);
     setLoading(false);
@@ -106,6 +113,60 @@ export default function AdminPanel() {
     setSaving(false);
   };
 
+  const openProfile = (c) => {
+    setProfileId(c.id);
+    setProfile({
+      name: c.name || "",
+      contact_name: c.contact_name || "",
+      contact_email: c.contact_email || "",
+      contact_phone: c.contact_phone || "",
+      address: c.address || "",
+      logo_url: c.logo_url || "",
+    });
+    setView("profile");
+    setMsg("");
+  };
+
+  const saveProfile = async () => {
+    setMsg("");
+    if (!profile.name.trim()) { setMsg("Company name cannot be empty."); return; }
+    setSaving(true);
+    const { error } = await supabase
+      .from("companies")
+      .update({
+        name: profile.name.trim(),
+        contact_name: profile.contact_name.trim(),
+        contact_email: profile.contact_email.trim(),
+        contact_phone: profile.contact_phone.trim(),
+        address: profile.address.trim(),
+        logo_url: profile.logo_url || null,
+      })
+      .eq("id", profileId);
+    if (error) setMsg("Error: " + error.message);
+    else { setMsg("Profile saved ✓"); await loadCompanies(); }
+    setSaving(false);
+  };
+
+  const uploadLogo = async (file) => {
+    if (!file) return;
+    setUploadingLogo(true);
+    setMsg("");
+    const ext = file.name.split(".").pop();
+    const filename = `logo_${profileId}_${Date.now()}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+    const { error } = await supabase.storage
+      .from("company-logos")
+      .upload(filename, file, { contentType: file.type, upsert: true });
+    if (error) {
+      setMsg("Logo upload failed: " + error.message);
+      setUploadingLogo(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filename);
+    setProfile(p => ({ ...p, logo_url: urlData?.publicUrl || "" }));
+    setUploadingLogo(false);
+    setMsg("Logo uploaded — remember to Save Profile ✓");
+  };
+
   const copyText = (text) => {
     try {
       navigator.clipboard?.writeText(text);
@@ -149,7 +210,16 @@ export default function AdminPanel() {
             <div style={{ color: "#9CA3AF", padding: "16px 0", textAlign: "center" }}>No companies yet. Add one to get started.</div>
           ) : companies.map((c, i) => (
             <div key={c.id} style={{ padding: "12px 0", borderBottom: i < companies.length - 1 ? "1px solid #F3F4F6" : "none" }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 6 }}>{c.name}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {c.logo_url && <img src={c.logo_url} alt="" style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover" }} />}
+                  <span style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>{c.name}</span>
+                </div>
+                <button onClick={() => openProfile(c)} style={{
+                  background: "#F5F3FF", color: "#7C3AED", border: "1px solid #DDD6FE", borderRadius: 8,
+                  padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer"
+                }}>Edit Profile</button>
+              </div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 <div>
                   <span style={{ fontSize: 11, color: "#6B7280", marginRight: 6 }}>WORKER</span>
@@ -207,6 +277,59 @@ export default function AdminPanel() {
 
           <button style={{ ...styles.btn("#7C3AED"), width: "100%" }} onClick={addSops} disabled={saving}>
             {saving ? "Saving…" : "Add SOPs"}
+          </button>
+        </div>
+      )}
+
+      {/* Company profile editor */}
+      {view === "profile" && (
+        <div style={styles.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>Company Profile</div>
+            <button onClick={() => { setView("list"); setMsg(""); }} style={{
+              background: "#F3F4F6", border: "none", borderRadius: 8, padding: "5px 12px",
+              fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#374151"
+            }}>← Back</button>
+          </div>
+
+          {/* Logo */}
+          <label style={styles.label}>Company Logo</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: 10, border: "1.5px solid #E5E7EB",
+              background: "#F9FAFB", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0
+            }}>
+              {profile.logo_url
+                ? <img src={profile.logo_url} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <span style={{ fontSize: 24, color: "#9CA3AF" }}>🏢</span>}
+            </div>
+            <label style={{
+              background: "#F5F3FF", color: "#7C3AED", border: "1px solid #DDD6FE", borderRadius: 8,
+              padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer"
+            }}>
+              {uploadingLogo ? "Uploading…" : "Upload Logo"}
+              <input type="file" accept="image/*" style={{ display: "none" }}
+                onChange={e => uploadLogo(e.target.files?.[0])} disabled={uploadingLogo} />
+            </label>
+          </div>
+
+          <label style={styles.label}>Company Name</label>
+          <input style={styles.input} value={profile.name} onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} />
+
+          <label style={styles.label}>Contact Name</label>
+          <input style={styles.input} placeholder="e.g. Jane Doe" value={profile.contact_name} onChange={e => setProfile(p => ({ ...p, contact_name: e.target.value }))} />
+
+          <label style={styles.label}>Contact Email</label>
+          <input style={styles.input} type="email" placeholder="e.g. safety@company.com" value={profile.contact_email} onChange={e => setProfile(p => ({ ...p, contact_email: e.target.value }))} />
+
+          <label style={styles.label}>Contact Phone</label>
+          <input style={styles.input} type="tel" placeholder="e.g. (403) 555-0123" value={profile.contact_phone} onChange={e => setProfile(p => ({ ...p, contact_phone: e.target.value }))} />
+
+          <label style={styles.label}>Address</label>
+          <input style={styles.input} placeholder="e.g. 123 Main St, Calgary, AB" value={profile.address} onChange={e => setProfile(p => ({ ...p, address: e.target.value }))} />
+
+          <button style={{ ...styles.btn("#7C3AED"), width: "100%", marginTop: 6 }} onClick={saveProfile} disabled={saving}>
+            {saving ? "Saving…" : "Save Profile"}
           </button>
         </div>
       )}
