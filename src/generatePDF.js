@@ -24,7 +24,7 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -88,7 +88,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.setTextColor(194, 65, 12);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text("⚠ SOP ALERTS TRIGGERED", margin + 4, y + 5);
+    doc.text("SOP ALERTS TRIGGERED", margin + 4, y + 5);
     y += 10;
     doc.setFont("helvetica", "normal");
     doc.setTextColor(154, 52, 18);
@@ -147,7 +147,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
       doc.setFont("helvetica", "normal");
       doc.setTextColor(55, 65, 81);
       doc.setFontSize(8);
-      rowY = wrapText(doc, `🛡 ${hz.control}`, margin + 4, rowY, contentW - 8, 4.5);
+      rowY = wrapText(doc, `Control: ${hz.control}`, margin + 4, rowY, contentW - 8, 4.5);
 
       // SOP ref
       if (hz.sopRef) {
@@ -185,16 +185,36 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     y += 12;
   }
 
-  // ── Signature line ───────────────────────────────────────
-  if (y > 250) { doc.addPage(); y = 20; }
+  // ── Signature block ──────────────────────────────────────
+  if (y > 230) { doc.addPage(); y = 20; }
+  y += 4;
   doc.setDrawColor(209, 213, 219);
   doc.line(margin, y, W - margin, y);
-  y += 6;
+  y += 8;
+
+  doc.setTextColor(30, 58, 95);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("Worker Signature", margin, y);
+  y += 4;
+
+  // Embed the drawn signature image if provided
+  if (signatureDataUrl) {
+    try {
+      doc.addImage(signatureDataUrl, "PNG", margin, y, 70, 21);
+    } catch (e) {
+      // if image fails, skip silently
+    }
+  }
+  // signature underline
+  doc.setDrawColor(150, 150, 150);
+  doc.line(margin, y + 23, margin + 70, y + 23);
+
   doc.setTextColor(107, 114, 128);
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text(`Electronically signed by: ${signName}`, margin, y);
-  doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y, { align: "right" });
+  doc.text(`Printed name: ${signName}`, margin, y + 29);
+  doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
 
   // ── Generate filename & upload ───────────────────────────
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
