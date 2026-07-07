@@ -29,19 +29,19 @@ function FLHACard({ flha, onClose }) {
         background: "#fff", borderRadius: 14, padding: 24, width: "100%",
         maxWidth: 640, marginTop: 8
       }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>FLHA Report</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>
-              {new Date(flha.created_at).toLocaleString("en-CA")} · {flha.job_site}
-            </div>
-          </div>
-          <button onClick={onClose} style={{
-            background: "#F3F4F6", border: "none", borderRadius: 8,
-            padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
-          }}>✕ Close</button>
-        </div>
-
+        <div style={{ display: "flex", gap: 8 }}>
+  {flha.pdf_url && (
+    <a href={flha.pdf_url} target="_blank" rel="noreferrer" style={{
+      background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
+      padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+      textDecoration: "none"
+    }}>⬇ PDF</a>
+  )}
+  <button onClick={onClose} style={{
+    background: "#F3F4F6", border: "none", borderRadius: 8,
+    padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
+  }}>✕ Close</button>
+</div>
         <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#0369A1", marginBottom: 4 }}>WORKER</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: "#1E3A5F" }}>{flha.worker_name}</div>
