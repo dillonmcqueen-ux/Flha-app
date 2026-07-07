@@ -519,9 +519,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Worker Acknowledgement</div>
             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
 
-            <label style={styles.label}>Printed Name</label>
-            <input style={{ ...styles.input, marginBottom: 14 }} placeholder="Type your full name" value={signName} onChange={e => setSignName(e.target.value)} />
-
             <label style={styles.label}>Signature</label>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas
@@ -547,14 +544,17 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                 }}>Sign here with your finger</div>
               )}
             </div>
-            <button onClick={clearSignature} style={{
-              background: "transparent", border: "none", color: "#6B7280",
-              fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 14, padding: 0
-            }}>Clear signature</button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 13, color: "#374151" }}>Signed by: <strong>{workerName}</strong></div>
+              <button onClick={clearSignature} style={{
+                background: "transparent", border: "none", color: "#6B7280",
+                fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0
+              }}>Clear signature</button>
+            </div>
 
-            <button style={styles.btn(signed ? "#16A34A" : (signName && hasSignature) ? "#F97316" : "#9CA3AF")}
-              disabled={!signName || !hasSignature || signed}
-              onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
+            <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
+              disabled={!hasSignature || signed}
+              onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
               {signed ? "✓ Signed" : "Sign & Submit FLHA"}
             </button>
           </div>
