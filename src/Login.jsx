@@ -59,7 +59,7 @@ export default function Login() {
     const column = role === "supervisor" ? "supervisor_code" : "worker_code";
     const { data, error: qErr } = await supabase
       .from("companies")
-      .select("id, name, worker_code, supervisor_code")
+      .select("id, name, worker_code, supervisor_code, suspended")
       .eq(column, entered)
       .limit(1);
 
@@ -75,7 +75,15 @@ export default function Login() {
     }
 
     const company = data[0];
-    const s = { role, companyId: company.id, companyName: company.name };
+
+    // Suspended companies: block workers entirely; supervisors get view-only.
+    if (company.suspended && role === "worker") {
+      setError("Access suspended. Please contact your administrator.");
+      setChecking(false);
+      return;
+    }
+
+    const s = { role, companyId: company.id, companyName: company.name, suspended: !!company.suspended };
     saveSession(s);
     setSession(s);
     setChecking(false);
@@ -117,6 +125,7 @@ export default function Login() {
         forcedCompanyId={session.companyId}
         isAdmin={false}
         onLogout={logout}
+        suspended={session.suspended}
       />
     );
   }
