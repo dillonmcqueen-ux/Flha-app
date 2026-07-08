@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
+import AdminPanel from "./AdminPanel.jsx";
 
 const ADMIN_CODE = "admin_2023";
 
@@ -22,6 +23,7 @@ export default function Login() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
+  const [adminDashCompany, setAdminDashCompany] = useState(null); // admin viewing a specific company's dashboard
 
   // Restore session on load
   useEffect(() => {
@@ -92,11 +94,28 @@ export default function Login() {
     if (session.role === "worker") {
       return <App forcedCompanyId={session.companyId} onLogout={logout} />;
     }
-    // supervisor or admin → dashboard
+
+    if (session.role === "admin") {
+      // Admin drilled into a specific company's FLHA dashboard
+      if (adminDashCompany) {
+        return (
+          <Dashboard
+            forcedCompanyId={adminDashCompany}
+            isAdmin={false}
+            onLogout={() => setAdminDashCompany(null)}
+            backLabel="← Back to onboarding"
+          />
+        );
+      }
+      // Admin home = onboarding panel
+      return <AdminPanel onViewDashboard={(cid) => setAdminDashCompany(cid)} onLogout={logout} />;
+    }
+
+    // supervisor → their company dashboard
     return (
       <Dashboard
-        forcedCompanyId={session.role === "admin" ? null : session.companyId}
-        isAdmin={session.role === "admin"}
+        forcedCompanyId={session.companyId}
+        isAdmin={false}
         onLogout={logout}
       />
     );
