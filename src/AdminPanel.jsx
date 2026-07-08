@@ -54,7 +54,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
 
   const loadAll = async () => {
     const [{ data: cos }, { data: fs }, { data: ss }] = await Promise.all([
-      supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url").order("id"),
+      supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended").order("id"),
       supabase.from("flhas").select("id, company_id"),
       supabase.from("sops").select("id, company_id"),
     ]);
@@ -181,6 +181,17 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
   };
   const copyText = (t) => { try { navigator.clipboard?.writeText(t); setMsg("Copied " + t); setTimeout(() => setMsg(""), 1500); } catch (e) {} };
 
+  const toggleSuspend = async (c, e) => {
+    if (e) e.stopPropagation(); // don't open the card
+    const next = !c.suspended;
+    if (next && !window.confirm(`Suspend "${c.name}"? Workers will be blocked from creating FLHAs. Supervisors can still view and export existing records.`)) return;
+    const { error } = await supabase.from("companies").update({ suspended: next }).eq("id", c.id);
+    if (error) { setMsg("Couldn't update: " + error.message); return; }
+    await loadAll();
+    setMsg(next ? `${c.name} suspended` : `${c.name} reactivated`);
+    setTimeout(() => setMsg(""), 2500);
+  };
+
   const addSite = async () => {
     setMsg("");
     const name = newSite.trim();
@@ -262,7 +273,9 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     const active = isActive(c);
     return (
       <div onClick={() => openManage(c)} style={{
-        ...st.card, cursor: "pointer", borderLeft: `4px solid ${active ? C.green : C.amber}`,
+        ...st.card, cursor: "pointer",
+        borderLeft: `4px solid ${c.suspended ? "#DC2626" : active ? C.green : C.amber}`,
+        opacity: c.suspended ? 0.85 : 1,
         transition: "transform 0.1s", display: "flex", flexDirection: "column", gap: 14
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
@@ -273,11 +286,23 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>#{c.id} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
           </div>
-          {active
-            ? <span style={{ fontSize: 11, fontWeight: 800, color: C.green, background: "#DCFCE7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>ACTIVE</span>
-            : <span style={{ fontSize: 11, fontWeight: 800, color: C.amberDark, background: "#FEF3C7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{doneCount(c)}/4</span>}
+          {c.suspended
+            ? <span style={{ fontSize: 11, fontWeight: 800, color: "#DC2626", background: "#FEE2E2", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>SUSPENDED</span>
+            : active
+              ? <span style={{ fontSize: 11, fontWeight: 800, color: C.green, background: "#DCFCE7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>ACTIVE</span>
+              : <span style={{ fontSize: 11, fontWeight: 800, color: C.amberDark, background: "#FEF3C7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{doneCount(c)}/4</span>}
         </div>
         <Meter c={c} />
+        <button
+          onClick={(e) => toggleSuspend(c, e)}
+          style={{
+            width: "100%", borderRadius: 8, padding: "8px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+            border: c.suspended ? "none" : `1.5px solid ${C.line}`,
+            background: c.suspended ? C.green : "#F8FAFC",
+            color: c.suspended ? "#fff" : C.inkSoft
+          }}>
+          {c.suspended ? "Reactivate access" : "Suspend access"}
+        </button>
       </div>
     );
   };
