@@ -17,7 +17,7 @@ function RiskBadge({ risk }) {
   );
 }
 
-function FLHACard({ flha, onClose }) {
+function FLHACard({ flha, onClose, onDelete }) {
   const h = flha.hazards_json || {};
   return (
     <div style={{
@@ -43,6 +43,12 @@ function FLHACard({ flha, onClose }) {
                 padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
                 textDecoration: "none"
               }}>⬇ PDF</a>
+            )}
+            {onDelete && (
+              <button onClick={() => onDelete(flha.id, flha.worker_name)} style={{
+                background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8,
+                padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
+              }}>🗑 Delete</button>
             )}
             <button onClick={onClose} style={{
               background: "#F3F4F6", border: "none", borderRadius: 8,
@@ -147,6 +153,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         a.click();
       }, i * 500); // stagger downloads
     });
+    setSelectedIds(new Set());
+  };
+
+  const deleteFlha = async (id, workerName) => {
+    if (!window.confirm(`Delete the FLHA for ${workerName || "this worker"}? This cannot be undone.`)) return;
+    await supabase.from("flhas").delete().eq("id", id);
+    setFlhas(prev => prev.filter(f => f.id !== id));
+    setSelectedFlha(null);
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+  };
+
+  const deleteSelected = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} selected FLHA${ids.length > 1 ? "s" : ""}? This cannot be undone.`)) return;
+    await supabase.from("flhas").delete().in("id", ids);
+    setFlhas(prev => prev.filter(f => !selectedIds.has(f.id)));
     setSelectedIds(new Set());
   };
 
@@ -266,7 +289,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   return (
     <div style={styles.wrap}>
-      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} />}
+      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} />}
 
       <div style={styles.header}>
         <div>
@@ -335,10 +358,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 </div>
               </div>
               {selectedIds.size > 0 && (
-                <button onClick={exportSelected} style={{
-                  background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
-                  padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer", flexShrink: 0
-                }}>⬇ Export {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button onClick={exportSelected} style={{
+                    background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                  }}>⬇ {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
+                  <button onClick={deleteSelected} style={{
+                    background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8,
+                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                  }}>🗑 Delete</button>
+                </div>
               )}
             </div>
 
