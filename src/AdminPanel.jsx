@@ -15,6 +15,11 @@ function codePrefix(name) {
   return words.map(w => w[0]).join("").slice(0, 3);
 }
 
+// 6-digit account number, 100000–999999
+function genAccountNumber() {
+  return Math.floor(100000 + Math.random() * 900000);
+}
+
 // Design tokens
 const C = {
   ink: "#1E293B",       // deep slate — authority
@@ -54,7 +59,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
 
   const loadAll = async () => {
     const [{ data: cos }, { data: fs }, { data: ss }] = await Promise.all([
-      supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended").order("id"),
+      supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number").order("id"),
       supabase.from("flhas").select("id, company_id"),
       supabase.from("sops").select("id, company_id"),
     ]);
@@ -86,7 +91,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
   const sortCompanies = (list) => {
     const arr = [...list];
     if (sortBy === "name") arr.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    else arr.sort((a, b) => a.id - b.id);
+    else arr.sort((a, b) => (a.account_number || a.id) - (b.account_number || b.id));
     return arr;
   };
 
@@ -107,8 +112,18 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     const { data: existing } = await supabase.from("companies").select("id")
       .or(`worker_code.eq.${newWorkerCode.trim()},supervisor_code.eq.${newSupervisorCode.trim()}`);
     if (existing && existing.length > 0) { setMsg("One of those codes is already in use. Edit and try again."); setSaving(false); return; }
+
+    // Generate a unique 6-digit account number
+    let acct = genAccountNumber();
+    for (let tries = 0; tries < 5; tries++) {
+      const { data: clash } = await supabase.from("companies").select("id").eq("account_number", acct).limit(1);
+      if (!clash || clash.length === 0) break;
+      acct = genAccountNumber();
+    }
+
     const { error } = await supabase.from("companies").insert({
       name: newName.trim(), worker_code: newWorkerCode.trim(), supervisor_code: newSupervisorCode.trim(),
+      account_number: acct,
     });
     if (error) { setMsg("Couldn't add company: " + error.message); }
     else { setNewName(""); setNewWorkerCode(""); setNewSupervisorCode(""); await loadAll(); setView("home"); }
@@ -284,7 +299,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-            <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>#{c.id} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>#{c.account_number || c.id} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
           </div>
           {c.suspended
             ? <span style={{ fontSize: 11, fontWeight: 800, color: "#DC2626", background: "#FEE2E2", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>SUSPENDED</span>
@@ -336,7 +351,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
               <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.white, color: C.ink, fontWeight: 600, cursor: "pointer" }}>
                 <option value="name">Name (A–Z)</option>
-                <option value="id">Company ID</option>
+                <option value="id">Account number</option>
               </select>
             </div>
           </div>
@@ -419,7 +434,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
             </div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 19 }}>{activeCompany?.name}</div>
-              <div style={{ fontSize: 12, color: "#CBD5E1" }}>#{activeId} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
+              <div style={{ fontSize: 12, color: "#CBD5E1" }}>#{activeCompany?.account_number || activeId} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
             </div>
           </div>
           <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); loadAll(); }}>← Console</button>
