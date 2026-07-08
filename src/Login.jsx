@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient";
 import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
+import WorkerMenu from "./WorkerMenu.jsx";
 
 const ADMIN_CODE = "admin_2023";
 
@@ -100,7 +101,7 @@ export default function Login() {
   // ── Authenticated views ──────────────────────────────────
   if (session) {
     if (session.role === "worker") {
-      return <App forcedCompanyId={session.companyId} onLogout={logout} />;
+      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} onLogout={logout} />;
     }
 
     if (session.role === "admin") {
