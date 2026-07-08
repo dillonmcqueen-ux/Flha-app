@@ -116,7 +116,7 @@ function FLHACard({ flha, onClose, onDelete }) {
   );
 }
 
-export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit" }) {
+export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [sops, setSops] = useState([]);
@@ -304,6 +304,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       </div>
 
       <div style={{ padding: 16 }}>
+
+        {suspended && (
+          <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 2 }}>⚠️ Account suspended</div>
+            <div style={{ fontSize: 13, color: "#B91C1C" }}>Your company's access is currently suspended. You can still view and export existing records, but workers cannot submit new FLHAs. Please contact your administrator.</div>
+          </div>
+        )}
 
         {/* Company selector — admin only */}
         {isAdmin && companies.length > 1 && (
