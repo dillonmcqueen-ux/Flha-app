@@ -57,6 +57,9 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
   const [siteList, setSiteList] = useState([]);
   const [newSite, setNewSite] = useState("");
 
+  const [equipList, setEquipList] = useState([]);
+  const [newEquip, setNewEquip] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
+
   const loadAll = async () => {
     const [{ data: cos }, { data: fs }, { data: ss }] = await Promise.all([
       supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number").order("id"),
@@ -141,6 +144,9 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     const { data: siteRows } = await supabase.from("sites").select("id, name").eq("company_id", c.id).order("name");
     setSiteList(siteRows || []);
     setNewSite("");
+    const { data: eqRows } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", c.id).order("make");
+    setEquipList(eqRows || []);
+    setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
     setManageTab("profile");
     setSopText(""); setMsg("");
     setView("manage");
@@ -225,6 +231,29 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
   const deleteSite = async (id) => {
     await supabase.from("sites").delete().eq("id", id);
     setSiteList(prev => prev.filter(s => s.id !== id));
+  };
+
+  const addEquip = async () => {
+    setMsg("");
+    const { year, make, model, type } = newEquip;
+    if (!make.trim() && !model.trim() && !type.trim()) { setMsg("Enter at least a make, model or type."); return; }
+    setSaving(true);
+    const { error } = await supabase.from("equipment").insert({
+      company_id: activeId,
+      year: newEquip.year.trim(), make: newEquip.make.trim(), model: newEquip.model.trim(),
+      type: newEquip.type.trim(), unit_number: newEquip.unit_number.trim(),
+    });
+    if (error) setMsg("Couldn't add equipment: " + error.message);
+    else {
+      setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
+      const { data } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", activeId).order("make");
+      setEquipList(data || []);
+    }
+    setSaving(false);
+  };
+  const deleteEquip = async (id) => {
+    await supabase.from("equipment").delete().eq("id", id);
+    setEquipList(prev => prev.filter(e => e.id !== id));
   };
 
   const deleteCompany = async () => {
@@ -448,6 +477,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
           <button style={st.tab(manageTab === "profile")} onClick={() => { setManageTab("profile"); setMsg(""); }}>Profile</button>
           <button style={st.tab(manageTab === "sops")} onClick={() => { setManageTab("sops"); setMsg(""); }}>SOPs</button>
           <button style={st.tab(manageTab === "sites")} onClick={() => { setManageTab("sites"); setMsg(""); }}>Sites</button>
+          <button style={st.tab(manageTab === "equipment")} onClick={() => { setManageTab("equipment"); setMsg(""); }}>Equipment</button>
           <button style={st.tab(manageTab === "codes")} onClick={() => { setManageTab("codes"); setMsg(""); }}>Codes</button>
         </div>
 
@@ -522,6 +552,38 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
                   <span style={{ fontSize: 15 }}>📍</span>
                   <div style={{ flex: 1, fontSize: 14, color: "#334155" }}>{site.name}</div>
                   <button onClick={() => deleteSite(site.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {manageTab === "equipment" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add equipment</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Register machines so workers can pick them from a fleet list. Inspections are generated specific to each machine.</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <input style={{ ...st.input, marginBottom: 0 }} placeholder="Year (e.g. 2019)" value={newEquip.year} onChange={e => setNewEquip(p => ({ ...p, year: e.target.value }))} />
+                <input style={{ ...st.input, marginBottom: 0 }} placeholder="Make (e.g. Caterpillar)" value={newEquip.make} onChange={e => setNewEquip(p => ({ ...p, make: e.target.value }))} />
+                <input style={{ ...st.input, marginBottom: 0 }} placeholder="Model (e.g. 320)" value={newEquip.model} onChange={e => setNewEquip(p => ({ ...p, model: e.target.value }))} />
+                <input style={{ ...st.input, marginBottom: 0 }} placeholder="Type (e.g. Excavator)" value={newEquip.type} onChange={e => setNewEquip(p => ({ ...p, type: e.target.value }))} />
+                <input style={{ ...st.input, marginBottom: 0, gridColumn: "1 / -1" }} placeholder="Unit / asset number (optional)" value={newEquip.unit_number} onChange={e => setNewEquip(p => ({ ...p, unit_number: e.target.value }))} />
+              </div>
+              <button style={{ ...st.darkBtn, width: "100%", marginTop: 12 }} onClick={addEquip} disabled={saving}>{saving ? "Adding…" : "Add to fleet"}</button>
+            </div>
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Fleet ({equipList.length})</div>
+              {equipList.length === 0 ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No equipment yet.</div>
+              ) : equipList.map((eq, i) => (
+                <div key={eq.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < equipList.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                  <span style={{ fontSize: 18 }}>🚜</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
+                    {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
+                  </div>
+                  <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
