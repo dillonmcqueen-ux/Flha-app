@@ -201,6 +201,24 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     setSiteList(prev => prev.filter(s => s.id !== id));
   };
 
+  const deleteCompany = async () => {
+    const cnt = counts[activeId] || { flhas: 0 };
+    if (cnt.flhas > 0) {
+      setMsg("Couldn't delete: this company has " + cnt.flhas + " FLHA record(s). Companies with submitted FLHAs can't be deleted.");
+      return;
+    }
+    if (!window.confirm(`Delete "${activeCompany?.name}"? This removes the company, its SOPs and sites. This cannot be undone.`)) return;
+    setSaving(true);
+    // Clean up related rows first (no FLHAs exist, so safe)
+    await supabase.from("sops").delete().eq("company_id", activeId);
+    await supabase.from("sites").delete().eq("company_id", activeId);
+    const { error } = await supabase.from("companies").delete().eq("id", activeId);
+    if (error) { setMsg("Couldn't delete: " + error.message); setSaving(false); return; }
+    await loadAll();
+    setSaving(false);
+    setView("home");
+  };
+
   // ── shared styles ────────────────────────────────────────
   const st = {
     wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: C.bg, minHeight: "100vh" },
@@ -487,6 +505,21 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
                 Open FLHA dashboard →
               </button>
             )}
+
+            <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${C.line}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 8 }}>Danger zone</div>
+              <button
+                onClick={deleteCompany}
+                disabled={saving}
+                style={{ width: "100%", background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 10, padding: "11px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                Delete company
+              </button>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
+                {(counts[activeId]?.flhas || 0) > 0
+                  ? `This company has ${counts[activeId].flhas} FLHA record(s), so it can't be deleted.`
+                  : "Only companies with no FLHA records can be deleted."}
+              </div>
+            </div>
           </div>
         )}
       </div>
