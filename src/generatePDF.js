@@ -31,22 +31,18 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   const W = 210, margin = 16, contentW = W - margin * 2;
   let y = 20;
 
-  // Try to load the company logo (remote URL → data URL) before drawing
+  // Try to load the company logo (remote URL → data URL) before drawing.
+  // Use fetch→blob→dataURL which avoids canvas CORS tainting issues.
   let logoDataUrl = null;
   if (companyLogo) {
     try {
+      const resp = await fetch(companyLogo, { mode: "cors" });
+      const blob = await resp.blob();
       logoDataUrl = await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          const c = document.createElement("canvas");
-          c.width = img.naturalWidth;
-          c.height = img.naturalHeight;
-          c.getContext("2d").drawImage(img, 0, 0);
-          resolve(c.toDataURL("image/png"));
-        };
-        img.onerror = () => reject(new Error("logo load failed"));
-        img.src = companyLogo;
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
       });
     } catch (e) {
       logoDataUrl = null; // skip logo if it can't load
@@ -67,7 +63,8 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   // Logo top-right (if available), else date
   if (logoDataUrl) {
     try {
-      doc.addImage(logoDataUrl, "PNG", W - margin - 20, 5, 20, 20);
+      const fmt = logoDataUrl.includes("image/png") ? "PNG" : logoDataUrl.includes("image/webp") ? "WEBP" : "JPEG";
+      doc.addImage(logoDataUrl, fmt, W - margin - 20, 5, 20, 20);
     } catch (e) {}
     doc.setFontSize(7);
     doc.text(new Date().toLocaleDateString("en-CA"), W - margin, 28, { align: "right" });
@@ -78,7 +75,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
 
   // ── Company / Worker info ────────────────────────────────
   doc.setFillColor(240, 249, 255);
-  doc.roundedRect(margin, y, contentW, 28, 3, 3, "F");
+  doc.roundedRect(margin, y, contentW, 22, 3, 3, "F");
   doc.setTextColor(3, 105, 161);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
@@ -87,14 +84,11 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.text("JOB SITE", margin + 130, y + 7);
   doc.setTextColor(30, 58, 95);
   doc.setFontSize(11);
-  doc.text(companyName || "—", margin + 4, y + 16);
+  doc.text(companyName || "—", margin + 4, y + 16, { maxWidth: 62 });
   doc.setFontSize(10);
-  doc.text(workerName || "—", margin + 70, y + 16);
+  doc.text(workerName || "—", margin + 70, y + 16, { maxWidth: 55 });
   doc.text(jobSite || "—", margin + 130, y + 16, { maxWidth: 60 });
-  doc.setFontSize(9);
-  doc.setTextColor(107, 114, 128);
-  doc.text(`Signed by: ${signName || "—"}`, margin + 4, y + 24);
-  y += 36;
+  y += 30;
 
   // ── Task Summary ─────────────────────────────────────────
   if (flha.taskSummary) {
@@ -247,6 +241,24 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setFont("helvetica", "normal");
   doc.text(`Printed name: ${signName}`, margin, y + 29);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
+
+  // ── FORA branding footer on every page ───────────────────
+  const H = 297; // A4 height mm
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
+    doc.line(margin, H - 12, W - margin, H - 12);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(30, 58, 95);
+    doc.text("FORA", margin, H - 7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(148, 163, 184);
+    doc.text("AI-generated field safety documentation", margin + 11, H - 7);
+    doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 7, { align: "right" });
+  }
 
   // ── Generate filename & upload ───────────────────────────
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
