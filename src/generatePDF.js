@@ -55,7 +55,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text("SafeField FLHA Report", margin, 13);
+  doc.text("FLHA Report", margin, 13);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text("Field Level Hazard Assessment", margin, 20);
