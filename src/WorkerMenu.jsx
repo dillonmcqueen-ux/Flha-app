@@ -37,7 +37,7 @@ export default function WorkerMenu({ companyId, companyName, onLogout }) {
     <div style={s.wrap}>
       <div style={s.header}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, opacity: 0.8, textTransform: "uppercase" }}>{companyName || "SafeField"}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, opacity: 0.8, textTransform: "uppercase" }}>{companyName || "FORA"}</div>
           <div style={{ fontWeight: 800, fontSize: 22, marginTop: 2 }}>Choose a form</div>
         </div>
         {onLogout && <button onClick={onLogout} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Sign out</button>}
