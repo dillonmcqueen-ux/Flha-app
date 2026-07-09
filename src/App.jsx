@@ -318,12 +318,13 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
     const signatureDataUrl = getSignatureDataUrl();
 
-    // Generate PDF and upload to Supabase Storage
+    // Generate PDF and upload to Supabase Storage.
+    // Use workerName directly (not signName state) to avoid async state timing.
     const pdfUrl = await generateAndUploadFLHA({
       flha,
       workerName,
       jobSite,
-      signName,
+      signName: workerName,
       companyName,
       signatureDataUrl,
       companyLogo,
@@ -335,7 +336,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       job_site: jobSite,
       task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
       hazards_json: flha,
-      signed_by: signName,
+      signed_by: workerName,
       pdf_url: pdfUrl || null,
       company_id: companyId,
     });
@@ -366,7 +367,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             ? <img src={companyLogo} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", background: "#fff" }} />
             : <span style={{ fontSize: 28 }}>🦺</span>}
           <div>
-            <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>SafeField FLHA</div>
+            <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>FLHA</div>
             <div style={{ fontSize: 13, opacity: 0.8 }}>AI-powered Field Level Hazard Assessment</div>
           </div>
         </div>
