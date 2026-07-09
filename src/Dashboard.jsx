@@ -116,10 +116,57 @@ function FLHACard({ flha, onClose, onDelete }) {
   );
 }
 
+function InspectionCard({ insp, onClose, onDelete }) {
+  const r = insp.results_json || {};
+  const items = r.items || [];
+  const condColor = { Good: "#16A34A", Monitor: "#D97706", Defective: "#DC2626" };
+  const condBg = { Good: "#F0FDF4", Monitor: "#FFFBEB", Defective: "#FEF2F2" };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E293B" }}>Equipment Inspection</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(insp.created_at).toLocaleString("en-CA")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {insp.pdf_url && (
+              <a href={insp.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+            )}
+            {onDelete && (
+              <button onClick={() => onDelete(insp.id, insp.worker_name)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+            )}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1E293B" }}>{insp.equipment_label}</div>
+          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Inspector: {insp.worker_name}</div>
+          {r.machineSummary && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{r.machineSummary}</div>}
+        </div>
+
+        {items.map((it, i) => (
+          <div key={i} style={{ border: `1.5px solid ${condColor[it.condition] || "#E5E7EB"}40`, background: condBg[it.condition] || "#fff", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{it.item}</div>
+              <span style={{ fontSize: 12, fontWeight: 800, color: condColor[it.condition] }}>{it.condition}</span>
+            </div>
+            {it.note && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>Note: {it.note}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
+  const [inspections, setInspections] = useState([]);
   const [sops, setSops] = useState([]);
+  const [selectedInspection, setSelectedInspection] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -175,10 +222,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: fs }, { data: ss }] = await Promise.all([
+      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
+        supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
       ]);
 
       // Supervisors only see their own company; admins see all.
@@ -188,6 +236,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
       setCompanies(visibleCompanies);
       setFlhas(fs || []);
+      setInspections(insp || []);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
@@ -197,7 +246,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const company = companies.find(c => c.id === selectedCompany);
   const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
+  const companyInspections = inspections.filter(i => i.company_id === selectedCompany);
   const companySops = sops.filter(s => s.company_id === selectedCompany);
+
+  const deleteInspection = async (id, workerName) => {
+    if (!window.confirm(`Delete the inspection by ${workerName || "this worker"}? This cannot be undone.`)) return;
+    await supabase.from("inspections").delete().eq("id", id);
+    setInspections(prev => prev.filter(i => i.id !== id));
+    setSelectedInspection(null);
+  };
 
   // Helper: highest risk level in an FLHA (for sorting)
   const riskRank = (f) => {
@@ -290,6 +347,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   return (
     <div style={styles.wrap}>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} />}
+      {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
 
       <div style={styles.header}>
         <div>
@@ -349,6 +407,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         {/* Tabs */}
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12 }}>
           <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
+          <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -461,6 +520,54 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                   })}
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {/* Inspections tab */}
+        {activeTab === "inspections" && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+              {company?.name} — Equipment Inspections
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any row to view the full inspection.</div>
+            {companyInspections.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🚜</div>
+                No inspections submitted yet.
+              </div>
+            ) : (
+              companyInspections.map((insp, i) => {
+                const r = insp.results_json || {};
+                const def = r.defectiveCount || 0;
+                const mon = r.monitorCount || 0;
+                return (
+                  <div key={insp.id} style={{
+                    padding: "12px 14px", borderBottom: i < companyInspections.length - 1 ? "1px solid #F3F4F6" : "none",
+                    cursor: "pointer"
+                  }} onClick={() => setSelectedInspection(insp)}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                        {def > 0
+                          ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
+                          : mon > 0
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
+                            : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
+                        <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
+                          {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         )}
