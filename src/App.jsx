@@ -109,13 +109,15 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
       const company = companies[0];
       setCompanyId(company.id);
       setCompanyLogo(company.logo_url || "");
+      setCompanyName(company.name);
 
       // Load saved sites for this company
-      const { data: siteRows } = await supabase
+      const { data: siteRows, error: siteErr } = await supabase
         .from("sites")
         .select("id, name")
         .eq("company_id", company.id)
-        .order("name");
+        .order("id");
+      if (siteErr) console.error("sites read error:", siteErr.message);
       setSites(siteRows || []);
       if (!siteRows || siteRows.length === 0) setSiteMode("other");
       const { data: sops, error: sopsErr } = await supabase
