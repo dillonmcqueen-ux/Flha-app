@@ -362,7 +362,7 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
         <div style={st.topbar}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: C.amber, textTransform: "uppercase" }}>SafeField Admin</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: C.amber, textTransform: "uppercase" }}>FORA Admin</div>
               <div style={{ fontWeight: 800, fontSize: 24, marginTop: 2 }}>Company Console</div>
             </div>
             {onLogout && <button style={st.ghost} onClick={onLogout}>Sign out</button>}
