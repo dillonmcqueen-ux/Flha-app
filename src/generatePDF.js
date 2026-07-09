@@ -108,6 +108,8 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
 
   // ── SOP Alerts ───────────────────────────────────────────
   if (flha.sopAlerts?.length) {
+    const alertsBoxH = 12 + flha.sopAlerts.length * 6;
+    if (y + alertsBoxH > 275) { doc.addPage(); y = 20; }
     doc.setFillColor(255, 247, 237);
     doc.setDrawColor(254, 215, 170);
     doc.roundedRect(margin, y, contentW, 7 + flha.sopAlerts.length * 6, 2, 2, "FD");
