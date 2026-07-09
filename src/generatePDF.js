@@ -17,7 +17,7 @@ async function loadJsPDF() {
 function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   const lines = doc.splitTextToSize(text, maxWidth);
   lines.forEach(line => {
-    if (y > 270) { doc.addPage(); y = 20; }
+    if (y > 276) { doc.addPage(); y = 20; }
     doc.text(line, x, y);
     y += lineHeight;
   });
@@ -133,7 +133,6 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     y += 6;
 
     flha.hazards.forEach(hz => {
-      if (y > 260) { doc.addPage(); y = 20; }
       const riskColors = {
         High: [254, 242, 242],
         Medium: [255, 251, 235],
@@ -151,6 +150,9 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
       const hazardLines = doc.splitTextToSize(hz.hazard, contentW - 30).length;
       const controlLines = doc.splitTextToSize(`Control: ${hz.control}`, contentW - 8).length;
       const boxH = 8 + hazardLines * 5 + controlLines * 5 + (hz.sopRef ? 5 : 0) + 4;
+
+      // Break to next page if the whole box won't fit above the footer (footer ~285mm)
+      if (y + boxH > 275) { doc.addPage(); y = 20; }
 
       doc.setFillColor(...bg);
       doc.roundedRect(margin, y, contentW, boxH, 2, 2, "F");
