@@ -144,7 +144,8 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     const { data: siteRows } = await supabase.from("sites").select("id, name").eq("company_id", c.id).order("name");
     setSiteList(siteRows || []);
     setNewSite("");
-    const { data: eqRows } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", c.id).order("make");
+    const { data: eqRows, error: eqErr } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", c.id).order("id");
+    if (eqErr) setMsg("Equipment read error: " + eqErr.message);
     setEquipList(eqRows || []);
     setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
     setManageTab("profile");
@@ -246,7 +247,8 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     if (error) setMsg("Couldn't add equipment: " + error.message);
     else {
       setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
-      const { data } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", activeId).order("make");
+      const { data, error: reErr } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", activeId).order("id");
+      if (reErr) setMsg("Equipment read error: " + reErr.message);
       setEquipList(data || []);
     }
     setSaving(false);
