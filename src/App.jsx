@@ -109,6 +109,15 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
       const company = companies[0];
       setCompanyId(company.id);
       setCompanyLogo(company.logo_url || "");
+
+      // Load saved sites for this company
+      const { data: siteRows } = await supabase
+        .from("sites")
+        .select("id, name")
+        .eq("company_id", company.id)
+        .order("name");
+      setSites(siteRows || []);
+      if (!siteRows || siteRows.length === 0) setSiteMode("other");
       const { data: sops, error: sopsErr } = await supabase
         .from("sops")
         .select("policy_text")
@@ -136,6 +145,8 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
 
   const [workerName, setWorkerName] = useState("");
   const [jobSite, setJobSite] = useState("");
+  const [sites, setSites] = useState([]);
+  const [siteMode, setSiteMode] = useState("list"); // "list" | "other"
   const [taskDesc, setTaskDesc] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -378,7 +389,39 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           <input style={{ ...styles.input, marginBottom: 14 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
 
           <label style={styles.label}>Job Site / Location</label>
-          <input style={{ ...styles.input, marginBottom: 22 }} placeholder="e.g. Hwy 2 & 42 Ave, Red Deer" value={jobSite} onChange={e => setJobSite(e.target.value)} />
+          {sites.length > 0 && siteMode === "list" ? (
+            <>
+              <select
+                style={{ ...styles.input, marginBottom: 8 }}
+                value={jobSite}
+                onChange={e => {
+                  if (e.target.value === "__other__") { setSiteMode("other"); setJobSite(""); }
+                  else setJobSite(e.target.value);
+                }}>
+                <option value="">Select a site…</option>
+                {sites.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                <option value="__other__">＋ Other site (type a new one)</option>
+              </select>
+              <div style={{ marginBottom: 22 }} />
+            </>
+          ) : (
+            <>
+              <input
+                style={{ ...styles.input, marginBottom: 8 }}
+                placeholder="e.g. Hwy 2 & 42 Ave, Red Deer"
+                value={jobSite}
+                onChange={e => setJobSite(e.target.value)}
+              />
+              {sites.length > 0 && (
+                <button
+                  onClick={() => { setSiteMode("list"); setJobSite(""); }}
+                  style={{ background: "transparent", border: "none", color: "#F97316", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 22 }}>
+                  ← Choose from saved sites
+                </button>
+              )}
+              {sites.length === 0 && <div style={{ marginBottom: 22 }} />}
+            </>
+          )}
 
           <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, marginBottom: 22, overflow: "hidden" }}>
             <button
@@ -400,7 +443,16 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             )}
           </div>
 
-          <button style={styles.btn("#F97316")} onClick={() => { if (workerName && jobSite) setStep("voice"); }}>
+          <button style={styles.btn("#F97316")} onClick={async () => {
+            if (!workerName || !jobSite) return;
+            // Auto-save a newly typed site (case-insensitive dedupe)
+            const trimmed = jobSite.trim();
+            const exists = sites.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
+            if (!exists && companyId) {
+              await supabase.from("sites").insert({ company_id: companyId, name: trimmed });
+            }
+            setStep("voice");
+          }}>
             Continue to Voice Input →
           </button>
         </div>
@@ -585,7 +637,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>
