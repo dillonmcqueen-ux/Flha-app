@@ -111,6 +111,20 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const label = equipmentLabel();
     const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount };
 
+    // Auto-save a free-typed rental to the fleet (dedupe against existing)
+    if (eqMode === "other") {
+      const { year, make, model, type } = freeEq;
+      const alreadyExists = equipment.some(eq =>
+        [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ").toLowerCase() === label.toLowerCase()
+      );
+      if (!alreadyExists && (make.trim() || model.trim() || type.trim())) {
+        await supabase.from("equipment").insert({
+          company_id: companyId,
+          year: year.trim(), make: make.trim(), model: model.trim(), type: type.trim(), unit_number: "",
+        });
+      }
+    }
+
     const pdfUrl = await generateAndUploadInspection({
       equipmentLabel: label, workerName, companyName, companyLogo,
       results: resultsJson, signatureDataUrl: sig,
