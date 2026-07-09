@@ -243,8 +243,21 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setTextColor(107, 114, 128);
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text(`Printed name: ${signName || workerName || ""}`, margin, y + 29);
+  doc.text(`Printed name: ${workerName || signName || ""}`, margin, y + 29);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
+
+  // Load the FORA brand logo for the footer (once)
+  let foraLogo = null;
+  try {
+    const fResp = await fetch("https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0113.jpeg", { mode: "cors" });
+    const fBlob = await fResp.blob();
+    foraLogo = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(fBlob);
+    });
+  } catch (e) { foraLogo = null; }
 
   // ── FORA branding footer on every page ───────────────────
   const H = 297; // A4 height mm
@@ -254,14 +267,28 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.2);
     doc.line(margin, H - 12, W - margin, H - 12);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.setTextColor(30, 58, 95);
-    doc.text("FORA", margin, H - 7);
-    doc.setFont("helvetica", "normal");
+    if (foraLogo) {
+      try {
+        const fmt = foraLogo.includes("image/png") ? "PNG" : "JPEG";
+        doc.addImage(foraLogo, fmt, margin, H - 10, 14, 5.5);
+      } catch (e) {}
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184);
+      doc.text("AI-generated field safety documentation", margin + 17, H - 6.5);
+    } else {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(30, 58, 95);
+      doc.text("FORA", margin, H - 7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(148, 163, 184);
+      doc.text("AI-generated field safety documentation", margin + 11, H - 7);
+    }
     doc.setTextColor(148, 163, 184);
-    doc.text("AI-generated field safety documentation", margin + 11, H - 7);
-    doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 7, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 6.5, { align: "right" });
   }
 
   // ── Generate filename & upload ───────────────────────────
