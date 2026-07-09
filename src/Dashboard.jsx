@@ -351,7 +351,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
       <div style={styles.header}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 18 }}>🦺 SafeField Dashboard</div>
+          <div style={{ fontWeight: 800, fontSize: 18 }}>FORA Dashboard</div>
           <div style={{ fontSize: 12, opacity: 0.8 }}>{isAdmin ? "Admin View — All Companies" : "Supervisor View"}</div>
         </div>
         {onLogout && (
