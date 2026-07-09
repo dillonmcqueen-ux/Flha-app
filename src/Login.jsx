@@ -170,10 +170,8 @@ export default function Login() {
   return (
     <div style={styles.wrap}>
       <div style={styles.card}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <div style={{ fontSize: 40, marginBottom: 6 }}>🦺</div>
-          <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F" }}>SafeField FLHA</div>
-          <div style={{ fontSize: 13, color: "#6B7280" }}>AI-powered Field Level Hazard Assessment</div>
+        <img src="https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0113.jpeg" alt="FORA" style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }} />
+<div style={{ fontSize: 13, color: "#6B7280" }}>AI-powered field safety documentation</div>
         </div>
 
         {!role ? (
