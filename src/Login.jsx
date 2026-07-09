@@ -170,8 +170,13 @@ export default function Login() {
   return (
     <div style={styles.wrap}>
       <div style={styles.card}>
-        <img src="https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0113.jpeg" alt="FORA" style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }} />
-<div style={{ fontSize: 13, color: "#6B7280" }}>AI-powered field safety documentation</div>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <img
+            src="https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0113.jpeg"
+            alt="FORA"
+            style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
+          />
+          <div style={{ fontSize: 13, color: "#6B7280" }}>AI-powered field safety documentation</div>
         </div>
 
         {!role ? (
