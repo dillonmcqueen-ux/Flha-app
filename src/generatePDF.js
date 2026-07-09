@@ -243,7 +243,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setTextColor(107, 114, 128);
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text(`Printed name: ${signName}`, margin, y + 29);
+  doc.text(`Printed name: ${signName || workerName || ""}`, margin, y + 29);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
 
   // ── FORA branding footer on every page ───────────────────
