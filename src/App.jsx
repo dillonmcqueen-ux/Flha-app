@@ -344,6 +344,31 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
   const riskColor = r => r === "High" ? "red" : r === "Medium" ? "amber" : "green";
 
+  // ── Hazard editing (worker can add/edit/remove) ──────────
+  const [editingHazard, setEditingHazard] = useState(null); // index being edited, or "new"
+  const [hazardDraft, setHazardDraft] = useState({ hazard: "", risk: "Medium", control: "" });
+
+  const openNewHazard = () => { setHazardDraft({ hazard: "", risk: "Medium", control: "" }); setEditingHazard("new"); };
+  const openEditHazard = (i) => { const h = flha.hazards[i]; setHazardDraft({ hazard: h.hazard, risk: h.risk, control: h.control }); setEditingHazard(i); };
+  const cancelHazardEdit = () => { setEditingHazard(null); };
+
+  const saveHazard = () => {
+    if (!hazardDraft.hazard.trim() || !hazardDraft.control.trim()) return;
+    setFlha(prev => {
+      const hazards = [...(prev.hazards || [])];
+      const entry = { hazard: hazardDraft.hazard.trim(), risk: hazardDraft.risk, control: hazardDraft.control.trim(), sopRef: null };
+      if (editingHazard === "new") hazards.push(entry);
+      else hazards[editingHazard] = { ...hazards[editingHazard], ...entry };
+      return { ...prev, hazards };
+    });
+    setEditingHazard(null);
+  };
+
+  const removeHazard = (i) => {
+    setFlha(prev => ({ ...prev, hazards: prev.hazards.filter((_, idx) => idx !== i) }));
+  };
+
+
   const styles = {
     wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: "16px" },
     card: { background: "#fff", borderRadius: 14, padding: "24px", marginBottom: 16, boxShadow: "0 1px 4px #0001" },
@@ -550,16 +575,56 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Hazards & Controls</div>
-            {flha.hazards?.map((h, i) => (
-              <div key={i} style={styles.hazardCard(h.risk)}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{h.hazard}</div>
-                  <Badge text={h.risk} color={riskColor(h.risk)} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Hazards & Controls</div>
+              <button onClick={openNewHazard} style={{ background: "#1E3A5F", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ Add hazard</button>
+            </div>
+
+            {editingHazard === "new" && (
+              <div style={{ ...styles.hazardCard("Medium"), border: "1.5px dashed #1E3A5F" }}>
+                <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Hazard (what's the risk?)" value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  {["Low", "Medium", "High"].map(r => (
+                    <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hazardDraft.risk === r ? "#1E3A5F" : "#E5E7EB"}`, background: hazardDraft.risk === r ? "#1E3A5F" : "#fff", color: hazardDraft.risk === r ? "#fff" : "#6B7280" }}>{r}</button>
+                  ))}
                 </div>
-                <div style={{ fontSize: 13, color: "#374151", marginBottom: h.sopRef ? 6 : 0 }}>🛡 {h.control}</div>
-                {h.sopRef && <div style={{ fontSize: 11, color: "#6B7280", fontStyle: "italic" }}>SOP: {h.sopRef}</div>}
+                <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Control (how do you manage it?)" value={hazardDraft.control} onChange={e => setHazardDraft(d => ({ ...d, control: e.target.value }))} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={saveHazard} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add</button>
+                  <button onClick={cancelHazardEdit} style={{ flex: 1, background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                </div>
               </div>
+            )}
+
+            {flha.hazards?.map((h, i) => (
+              editingHazard === i ? (
+                <div key={i} style={{ ...styles.hazardCard(hazardDraft.risk), border: "1.5px dashed #1E3A5F" }}>
+                  <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    {["Low", "Medium", "High"].map(r => (
+                      <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hazardDraft.risk === r ? "#1E3A5F" : "#E5E7EB"}`, background: hazardDraft.risk === r ? "#1E3A5F" : "#fff", color: hazardDraft.risk === r ? "#fff" : "#6B7280" }}>{r}</button>
+                    ))}
+                  </div>
+                  <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.control} onChange={e => setHazardDraft(d => ({ ...d, control: e.target.value }))} />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={saveHazard} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Save</button>
+                    <button onClick={cancelHazardEdit} style={{ flex: 1, background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div key={i} style={styles.hazardCard(h.risk)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{h.hazard}</div>
+                    <Badge text={h.risk} color={riskColor(h.risk)} />
+                  </div>
+                  <div style={{ fontSize: 13, color: "#374151", marginBottom: h.sopRef ? 6 : 6 }}>🛡 {h.control}</div>
+                  {h.sopRef && <div style={{ fontSize: 11, color: "#6B7280", fontStyle: "italic", marginBottom: 6 }}>SOP: {h.sopRef}</div>}
+                  <div style={{ display: "flex", gap: 12 }}>
+                    <button onClick={() => openEditHazard(i)} style={{ background: "transparent", border: "none", color: "#1E3A5F", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
+                    <button onClick={() => removeHazard(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Remove</button>
+                  </div>
+                </div>
+              )
             ))}
 
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Required PPE</div>
