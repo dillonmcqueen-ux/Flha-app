@@ -24,7 +24,7 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -263,6 +263,13 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setFont("helvetica", "normal");
   doc.text(`Printed name: ${workerName || signName || ""}`, margin, y + 29);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
+  if (amendedNote) {
+    doc.setTextColor(180, 83, 9);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.text(amendedNote, margin, y + 34);
+    doc.setFont("helvetica", "normal");
+  }
 
   // Load the FORA brand logo for the footer (once)
   let foraLogo = null;
