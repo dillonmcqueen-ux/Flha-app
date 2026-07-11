@@ -134,7 +134,25 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.text("Hazards & Controls", margin, y);
     y += 6;
 
-    flha.hazards.forEach(hz => {
+    flha.hazards.forEach((hz, hzIdx) => {
+      // Task section header when the task changes
+      const prevTask = hzIdx > 0 ? flha.hazards[hzIdx - 1].task : null;
+      if (hz.task && hz.task !== prevTask) {
+        const taskNum = [...new Set(flha.hazards.slice(0, hzIdx + 1).map(x => x.task))].length;
+        const taskHeaderH = 10;
+        if (y + taskHeaderH > 275) { doc.addPage(); y = 20; }
+        doc.setFillColor(239, 246, 255);
+        doc.roundedRect(margin, y, contentW, 9, 2, 2, "F");
+        doc.setTextColor(30, 58, 95);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text(`TASK ${taskNum}`, margin + 3, y + 3.5);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        const taskLine = doc.splitTextToSize(hz.task, contentW - 6)[0];
+        doc.text(taskLine, margin + 3, y + 7);
+        y += 12;
+      }
       const riskColors = {
         High: [254, 242, 242],
         Medium: [255, 251, 235],
