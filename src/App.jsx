@@ -248,10 +248,13 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
     setTranscript(t => t.replace(/\[live\].*/s, "").trim());
   };
 
+  const [addingTask, setAddingTask] = useState(false); // true when generating an additional task
+
   const generateFLHA = async () => {
     setLoading(true);
     setGenError(false);
     const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
+    const taskLabel = cleanTranscript;
     const prompt = `You are an experienced field safety officer reviewing a worker's task description before they begin work. Your job is to identify ONLY the hazards that are genuinely relevant to what this specific worker has described — not a generic list.
 
 Company: ${companyName}
@@ -303,13 +306,44 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       }
       const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
-      setFlha(parsed);
+      // Tag each hazard with its task summary so we can group by task
+      const tagged = (parsed.hazards || []).map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+
+      if (addingTask && flha) {
+        // Append this task's hazards + merge PPE/alerts into the existing FLHA
+        setFlha(prev => {
+          const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...(parsed.ppeRequired || [])]));
+          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...(parsed.sopAlerts || [])]));
+          const existingTagged = (prev.hazards || []).map(h => h.task ? h : { ...h, task: prev.taskSummary || "Task 1" });
+          return {
+            ...prev,
+            hazards: [...existingTagged, ...tagged],
+            ppeRequired: mergedPPE,
+            sopAlerts: mergedAlerts,
+            additionalNotes: prev.additionalNotes,
+          };
+        });
+        setAddingTask(false);
+      } else {
+        // First task — tag its hazards too, for consistent grouping
+        setFlha({ ...parsed, hazards: tagged });
+      }
       setStep("review");
+      setTranscript("");
+      setTaskDesc("");
     } catch (err) {
       console.error("FLHA generation error:", err);
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // Start adding an additional task — go back to voice input
+  const startAddTask = () => {
+    setAddingTask(true);
+    setTranscript("");
+    setTaskDesc("");
+    setStep("voice");
   };
 
   // Save the completed, signed FLHA back to Supabase + generate PDF
@@ -542,7 +576,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             style={styles.btn(loading ? "#9CA3AF" : "#16A34A")}
             onClick={generateFLHA}
             disabled={loading || (!transcript.replace(/\[live\].*/s, "").trim() && !taskDesc)}>
-            {loading ? "⏳ Analyzing against SOPs…" : "✅ Generate FLHA"}
+            {loading ? "⏳ Analyzing against SOPs…" : addingTask ? "✅ Add this task" : "✅ Generate FLHA"}
           </button>
 
           <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={() => setStep("company")}>
@@ -596,9 +630,22 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
-            {flha.hazards?.map((h, i) => (
-              editingHazard === i ? (
-                <div key={i} style={{ ...styles.hazardCard(hazardDraft.risk), border: "1.5px dashed #1E3A5F" }}>
+            {flha.hazards?.map((h, i) => {
+              const prevTask = i > 0 ? flha.hazards[i - 1].task : null;
+              const showTaskHeader = h.task && h.task !== prevTask;
+              const taskNumber = showTaskHeader
+                ? [...new Set(flha.hazards.slice(0, i + 1).map(x => x.task))].length
+                : null;
+              return (
+              <div key={i}>
+              {showTaskHeader && (
+                <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 6 : 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#1E3A5F", textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
+                  <div style={{ fontSize: 13, color: "#374151", marginTop: 1 }}>{h.task}</div>
+                </div>
+              )}
+              {editingHazard === i ? (
+                <div style={{ ...styles.hazardCard(hazardDraft.risk), border: "1.5px dashed #1E3A5F" }}>
                   <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                   <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                     {["Low", "Medium", "High"].map(r => (
@@ -612,7 +659,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                   </div>
                 </div>
               ) : (
-                <div key={i} style={styles.hazardCard(h.risk)}>
+                <div style={styles.hazardCard(h.risk)}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{h.hazard}</div>
                     <Badge text={h.risk} color={riskColor(h.risk)} />
@@ -624,8 +671,15 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                     <button onClick={() => removeHazard(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Remove</button>
                   </div>
                 </div>
-              )
-            ))}
+              )}
+              </div>
+              );
+            })}
+
+            <button onClick={startAddTask} style={{ width: "100%", background: "#fff", border: "1.5px dashed #1E3A5F", color: "#1E3A5F", borderRadius: 10, padding: "12px", fontWeight: 700, fontSize: 14, cursor: "pointer", marginTop: 4, marginBottom: 16 }}>
+              + Add another task
+            </button>
+
 
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Required PPE</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
