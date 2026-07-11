@@ -249,6 +249,46 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   };
 
   const [addingTask, setAddingTask] = useState(false); // true when generating an additional task
+  const [amendingId, setAmendingId] = useState(null);   // FLHA id being amended (null = new)
+  const [amendSignature, setAmendSignature] = useState(null); // original signature to preserve
+  const [resumeName, setResumeName] = useState("");
+  const [resumeError, setResumeError] = useState("");
+  const [resumeChoices, setResumeChoices] = useState([]); // if multiple found
+
+  // Find today's FLHA for this worker name + company and load it for amending
+  const resumeTodaysFLHA = async () => {
+    setResumeError("");
+    setResumeChoices([]);
+    const name = resumeName.trim();
+    if (!name) { setResumeError("Enter your name."); return; }
+
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const { data, error } = await supabase
+      .from("flhas")
+      .select("id, worker_name, job_site, hazards_json, created_at")
+      .eq("company_id", companyId)
+      .gte("created_at", start.toISOString())
+      .order("created_at", { ascending: false });
+
+    if (error) { setResumeError("Something went wrong. Try again."); return; }
+    const matches = (data || []).filter(f => (f.worker_name || "").trim().toLowerCase() === name.toLowerCase());
+    if (matches.length === 0) { setResumeError("No FLHA found for that name today. Check the spelling or start a new one."); return; }
+    if (matches.length === 1) { loadForAmend(matches[0]); return; }
+    setResumeChoices(matches); // let them pick
+  };
+
+  const loadForAmend = (record) => {
+    const h = record.hazards_json || {};
+    setFlha(h);
+    setWorkerName(record.worker_name || "");
+    setJobSite(record.job_site || "");
+    setAmendingId(record.id);
+    // preserve original signature if it was stored in hazards_json (not currently), else keep null
+    setAmendSignature(h.__signature || null);
+    setResumeChoices([]);
+    setStep("review");
+  };
+
 
   const generateFLHA = async () => {
     setLoading(true);
@@ -350,10 +390,11 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
   const saveFLHA = async () => {
     if (!flha) return;
 
-    const signatureDataUrl = getSignatureDataUrl();
+    // When amending, reuse the original signature; otherwise capture the drawn one.
+    const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
+    const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
 
     // Generate PDF and upload to Supabase Storage.
-    // Use workerName directly (not signName state) to avoid async state timing.
     const pdfUrl = await generateAndUploadFLHA({
       flha,
       workerName,
@@ -362,18 +403,28 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       companyName,
       signatureDataUrl,
       companyLogo,
+      amendedNote,
     });
 
-    // Save FLHA record with PDF URL
-    await supabase.from("flhas").insert({
-      worker_name: workerName,
-      job_site: jobSite,
-      task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-      hazards_json: flha,
-      signed_by: workerName,
-      pdf_url: pdfUrl || null,
-      company_id: companyId,
-    });
+    if (amendingId) {
+      // Update the existing record (one clean document)
+      await supabase.from("flhas").update({
+        job_site: jobSite,
+        task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
+        hazards_json: flha,
+        pdf_url: pdfUrl || null,
+      }).eq("id", amendingId);
+    } else {
+      await supabase.from("flhas").insert({
+        worker_name: workerName,
+        job_site: jobSite,
+        task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
+        hazards_json: flha,
+        signed_by: workerName,
+        pdf_url: pdfUrl || null,
+        company_id: companyId,
+      });
+    }
   };
 
   const riskColor = r => r === "High" ? "red" : r === "Medium" ? "amber" : "green";
@@ -517,6 +568,27 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           }}>
             Continue to Voice Input →
           </button>
+
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px solid #E5E7EB" }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: "#1E3A5F" }}>Already started an FLHA today?</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>Enter your name to reopen today's FLHA and add a task to it.</div>
+            <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Your name (as entered earlier)" value={resumeName} onChange={e => setResumeName(e.target.value)} />
+            {resumeError && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 13, color: "#991B1B" }}>{resumeError}</div>}
+            {resumeChoices.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Multiple found — pick one:</div>
+                {resumeChoices.map(c => (
+                  <button key={c.id} onClick={() => loadForAmend(c)} style={{ width: "100%", textAlign: "left", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 12px", marginBottom: 6, cursor: "pointer" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1E3A5F" }}>{c.job_site || "No site"}</div>
+                    <div style={{ fontSize: 11, color: "#6B7280" }}>{new Date(c.created_at).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button style={{ ...styles.btn("#F3F4F6", "#374151") }} onClick={resumeTodaysFLHA}>
+              Resume today's FLHA
+            </button>
+          </div>
         </div>
       )}
 
@@ -696,6 +768,21 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Worker Acknowledgement</div>
+            {amendingId ? (
+              <>
+                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By confirming, I acknowledge I have reviewed the added task(s) and understand the hazards and controls. This amendment will be time-stamped on the document.</div>
+                <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, color: "#374151" }}>Worker: <strong>{workerName}</strong></div>
+                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Amendment will be recorded {new Date().toLocaleString("en-CA")}</div>
+                </div>
+                <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
+                  disabled={signed}
+                  onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
+                  {signed ? "✓ Saved" : "Confirm & Update FLHA"}
+                </button>
+              </>
+            ) : (
+              <>
             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
 
             <label style={styles.label}>Signature</label>
@@ -736,6 +823,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
               {signed ? "✓ Signed" : "Sign & Submit FLHA"}
             </button>
+              </>
+            )}
           </div>
         </>
       )}
