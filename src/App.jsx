@@ -267,7 +267,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const { data, error } = await supabase
       .from("flhas")
-      .select("id, worker_name, job_site, hazards_json, created_at")
+      .select("id, worker_name, job_site, hazards_json, created_at, worker_signature")
       .eq("company_id", companyId)
       .gte("created_at", start.toISOString())
       .order("created_at", { ascending: false });
@@ -286,7 +286,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
     setJobSite(record.job_site || "");
     setAmendingId(record.id);
     // preserve original signature if it was stored in hazards_json (not currently), else keep null
-    setAmendSignature(h.__signature || null);
+    setAmendSignature(record.worker_signature || null);
     setResumeChoices([]);
     setStep("review");
   };
@@ -439,6 +439,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         pdf_url: pdfUrl || null,
         company_id: companyId,
         status: newStatus,
+        worker_signature: signatureDataUrl || null,
       });
     }
     setPendingApproval(newStatus === "pending_approval");
