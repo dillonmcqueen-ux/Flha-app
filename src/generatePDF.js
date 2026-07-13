@@ -24,7 +24,7 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -89,6 +89,20 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.text(workerName || "—", margin + 70, y + 16, { maxWidth: 55 });
   doc.text(jobSite || "—", margin + 130, y + 16, { maxWidth: 60 });
   y += 30;
+
+  // ── Pending supervisor approval banner ───────────────────
+  if (pendingApproval) {
+    doc.setFillColor(127, 29, 29);
+    doc.roundedRect(margin, y, contentW, 12, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("PENDING SUPERVISOR APPROVAL — EXTREME RISK", W / 2, y + 5.5, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.text("Work must not begin until a supervisor has signed off below.", W / 2, y + 9.5, { align: "center" });
+    y += 18;
+  }
 
   // ── Task Summary ─────────────────────────────────────────
   if (flha.taskSummary) {
