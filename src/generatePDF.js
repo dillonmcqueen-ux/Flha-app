@@ -154,11 +154,13 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
         y += 12;
       }
       const riskColors = {
+        Extreme: [254, 226, 226],
         High: [254, 242, 242],
         Medium: [255, 251, 235],
         Low: [240, 253, 244],
       };
       const riskText = {
+        Extreme: [127, 29, 29],
         High: [220, 38, 38],
         Medium: [217, 119, 6],
         Low: [22, 163, 74],
