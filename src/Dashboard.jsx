@@ -300,7 +300,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         jobSite: record.job_site,
         signName: record.worker_name,
         companyName: co?.name || "",
-        signatureDataUrl: null,
+        signatureDataUrl: record.worker_signature || null,
         companyLogo: co?.logo_url || "",
         amendedNote: null,
         pendingApproval: false,
@@ -334,7 +334,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     async function loadAll() {
       const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }] = await Promise.all([
         supabase.from("companies").select("*"),
-        supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at").order("created_at", { ascending: false }),
+        supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
         supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
       ]);
