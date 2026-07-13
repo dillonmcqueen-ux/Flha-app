@@ -27,6 +27,7 @@ function Badge({ text, color = "blue" }) {
     green: "background:#16A34A20;color:#16A34A;border:1px solid #16A34A40",
     amber: "background:#D9770620;color:#D97706;border:1px solid #D9770640",
     red: "background:#DC262620;color:#DC2626;border:1px solid #DC262640",
+    extreme: "background:#7F1D1D;color:#FFFFFF;border:1px solid #7F1D1D",
   };
   return (
     <span style={{ ...Object.fromEntries(colors[color].split(";").map(s => s.split(":"))), borderRadius: 6, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>
@@ -312,14 +313,19 @@ INSTRUCTIONS:
 - For sopAlerts, only include SOPs that are specifically triggered by this task — e.g. if no hot work is mentioned, don't include the hot work SOP.
 - For ppeRequired, only list PPE actually needed for this specific task.
 - Identify 2-5 hazards maximum. Quality over quantity.
-- Risk levels: High = could cause serious injury or death, Medium = could cause injury, Low = minor risk.
+- Risk levels — apply these STRICTLY:
+  - "Extreme" = a single mistake or failure could realistically be CATASTROPHIC or FATAL, with little margin for error. Reserve this ONLY for genuinely life-threatening work such as: working on or near live/energized high-voltage electrical, entering a confined space, work on a pressurized or live water/gas main, critical or complex crane lifts, work at significant heights without established fall protection, excavation/trench entry deep enough to bury a person, hot work near flammables/explosive atmospheres, or work that could release stored energy fatally. Extreme is rare — most tasks are NOT extreme.
+  - "High" = could cause serious injury but is routine and controllable with normal precautions (e.g. a standard pre-trip inspection, general equipment operation, working near normal traffic). Do NOT inflate ordinary tasks to Extreme.
+  - "Medium" = could cause injury.
+  - "Low" = minor risk.
+- Be conservative and honest: if a task is everyday work that a trained worker does routinely, it is at most High, not Extreme.
 - If a hazard is already well-controlled by the worker's described approach, rate it Lower.
 
 Respond ONLY with a valid JSON object (no markdown, no backticks):
 {
   "taskSummary": "one sentence summary of what the worker is doing",
   "hazards": [
-    { "hazard": "specific hazard name", "risk": "Low|Medium|High", "control": "specific control measure for this task", "sopRef": "exact SOP text this references, or null" }
+    { "hazard": "specific hazard name", "risk": "Low|Medium|High|Extreme", "control": "specific control measure for this task", "sopRef": "exact SOP text this references, or null" }
   ],
   "sopAlerts": ["only SOPs specifically triggered by this task"],
   "ppeRequired": ["only PPE needed for this specific task"],
@@ -427,7 +433,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     }
   };
 
-  const riskColor = r => r === "High" ? "red" : r === "Medium" ? "amber" : "green";
+  const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
 
   // ── Hazard editing (worker can add/edit/remove) ──────────
   const [editingHazard, setEditingHazard] = useState(null); // index being edited, or "new"
@@ -463,8 +469,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 9, padding: "12px 20px", fontWeight: 700, fontSize: 15, cursor: "pointer", width: "100%" }),
     textarea: { width: "100%", minHeight: 90, padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, resize: "vertical", boxSizing: "border-box" },
     hazardCard: (risk) => ({
-      border: `1.5px solid ${risk === "High" ? "#FCA5A5" : risk === "Medium" ? "#FCD34D" : "#86EFAC"}`,
-      background: risk === "High" ? "#FEF2F2" : risk === "Medium" ? "#FFFBEB" : "#F0FDF4",
+      border: `1.5px solid ${risk === "Extreme" ? "#7F1D1D" : risk === "High" ? "#FCA5A5" : risk === "Medium" ? "#FCD34D" : "#86EFAC"}`,
+      background: risk === "Extreme" ? "#FEF2F2" : risk === "High" ? "#FEF2F2" : risk === "Medium" ? "#FFFBEB" : "#F0FDF4",
+      borderLeft: risk === "Extreme" ? "5px solid #7F1D1D" : undefined,
       borderRadius: 10, padding: "14px 16px", marginBottom: 10
     })
   };
@@ -690,7 +697,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               <div style={{ ...styles.hazardCard("Medium"), border: "1.5px dashed #1E3A5F" }}>
                 <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Hazard (what's the risk?)" value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                  {["Low", "Medium", "High"].map(r => (
+                  {["Low", "Medium", "High", "Extreme"].map(r => (
                     <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hazardDraft.risk === r ? "#1E3A5F" : "#E5E7EB"}`, background: hazardDraft.risk === r ? "#1E3A5F" : "#fff", color: hazardDraft.risk === r ? "#fff" : "#6B7280" }}>{r}</button>
                   ))}
                 </div>
@@ -720,7 +727,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                 <div style={{ ...styles.hazardCard(hazardDraft.risk), border: "1.5px dashed #1E3A5F" }}>
                   <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                   <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                    {["Low", "Medium", "High"].map(r => (
+                    {["Low", "Medium", "High", "Extreme"].map(r => (
                       <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hazardDraft.risk === r ? "#1E3A5F" : "#E5E7EB"}`, background: hazardDraft.risk === r ? "#1E3A5F" : "#fff", color: hazardDraft.risk === r ? "#fff" : "#6B7280" }}>{r}</button>
                     ))}
                   </div>
