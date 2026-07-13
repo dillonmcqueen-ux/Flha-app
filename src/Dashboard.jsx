@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import { generateAndUploadFLHA } from "./generatePDF";
 
 const RISK_COLOR = {
   Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
@@ -18,8 +19,32 @@ function RiskBadge({ risk }) {
   );
 }
 
-function FLHACard({ flha, onClose, onDelete }) {
+function FLHACard({ flha, onClose, onDelete, onApprove }) {
   const h = flha.hazards_json || {};
+  const isPending = flha.status === "pending_approval";
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+  const [hasSignature, setHasSignature] = useState(false);
+  const [supName, setSupName] = useState("");
+  const [approving, setApproving] = useState(false);
+
+  const getPos = (e) => {
+    const c = canvasRef.current, r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
+    return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) };
+  };
+  const startDraw = (e) => { e.preventDefault(); drawingRef.current = true; const ctx = canvasRef.current.getContext("2d"); const { x, y } = getPos(e); ctx.beginPath(); ctx.moveTo(x, y); };
+  const draw = (e) => { if (!drawingRef.current) return; e.preventDefault(); const ctx = canvasRef.current.getContext("2d"); const { x, y } = getPos(e); ctx.lineTo(x, y); ctx.strokeStyle = "#1E293B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setHasSignature(true); };
+  const endDraw = () => { drawingRef.current = false; };
+  const clearSig = () => { const c = canvasRef.current; if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasSignature(false); };
+
+  const doApprove = async () => {
+    if (!supName.trim() || !hasSignature) return;
+    setApproving(true);
+    const sig = canvasRef.current.toDataURL("image/png");
+    await onApprove(flha, supName.trim(), sig);
+    setApproving(false);
+  };
+
   return (
     <div style={{
       position: "fixed", inset: 0, background: "#00000080", zIndex: 100,
@@ -57,6 +82,20 @@ function FLHACard({ flha, onClose, onDelete }) {
             }}>✕ Close</button>
           </div>
         </div>
+
+        {isPending && (
+          <div style={{ background: "#7F1D1D", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 2 }}>🛑 PENDING SUPERVISOR SIGN-OFF — EXTREME RISK</div>
+            <div style={{ fontSize: 13, color: "#FECACA" }}>This FLHA contains extreme-risk work. Review the hazards and controls below, then sign off to approve. Work should not begin until you approve.</div>
+          </div>
+        )}
+
+        {!isPending && flha.supervisor_signed_by && (
+          <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ APPROVED BY SUPERVISOR</div>
+            <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>{flha.supervisor_signed_by} · {flha.supervisor_signed_at ? new Date(flha.supervisor_signed_at).toLocaleString("en-CA") : ""}</div>
+          </div>
+        )}
 
         <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#0369A1", marginBottom: 4 }}>WORKER</div>
@@ -123,6 +162,30 @@ function FLHACard({ flha, onClose, onDelete }) {
                 }}>{p}</span>
               ))}
             </div>
+          </div>
+        )}
+
+        {isPending && onApprove && (
+          <div style={{ borderTop: "2px solid #7F1D1D", marginTop: 8, paddingTop: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#7F1D1D", marginBottom: 4 }}>Supervisor Sign-Off Required</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>By signing, I approve this extreme-risk work to proceed with the controls listed above.</div>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Supervisor name</label>
+            <input value={supName} onChange={e => setSupName(e.target.value)} placeholder="Your full name" style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 12, background: "#F8FAFC" }} />
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Signature</label>
+            <div style={{ position: "relative", marginBottom: 6 }}>
+              <canvas ref={canvasRef} width={600} height={180}
+                style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
+              {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here to approve</div>}
+            </div>
+            <div style={{ textAlign: "right", marginBottom: 12 }}>
+              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+            </div>
+            <button onClick={doApprove} disabled={!supName.trim() || !hasSignature || approving}
+              style={{ width: "100%", background: (supName.trim() && hasSignature) ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
+              {approving ? "Approving…" : "✓ Approve & Sign Off"}
+            </button>
           </div>
         )}
       </div>
@@ -225,6 +288,39 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
+  const approveFLHA = async (record, supName, supSignature) => {
+    const now = new Date();
+    const co = companies.find(c => c.id === record.company_id);
+    // Regenerate the PDF as approved (no pending banner), including supervisor sign-off
+    let pdfUrl = record.pdf_url;
+    try {
+      pdfUrl = await generateAndUploadFLHA({
+        flha: record.hazards_json,
+        workerName: record.worker_name,
+        jobSite: record.job_site,
+        signName: record.worker_name,
+        companyName: co?.name || "",
+        signatureDataUrl: null,
+        companyLogo: co?.logo_url || "",
+        amendedNote: null,
+        pendingApproval: false,
+        supervisorApproval: { name: supName, date: now.toLocaleString("en-CA"), signature: supSignature },
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+
+    await supabase.from("flhas").update({
+      status: "complete",
+      supervisor_signed_by: supName,
+      supervisor_signed_at: now.toISOString(),
+      pdf_url: pdfUrl || record.pdf_url,
+    }).eq("id", record.id);
+
+    setFlhas(prev => prev.map(f => f.id === record.id
+      ? { ...f, status: "complete", supervisor_signed_by: supName, supervisor_signed_at: now.toISOString(), pdf_url: pdfUrl || f.pdf_url }
+      : f));
+    setSelectedFlha(null);
+  };
+
   const deleteSelected = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
@@ -238,7 +334,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     async function loadAll() {
       const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }] = await Promise.all([
         supabase.from("companies").select("*"),
-        supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
+        supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
         supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
       ]);
@@ -361,7 +457,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   return (
     <div style={styles.wrap}>
-      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} />}
+      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
 
       <div style={styles.header}>
@@ -522,6 +618,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                               </div>
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                              {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#7F1D1D", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
                               {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                               {highRisk > 0 && <RiskBadge risk="High" />}
                               {medRisk > 0 && <RiskBadge risk="Medium" />}
