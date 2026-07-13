@@ -313,12 +313,13 @@ INSTRUCTIONS:
 - For sopAlerts, only include SOPs that are specifically triggered by this task — e.g. if no hot work is mentioned, don't include the hot work SOP.
 - For ppeRequired, only list PPE actually needed for this specific task.
 - Identify 2-5 hazards maximum. Quality over quantity.
-- Risk levels — apply these STRICTLY:
-  - "Extreme" = a single mistake or failure could realistically be CATASTROPHIC or FATAL, with little margin for error. Reserve this ONLY for genuinely life-threatening work such as: working on or near live/energized high-voltage electrical, entering a confined space, work on a pressurized or live water/gas main, critical or complex crane lifts, work at significant heights without established fall protection, excavation/trench entry deep enough to bury a person, hot work near flammables/explosive atmospheres, or work that could release stored energy fatally. Extreme is rare — most tasks are NOT extreme.
-  - "High" = could cause serious injury but is routine and controllable with normal precautions (e.g. a standard pre-trip inspection, general equipment operation, working near normal traffic). Do NOT inflate ordinary tasks to Extreme.
+- Risk levels — rate the RESIDUAL risk (the risk that REMAINS after accounting for the safeguards and controls the worker has already described). Apply STRICTLY:
+  - CRITICAL RULE: If the worker has described a control that properly manages a hazard (e.g. "using a trench box" for excavation collapse, "locked out the equipment" for energized machinery, "using a fall arrest harness" for heights), then the residual risk is REDUCED — usually to High or Medium — NOT Extreme. A well-controlled hazard is not Extreme.
+  - "Extreme" = even WITH normal controls in place, a single mistake or equipment failure could realistically be CATASTROPHIC or FATAL, with almost no margin for error. Reserve ONLY for inherently life-threatening work where the danger persists despite safeguards: working on an energized high-voltage source, entry into a confined space with a hazardous atmosphere, work on a LIVE (un-isolated) pressurized water/gas main, a critical/complex crane lift over people, or hot work in a confirmed explosive atmosphere. Extreme is rare. If a proper safeguard is described, it is almost never Extreme.
+  - "High" = could cause serious injury or death, but is either routine work or a serious hazard that is being actively controlled by the worker's described safeguards (e.g. excavation collapse WITH a trench box, work at height WITH fall protection). This is where most managed high-risk work lands.
   - "Medium" = could cause injury.
   - "Low" = minor risk.
-- Be conservative and honest: if a task is everyday work that a trained worker does routinely, it is at most High, not Extreme.
+- Read the task description for controls the worker already mentioned, and lower the risk accordingly. Do not rate the raw hazard — rate what could still realistically happen given their approach.
 - If a hazard is already well-controlled by the worker's described approach, rate it Lower.
 
 Respond ONLY with a valid JSON object (no markdown, no backticks):
