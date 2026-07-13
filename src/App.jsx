@@ -252,6 +252,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   const [addingTask, setAddingTask] = useState(false); // true when generating an additional task
   const [amendingId, setAmendingId] = useState(null);   // FLHA id being amended (null = new)
   const [amendSignature, setAmendSignature] = useState(null); // original signature to preserve
+  const [pendingApproval, setPendingApproval] = useState(false);
   const [resumeName, setResumeName] = useState("");
   const [resumeError, setResumeError] = useState("");
   const [resumeChoices, setResumeChoices] = useState([]); // if multiple found
@@ -401,6 +402,10 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
     const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
 
+    // Any Extreme hazard requires supervisor sign-off.
+    const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
+    const newStatus = hasExtreme ? "pending_approval" : "complete";
+
     // Generate PDF and upload to Supabase Storage.
     const pdfUrl = await generateAndUploadFLHA({
       flha,
@@ -411,15 +416,18 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       signatureDataUrl,
       companyLogo,
       amendedNote,
+      pendingApproval: newStatus === "pending_approval",
     });
 
     if (amendingId) {
-      // Update the existing record (one clean document)
+      // Update the existing record (one clean document).
+      // Re-evaluate status: if an amendment added Extreme work, it needs approval again.
       await supabase.from("flhas").update({
         job_site: jobSite,
         task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
         hazards_json: flha,
         pdf_url: pdfUrl || null,
+        status: newStatus,
       }).eq("id", amendingId);
     } else {
       await supabase.from("flhas").insert({
@@ -430,8 +438,10 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         signed_by: workerName,
         pdf_url: pdfUrl || null,
         company_id: companyId,
+        status: newStatus,
       });
     }
+    setPendingApproval(newStatus === "pending_approval");
   };
 
   const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
@@ -840,14 +850,25 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       {step === "done" && (
         <div style={styles.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 64, marginBottom: 12 }}>✅</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>FLHA Complete</div>
+            <div style={{ fontSize: 64, marginBottom: 12 }}>{pendingApproval ? "⚠️" : "✅"}</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>{pendingApproval ? "Awaiting Supervisor Sign-Off" : "FLHA Complete"}</div>
             <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 20 }}>
-              Submitted {new Date().toLocaleString("en-CA")} by <strong>{signName}</strong>
+              Submitted {new Date().toLocaleString("en-CA")} by <strong>{workerName}</strong>
             </div>
+
+            {pendingApproval && (
+              <div style={{ background: "#7F1D1D", borderRadius: 10, padding: 16, marginBottom: 16, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🛑 EXTREME-RISK WORK — DO NOT START YET</div>
+                <div style={{ fontSize: 13, color: "#FECACA", lineHeight: 1.5 }}>This FLHA contains extreme-risk activity and requires a supervisor's sign-off before work begins. Your submission has been sent to your supervisor for review and approval.</div>
+              </div>
+            )}
+
             <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: 16, marginBottom: 16, textAlign: "left" }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", marginBottom: 8 }}>SUBMITTED SUCCESSFULLY</div>
-              {["🗂 Saved to company FLHA database", "📄 PDF generated and stored for supervisor", "📊 Hazard data recorded for site trends", "🔔 Available in supervisor dashboard"].map((n, i) => (
+              {(pendingApproval
+                ? ["🗂 Saved to company FLHA database", "📄 PDF generated (marked pending approval)", "🔔 Sent to supervisor for required sign-off"]
+                : ["🗂 Saved to company FLHA database", "📄 PDF generated and stored for supervisor", "📊 Hazard data recorded for site trends", "🔔 Available in supervisor dashboard"]
+              ).map((n, i) => (
                 <div key={i} style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>{n}</div>
               ))}
             </div>
@@ -856,7 +877,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>
