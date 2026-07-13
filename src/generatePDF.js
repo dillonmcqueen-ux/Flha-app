@@ -24,7 +24,7 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -285,6 +285,31 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.setFontSize(8);
     doc.text(amendedNote, margin, y + 34);
     doc.setFont("helvetica", "normal");
+  }
+
+  // ── Supervisor approval block (extreme-risk sign-off) ────
+  if (supervisorApproval) {
+    let sy = y + 40;
+    if (sy > 240) { doc.addPage(); sy = 20; }
+    doc.setDrawColor(22, 163, 74);
+    doc.setLineWidth(0.4);
+    doc.line(margin, sy, W - margin, sy);
+    sy += 8;
+    doc.setTextColor(22, 101, 52);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("Supervisor Approval — Extreme-Risk Sign-Off", margin, sy);
+    sy += 4;
+    if (supervisorApproval.signature) {
+      try { doc.addImage(supervisorApproval.signature, "PNG", margin, sy, 70, 21); } catch (e) {}
+    }
+    doc.setDrawColor(150, 150, 150);
+    doc.line(margin, sy + 23, margin + 70, sy + 23);
+    doc.setTextColor(107, 114, 128);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Approved by: ${supervisorApproval.name}`, margin, sy + 29);
+    doc.text(`Date: ${supervisorApproval.date}`, W - margin, sy + 29, { align: "right" });
   }
 
   // Load the FORA brand logo for the footer (once)
