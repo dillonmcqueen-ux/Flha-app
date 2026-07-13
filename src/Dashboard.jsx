@@ -82,16 +82,29 @@ function FLHACard({ flha, onClose, onDelete }) {
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: "#1E3A5F" }}>Hazards & Controls</div>
             {h.hazards.map((hz, i) => {
               const c = RISK_COLOR[hz.risk] || RISK_COLOR.Low;
+              const prevTask = i > 0 ? h.hazards[i - 1].task : null;
+              const showTaskHeader = hz.task && hz.task !== prevTask;
+              const taskNumber = showTaskHeader
+                ? [...new Set(h.hazards.slice(0, i + 1).map(x => x.task))].length
+                : null;
               return (
-                <div key={i} style={{
-                  border: `1.5px solid ${c.border}`, background: c.bg,
-                  borderRadius: 10, padding: "12px 14px", marginBottom: 8
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{hz.hazard}</div>
-                    <RiskBadge risk={hz.risk} />
+                <div key={i}>
+                  {showTaskHeader && (
+                    <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 10 : 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#1E3A5F", textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
+                      <div style={{ fontSize: 13, color: "#374151", marginTop: 1 }}>{hz.task}</div>
+                    </div>
+                  )}
+                  <div style={{
+                    border: `1.5px solid ${c.border}`, background: c.bg,
+                    borderRadius: 10, padding: "12px 14px", marginBottom: 8
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{hz.hazard}</div>
+                      <RiskBadge risk={hz.risk} />
+                    </div>
+                    <div style={{ fontSize: 13, color: "#374151" }}>🛡 {hz.control}</div>
                   </div>
-                  <div style={{ fontSize: 13, color: "#374151" }}>🛡 {hz.control}</div>
                 </div>
               );
             })}
