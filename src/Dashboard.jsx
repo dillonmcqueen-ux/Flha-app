@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 
 const RISK_COLOR = {
+  Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
   High: { bg: "#FEF2F2", border: "#FCA5A5", text: "#991B1B", dot: "#DC2626" },
   Medium: { bg: "#FFFBEB", border: "#FCD34D", text: "#92400E", dot: "#D97706" },
   Low: { bg: "#F0FDF4", border: "#86EFAC", text: "#166534", dot: "#16A34A" },
@@ -272,6 +273,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   // Helper: highest risk level in an FLHA (for sorting)
   const riskRank = (f) => {
     const hz = f.hazards_json?.hazards || [];
+    if (hz.some(h => h.risk === "Extreme")) return 4;
     if (hz.some(h => h.risk === "High")) return 3;
     if (hz.some(h => h.risk === "Medium")) return 2;
     return 1;
@@ -495,6 +497,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                   )}
                   {groupFlhas.map((f, i) => {
                     const hazards = f.hazards_json?.hazards || [];
+                    const extremeRisk = hazards.filter(h => h.risk === "Extreme").length;
                     const highRisk = hazards.filter(h => h.risk === "High").length;
                     const medRisk = hazards.filter(h => h.risk === "Medium").length;
                     return (
@@ -519,9 +522,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                               </div>
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                              {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                               {highRisk > 0 && <RiskBadge risk="High" />}
                               {medRisk > 0 && <RiskBadge risk="Medium" />}
-                              {highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
+                              {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
                               <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
                                 {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
                               </div>
