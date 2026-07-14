@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
+import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const INCIDENT_TYPES = [
   "Injury / Illness",
@@ -39,6 +40,7 @@ export default function Incident({ companyId, companyName, onBack, onLogout }) {
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null);
   const [companyLogo, setCompanyLogo] = useState("");
+  const cf = useCustomFields(companyId, "incident");
 
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
@@ -134,7 +136,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSigned(true);
     setSaving(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
-    const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence };
+    const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
     const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig });
     await supabase.from("incidents").insert({
       company_id: companyId,
@@ -142,7 +144,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       site, occurred_at: occurredAt, incident_type: incidentType,
       injured_person: injuredPerson, body_part: bodyPart, treatment,
       medical_attention: medicalAttention, witnesses, evidence,
-      report_json: report,
+      report_json: { ...report, customFields: cf.entries() },
       signed_by: reporter,
       pdf_url: pdfUrl || null,
     });
@@ -235,7 +237,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Evidence on file</label>
           <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="Describe any photos, videos, or physical evidence and where it's stored (e.g. 4 photos of the damaged scaffold on my phone, emailed to supervisor)" value={evidence} onChange={e => setEvidence(e.target.value)} />
 
-          <button style={s.btn("#DC2626")} onClick={() => setStep("describe")}>Continue →</button>
+          <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
+
+          <button style={s.btn("#DC2626")} onClick={() => {
+            const missing = cf.missingRequired();
+            if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
+            setStep("describe");
+          }}>Continue →</button>
           <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
         </div>
       )}
