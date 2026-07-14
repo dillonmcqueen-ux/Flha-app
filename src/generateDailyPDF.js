@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -56,6 +57,7 @@ export async function generateAndUploadDaily(data) {
   doc.text(`${weather || "—"}${temperature ? `, ${temperature}` : ""}`, L, y + 27, { maxWidth: contentW / 2 - 8 });
   doc.text(reporter || "—", R, y + 27, { maxWidth: contentW / 2 - 8 });
   y += 38;
+  y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [21, 128, 61] });
 
   // crew / equipment / visitors
   doc.setTextColor(71, 85, 105); doc.setFontSize(9); doc.setFont("helvetica", "normal");
