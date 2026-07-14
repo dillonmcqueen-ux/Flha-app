@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -17,7 +18,7 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   return y;
 }
 
-export async function generateAndUploadNearMiss({ reporter, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl }) {
+export async function generateAndUploadNearMiss({ reporter, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl, customFields }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -68,6 +69,7 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
     doc.text(doc.splitTextToSize(report.severityReason, contentW - 10)[0], margin + 5, y + 11);
   }
   y += 20;
+  y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [180, 83, 9] });
 
   const section = (title, body) => {
     if (y > 265) { doc.addPage(); y = 20; }
