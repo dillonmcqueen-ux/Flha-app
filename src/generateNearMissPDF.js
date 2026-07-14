@@ -53,6 +53,22 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   doc.text(`Involved: ${involved || "—"}`, margin + 4, y + 23, { maxWidth: contentW - 8 });
   y += 36;
 
+  // severity banner
+  const sevColors = {
+    Low: [22, 163, 74], Medium: [217, 119, 6], High: [220, 38, 38], Critical: [127, 29, 29],
+  };
+  const sev = report?.severity || "Medium";
+  const sc = sevColors[sev] || sevColors.Medium;
+  doc.setFillColor(...sc);
+  doc.roundedRect(margin, y, contentW, 14, 2, 2, "F");
+  doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+  doc.text(`POTENTIAL SEVERITY: ${sev.toUpperCase()}`, margin + 5, y + 6);
+  if (report?.severityReason) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+    doc.text(doc.splitTextToSize(report.severityReason, contentW - 10)[0], margin + 5, y + 11);
+  }
+  y += 20;
+
   const section = (title, body) => {
     if (y > 265) { doc.addPage(); y = 20; }
     doc.setTextColor(180, 83, 9); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
@@ -74,7 +90,8 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   section("What Happened", report?.whatHappened || "—");
   section("Contributing Factors", report?.contributingFactors || []);
   section("Potential Outcome", report?.potentialOutcome || "—");
-  section("Corrective Actions", report?.correctiveActions || []);
+  section("Immediate Actions Taken", report?.immediateActions || []);
+  section("Recommended Next Steps", report?.nextSteps || []);
 
   // signature
   if (y > 235) { doc.addPage(); y = 20; }
