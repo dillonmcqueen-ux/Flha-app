@@ -121,6 +121,16 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
       if (siteErr) console.error("sites read error:", siteErr.message);
       setSites(siteRows || []);
       if (!siteRows || siteRows.length === 0) setSiteMode("other");
+
+      // Load this company's custom FLHA fields
+      const { data: cfRows, error: cfErr } = await supabase
+        .from("custom_fields")
+        .select("id, label, field_type, options, required")
+        .eq("company_id", company.id)
+        .eq("doc_type", "flha")
+        .order("id");
+      if (cfErr) console.error("custom fields read error:", cfErr.message);
+      setCustomFields(cfRows || []);
       const { data: sops, error: sopsErr } = await supabase
         .from("sops")
         .select("policy_text")
@@ -149,6 +159,8 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   const [workerName, setWorkerName] = useState("");
   const [jobSite, setJobSite] = useState("");
   const [sites, setSites] = useState([]);
+  const [customFields, setCustomFields] = useState([]);
+  const [customValues, setCustomValues] = useState({});
   const [siteMode, setSiteMode] = useState("list"); // "list" | "other"
   const [taskDesc, setTaskDesc] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -406,9 +418,17 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
     const newStatus = hasExtreme ? "pending_approval" : "complete";
 
+    // Attach this company's custom field values (label + value) to the record.
+    const customEntries = customFields
+      .map(f => ({ label: f.label, value: (customValues[f.id] || "").trim() }))
+      .filter(e => e.value);
+    const flhaWithCustom = customEntries.length > 0
+      ? { ...flha, customFields: customEntries }
+      : (flha.customFields ? flha : { ...flha });
+
     // Generate PDF and upload to Supabase Storage.
     const pdfUrl = await generateAndUploadFLHA({
-      flha,
+      flha: flhaWithCustom,
       workerName,
       jobSite,
       signName: workerName,
@@ -425,7 +445,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       await supabase.from("flhas").update({
         job_site: jobSite,
         task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
-        hazards_json: flha,
+        hazards_json: flhaWithCustom,
         pdf_url: pdfUrl || null,
         status: newStatus,
       }).eq("id", amendingId);
@@ -434,7 +454,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         worker_name: workerName,
         job_site: jobSite,
         task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-        hazards_json: flha,
+        hazards_json: flhaWithCustom,
         signed_by: workerName,
         pdf_url: pdfUrl || null,
         company_id: companyId,
@@ -575,8 +595,30 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             )}
           </div>
 
+          {customFields.length > 0 && (
+            <div style={{ marginBottom: 4 }}>
+              {customFields.map(f => (
+                <div key={f.id}>
+                  <label style={styles.label}>{f.label}{f.required ? " *" : ""}</label>
+                  {f.field_type === "dropdown" ? (
+                    <select style={styles.input} value={customValues[f.id] || ""} onChange={e => setCustomValues(v => ({ ...v, [f.id]: e.target.value }))}>
+                      <option value="">Select…</option>
+                      {(f.options || "").split(",").map(o => o.trim()).filter(Boolean).map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input style={styles.input} placeholder={f.label} value={customValues[f.id] || ""} onChange={e => setCustomValues(v => ({ ...v, [f.id]: e.target.value }))} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <button style={styles.btn("#F97316")} onClick={async () => {
             if (!workerName || !jobSite) return;
+            const missing = customFields.filter(f => f.required && !(customValues[f.id] || "").trim());
+            if (missing.length > 0) { alert(`Please fill in: ${missing.map(m => m.label).join(", ")}`); return; }
             // Auto-save a newly typed site (case-insensitive dedupe)
             const trimmed = jobSite.trim();
             const exists = sites.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
