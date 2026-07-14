@@ -196,6 +196,59 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     }
     setSaving(false);
   };
+
+  // ── SOP condenser: long document → short policy lines ────
+  const [rawSop, setRawSop] = useState("");
+  const [condensing, setCondensing] = useState(false);
+  const [condenseError, setCondenseError] = useState("");
+
+  const condenseSop = async () => {
+    setCondenseError(""); setMsg("");
+    if (!rawSop.trim()) { setCondenseError("Paste a document first."); return; }
+    setCondensing(true);
+    const prompt = `You are a construction safety officer converting a long, formal SOP or safety policy document into a set of short, specific, actionable safety rules for a field hazard-assessment system.
+
+The system uses these rules by matching them to a worker's described task, so each rule must be SELF-CONTAINED and SPECIFIC — a worker or an AI should be able to tell at a glance whether it applies to a given task.
+
+Document to convert:
+"""
+${rawSop.slice(0, 12000)}
+"""
+
+INSTRUCTIONS:
+- Extract the actual safety requirements. Ignore boilerplate, headers, revision history, tables of contents, definitions, and legal preamble.
+- Write each rule as ONE line — a clear, direct requirement. Start with the condition or activity where possible (e.g. "Trenches deeper than 1.2m require a trench box, sloping, or benching before entry.").
+- Be specific and keep concrete details that matter: depths, distances, voltages, weights, durations, PPE types.
+- Do NOT invent requirements that aren't in the document.
+- Do NOT number the lines or add bullets — one plain rule per line.
+- Aim for 5-25 rules depending on the document's length and content.
+
+Respond ONLY with valid JSON (no markdown, no backticks):
+{ "policies": ["rule one", "rule two"] }`;
+
+    try {
+      const res = await fetch("/api/generate-flha", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const text = data.content?.map(b => b.text || "").join("") || "";
+      const a = text.indexOf("{"), b = text.lastIndexOf("}");
+      if (a === -1 || b === -1) throw new Error("bad response");
+      const parsed = JSON.parse(text.slice(a, b + 1));
+      const lines = (parsed.policies || []).filter(Boolean);
+      if (lines.length === 0) throw new Error("no policies found");
+      // Drop the condensed rules into the existing SOP box for review before saving
+      setSopText(prev => (prev.trim() ? prev.trim() + "\n" : "") + lines.join("\n"));
+      setRawSop("");
+      setMsg(`Condensed into ${lines.length} ${lines.length > 1 ? "policies" : "policy"} — review below, then Add.`);
+    } catch (e) {
+      setCondenseError("Couldn't condense that document. Try a shorter section, or check your connection.");
+    }
+    setCondensing(false);
+  };
+
   const deleteSop = async (id) => {
     await supabase.from("sops").delete().eq("id", id);
     setExistingSops(prev => prev.filter(s => s.id !== id));
@@ -511,6 +564,18 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
 
         {manageTab === "sops" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>✨ Condense a long SOP document</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Paste a full safety policy or SOP document — even many pages. The AI pulls out the actual requirements and turns them into short, specific rules the FLHA system can use. Review them below before adding.</div>
+              <textarea style={{ ...st.input, minHeight: 130, resize: "vertical", fontFamily: "inherit" }}
+                placeholder="Paste the full SOP document text here…"
+                value={rawSop} onChange={e => setRawSop(e.target.value)} />
+              {condenseError && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "9px 12px", marginBottom: 10, fontSize: 13, color: "#991B1B" }}>{condenseError}</div>}
+              <button style={{ background: condensing ? "#94A3B8" : C.amber, color: "#1E293B", border: "none", borderRadius: 9, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", width: "100%" }} onClick={condenseSop} disabled={condensing}>
+                {condensing ? "⏳ Condensing…" : "✨ Condense into policies"}
+              </button>
+            </div>
+
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add safety policies</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Paste one policy per line. Each line becomes a separate SOP.</div>
