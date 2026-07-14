@@ -843,8 +843,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
           <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
-          <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>⚠️ Near Misses</button>
-          <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>🚑 Incidents</button>
+          <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
+            ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
+          </button>
+          <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
+            🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
+          </button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -1070,10 +1074,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               <>
                 {companyNearMisses.filter(n => !n.reviewed).length > 0 && (
                   <>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                      🚩 Needs Review ({companyNearMisses.filter(n => !n.reviewed).length})
+                    <div style={{ background: "#B45309", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 22 }}>🚩</span>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{companyNearMisses.filter(n => !n.reviewed).length} Awaiting Review</div>
+                        <div style={{ fontSize: 12, opacity: 0.9 }}>Tap to review and record action taken</div>
+                      </div>
                     </div>
-                    <div style={{ background: "#FFFBEB", borderRadius: 10, border: "1px solid #FDE68A", padding: "4px 10px", marginBottom: 16 }}>
+                    <div style={{ background: "#FFFBEB", borderRadius: 10, border: "1.5px solid #FDE68A", padding: "4px 12px", marginBottom: 20 }}>
                       {companyNearMisses.filter(n => !n.reviewed).map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                       ))}
@@ -1108,10 +1116,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               <>
                 {companyIncidents.filter(n => !n.reviewed).length > 0 && (
                   <>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                      🚩 Needs Review ({companyIncidents.filter(n => !n.reviewed).length})
+                    <div style={{ background: "#991B1B", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 22 }}>🚩</span>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{companyIncidents.filter(n => !n.reviewed).length} Awaiting Review</div>
+                        <div style={{ fontSize: 12, opacity: 0.9 }}>Incident reports require your review — tap to record action taken</div>
+                      </div>
                     </div>
-                    <div style={{ background: "#FEF2F2", borderRadius: 10, border: "1px solid #FCA5A5", padding: "4px 10px", marginBottom: 16 }}>
+                    <div style={{ background: "#FEF2F2", borderRadius: 10, border: "1.5px solid #FCA5A5", padding: "4px 12px", marginBottom: 20 }}>
                       {companyIncidents.filter(n => !n.reviewed).map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                       ))}
