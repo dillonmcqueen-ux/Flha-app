@@ -2,6 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 
+const SEVERITY = {
+  Low: { color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
+  Medium: { color: "#D97706", bg: "#FFFBEB", border: "#FCD34D" },
+  High: { color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5" },
+  Critical: { color: "#FFFFFF", bg: "#7F1D1D", border: "#7F1D1D" },
+};
+const SEVERITY_LEVELS = ["Low", "Medium", "High", "Critical"];
+
 export default function NearMiss({ companyId, companyName, onBack, onLogout }) {
   const [step, setStep] = useState("setup"); // setup | describe | review | sign | done
   const [reporter, setReporter] = useState("");
@@ -53,7 +61,7 @@ export default function NearMiss({ companyId, companyName, onBack, onLogout }) {
 
   const generateReport = async () => {
     setLoading(true); setGenError(false);
-    const prompt = `You are a construction safety officer helping a worker turn a raw near-miss description into a clean, professional near-miss report. A near miss is an event that could have caused injury, illness, or damage but did not.
+    const prompt = `You are a construction safety officer helping a worker turn a raw near-miss description into a clean, professional near-miss incident report. A near miss is an event that could have caused injury, illness, or damage but did not.
 
 Company: ${companyName}
 Site: ${site}
@@ -62,19 +70,25 @@ Who/what was involved: ${involved || "not specified"}
 Worker's description of what happened: "${description}"
 
 INSTRUCTIONS:
-- Write a clear, factual, professional report based ONLY on what the worker described. Do not invent specifics that weren't provided, but you may reasonably infer contributing factors.
+- Write a clear, factual, professional report based ONLY on what the worker described. Do not invent specifics that weren't provided, but you may reasonably infer contributing factors and sensible corrective steps.
 - Keep a neutral, non-blaming tone — near-miss reporting is about learning, not fault.
+- "severity": rate the POTENTIAL severity — how bad it realistically could have been if it had gone wrong — as one of "Low", "Medium", "High", or "Critical". Critical = potential fatality or life-altering injury; High = potential serious injury; Medium = potential injury needing medical treatment; Low = minor potential injury.
+- "severityReason": one short sentence explaining the rating.
 - "whatHappened": a clear 2-4 sentence write-up of the event.
 - "contributingFactors": the conditions or actions that led to the near miss (2-4 short points).
-- "potentialOutcome": one or two sentences on what could realistically have happened if it had gone wrong.
-- "correctiveActions": specific, practical actions to prevent this from happening again (2-4 short points).
+- "potentialOutcome": one or two sentences on what could realistically have happened.
+- "immediateActions": what was or should have been done right away to make the situation safe (2-3 short points).
+- "nextSteps": longer-term recommended actions to prevent recurrence (2-4 short points).
 
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
+  "severity": "Low|Medium|High|Critical",
+  "severityReason": "short reason",
   "whatHappened": "clear write-up",
   "contributingFactors": ["point", "point"],
   "potentialOutcome": "what could have happened",
-  "correctiveActions": ["action", "action"]
+  "immediateActions": ["action", "action"],
+  "nextSteps": ["action", "action"]
 }`;
 
     try {
@@ -207,8 +221,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "review" && report && (
         <>
           <div style={s.card}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#B45309", textTransform: "uppercase", letterSpacing: 0.5 }}>Near Miss</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#B45309", textTransform: "uppercase", letterSpacing: 0.5 }}>Near Miss Incident Report</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{reporterLabel()} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
+          </div>
+
+          {/* Severity index */}
+          <div style={{ ...s.card, background: (SEVERITY[report.severity] || SEVERITY.Medium).bg, border: `1.5px solid ${(SEVERITY[report.severity] || SEVERITY.Medium).border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Potential Severity</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              {SEVERITY_LEVELS.map(lvl => {
+                const sel = report.severity === lvl;
+                const c = SEVERITY[lvl];
+                return (
+                  <button key={lvl} onClick={() => updateText("severity", lvl)} style={{
+                    flex: 1, padding: "10px 4px", borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    border: `1.5px solid ${sel ? c.color : "#E2E8F0"}`,
+                    background: sel ? c.bg : "#fff",
+                    color: sel ? c.color : "#94A3B8",
+                    boxShadow: sel && lvl === "Critical" ? "inset 0 0 0 2px #7F1D1D" : "none",
+                  }}>{lvl}</button>
+                );
+              })}
+            </div>
+            {report.severityReason && <div style={{ fontSize: 13, color: "#475569", fontStyle: "italic" }}>{report.severityReason}</div>}
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>AI-suggested — tap to adjust</div>
           </div>
 
           <div style={s.card}>
@@ -233,14 +269,25 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           </div>
 
           <div style={s.card}>
-            <div style={s.section}>Corrective Actions</div>
-            {(report.correctiveActions || []).map((f, i) => (
+            <div style={s.section}>Immediate Actions Taken</div>
+            {(report.immediateActions || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
-                <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("correctiveActions", i, e.target.value)} />
-                <button onClick={() => removeListItem("correctiveActions", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("immediateActions", i, e.target.value)} />
+                <button onClick={() => removeListItem("immediateActions", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
               </div>
             ))}
-            <button onClick={() => addListItem("correctiveActions")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add action</button>
+            <button onClick={() => addListItem("immediateActions")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add action</button>
+          </div>
+
+          <div style={s.card}>
+            <div style={s.section}>Recommended Next Steps</div>
+            {(report.nextSteps || []).map((f, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
+                <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("nextSteps", i, e.target.value)} />
+                <button onClick={() => removeListItem("nextSteps", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+              </div>
+            ))}
+            <button onClick={() => addListItem("nextSteps")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add step</button>
           </div>
 
           <button style={s.btn("#D97706")} onClick={() => setStep("sign")}>Continue to Sign →</button>
