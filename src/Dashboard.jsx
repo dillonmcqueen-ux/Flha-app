@@ -117,6 +117,19 @@ function FLHACard({ flha, onClose, onDelete, onApprove }) {
           </div>
         )}
 
+        {h.customFields?.length > 0 && (
+          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {h.customFields.map((f, i) => (
+                <div key={i}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase" }}>{f.label}</div>
+                  <div style={{ fontSize: 13, color: "#334155" }}>{f.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {h.hazards?.length > 0 && (
           <>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: "#1E3A5F" }}>Hazards & Controls</div>
