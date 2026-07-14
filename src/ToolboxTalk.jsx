@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadToolbox } from "./generateToolboxPDF";
+import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly"];
 
@@ -16,6 +17,7 @@ export default function ToolboxTalk({ companyId, companyName, onBack, onLogout }
   const [genError, setGenError] = useState(false);
   const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[] }
   const [companyLogo, setCompanyLogo] = useState("");
+  const cf = useCustomFields(companyId, "toolbox");
 
   // Attendees
   const [attendees, setAttendees] = useState([]); // {name, signature}
@@ -103,7 +105,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const submit = async () => {
     setSaving(true);
     const pdfUrl = await generateAndUploadToolbox({
-      presenter, meetingType, site, topic, companyName, companyLogo, points, attendees,
+      presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields: cf.entries(),
     });
     await supabase.from("toolbox_talks").insert({
       company_id: companyId,
@@ -111,7 +113,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       meeting_type: meetingType,
       site,
       topic,
-      talking_points_json: points,
+      talking_points_json: { ...points, customFields: cf.entries() },
       attendees_json: attendees,
       pdf_url: pdfUrl || null,
     });
@@ -167,7 +169,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <input style={s.input} placeholder="e.g. Hwy 2 Project" value={site} onChange={e => setSite(e.target.value)} />
           )}
 
-          <button style={s.btn((presenter && site) ? "#7C3AED" : "#94A3B8")} disabled={!presenter || !site} onClick={() => setStep("topic")}>Continue →</button>
+          <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
+
+          <button style={s.btn((presenter && site) ? "#7C3AED" : "#94A3B8")} disabled={!presenter || !site} onClick={() => {
+            const missing = cf.missingRequired();
+            if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
+            setStep("topic");
+          }}>Continue →</button>
         </div>
       )}
 
