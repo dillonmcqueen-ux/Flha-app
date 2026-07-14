@@ -507,6 +507,47 @@ function IncidentCard({ inc, onClose, onDelete, onReview }) {
   );
 }
 
+function DailyCard({ dr, onClose, onDelete }) {
+  const r = dr.report_json || {};
+  const Block = ({ title, body }) => (
+    body ? (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#15803D", marginBottom: 6 }}>{title}</div>
+        <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{body}</div>
+      </div>
+    ) : null
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#15803D" }}>Daily Report</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{dr.report_date} · {dr.site}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {dr.pdf_url && <a href={dr.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#16A34A", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            {onDelete && <button onClick={() => onDelete(dr.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#374151" }}>Weather: <strong>{dr.weather}{dr.temperature ? `, ${dr.temperature}` : ""}</strong></div>
+          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Prepared by: <strong>{dr.reporter_name}</strong></div>
+          {dr.crew && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Crew: {dr.crew}</div>}
+          {dr.equipment && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Equipment: {dr.equipment}</div>}
+          {dr.visitors && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Visitors: {dr.visitors}</div>}
+        </div>
+
+        <Block title="Work Completed" body={r.workSummary} />
+        <Block title="Delays / Issues" body={r.delaysSummary} />
+        <Block title="Plan for Tomorrow" body={r.tomorrowPlan} />
+      </div>
+    </div>
+  );
+}
+
 
 export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false }) {
   const [companies, setCompanies] = useState([]);
@@ -518,6 +559,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [selectedNearMiss, setSelectedNearMiss] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [selectedIncident, setSelectedIncident] = useState(null);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [selectedDaily, setSelectedDaily] = useState(null);
   const [sops, setSops] = useState([]);
   const [selectedInspection, setSelectedInspection] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -608,7 +651,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }, { data: inc }] = await Promise.all([
+      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }, { data: inc }, { data: dr }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
@@ -616,6 +659,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         supabase.from("toolbox_talks").select("id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
         supabase.from("near_misses").select("id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes").order("created_at", { ascending: false }),
         supabase.from("incidents").select("id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes").order("created_at", { ascending: false }),
+        supabase.from("daily_reports").select("id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
       ]);
 
       // Supervisors only see their own company; admins see all.
@@ -629,6 +673,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setToolboxTalks(tbt || []);
       setNearMisses(nm || []);
       setIncidents(inc || []);
+      setDailyReports(dr || []);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
@@ -642,6 +687,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const companyToolbox = toolboxTalks.filter(t => t.company_id === selectedCompany);
   const companyNearMisses = nearMisses.filter(n => n.company_id === selectedCompany);
   const companyIncidents = incidents.filter(n => n.company_id === selectedCompany);
+  const companyDaily = dailyReports.filter(d => d.company_id === selectedCompany);
+
+  const deleteDaily = async (id) => {
+    if (!window.confirm("Delete this daily report? This cannot be undone.")) return;
+    await supabase.from("daily_reports").delete().eq("id", id);
+    setDailyReports(prev => prev.filter(d => d.id !== id));
+    setSelectedDaily(null);
+  };
 
   // Supervisor summary metrics
   const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
@@ -649,7 +702,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
   const docsThisWeek = [
-    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents,
+    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily,
   ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
 
   const reviewNearMiss = async (id, notes) => {
@@ -791,6 +844,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
       {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} />}
       {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} />}
+      {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
 
       <div style={styles.header}>
         <div>
@@ -862,6 +916,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
             🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
           </button>
+          <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -1152,6 +1207,46 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                   </>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* Daily Reports tab */}
+        {activeTab === "daily" && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+              {company?.name} — Daily Reports
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any report to view the full day's summary.</div>
+            {companyDaily.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                No daily reports yet.
+              </div>
+            ) : (
+              companyDaily.map((d, i) => {
+                const r = d.report_json || {};
+                return (
+                  <div key={d.id} style={{
+                    padding: "12px 14px", borderBottom: i < companyDaily.length - 1 ? "1px solid #F3F4F6" : "none",
+                    cursor: "pointer"
+                  }} onClick={() => setSelectedDaily(d)}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, paddingRight: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{d.report_date}</div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
+                        {d.pdf_url ? "📄 PDF" : ""} →
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         )}
