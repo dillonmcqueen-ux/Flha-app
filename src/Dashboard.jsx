@@ -237,11 +237,77 @@ function InspectionCard({ insp, onClose, onDelete }) {
   );
 }
 
+function ToolboxCard({ talk, onClose, onDelete }) {
+  const p = talk.talking_points_json || {};
+  const attendees = talk.attendees_json || [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#5B21B6" }}>{talk.meeting_type} Toolbox Talk</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(talk.created_at).toLocaleString("en-CA")} · {talk.site}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {talk.pdf_url && (
+              <a href={talk.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+            )}
+            {onDelete && (
+              <button onClick={() => onDelete(talk.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+            )}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        <div style={{ background: "#FAF5FF", border: "1px solid #E9D5FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B" }}>{p.summary || talk.topic}</div>
+          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Presenter: {talk.presenter_name}</div>
+        </div>
+
+        {(p.sections || []).map((sec, i) => (
+          <div key={i} style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#5B21B6", marginBottom: 6 }}>{sec.heading}</div>
+            {(sec.bullets || []).map((b, j) => (
+              <div key={j} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+                <span style={{ color: "#7C3AED", fontWeight: 800 }}>•</span>
+                <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{b}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {p.discussion?.length > 0 && (
+          <div style={{ background: "#FAF5FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#5B21B6", marginBottom: 6 }}>💬 Discussion</div>
+            {p.discussion.map((d, i) => (
+              <div key={i} style={{ fontSize: 14, color: "#334155", marginBottom: 4 }}>{i + 1}. {d}</div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 8 }}>Attendance ({attendees.length})</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {attendees.map((a, i) => (
+              <div key={i} style={{ border: "1px solid #E5E7EB", borderRadius: 8, padding: 8 }}>
+                {a.signature && <img src={a.signature} alt="" style={{ width: "100%", height: 40, objectFit: "contain" }} />}
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [inspections, setInspections] = useState([]);
+  const [toolboxTalks, setToolboxTalks] = useState([]);
+  const [selectedToolbox, setSelectedToolbox] = useState(null);
   const [sops, setSops] = useState([]);
   const [selectedInspection, setSelectedInspection] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -332,11 +398,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }] = await Promise.all([
+      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }, { data: tbt }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
         supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
+        supabase.from("toolbox_talks").select("id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
       ]);
 
       // Supervisors only see their own company; admins see all.
@@ -347,6 +414,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setCompanies(visibleCompanies);
       setFlhas(fs || []);
       setInspections(insp || []);
+      setToolboxTalks(tbt || []);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
@@ -357,6 +425,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const company = companies.find(c => c.id === selectedCompany);
   const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
   const companyInspections = inspections.filter(i => i.company_id === selectedCompany);
+  const companyToolbox = toolboxTalks.filter(t => t.company_id === selectedCompany);
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
   const deleteInspection = async (id, workerName) => {
@@ -364,6 +433,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     await supabase.from("inspections").delete().eq("id", id);
     setInspections(prev => prev.filter(i => i.id !== id));
     setSelectedInspection(null);
+  };
+
+  const deleteToolbox = async (id) => {
+    if (!window.confirm("Delete this toolbox talk? This cannot be undone.")) return;
+    await supabase.from("toolbox_talks").delete().eq("id", id);
+    setToolboxTalks(prev => prev.filter(t => t.id !== id));
+    setSelectedToolbox(null);
   };
 
   // Helper: highest risk level in an FLHA (for sorting)
@@ -459,6 +535,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     <div style={styles.wrap}>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
+      {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
 
       <div style={styles.header}>
         <div>
@@ -519,6 +596,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12 }}>
           <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
+          <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -677,6 +755,49 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                         <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
                           {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Toolbox Talks tab */}
+        {activeTab === "toolbox" && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+              {company?.name} — Toolbox Talks
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any meeting to view the talk and attendance.</div>
+            {companyToolbox.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🧰</div>
+                No toolbox talks recorded yet.
+              </div>
+            ) : (
+              companyToolbox.map((t, i) => {
+                const attendees = t.attendees_json || [];
+                return (
+                  <div key={t.id} style={{
+                    padding: "12px 14px", borderBottom: i < companyToolbox.length - 1 ? "1px solid #F3F4F6" : "none",
+                    cursor: "pointer"
+                  }} onClick={() => setSelectedToolbox(t)}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
+                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
+                        {t.pdf_url ? "📄 PDF" : "No PDF"} →
                       </div>
                     </div>
                   </div>
