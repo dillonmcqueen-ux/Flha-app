@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadDaily } from "./generateDailyPDF";
+import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
@@ -25,6 +26,7 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null); // { workSummary, delaysSummary, tomorrowPlan }
   const [companyLogo, setCompanyLogo] = useState("");
+  const cf = useCustomFields(companyId, "daily");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -90,14 +92,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   const submit = async () => {
     setSaving(true);
-    const meta = { reporter, site, reportDate, weather, temperature, crew, equipment, visitors };
+    const meta = { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, customFields: cf.entries() };
     const pdfUrl = await generateAndUploadDaily({ ...meta, report, companyName, companyLogo });
     await supabase.from("daily_reports").insert({
       company_id: companyId,
       reporter_name: reporter,
       site, report_date: reportDate, weather, temperature,
       crew, equipment, visitors,
-      report_json: report,
+      report_json: { ...report, customFields: cf.entries() },
       pdf_url: pdfUrl || null,
     });
     setSaving(false);
@@ -160,7 +162,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Temperature (optional)</label>
           <input style={s.input} placeholder="e.g. 18°C" value={temperature} onChange={e => setTemperature(e.target.value)} />
 
-          <button style={s.btn((reporter && site) ? "#16A34A" : "#94A3B8")} disabled={!reporter || !site} onClick={() => setStep("notes")}>Continue →</button>
+          <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
+
+          <button style={s.btn((reporter && site) ? "#16A34A" : "#94A3B8")} disabled={!reporter || !site} onClick={() => {
+            const missing = cf.missingRequired();
+            if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
+            setStep("notes");
+          }}>Continue →</button>
         </div>
       )}
 
