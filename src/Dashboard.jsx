@@ -301,7 +301,41 @@ function ToolboxCard({ talk, onClose, onDelete }) {
   );
 }
 
-function NearMissCard({ nm, onClose, onDelete }) {
+function ReportRow({ rec, last, onClick, kind }) {
+  const r = rec.report_json || {};
+  const sevColors = {
+    Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
+    High: { c: "#991B1B", bg: "#FEF2F2" }, Critical: { c: "#fff", bg: "#7F1D1D" },
+  };
+  const sev = r.severity || "Medium";
+  const sc = sevColors[sev] || sevColors.Medium;
+  const preview = kind === "incident"
+    ? (r.summary || rec.incident_type || "")
+    : (r.whatHappened || rec.involved || "");
+  const who = kind === "nearmiss" && rec.is_anonymous ? "Anonymous" : rec.reporter_name;
+  return (
+    <div onClick={onClick} style={{ padding: "12px 4px", borderBottom: last ? "none" : "1px solid #F3F4F680", cursor: "pointer" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, paddingRight: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: sc.c, background: sc.bg, padding: "2px 9px", borderRadius: 20, border: sev === "Critical" ? "none" : `1px solid ${sc.c}30` }}>{sev.toUpperCase()}</span>
+            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", background: "#FEF2F2", padding: "2px 8px", borderRadius: 20 }}>{rec.incident_type}</span>}
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{rec.site}</div>
+          </div>
+          <div style={{ fontSize: 13, color: "#374151" }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🧑 {who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
+          {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2 }}>✓ Reviewed by {rec.reviewed_by}</div>}
+        </div>
+        <div style={{ fontSize: 11, color: rec.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
+          {rec.pdf_url ? "📄 PDF" : ""} →
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NearMissCard({ nm, onClose, onDelete, onReview }) {
+  const [reviewNotes, setReviewNotes] = useState("");
   const r = nm.report_json || {};
   const sevColors = {
     Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
@@ -367,6 +401,107 @@ function NearMissCard({ nm, onClose, onDelete }) {
         )}
         <List title="Immediate Actions Taken" items={r.immediateActions} />
         <List title="Recommended Next Steps" items={r.nextSteps} />
+
+        {nm.reviewed ? (
+          <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(nm.reviewed_by || "").toUpperCase()}</div>
+            <div style={{ fontSize: 12, color: "#374151", marginTop: 2 }}>{nm.reviewed_at ? new Date(nm.reviewed_at).toLocaleString("en-CA") : ""}</div>
+            {nm.review_notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 6 }}><strong>Action taken:</strong> {nm.review_notes}</div>}
+          </div>
+        ) : onReview && (
+          <div style={{ borderTop: "2px solid #B45309", marginTop: 8, paddingTop: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#B45309", marginBottom: 8 }}>Mark as Reviewed</div>
+            <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
+            <button onClick={() => onReview(nm.id, reviewNotes)} style={{ width: "100%", background: "#16A34A", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IncidentCard({ inc, onClose, onDelete, onReview }) {
+  const [reviewNotes, setReviewNotes] = useState("");
+  const r = inc.report_json || {};
+  const sevColors = {
+    Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
+    High: { c: "#991B1B", bg: "#FEF2F2" }, Critical: { c: "#fff", bg: "#7F1D1D" },
+  };
+  const sev = r.severity || "Medium";
+  const sc = sevColors[sev] || sevColors.Medium;
+  const List = ({ title, items }) => (
+    (items && items.length > 0) ? (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>{title}</div>
+        {items.map((it, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+            <span style={{ color: "#DC2626", fontWeight: 800 }}>•</span>
+            <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{it}</span>
+          </div>
+        ))}
+      </div>
+    ) : null
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#991B1B" }}>{inc.incident_type}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(inc.created_at).toLocaleString("en-CA")} · {inc.site}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {inc.pdf_url && <a href={inc.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#DC2626", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            {onDelete && <button onClick={() => onDelete(inc.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ background: sc.bg, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: sc.c }}>SEVERITY: {sev.toUpperCase()}</div>
+          {r.severityReason && <div style={{ fontSize: 13, color: sc.c === "#fff" ? "#FECACA" : "#475569", marginTop: 2 }}>{r.severityReason}</div>}
+        </div>
+
+        <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#374151" }}>Reported by: <strong>{inc.reporter_name}</strong></div>
+          {inc.occurred_at && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>When: {inc.occurred_at}</div>}
+          {inc.injured_person && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Injured: {inc.injured_person}{inc.body_part ? ` (${inc.body_part})` : ""}</div>}
+          {inc.medical_attention && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Medical: {inc.medical_attention}</div>}
+          {inc.treatment && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Treatment: {inc.treatment}</div>}
+          {inc.witnesses && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Witnesses: {inc.witnesses}</div>}
+          {inc.evidence && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Evidence: {inc.evidence}</div>}
+        </div>
+
+        {r.summary && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>Summary</div>
+            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{r.summary}</div>
+          </div>
+        )}
+        <List title="Sequence of Events" items={r.sequenceOfEvents} />
+        <List title="Contributing Factors" items={r.contributingFactors} />
+        {r.rootCause && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>Root Cause</div>
+            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{r.rootCause}</div>
+          </div>
+        )}
+        <List title="Immediate Actions Taken" items={r.immediateActions} />
+        <List title="Corrective Actions" items={r.correctiveActions} />
+
+        {inc.reviewed ? (
+          <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(inc.reviewed_by || "").toUpperCase()}</div>
+            <div style={{ fontSize: 12, color: "#374151", marginTop: 2 }}>{inc.reviewed_at ? new Date(inc.reviewed_at).toLocaleString("en-CA") : ""}</div>
+            {inc.review_notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 6 }}><strong>Action taken:</strong> {inc.review_notes}</div>}
+          </div>
+        ) : onReview && (
+          <div style={{ borderTop: "2px solid #991B1B", marginTop: 8, paddingTop: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 8 }}>Mark as Reviewed</div>
+            <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
+            <button onClick={() => onReview(inc.id, reviewNotes)} style={{ width: "100%", background: "#16A34A", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -381,6 +516,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [selectedToolbox, setSelectedToolbox] = useState(null);
   const [nearMisses, setNearMisses] = useState([]);
   const [selectedNearMiss, setSelectedNearMiss] = useState(null);
+  const [incidents, setIncidents] = useState([]);
+  const [selectedIncident, setSelectedIncident] = useState(null);
   const [sops, setSops] = useState([]);
   const [selectedInspection, setSelectedInspection] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -471,13 +608,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }] = await Promise.all([
+      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }, { data: inc }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
         supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
         supabase.from("toolbox_talks").select("id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
-        supabase.from("near_misses").select("id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
+        supabase.from("near_misses").select("id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes").order("created_at", { ascending: false }),
+        supabase.from("incidents").select("id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes").order("created_at", { ascending: false }),
       ]);
 
       // Supervisors only see their own company; admins see all.
@@ -490,6 +628,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setInspections(insp || []);
       setToolboxTalks(tbt || []);
       setNearMisses(nm || []);
+      setIncidents(inc || []);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
@@ -502,6 +641,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const companyInspections = inspections.filter(i => i.company_id === selectedCompany);
   const companyToolbox = toolboxTalks.filter(t => t.company_id === selectedCompany);
   const companyNearMisses = nearMisses.filter(n => n.company_id === selectedCompany);
+  const companyIncidents = incidents.filter(n => n.company_id === selectedCompany);
+
+  const reviewNearMiss = async (id, notes) => {
+    const now = new Date().toISOString();
+    const by = forcedCompanyId ? "Supervisor" : "Admin";
+    await supabase.from("near_misses").update({ reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null }).eq("id", id);
+    setNearMisses(prev => prev.map(n => n.id === id ? { ...n, reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null } : n));
+    setSelectedNearMiss(null);
+  };
+  const reviewIncident = async (id, notes) => {
+    const now = new Date().toISOString();
+    const by = forcedCompanyId ? "Supervisor" : "Admin";
+    await supabase.from("incidents").update({ reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null }).eq("id", id);
+    setIncidents(prev => prev.map(n => n.id === id ? { ...n, reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null } : n));
+    setSelectedIncident(null);
+  };
+  const deleteIncident = async (id) => {
+    if (!window.confirm("Delete this incident report? This cannot be undone.")) return;
+    await supabase.from("incidents").delete().eq("id", id);
+    setIncidents(prev => prev.filter(n => n.id !== id));
+    setSelectedIncident(null);
+  };
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
   const deleteInspection = async (id, workerName) => {
@@ -619,7 +780,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
-      {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} />}
+      {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} />}
+      {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} />}
 
       <div style={styles.header}>
         <div>
@@ -682,6 +844,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
           <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
           <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>⚠️ Near Misses</button>
+          <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>🚑 Incidents</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -895,45 +1058,75 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         {/* Near Misses tab */}
         {activeTab === "nearmiss" && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
               {company?.name} — Near Miss Reports
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any report to view the full details.</div>
             {companyNearMisses.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
                 No near miss reports yet.
               </div>
             ) : (
-              companyNearMisses.map((n, i) => {
-                const r = n.report_json || {};
-                const sevColors = {
-                  Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
-                  High: { c: "#991B1B", bg: "#FEF2F2" }, Critical: { c: "#fff", bg: "#7F1D1D" },
-                };
-                const sev = r.severity || "Medium";
-                const sc = sevColors[sev] || sevColors.Medium;
-                return (
-                  <div key={n.id} style={{
-                    padding: "12px 14px", borderBottom: i < companyNearMisses.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer"
-                  }} onClick={() => setSelectedNearMiss(n)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, paddingRight: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                          <span style={{ fontSize: 11, fontWeight: 800, color: sc.c, background: sc.bg, padding: "2px 9px", borderRadius: 20, border: sev === "Critical" ? "none" : `1px solid ${sc.c}30` }}>{sev.toUpperCase()}</span>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{n.site}</div>
-                        </div>
-                        <div style={{ fontSize: 13, color: "#374151" }}>{r.whatHappened ? (r.whatHappened.length > 90 ? r.whatHappened.slice(0, 90) + "…" : r.whatHappened) : n.involved}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🧑 {n.is_anonymous ? "Anonymous" : n.reporter_name}{n.occurred_at ? ` · ${n.occurred_at}` : ""}</div>
-                      </div>
-                      <div style={{ fontSize: 11, color: n.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
-                        {n.pdf_url ? "📄 PDF" : "No PDF"} →
-                      </div>
+              <>
+                {companyNearMisses.filter(n => !n.reviewed).length > 0 && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#B45309", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                      🚩 Needs Review ({companyNearMisses.filter(n => !n.reviewed).length})
                     </div>
-                  </div>
-                );
-              })
+                    <div style={{ background: "#FFFBEB", borderRadius: 10, border: "1px solid #FDE68A", padding: "4px 10px", marginBottom: 16 }}>
+                      {companyNearMisses.filter(n => !n.reviewed).map((n, i, arr) => (
+                        <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
+                      ))}
+                    </div>
+                  </>
+                )}
+                {companyNearMisses.filter(n => n.reviewed).length > 0 && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
+                    {companyNearMisses.filter(n => n.reviewed).map((n, i, arr) => (
+                      <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Incidents tab */}
+        {activeTab === "incident" && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
+              {company?.name} — Incident Reports
+            </div>
+            {companyIncidents.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🚑</div>
+                No incident reports yet.
+              </div>
+            ) : (
+              <>
+                {companyIncidents.filter(n => !n.reviewed).length > 0 && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                      🚩 Needs Review ({companyIncidents.filter(n => !n.reviewed).length})
+                    </div>
+                    <div style={{ background: "#FEF2F2", borderRadius: 10, border: "1px solid #FCA5A5", padding: "4px 10px", marginBottom: 16 }}>
+                      {companyIncidents.filter(n => !n.reviewed).map((n, i, arr) => (
+                        <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
+                      ))}
+                    </div>
+                  </>
+                )}
+                {companyIncidents.filter(n => n.reviewed).length > 0 && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
+                    {companyIncidents.filter(n => n.reviewed).map((n, i, arr) => (
+                      <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
+                    ))}
+                  </>
+                )}
+              </>
             )}
           </div>
         )}
