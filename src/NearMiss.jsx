@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
+import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const SEVERITY = {
   Low: { color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -24,6 +25,7 @@ export default function NearMiss({ companyId, companyName, onBack, onLogout }) {
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null); // { whatHappened, contributingFactors:[], potentialOutcome, correctiveActions:[] }
   const [companyLogo, setCompanyLogo] = useState("");
+  const cf = useCustomFields(companyId, "nearmiss");
 
   // editing
   const [editField, setEditField] = useState(null);
@@ -121,7 +123,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSaving(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const pdfUrl = await generateAndUploadNearMiss({
-      reporter: reporterLabel(), site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig,
+      reporter: reporterLabel(), site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields: cf.entries(),
     });
     await supabase.from("near_misses").insert({
       company_id: companyId,
@@ -130,7 +132,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       site,
       occurred_at: occurredAt,
       involved,
-      report_json: report,
+      report_json: { ...report, customFields: cf.entries() },
       signed_by: reporterLabel(),
       pdf_url: pdfUrl || null,
     });
@@ -199,7 +201,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Who / what was involved?</label>
           <input style={s.input} placeholder="e.g. Excavator and a ground worker" value={involved} onChange={e => setInvolved(e.target.value)} />
 
-          <button style={s.btn((site && (anonymous || reporter)) ? "#D97706" : "#94A3B8")} disabled={!site || (!anonymous && !reporter)} onClick={() => setStep("describe")}>Continue →</button>
+          <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
+
+          <button style={s.btn((site && (anonymous || reporter)) ? "#D97706" : "#94A3B8")} disabled={!site || (!anonymous && !reporter)} onClick={() => {
+            const missing = cf.missingRequired();
+            if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
+            setStep("describe");
+          }}>Continue →</button>
         </div>
       )}
 
