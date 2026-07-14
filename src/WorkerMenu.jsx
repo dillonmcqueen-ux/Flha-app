@@ -3,6 +3,7 @@ import App from "./App.jsx";
 import Inspection from "./Inspection.jsx";
 import ToolboxTalk from "./ToolboxTalk.jsx";
 import NearMiss from "./NearMiss.jsx";
+import Incident from "./Incident.jsx";
 
 // Document types. `ready: false` shows a "coming soon" state.
 const DOC_TYPES = [
@@ -10,7 +11,7 @@ const DOC_TYPES = [
   { key: "inspection", icon: "🚜", title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1" },
   { key: "toolbox", icon: "🧰", title: "Toolbox Talk", desc: "Crew safety meeting record", ready: true, accent: "#7C3AED" },
   { key: "nearmiss", icon: "⚠️", title: "Near Miss Report", desc: "Report a close call", ready: true, accent: "#D97706" },
-  { key: "incident", icon: "🚑", title: "Incident Report", desc: "Report an injury or event", ready: false, accent: "#DC2626" },
+  { key: "incident", icon: "🚑", title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626" },
   { key: "daily", icon: "📋", title: "Daily Report", desc: "End-of-day site summary", ready: false, accent: "#16A34A" },
 ];
 
@@ -28,6 +29,9 @@ export default function WorkerMenu({ companyId, companyName, onLogout }) {
   }
   if (doc === "nearmiss") {
     return <NearMiss companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
+  }
+  if (doc === "incident") {
+    return <Incident companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
   }
 
   const s = {
