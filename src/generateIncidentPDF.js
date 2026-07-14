@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -51,6 +52,7 @@ export async function generateAndUploadIncident(data) {
   doc.text(`SEVERITY: ${sev.toUpperCase()}`, margin + 5, y + 6);
   if (report?.severityReason) { doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.text(doc.splitTextToSize(report.severityReason, contentW - 10)[0], margin + 5, y + 11); }
   y += 20;
+  y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [153, 27, 27] });
 
   // details box
   doc.setFillColor(254, 242, 242); doc.roundedRect(margin, y, contentW, 40, 3, 3, "F");
