@@ -58,6 +58,8 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
   const [newSite, setNewSite] = useState("");
 
   const [equipList, setEquipList] = useState([]);
+  const [fieldList, setFieldList] = useState([]);
+  const [newField, setNewField] = useState({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
   const [newEquip, setNewEquip] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
 
   const loadAll = async () => {
@@ -148,6 +150,9 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
     if (eqErr) setMsg("Equipment read error: " + eqErr.message);
     setEquipList(eqRows || []);
     setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
+    const { data: fRows } = await supabase.from("custom_fields").select("id, doc_type, label, field_type, options, required").eq("company_id", c.id).order("id");
+    setFieldList(fRows || []);
+    setNewField({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
     setManageTab("profile");
     setSopText(""); setMsg("");
     setView("manage");
@@ -309,6 +314,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const deleteEquip = async (id) => {
     await supabase.from("equipment").delete().eq("id", id);
     setEquipList(prev => prev.filter(e => e.id !== id));
+  };
+
+  const addField = async () => {
+    setMsg("");
+    if (!newField.label.trim()) { setMsg("Give the field a label."); return; }
+    if (newField.field_type === "dropdown" && !newField.options.trim()) { setMsg("Add dropdown options, separated by commas."); return; }
+    setSaving(true);
+    const { error } = await supabase.from("custom_fields").insert({
+      company_id: activeId,
+      doc_type: newField.doc_type,
+      label: newField.label.trim(),
+      field_type: newField.field_type,
+      options: newField.field_type === "dropdown" ? newField.options.trim() : "",
+      required: newField.required,
+    });
+    if (error) setMsg("Couldn't add field: " + error.message);
+    else {
+      setNewField({ doc_type: newField.doc_type, label: "", field_type: "text", options: "", required: false });
+      const { data } = await supabase.from("custom_fields").select("id, doc_type, label, field_type, options, required").eq("company_id", activeId).order("id");
+      setFieldList(data || []);
+      setMsg("Field added");
+    }
+    setSaving(false);
+  };
+  const deleteField = async (id) => {
+    await supabase.from("custom_fields").delete().eq("id", id);
+    setFieldList(prev => prev.filter(f => f.id !== id));
   };
 
   const deleteCompany = async () => {
@@ -533,6 +565,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <button style={st.tab(manageTab === "sops")} onClick={() => { setManageTab("sops"); setMsg(""); }}>SOPs</button>
           <button style={st.tab(manageTab === "sites")} onClick={() => { setManageTab("sites"); setMsg(""); }}>Sites</button>
           <button style={st.tab(manageTab === "equipment")} onClick={() => { setManageTab("equipment"); setMsg(""); }}>Equipment</button>
+          <button style={st.tab(manageTab === "fields")} onClick={() => { setManageTab("fields"); setMsg(""); }}>Fields</button>
           <button style={st.tab(manageTab === "codes")} onClick={() => { setManageTab("codes"); setMsg(""); }}>Codes</button>
         </div>
 
@@ -651,6 +684,65 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
                   </div>
                   <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {manageTab === "fields" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add a custom field</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>If this company's paper forms track something extra — a permit number, crew size, client contact — add it here. Workers will fill it in, and it appears on the PDF.</div>
+
+              <label style={st.label}>Which document?</label>
+              <select style={st.input} value={newField.doc_type} onChange={e => setNewField(p => ({ ...p, doc_type: e.target.value }))}>
+                <option value="flha">FLHA</option>
+                <option value="inspection">Equipment Inspection</option>
+                <option value="toolbox">Toolbox Talk</option>
+                <option value="nearmiss">Near Miss Report</option>
+                <option value="incident">Incident Report</option>
+                <option value="daily">Daily Report</option>
+              </select>
+
+              <label style={st.label}>Field label</label>
+              <input style={st.input} placeholder="e.g. Permit Number" value={newField.label} onChange={e => setNewField(p => ({ ...p, label: e.target.value }))} />
+
+              <label style={st.label}>Field type</label>
+              <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
+                {[{ k: "text", l: "Text box" }, { k: "dropdown", l: "Dropdown" }].map(t => (
+                  <button key={t.k} onClick={() => setNewField(p => ({ ...p, field_type: t.k }))} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${newField.field_type === t.k ? C.ink : C.line}`, background: newField.field_type === t.k ? C.ink : "#fff", color: newField.field_type === t.k ? "#fff" : C.muted }}>{t.l}</button>
+                ))}
+              </div>
+
+              {newField.field_type === "dropdown" && (
+                <>
+                  <label style={st.label}>Dropdown options (comma separated)</label>
+                  <input style={st.input} placeholder="e.g. Day shift, Night shift, Weekend" value={newField.options} onChange={e => setNewField(p => ({ ...p, options: e.target.value }))} />
+                </>
+              )}
+
+              <div onClick={() => setNewField(p => ({ ...p, required: !p.required }))} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: newField.required ? "#FFFBEB" : "#F8FAFC", border: `1.5px solid ${newField.required ? C.amber : C.line}`, borderRadius: 9, marginBottom: 12, cursor: "pointer" }}>
+                <div style={{ width: 20, height: 20, borderRadius: 5, background: newField.required ? C.amber : "#fff", border: `1.5px solid ${newField.required ? C.amber : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#1E293B", fontSize: 13, fontWeight: 800 }}>{newField.required ? "✓" : ""}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>Required — worker must fill this in</div>
+              </div>
+
+              <button style={{ ...st.darkBtn, width: "100%" }} onClick={addField} disabled={saving}>{saving ? "Adding…" : "Add field"}</button>
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Custom fields ({fieldList.length})</div>
+              {fieldList.length === 0 ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No custom fields — this company uses the standard forms.</div>
+              ) : fieldList.map((f, i) => (
+                <div key={f.id} style={{ display: "flex", gap: 11, alignItems: "flex-start", padding: "11px 0", borderBottom: i < fieldList.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: C.amber, background: C.ink, padding: "3px 7px", borderRadius: 5, flexShrink: 0, textTransform: "uppercase" }}>{f.doc_type}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{f.label}{f.required ? <span style={{ color: "#DC2626" }}> *</span> : null}</div>
+                    <div style={{ fontSize: 12, color: C.muted }}>{f.field_type === "dropdown" ? `Dropdown: ${f.options}` : "Text box"}</div>
+                  </div>
+                  <button onClick={() => deleteField(f.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
