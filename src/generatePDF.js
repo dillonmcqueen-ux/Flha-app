@@ -90,6 +90,30 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.text(jobSite || "—", margin + 130, y + 16, { maxWidth: 60 });
   y += 30;
 
+  // ── Company custom fields ────────────────────────────────
+  if (flha.customFields?.length) {
+    const rows = flha.customFields;
+    const boxH = 6 + Math.ceil(rows.length / 2) * 9;
+    if (y + boxH > 275) { doc.addPage(); y = 20; }
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y, contentW, boxH, 2, 2, "F");
+    let cy = y + 6, col = 0;
+    rows.forEach((f) => {
+      const x = margin + 4 + col * (contentW / 2);
+      doc.setTextColor(100, 116, 139);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text(String(f.label || "").toUpperCase(), x, cy);
+      doc.setTextColor(30, 41, 59);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(String(f.value || "—"), x, cy + 4.5, { maxWidth: contentW / 2 - 8 });
+      col++;
+      if (col > 1) { col = 0; cy += 9; }
+    });
+    y += boxH + 6;
+  }
+
   // ── Pending supervisor approval banner ───────────────────
   if (pendingApproval) {
     doc.setFillColor(127, 29, 29);
