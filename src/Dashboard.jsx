@@ -643,6 +643,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const companyNearMisses = nearMisses.filter(n => n.company_id === selectedCompany);
   const companyIncidents = incidents.filter(n => n.company_id === selectedCompany);
 
+  // Supervisor summary metrics
+  const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
+  const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
+  const incidentCount = companyIncidents.length;
+  const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
+  const docsThisWeek = [
+    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents,
+  ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
+
   const reviewNearMiss = async (id, notes) => {
     const now = new Date().toISOString();
     const by = forcedCompanyId ? "Supervisor" : "Admin";
@@ -822,19 +831,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Stats row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
-          <div style={styles.stat("#F97316")}>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#1E3A5F" }}>{companyFlhas.length}</div>
-            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600 }}>TOTAL FLHAs</div>
+        {/* Supervisor summary — action cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+          <div onClick={() => setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
+            <div style={{ fontSize: 26, fontWeight: 800, color: awaitingSignOff > 0 ? "#fff" : "#94A3B8" }}>{awaitingSignOff}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: awaitingSignOff > 0 ? "#FECACA" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🛑 Awaiting Sign-Off</div>
           </div>
-          <div style={styles.stat("#DC2626")}>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#DC2626" }}>{highRiskCount}</div>
-            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600 }}>HIGH RISK</div>
+          <div onClick={() => setActiveTab(companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss")} style={{ background: needsReview > 0 ? "#B45309" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: needsReview > 0 ? "none" : "1px solid #F1F5F9" }}>
+            <div style={{ fontSize: 26, fontWeight: 800, color: needsReview > 0 ? "#fff" : "#94A3B8" }}>{needsReview}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚩 Needs Review</div>
           </div>
-          <div style={styles.stat("#16A34A")}>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#16A34A" }}>{companySops.length}</div>
-            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600 }}>SOPs LOADED</div>
+          <div onClick={() => setActiveTab("incident")} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
+            <div style={{ fontSize: 26, fontWeight: 800, color: incidentCount > 0 ? "#DC2626" : "#94A3B8" }}>{incidentCount}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚑 Incidents</div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
+            <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>📄 Docs This Week</div>
           </div>
         </div>
 
