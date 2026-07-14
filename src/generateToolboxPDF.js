@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -17,7 +18,7 @@ function wrap(doc, text, x, y, maxW, lh, footerLimit = 276) {
   return y;
 }
 
-export async function generateAndUploadToolbox({ presenter, meetingType, site, topic, companyName, companyLogo, points, attendees }) {
+export async function generateAndUploadToolbox({ presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -55,6 +56,8 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
   y += 28;
   doc.setTextColor(100, 116, 139); doc.setFontSize(8);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, margin, y); y += 8;
+
+  y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [91, 33, 182] });
 
   // summary
   if (points?.summary) {
