@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadInspection } from "./generateInspectionPDF";
+import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -22,6 +23,7 @@ export default function Inspection({ companyId, companyName, onBack, onLogout })
   const [items, setItems] = useState([]);        // [{ item, condition, note }]
   const [inspectionMeta, setInspectionMeta] = useState({});
   const [companyLogo, setCompanyLogo] = useState("");
+  const cf = useCustomFields(companyId, "inspection");
   const [signed, setSigned] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
   const canvasRef = useRef(null);
@@ -109,19 +111,26 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSigned(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
-    const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount };
+    const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries() };
 
-    // Auto-save a free-typed rental to the fleet (dedupe against existing)
-    if (eqMode === "other") {
-      const { year, make, model, type } = freeEq;
-      const alreadyExists = equipment.some(eq =>
-        [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ").toLowerCase() === label.toLowerCase()
+    // Auto-save a free-typed rental to the fleet.
+    // Only when the worker typed details (freeEq has content) — fleet picks are already saved.
+    const typedSomething = (freeEq.make || freeEq.model || freeEq.type || freeEq.year).trim();
+    if (typedSomething) {
+      const typedLabel = [freeEq.year, freeEq.make, freeEq.model, freeEq.type].filter(v => v && v.trim()).join(" ").trim().toLowerCase();
+      const alreadyInFleet = equipment.some(eq =>
+        [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ").trim().toLowerCase() === typedLabel
       );
-      if (!alreadyExists && (make.trim() || model.trim() || type.trim())) {
-        await supabase.from("equipment").insert({
+      if (!alreadyInFleet) {
+        const { error: eqInsErr } = await supabase.from("equipment").insert({
           company_id: companyId,
-          year: year.trim(), make: make.trim(), model: model.trim(), type: type.trim(), unit_number: "",
+          year: (freeEq.year || "").trim(),
+          make: (freeEq.make || "").trim(),
+          model: (freeEq.model || "").trim(),
+          type: (freeEq.type || "").trim(),
+          unit_number: "",
         });
+        if (eqInsErr) console.error("rental auto-save failed:", eqInsErr.message);
       }
     }
 
@@ -213,8 +222,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Inspecting: <strong>{equipmentLabel()}</strong></div>
           <label style={s.label}>Your name</label>
           <input style={s.input} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+          <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
           {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the inspection. Check your connection and try again.</div>}
-          <button style={s.btn(loading ? "#94A3B8" : workerName ? "#0369A1" : "#94A3B8")} disabled={loading || !workerName} onClick={generateInspection}>
+          <button style={s.btn(loading ? "#94A3B8" : workerName ? "#0369A1" : "#94A3B8")} disabled={loading || !workerName} onClick={() => {
+            const missing = cf.missingRequired();
+            if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
+            generateInspection();
+          }}>
             {loading ? "⏳ Building inspection…" : "Generate Inspection"}
           </button>
           <button style={s.ghost} onClick={() => setStep("equipment")}>← Back</button>
