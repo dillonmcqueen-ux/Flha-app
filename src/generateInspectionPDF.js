@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -55,6 +56,9 @@ export async function generateAndUploadInspection({ equipmentLabel, workerName, 
   doc.text(companyName || "—", margin + 90, y + 15, { maxWidth: 45 });
   doc.text(workerName || "—", margin + 140, y + 15, { maxWidth: 50 });
   y += 32;
+
+  // company custom fields
+  y = drawCustomFieldsPDF(doc, results.customFields, { margin, contentW, y, accent: [3, 105, 161] });
 
   // summary counts
   const items = results.items || [];
