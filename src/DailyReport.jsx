@@ -12,10 +12,12 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
   const [sites, setSites] = useState([]);
   const [siteMode, setSiteMode] = useState("list");
   const [reportDate, setReportDate] = useState(new Date().toLocaleDateString("en-CA"));
-  const [weather, setWeather] = useState("Clear");
+  const [weather, setWeather] = useState(["Clear"]);
   const [temperature, setTemperature] = useState("");
   const [crew, setCrew] = useState("");
-  const [equipment, setEquipment] = useState("");
+  const [equipmentFleet, setEquipmentFleet] = useState([]);
+  const [selectedEquipIds, setSelectedEquipIds] = useState(new Set());
+  const [otherEquipment, setOtherEquipment] = useState("");
   const [visitors, setVisitors] = useState("");
 
   const [workDone, setWorkDone] = useState("");
@@ -34,20 +36,48 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
       const { data: st } = await supabase.from("sites").select("id, name").eq("company_id", companyId).order("id");
       setSites(st || []);
       if (!st || st.length === 0) setSiteMode("other");
+      const { data: eq } = await supabase.from("equipment")
+        .select("id, year, make, model, type, unit_number")
+        .eq("company_id", companyId).order("make");
+      setEquipmentFleet(eq || []);
       const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
       if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
     }
     load();
   }, [companyId]);
 
+  const equipLabel = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
+
+  const toggleEquip = (id) => {
+    setSelectedEquipIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleWeather = (w) => {
+    setWeather(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
+  };
+
+  // Combine fleet selections + free-typed "other" equipment into one string for storage/PDF
+  const equipmentSummary = () => {
+    const picked = equipmentFleet.filter(eq => selectedEquipIds.has(eq.id)).map(equipLabel);
+    const other = otherEquipment.trim();
+    return [...picked, ...(other ? [other] : [])].join(", ");
+  };
+
+  const weatherSummary = () => weather.join(", ");
+
   const generateReport = async () => {
     setLoading(true); setGenError(false);
+    const equipment = equipmentSummary();
     const prompt = `You are a construction site supervisor writing a professional end-of-day site daily report from rough field notes. Turn the notes into clean, professional prose suitable for a project manager or client to read. Do not invent details not present in the notes; just clean up, organize, and professionalize what's given.
 
 Company: ${companyName}
 Site: ${site}
 Date: ${reportDate}
-Weather: ${weather}${temperature ? `, ${temperature}` : ""}
+Weather: ${weatherSummary() || "not specified"}${temperature ? `, ${temperature}` : ""}
 Crew on site: ${crew || "not specified"}
 Equipment used: ${equipment || "not specified"}
 Visitors: ${visitors || "none"}
@@ -92,12 +122,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   const submit = async () => {
     setSaving(true);
-    const meta = { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, customFields: cf.entries() };
+    const equipment = equipmentSummary();
+    const weatherStr = weatherSummary();
+    const meta = { reporter, site, reportDate, weather: weatherStr, temperature, crew, equipment, visitors, customFields: cf.entries() };
     const pdfUrl = await generateAndUploadDaily({ ...meta, report, companyName, companyLogo });
     await supabase.from("daily_reports").insert({
       company_id: companyId,
       reporter_name: reporter,
-      site, report_date: reportDate, weather, temperature,
+      site, report_date: reportDate, weather: weatherStr, temperature,
       crew, equipment, visitors,
       report_json: { ...report, customFields: cf.entries() },
       pdf_url: pdfUrl || null,
@@ -152,10 +184,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Date</label>
           <input style={s.input} value={reportDate} onChange={e => setReportDate(e.target.value)} />
 
-          <label style={s.label}>Weather</label>
+          <label style={s.label}>Weather (select all that apply)</label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 11 }}>
             {WEATHER.map(w => (
-              <button key={w} onClick={() => setWeather(w)} style={{ flex: "1 1 28%", padding: "9px 4px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${weather === w ? "#16A34A" : "#E2E8F0"}`, background: weather === w ? "#F0FDF4" : "#fff", color: weather === w ? "#15803D" : "#94A3B8" }}>{w}</button>
+              <button key={w} onClick={() => toggleWeather(w)} style={{ flex: "1 1 28%", padding: "9px 4px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${weather.includes(w) ? "#16A34A" : "#E2E8F0"}`, background: weather.includes(w) ? "#F0FDF4" : "#fff", color: weather.includes(w) ? "#15803D" : "#94A3B8" }}>{weather.includes(w) ? "✓ " : ""}{w}</button>
             ))}
           </div>
 
@@ -179,8 +211,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Crew, equipment & visitors</div>
             <label style={s.label}>Crew on site + hours</label>
             <input style={s.input} placeholder="e.g. 4 laborers, 1 operator — 8 hrs each" value={crew} onChange={e => setCrew(e.target.value)} />
+
             <label style={s.label}>Equipment used</label>
-            <input style={s.input} placeholder="e.g. Excavator, skid steer, compactor" value={equipment} onChange={e => setEquipment(e.target.value)} />
+            {equipmentFleet.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 11 }}>
+                {equipmentFleet.map(eq => {
+                  const checked = selectedEquipIds.has(eq.id);
+                  return (
+                    <div key={eq.id} onClick={() => toggleEquip(eq.id)} style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                      background: checked ? "#F0FDF4" : "#F8FAFC", border: `1.5px solid ${checked ? "#86EFAC" : "#E2E8F0"}`,
+                      borderRadius: 9, cursor: "pointer"
+                    }}>
+                      <div style={{
+                        width: 20, height: 20, borderRadius: 5, background: checked ? "#16A34A" : "#fff",
+                        border: `1.5px solid ${checked ? "#16A34A" : "#CBD5E1"}`, display: "flex",
+                        alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 800, flexShrink: 0
+                      }}>{checked ? "✓" : ""}</div>
+                      <span style={{ fontSize: 14, color: "#334155" }}>{equipLabel(eq)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 11 }}>No equipment registered for this company yet.</div>
+            )}
+            <input style={s.input} placeholder="Other equipment not listed above (optional)" value={otherEquipment} onChange={e => setOtherEquipment(e.target.value)} />
+
             <label style={s.label}>Visitors on site (optional)</label>
             <input style={s.input} placeholder="e.g. Site inspector at 10am" value={visitors} onChange={e => setVisitors(e.target.value)} />
           </div>
@@ -212,14 +269,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <>
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#15803D", textTransform: "uppercase", letterSpacing: 0.5 }}>Daily Report</div>
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{site} · {reportDate} · {weather}{temperature ? `, ${temperature}` : ""}</div>
+            <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{site} · {reportDate} · {weatherSummary()}{temperature ? `, ${temperature}` : ""}</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>By {reporter}</div>
           </div>
 
-          {(crew || equipment || visitors) && (
+          {(crew || equipmentSummary() || visitors) && (
             <div style={s.card}>
               {crew && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}><strong>Crew:</strong> {crew}</div>}
-              {equipment && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}><strong>Equipment:</strong> {equipment}</div>}
+              {equipmentSummary() && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}><strong>Equipment:</strong> {equipmentSummary()}</div>}
               {visitors && <div style={{ fontSize: 13, color: "#374151" }}><strong>Visitors:</strong> {visitors}</div>}
             </div>
           )}
