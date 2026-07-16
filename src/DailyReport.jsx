@@ -16,7 +16,8 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
   const [temperature, setTemperature] = useState("");
   const [crew, setCrew] = useState("");
   const [equipmentFleet, setEquipmentFleet] = useState([]);
-  const [selectedEquipIds, setSelectedEquipIds] = useState(new Set());
+  const [pickedEquip, setPickedEquip] = useState([]); // array of label strings
+  const [equipDropdown, setEquipDropdown] = useState("");
   const [otherEquipment, setOtherEquipment] = useState("");
   const [visitors, setVisitors] = useState("");
 
@@ -48,23 +49,21 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
 
   const equipLabel = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
-  const toggleEquip = (id) => {
-    setSelectedEquipIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const addPickedEquip = () => {
+    if (!equipDropdown.trim()) return;
+    if (!pickedEquip.includes(equipDropdown)) setPickedEquip(prev => [...prev, equipDropdown]);
+    setEquipDropdown("");
   };
+  const removePickedEquip = (label) => setPickedEquip(prev => prev.filter(l => l !== label));
 
   const toggleWeather = (w) => {
     setWeather(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
   };
 
-  // Combine fleet selections + free-typed "other" equipment into one string for storage/PDF
+  // Combine fleet picks + free-typed "other" equipment into one string for storage/PDF
   const equipmentSummary = () => {
-    const picked = equipmentFleet.filter(eq => selectedEquipIds.has(eq.id)).map(equipLabel);
     const other = otherEquipment.trim();
-    return [...picked, ...(other ? [other] : [])].join(", ");
+    return [...pickedEquip, ...(other ? [other] : [])].join(", ");
   };
 
   const weatherSummary = () => weather.join(", ");
@@ -214,28 +213,31 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
             <label style={s.label}>Equipment used</label>
             {equipmentFleet.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 11 }}>
-                {equipmentFleet.map(eq => {
-                  const checked = selectedEquipIds.has(eq.id);
-                  return (
-                    <div key={eq.id} onClick={() => toggleEquip(eq.id)} style={{
-                      display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
-                      background: checked ? "#F0FDF4" : "#F8FAFC", border: `1.5px solid ${checked ? "#86EFAC" : "#E2E8F0"}`,
-                      borderRadius: 9, cursor: "pointer"
-                    }}>
-                      <div style={{
-                        width: 20, height: 20, borderRadius: 5, background: checked ? "#16A34A" : "#fff",
-                        border: `1.5px solid ${checked ? "#16A34A" : "#CBD5E1"}`, display: "flex",
-                        alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 800, flexShrink: 0
-                      }}>{checked ? "✓" : ""}</div>
-                      <span style={{ fontSize: 14, color: "#334155" }}>{equipLabel(eq)}</span>
-                    </div>
-                  );
-                })}
+              <div style={{ display: "flex", gap: 8, marginBottom: 11 }}>
+                <select style={{ ...s.input, marginBottom: 0, flex: 1 }} value={equipDropdown} onChange={e => setEquipDropdown(e.target.value)}>
+                  <option value="">Select equipment…</option>
+                  {equipmentFleet.map(eq => {
+                    const lbl = equipLabel(eq);
+                    return <option key={eq.id} value={lbl} disabled={pickedEquip.includes(lbl)}>{lbl}</option>;
+                  })}
+                </select>
+                <button onClick={addPickedEquip} disabled={!equipDropdown} style={{ background: equipDropdown ? "#16A34A" : "#CBD5E1", color: "#fff", border: "none", borderRadius: 9, padding: "0 16px", fontWeight: 700, fontSize: 14, cursor: equipDropdown ? "pointer" : "default", flexShrink: 0 }}>Add</button>
               </div>
             ) : (
               <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 11 }}>No equipment registered for this company yet.</div>
             )}
+
+            {pickedEquip.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 11 }}>
+                {pickedEquip.map(label => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 9 }}>
+                    <span style={{ fontSize: 14, color: "#15803D" }}>{label}</span>
+                    <button onClick={() => removePickedEquip(label)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <input style={s.input} placeholder="Other equipment not listed above (optional)" value={otherEquipment} onChange={e => setOtherEquipment(e.target.value)} />
 
             <label style={s.label}>Visitors on site (optional)</label>
