@@ -55,7 +55,7 @@ export default function Login() {
       }
 
       // data.session holds the role/company info; data.token is the signed
-      // pass we'll use later so other pages can prove this login was real.
+      // pass we'll use so other pages can prove this login was real.
       const s = { ...data.session, token: data.token };
       saveSession(s);
       setSession(s);
@@ -76,7 +76,7 @@ export default function Login() {
   // ── Authenticated views ──────────────────────────────────
   if (session) {
     if (session.role === "worker") {
-      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} onLogout={logout} />;
+      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} onLogout={logout} token={session.token} />;
     }
 
     if (session.role === "admin") {
@@ -88,11 +88,12 @@ export default function Login() {
             isAdmin={false}
             onLogout={() => setAdminDashCompany(null)}
             backLabel="← Back to onboarding"
+            token={session.token}
           />
         );
       }
       // Admin home = onboarding panel
-      return <AdminPanel onViewDashboard={(cid) => setAdminDashCompany(cid)} onLogout={logout} />;
+      return <AdminPanel onViewDashboard={(cid) => setAdminDashCompany(cid)} onLogout={logout} token={session.token} />;
     }
 
     // supervisor → their company dashboard
@@ -102,6 +103,7 @@ export default function Login() {
         isAdmin={false}
         onLogout={logout}
         suspended={session.suspended}
+        token={session.token}
       />
     );
   }
