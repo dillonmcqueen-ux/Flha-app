@@ -112,20 +112,21 @@ export default function Login() {
   const styles = {
     wrap: {
       fontFamily: "'Segoe UI', system-ui, sans-serif",
-      background: "#F0F4F8", minHeight: "100vh",
+      background: "#0A0A0A", minHeight: "100vh",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 16
     },
     card: {
-      background: "#fff", borderRadius: 16, padding: 28, width: "100%", maxWidth: 420,
-      boxShadow: "0 4px 24px #0002"
+      background: "#161616", borderRadius: 16, padding: 28, width: "100%", maxWidth: 420,
+      border: "1px solid #F9731640", boxShadow: "0 4px 30px #F9731622"
     },
     roleBtn: (accent) => ({
-      width: "100%", padding: "16px 18px", borderRadius: 12, border: "1.5px solid #E5E7EB",
-      background: "#fff", cursor: "pointer", marginBottom: 12, textAlign: "left",
+      width: "100%", padding: "16px 18px", borderRadius: 12, border: "1.5px solid #2A2A2A",
+      background: "#1E1E1E", cursor: "pointer", marginBottom: 12, textAlign: "left",
       display: "flex", alignItems: "center", gap: 14, transition: "all 0.15s"
     }),
     input: {
-      width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #E5E7EB",
+      width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #F9731660",
+      background: "#1E1E1E", color: "#fff",
       fontSize: 16, boxSizing: "border-box", outline: "none", marginBottom: 12
     },
     primaryBtn: {
@@ -133,7 +134,7 @@ export default function Login() {
       padding: "13px", fontWeight: 700, fontSize: 16, cursor: "pointer"
     },
     backBtn: {
-      width: "100%", background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 10,
+      width: "100%", background: "#1E1E1E", color: "#F97316", border: "1.5px solid #F9731660", borderRadius: 10,
       padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", marginTop: 10
     },
   };
@@ -153,12 +154,12 @@ export default function Login() {
             alt="FORA"
             style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
           />
-          <div style={{ fontSize: 13, color: "#6B7280" }}>AI-powered field safety documentation</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field safety documentation</div>
         </div>
 
         {!role ? (
           <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#6B7280", marginBottom: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#9CA3AF", marginBottom: 12, textAlign: "center" }}>
               Select your role to continue
             </div>
             {["worker", "supervisor", "admin"].map(r => {
@@ -167,8 +168,8 @@ export default function Login() {
                 <button key={r} style={styles.roleBtn(m.accent)} onClick={() => { setRole(r); setError(""); setCode(""); }}>
                   <span style={{ fontSize: 26 }}>{m.icon}</span>
                   <span>
-                    <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>{m.title}</span>
-                    <span style={{ display: "block", fontSize: 12, color: "#6B7280" }}>{m.desc}</span>
+                    <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "#F97316" }}>{m.title}</span>
+                    <span style={{ display: "block", fontSize: 12, color: "#9CA3AF" }}>{m.desc}</span>
                   </span>
                 </button>
               );
@@ -179,8 +180,8 @@ export default function Login() {
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <span style={{ fontSize: 26 }}>{roleMeta[role].icon}</span>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "#1E3A5F" }}>{roleMeta[role].title}</div>
-                <div style={{ fontSize: 12, color: "#6B7280" }}>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316" }}>{roleMeta[role].title}</div>
+                <div style={{ fontSize: 12, color: "#9CA3AF" }}>
                   {role === "admin" ? "Enter your admin code" : "Enter your company code"}
                 </div>
               </div>
@@ -197,7 +198,7 @@ export default function Login() {
             />
 
             {error && (
-              <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>
+              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
                 {error}
               </div>
             )}
