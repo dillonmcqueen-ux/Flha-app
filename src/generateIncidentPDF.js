@@ -19,7 +19,7 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
 }
 
 export async function generateAndUploadIncident(data) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl } = data;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields } = data;
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
