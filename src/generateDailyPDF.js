@@ -19,7 +19,7 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
 }
 
 export async function generateAndUploadDaily(data) {
-  const { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report, companyName, companyLogo } = data;
+  const { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report, companyName, companyLogo, customFields } = data;
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
