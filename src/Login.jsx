@@ -150,7 +150,7 @@ export default function Login() {
       <div style={styles.card}>
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <img
-            src="https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0113.jpeg"
+            src="https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0125.png"
             alt="FORA"
             style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
           />
