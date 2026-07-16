@@ -680,15 +680,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: ss }, { data: insp }, { data: tbt }, { data: dr }] = await Promise.all([
+      const [{ data: cos }, { data: ss }, { data: dr }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("sops").select("*"),
-        supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
-        supabase.from("toolbox_talks").select("id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
         supabase.from("daily_reports").select("id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
       ]);
 
-      // FLHAs, incidents, and near misses now come from our protected server endpoints.
+      // FLHAs, incidents, near misses, inspections, and toolbox talks now
+      // come from our protected server endpoints instead of Supabase directly.
       let fs = [];
       try {
         const flhaRes = await fetch("/api/flhas", {
@@ -719,6 +718,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         if (incRes.ok) inc = incData.records || [];
       } catch (e) { /* leave inc empty if the request fails */ }
 
+      let insp = [];
+      try {
+        const inspRes = await fetch("/api/logs", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "inspection", action: "list", token }),
+        });
+        const inspData = await inspRes.json();
+        if (inspRes.ok) insp = inspData.records || [];
+      } catch (e) { /* leave insp empty if the request fails */ }
+
+      let tbt = [];
+      try {
+        const tbtRes = await fetch("/api/logs", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "toolbox", action: "list", token }),
+        });
+        const tbtData = await tbtRes.json();
+        if (tbtRes.ok) tbt = tbtData.records || [];
+      } catch (e) { /* leave tbt empty if the request fails */ }
+
       // Supervisors only see their own company; admins see all.
       const visibleCompanies = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)
@@ -726,8 +745,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
       setCompanies(visibleCompanies);
       setFlhas(fs);
-      setInspections(insp || []);
-      setToolboxTalks(tbt || []);
+      setInspections(insp);
+      setToolboxTalks(tbt);
       setNearMisses(nm);
       setIncidents(inc);
       setDailyReports(dr || []);
@@ -762,7 +781,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily,
   ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
 
-  // Near Miss review now goes through our protected server endpoint.
+  // Near Miss review goes through our protected server endpoint.
   const reviewNearMiss = async (id, notes) => {
     try {
       const res = await fetch("/api/reports", {
@@ -779,7 +798,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedNearMiss(null);
   };
 
-  // Incident review now goes through our protected server endpoint.
+  // Incident review goes through our protected server endpoint.
   const reviewIncident = async (id, notes) => {
     try {
       const res = await fetch("/api/reports", {
@@ -796,7 +815,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIncident(null);
   };
 
-  // Incident delete now goes through our protected server endpoint.
+  // Incident delete goes through our protected server endpoint.
   const deleteIncident = async (id) => {
     if (!window.confirm("Delete this incident report? This cannot be undone.")) return;
     try {
@@ -811,21 +830,33 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
+  // Inspection delete goes through our protected server endpoint.
   const deleteInspection = async (id, workerName) => {
     if (!window.confirm(`Delete the inspection by ${workerName || "this worker"}? This cannot be undone.`)) return;
-    await supabase.from("inspections").delete().eq("id", id);
+    try {
+      await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "inspection", action: "delete", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setInspections(prev => prev.filter(i => i.id !== id));
     setSelectedInspection(null);
   };
 
+  // Toolbox Talk delete goes through our protected server endpoint.
   const deleteToolbox = async (id) => {
     if (!window.confirm("Delete this toolbox talk? This cannot be undone.")) return;
-    await supabase.from("toolbox_talks").delete().eq("id", id);
+    try {
+      await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "toolbox", action: "delete", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setToolboxTalks(prev => prev.filter(t => t.id !== id));
     setSelectedToolbox(null);
   };
 
-  // Near Miss delete now goes through our protected server endpoint.
+  // Near Miss delete goes through our protected server endpoint.
   const deleteNearMiss = async (id) => {
     if (!window.confirm("Delete this near miss report? This cannot be undone.")) return;
     try {
