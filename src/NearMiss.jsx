@@ -11,7 +11,7 @@ const SEVERITY = {
 };
 const SEVERITY_LEVELS = ["Low", "Medium", "High", "Critical"];
 
-export default function NearMiss({ companyId, companyName, onBack, onLogout }) {
+export default function NearMiss({ companyId, companyName, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | describe | review | sign | done
   const [reporter, setReporter] = useState("");
   const [anonymous, setAnonymous] = useState(false);
@@ -125,17 +125,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const pdfUrl = await generateAndUploadNearMiss({
       reporter: reporterLabel(), site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields: cf.entries(),
     });
-    await supabase.from("near_misses").insert({
-      company_id: companyId,
-      reporter_name: reporterLabel(),
-      is_anonymous: anonymous,
-      site,
-      occurred_at: occurredAt,
-      involved,
-      report_json: { ...report, customFields: cf.entries() },
-      signed_by: reporterLabel(),
-      pdf_url: pdfUrl || null,
-    });
+    try {
+      await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "nearmiss",
+          action: "submit",
+          token,
+          record: {
+            reporter_name: reporterLabel(),
+            is_anonymous: anonymous,
+            site,
+            occurred_at: occurredAt,
+            involved,
+            report_json: { ...report, customFields: cf.entries() },
+            signed_by: reporterLabel(),
+            pdf_url: pdfUrl || null,
+          },
+        }),
+      });
+    } catch (e) {
+      console.error("Near miss save failed:", e);
+    }
     setSaving(false);
     setStep("done");
   };
