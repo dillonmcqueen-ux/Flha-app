@@ -19,7 +19,7 @@ const SEVERITY = {
 };
 const SEVERITY_LEVELS = ["Low", "Medium", "High", "Critical"];
 
-export default function Incident({ companyId, companyName, onBack, onLogout }) {
+export default function Incident({ companyId, companyName, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | details | describe | review | sign | done
   const [reporter, setReporter] = useState("");
   const [site, setSite] = useState("");
@@ -138,16 +138,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
     const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig });
-    await supabase.from("incidents").insert({
-      company_id: companyId,
-      reporter_name: reporter,
-      site, occurred_at: occurredAt, incident_type: incidentType,
-      injured_person: injuredPerson, body_part: bodyPart, treatment,
-      medical_attention: medicalAttention, witnesses, evidence,
-      report_json: { ...report, customFields: cf.entries() },
-      signed_by: reporter,
-      pdf_url: pdfUrl || null,
-    });
+    try {
+      await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "incident",
+          action: "submit",
+          token,
+          record: {
+            reporter_name: reporter,
+            site, occurred_at: occurredAt, incident_type: incidentType,
+            injured_person: injuredPerson, body_part: bodyPart, treatment,
+            medical_attention: medicalAttention, witnesses, evidence,
+            report_json: { ...report, customFields: cf.entries() },
+            signed_by: reporter,
+            pdf_url: pdfUrl || null,
+          },
+        }),
+      });
+    } catch (e) {
+      console.error("Incident save failed:", e);
+    }
     setSaving(false);
     setStep("done");
   };
