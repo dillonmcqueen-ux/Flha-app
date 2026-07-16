@@ -11,7 +11,7 @@ const CONDITIONS = [
 
 const STEPS = ["equipment", "worker", "inspect", "done"];
 
-export default function Inspection({ companyId, companyName, onBack, onLogout }) {
+export default function Inspection({ companyId, companyName, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("equipment");
   const [equipment, setEquipment] = useState([]);
   const [eqMode, setEqMode] = useState("list"); // list | other
@@ -139,14 +139,26 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       results: resultsJson, signatureDataUrl: sig,
     });
 
-    await supabase.from("inspections").insert({
-      company_id: companyId,
-      worker_name: workerName,
-      equipment_label: label,
-      results_json: resultsJson,
-      signed_by: workerName,
-      pdf_url: pdfUrl || null,
-    });
+    try {
+      await fetch("/api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "inspection",
+          action: "submit",
+          token,
+          record: {
+            worker_name: workerName,
+            equipment_label: label,
+            results_json: resultsJson,
+            signed_by: workerName,
+            pdf_url: pdfUrl || null,
+          },
+        }),
+      });
+    } catch (e) {
+      console.error("Inspection save failed:", e);
+    }
     setTimeout(() => setStep("done"), 500);
   };
 
