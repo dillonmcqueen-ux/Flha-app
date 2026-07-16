@@ -23,10 +23,10 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
     return <App forcedCompanyId={companyId} onLogout={() => setDoc(null)} token={token} />;
   }
   if (doc === "inspection") {
-    return <Inspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
+    return <Inspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "toolbox") {
-    return <ToolboxTalk companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
+    return <ToolboxTalk companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "nearmiss") {
     return <NearMiss companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
