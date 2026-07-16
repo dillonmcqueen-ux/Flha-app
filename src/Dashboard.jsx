@@ -612,7 +612,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIds(new Set());
   };
 
-  // FLHA deletes now go through our protected server endpoint.
+  // FLHA deletes go through our protected server endpoint.
   const deleteFlha = async (id, workerName) => {
     if (!window.confirm(`Delete the FLHA for ${workerName || "this worker"}? This cannot be undone.`)) return;
     try {
@@ -627,7 +627,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
-  // FLHA approval now goes through our protected server endpoint (the PDF
+  // FLHA approval goes through our protected server endpoint (the PDF
   // itself is still generated in the browser, same as before).
   const approveFLHA = async (record, supName, supSignature) => {
     const now = new Date();
@@ -662,7 +662,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedFlha(null);
   };
 
-  // FLHA bulk delete now goes through our protected server endpoint.
+  // FLHA bulk delete goes through our protected server endpoint.
   const deleteSelected = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
@@ -680,27 +680,44 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }, { data: inc }, { data: dr }] = await Promise.all([
+      const [{ data: cos }, { data: ss }, { data: insp }, { data: tbt }, { data: dr }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("sops").select("*"),
         supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
         supabase.from("toolbox_talks").select("id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
-        supabase.from("near_misses").select("id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes").order("created_at", { ascending: false }),
-        supabase.from("incidents").select("id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes").order("created_at", { ascending: false }),
         supabase.from("daily_reports").select("id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
       ]);
 
-      // FLHAs now come from our protected server endpoint instead of Supabase directly.
+      // FLHAs, incidents, and near misses now come from our protected server endpoints.
       let fs = [];
       try {
         const flhaRes = await fetch("/api/flhas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list", token }),
         });
         const flhaData = await flhaRes.json();
         if (flhaRes.ok) fs = flhaData.flhas || [];
       } catch (e) { /* leave fs empty if the request fails */ }
+
+      let nm = [];
+      try {
+        const nmRes = await fetch("/api/reports", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "nearmiss", action: "list", token }),
+        });
+        const nmData = await nmRes.json();
+        if (nmRes.ok) nm = nmData.records || [];
+      } catch (e) { /* leave nm empty if the request fails */ }
+
+      let inc = [];
+      try {
+        const incRes = await fetch("/api/reports", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "incident", action: "list", token }),
+        });
+        const incData = await incRes.json();
+        if (incRes.ok) inc = incData.records || [];
+      } catch (e) { /* leave inc empty if the request fails */ }
 
       // Supervisors only see their own company; admins see all.
       const visibleCompanies = forcedCompanyId
@@ -711,8 +728,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setFlhas(fs);
       setInspections(insp || []);
       setToolboxTalks(tbt || []);
-      setNearMisses(nm || []);
-      setIncidents(inc || []);
+      setNearMisses(nm);
+      setIncidents(inc);
       setDailyReports(dr || []);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
@@ -745,26 +762,53 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily,
   ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
 
+  // Near Miss review now goes through our protected server endpoint.
   const reviewNearMiss = async (id, notes) => {
-    const now = new Date().toISOString();
-    const by = forcedCompanyId ? "Supervisor" : "Admin";
-    await supabase.from("near_misses").update({ reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null }).eq("id", id);
-    setNearMisses(prev => prev.map(n => n.id === id ? { ...n, reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null } : n));
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "nearmiss", action: "review", token, id, notes }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNearMisses(prev => prev.map(n => n.id === id
+          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null }
+          : n));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
     setSelectedNearMiss(null);
   };
+
+  // Incident review now goes through our protected server endpoint.
   const reviewIncident = async (id, notes) => {
-    const now = new Date().toISOString();
-    const by = forcedCompanyId ? "Supervisor" : "Admin";
-    await supabase.from("incidents").update({ reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null }).eq("id", id);
-    setIncidents(prev => prev.map(n => n.id === id ? { ...n, reviewed: true, reviewed_by: by, reviewed_at: now, review_notes: notes || null } : n));
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "incident", action: "review", token, id, notes }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIncidents(prev => prev.map(n => n.id === id
+          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null }
+          : n));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
     setSelectedIncident(null);
   };
+
+  // Incident delete now goes through our protected server endpoint.
   const deleteIncident = async (id) => {
     if (!window.confirm("Delete this incident report? This cannot be undone.")) return;
-    await supabase.from("incidents").delete().eq("id", id);
+    try {
+      await fetch("/api/reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "incident", action: "delete", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setIncidents(prev => prev.filter(n => n.id !== id));
     setSelectedIncident(null);
   };
+
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
   const deleteInspection = async (id, workerName) => {
@@ -781,9 +825,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedToolbox(null);
   };
 
+  // Near Miss delete now goes through our protected server endpoint.
   const deleteNearMiss = async (id) => {
     if (!window.confirm("Delete this near miss report? This cannot be undone.")) return;
-    await supabase.from("near_misses").delete().eq("id", id);
+    try {
+      await fetch("/api/reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "nearmiss", action: "delete", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setNearMisses(prev => prev.filter(n => n.id !== id));
     setSelectedNearMiss(null);
   };
