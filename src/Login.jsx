@@ -1,13 +1,10 @@
 import { useState, useEffect } from "react";
-import { supabase } from "./supabaseClient";
 import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 
-const ADMIN_CODE = "admin_2023";
-
-// Session storage keys — kept in memory for the browser session
+// Session storage — kept in memory for the browser session
 function saveSession(session) {
   try { window.name = JSON.stringify(session); } catch (e) {}
 }
@@ -43,50 +40,28 @@ export default function Login() {
       return;
     }
 
-    // Admin path — master code, no company lookup
-    if (role === "admin") {
-      if (entered === ADMIN_CODE) {
-        const s = { role: "admin", companyId: null };
-        saveSession(s);
-        setSession(s);
-      } else {
-        setError("Incorrect admin code.");
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, code: entered }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+        setChecking(false);
+        return;
       }
-      setChecking(false);
-      return;
-    }
 
-    // Worker / Supervisor — look up company by matching code
-    const column = role === "supervisor" ? "supervisor_code" : "worker_code";
-    const { data, error: qErr } = await supabase
-      .from("companies")
-      .select("id, name, worker_code, supervisor_code, suspended")
-      .eq(column, entered)
-      .limit(1);
-
-    if (qErr) {
+      // data.session holds the role/company info; data.token is the signed
+      // pass we'll use later so other pages can prove this login was real.
+      const s = { ...data.session, token: data.token };
+      saveSession(s);
+      setSession(s);
+    } catch (e) {
       setError("Connection error. Please try again.");
-      setChecking(false);
-      return;
     }
-    if (!data || data.length === 0) {
-      setError("Code not recognized. Check with your supervisor.");
-      setChecking(false);
-      return;
-    }
-
-    const company = data[0];
-
-    // Suspended companies: block workers entirely; supervisors get view-only.
-    if (company.suspended && role === "worker") {
-      setError("Access suspended. Please contact your administrator.");
-      setChecking(false);
-      return;
-    }
-
-    const s = { role, companyId: company.id, companyName: company.name, suspended: !!company.suspended };
-    saveSession(s);
-    setSession(s);
     setChecking(false);
   };
 
