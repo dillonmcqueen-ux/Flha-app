@@ -5,7 +5,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly"];
 
-export default function ToolboxTalk({ companyId, companyName, onBack, onLogout }) {
+export default function ToolboxTalk({ companyId, companyName, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | topic | review | signoff | done
   const [presenter, setPresenter] = useState("");
   const [meetingType, setMeetingType] = useState("Pre-Job");
@@ -107,16 +107,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const pdfUrl = await generateAndUploadToolbox({
       presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields: cf.entries(),
     });
-    await supabase.from("toolbox_talks").insert({
-      company_id: companyId,
-      presenter_name: presenter,
-      meeting_type: meetingType,
-      site,
-      topic,
-      talking_points_json: { ...points, customFields: cf.entries() },
-      attendees_json: attendees,
-      pdf_url: pdfUrl || null,
-    });
+    try {
+      await fetch("/api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "toolbox",
+          action: "submit",
+          token,
+          record: {
+            presenter_name: presenter,
+            meeting_type: meetingType,
+            site,
+            topic,
+            talking_points_json: { ...points, customFields: cf.entries() },
+            attendees_json: attendees,
+            pdf_url: pdfUrl || null,
+          },
+        }),
+      });
+    } catch (e) {
+      console.error("Toolbox talk save failed:", e);
+    }
     setSaving(false);
     setStep("done");
   };
