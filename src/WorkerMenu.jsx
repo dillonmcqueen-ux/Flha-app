@@ -29,10 +29,10 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
     return <ToolboxTalk companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
   }
   if (doc === "nearmiss") {
-    return <NearMiss companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
+    return <NearMiss companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "incident") {
-    return <Incident companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
+    return <Incident companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "daily") {
     return <DailyReport companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
