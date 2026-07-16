@@ -16,11 +16,11 @@ const DOC_TYPES = [
   { key: "daily", icon: "📋", title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
 ];
 
-export default function WorkerMenu({ companyId, companyName, onLogout }) {
+export default function WorkerMenu({ companyId, companyName, onLogout, token }) {
   const [doc, setDoc] = useState(null);
 
   if (doc === "flha") {
-    return <App forcedCompanyId={companyId} onLogout={() => setDoc(null)} />;
+    return <App forcedCompanyId={companyId} onLogout={() => setDoc(null)} token={token} />;
   }
   if (doc === "inspection") {
     return <Inspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
