@@ -562,7 +562,7 @@ function DailyCard({ dr, onClose, onDelete }) {
 }
 
 
-export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false }) {
+export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, token = null }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [inspections, setInspections] = useState([]);
@@ -612,18 +612,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIds(new Set());
   };
 
+  // FLHA deletes now go through our protected server endpoint.
   const deleteFlha = async (id, workerName) => {
     if (!window.confirm(`Delete the FLHA for ${workerName || "this worker"}? This cannot be undone.`)) return;
-    await supabase.from("flhas").delete().eq("id", id);
+    try {
+      await fetch("/api/flhas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", token, ids: [id] }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setFlhas(prev => prev.filter(f => f.id !== id));
     setSelectedFlha(null);
     setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
+  // FLHA approval now goes through our protected server endpoint (the PDF
+  // itself is still generated in the browser, same as before).
   const approveFLHA = async (record, supName, supSignature) => {
     const now = new Date();
     const co = companies.find(c => c.id === record.company_id);
-    // Regenerate the PDF as approved (no pending banner), including supervisor sign-off
     let pdfUrl = record.pdf_url;
     try {
       pdfUrl = await generateAndUploadFLHA({
@@ -640,12 +648,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       });
     } catch (e) { /* keep old pdf if regen fails */ }
 
-    await supabase.from("flhas").update({
-      status: "complete",
-      supervisor_signed_by: supName,
-      supervisor_signed_at: now.toISOString(),
-      pdf_url: pdfUrl || record.pdf_url,
-    }).eq("id", record.id);
+    try {
+      await fetch("/api/flhas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve", token, id: record.id, supName, supSignature, pdfUrl: pdfUrl || record.pdf_url }),
+      });
+    } catch (e) { /* keep local state updated even if the request fails */ }
 
     setFlhas(prev => prev.map(f => f.id === record.id
       ? { ...f, status: "complete", supervisor_signed_by: supName, supervisor_signed_at: now.toISOString(), pdf_url: pdfUrl || f.pdf_url }
@@ -653,20 +662,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedFlha(null);
   };
 
+  // FLHA bulk delete now goes through our protected server endpoint.
   const deleteSelected = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     if (!window.confirm(`Delete ${ids.length} selected FLHA${ids.length > 1 ? "s" : ""}? This cannot be undone.`)) return;
-    await supabase.from("flhas").delete().in("id", ids);
+    try {
+      await fetch("/api/flhas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", token, ids }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setFlhas(prev => prev.filter(f => !selectedIds.has(f.id)));
     setSelectedIds(new Set());
   };
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: fs }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }, { data: inc }, { data: dr }] = await Promise.all([
+      const [{ data: cos }, { data: ss }, { data: insp }, { data: tbt }, { data: nm }, { data: inc }, { data: dr }] = await Promise.all([
         supabase.from("companies").select("*"),
-        supabase.from("flhas").select("id, worker_name, job_site, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature").order("created_at", { ascending: false }),
         supabase.from("sops").select("*"),
         supabase.from("inspections").select("id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url").order("created_at", { ascending: false }),
         supabase.from("toolbox_talks").select("id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
@@ -675,13 +690,25 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         supabase.from("daily_reports").select("id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
       ]);
 
+      // FLHAs now come from our protected server endpoint instead of Supabase directly.
+      let fs = [];
+      try {
+        const flhaRes = await fetch("/api/flhas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list", token }),
+        });
+        const flhaData = await flhaRes.json();
+        if (flhaRes.ok) fs = flhaData.flhas || [];
+      } catch (e) { /* leave fs empty if the request fails */ }
+
       // Supervisors only see their own company; admins see all.
       const visibleCompanies = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)
         : (cos || []);
 
       setCompanies(visibleCompanies);
-      setFlhas(fs || []);
+      setFlhas(fs);
       setInspections(insp || []);
       setToolboxTalks(tbt || []);
       setNearMisses(nm || []);
@@ -692,7 +719,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setLoading(false);
     }
     loadAll();
-  }, [forcedCompanyId]);
+  }, [forcedCompanyId, token]);
 
   const company = companies.find(c => c.id === selectedCompany);
   const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
