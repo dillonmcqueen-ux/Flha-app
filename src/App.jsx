@@ -13,14 +13,6 @@ const FALLBACK_SOPS = {
 
 const STEPS = ["company", "voice", "review", "done"];
 
-const sampleHazards = [
-  { hazard: "Uneven terrain / trip hazard", control: "Walk the site perimeter before work begins. Wear CSA-approved footwear." },
-  { hazard: "Working at heights (ladder use)", control: "Inspect ladder before use. Maintain 3-point contact. Secure base." },
-  { hazard: "Overhead power lines present", control: "Call 811. Maintain 3 m clearance. Notify supervisor before approaching." },
-  { hazard: "Hot work — grinding required", control: "Fire watch assigned. ABC extinguisher within 10 m. Hot work permit issued." },
-  { hazard: "Energized equipment nearby", control: "LOTO procedure completed and verified by second worker before starting." },
-];
-
 function Badge({ text, color = "blue" }) {
   const colors = {
     blue: "background:#1D4ED820;color:#1D4ED8;border:1px solid #1D4ED840",
@@ -68,7 +60,7 @@ function Stepper({ step }) {
   );
 }
 
-export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
+export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token = null }) {
   const [step, setStep] = useState("company");
   const [sopData, setSopData] = useState(FALLBACK_SOPS);
   const [sopsLoading, setSopsLoading] = useState(true);
@@ -269,26 +261,29 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null }) {
   const [resumeError, setResumeError] = useState("");
   const [resumeChoices, setResumeChoices] = useState([]); // if multiple found
 
-  // Find today's FLHA for this worker name + company and load it for amending
+  // Find today's FLHA for this worker name + company and load it for amending.
+  // This now goes through our protected server endpoint instead of Supabase directly.
   const resumeTodaysFLHA = async () => {
     setResumeError("");
     setResumeChoices([]);
     const name = resumeName.trim();
     if (!name) { setResumeError("Enter your name."); return; }
 
-    const start = new Date(); start.setHours(0, 0, 0, 0);
-    const { data, error } = await supabase
-      .from("flhas")
-      .select("id, worker_name, job_site, hazards_json, created_at, worker_signature")
-      .eq("company_id", companyId)
-      .gte("created_at", start.toISOString())
-      .order("created_at", { ascending: false });
-
-    if (error) { setResumeError("Something went wrong. Try again."); return; }
-    const matches = (data || []).filter(f => (f.worker_name || "").trim().toLowerCase() === name.toLowerCase());
-    if (matches.length === 0) { setResumeError("No FLHA found for that name today. Check the spelling or start a new one."); return; }
-    if (matches.length === 1) { loadForAmend(matches[0]); return; }
-    setResumeChoices(matches); // let them pick
+    try {
+      const res = await fetch("/api/flhas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resume", token, workerName: name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setResumeError(data.error || "Something went wrong. Try again."); return; }
+      const matches = data.matches || [];
+      if (matches.length === 0) { setResumeError("No FLHA found for that name today. Check the spelling or start a new one."); return; }
+      if (matches.length === 1) { loadForAmend(matches[0]); return; }
+      setResumeChoices(matches); // let them pick
+    } catch (e) {
+      setResumeError("Something went wrong. Try again.");
+    }
   };
 
   const loadForAmend = (record) => {
@@ -406,7 +401,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     setStep("voice");
   };
 
-  // Save the completed, signed FLHA back to Supabase + generate PDF
+  // Save the completed, signed FLHA back to the database (via our protected
+  // server endpoint) + generate the PDF.
   const saveFLHA = async () => {
     if (!flha) return;
 
@@ -439,28 +435,48 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       pendingApproval: newStatus === "pending_approval",
     });
 
-    if (amendingId) {
-      // Update the existing record (one clean document).
-      // Re-evaluate status: if an amendment added Extreme work, it needs approval again.
-      await supabase.from("flhas").update({
-        job_site: jobSite,
-        task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
-        hazards_json: flhaWithCustom,
-        pdf_url: pdfUrl || null,
-        status: newStatus,
-      }).eq("id", amendingId);
-    } else {
-      await supabase.from("flhas").insert({
-        worker_name: workerName,
-        job_site: jobSite,
-        task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-        hazards_json: flhaWithCustom,
-        signed_by: workerName,
-        pdf_url: pdfUrl || null,
-        company_id: companyId,
-        status: newStatus,
-        worker_signature: signatureDataUrl || null,
-      });
+    try {
+      if (amendingId) {
+        // Update the existing record (one clean document).
+        // Re-evaluate status: if an amendment added Extreme work, it needs approval again.
+        await fetch("/api/flhas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "submit",
+            token,
+            amendingId,
+            record: {
+              job_site: jobSite,
+              task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
+              hazards_json: flhaWithCustom,
+              pdf_url: pdfUrl || null,
+              status: newStatus,
+            },
+          }),
+        });
+      } else {
+        await fetch("/api/flhas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "submit",
+            token,
+            record: {
+              worker_name: workerName,
+              job_site: jobSite,
+              task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
+              hazards_json: flhaWithCustom,
+              signed_by: workerName,
+              pdf_url: pdfUrl || null,
+              status: newStatus,
+              worker_signature: signatureDataUrl || null,
+            },
+          }),
+        });
+      }
+    } catch (e) {
+      console.error("FLHA save failed:", e);
     }
     setPendingApproval(newStatus === "pending_approval");
   };
