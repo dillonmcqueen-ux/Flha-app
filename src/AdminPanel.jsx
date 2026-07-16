@@ -33,7 +33,7 @@ const C = {
   muted: "#94A3B8",
 };
 
-export default function AdminPanel({ onViewDashboard, onLogout }) {
+export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [companies, setCompanies] = useState([]);
   const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
@@ -63,20 +63,32 @@ export default function AdminPanel({ onViewDashboard, onLogout }) {
   const [newEquip, setNewEquip] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
 
   const loadAll = async () => {
-    const [{ data: cos }, { data: fs }, { data: ss }] = await Promise.all([
+    const [{ data: cos }, { data: ss }] = await Promise.all([
       supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number").order("id"),
-      supabase.from("flhas").select("id, company_id"),
       supabase.from("sops").select("id, company_id"),
     ]);
+
+    // FLHA counts now come from our protected server endpoint instead of a
+    // direct read of the flhas table.
+    let flhaCounts = {};
+    try {
+      const res = await fetch("/api/flhas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "count", token }),
+      });
+      const data = await res.json();
+      if (res.ok) flhaCounts = data.counts || {};
+    } catch (e) { /* leave counts empty if the request fails */ }
+
     setCompanies(cos || []);
     const c = {};
-    (cos || []).forEach(co => { c[co.id] = { flhas: 0, sops: 0 }; });
-    (fs || []).forEach(f => { if (c[f.company_id]) c[f.company_id].flhas++; });
+    (cos || []).forEach(co => { c[co.id] = { flhas: flhaCounts[co.id] || 0, sops: 0 }; });
     (ss || []).forEach(s => { if (c[s.company_id]) c[s.company_id].sops++; });
     setCounts(c);
     setLoading(false);
   };
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [token]);
 
   const activeCompany = companies.find(c => c.id === activeId);
 
