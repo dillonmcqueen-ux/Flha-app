@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+gimport { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 
 function randomSuffix(len = 3) {
