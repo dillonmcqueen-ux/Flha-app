@@ -15,11 +15,6 @@ function codePrefix(name) {
   return words.map(w => w[0]).join("").slice(0, 3);
 }
 
-// 6-digit account number, 100000–999999
-function genAccountNumber() {
-  return Math.floor(100000 + Math.random() * 900000);
-}
-
 // Design tokens
 const C = {
   ink: "#1E293B",       // deep slate — authority
@@ -62,14 +57,26 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [newField, setNewField] = useState({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
   const [newEquip, setNewEquip] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
 
+  // Companies now come from our protected server endpoint (it has the real
+  // worker/supervisor codes and contact info, so it needs to be admin-only).
   const loadAll = async () => {
-    const [{ data: cos }, { data: ss }] = await Promise.all([
-      supabase.from("companies").select("id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number").order("id"),
-      supabase.from("sops").select("id, company_id"),
-    ]);
+    let cos = [];
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_companies", token }),
+      });
+      const data = await res.json();
+      if (res.ok) cos = data.companies || [];
+      else setMsg(data.error || "Could not load companies.");
+    } catch (e) {
+      setMsg("Could not load companies.");
+    }
 
-    // FLHA counts now come from our protected server endpoint instead of a
-    // direct read of the flhas table.
+    const { data: ss } = await supabase.from("sops").select("id, company_id");
+
+    // FLHA counts still come from the protected /api/flhas endpoint.
     let flhaCounts = {};
     try {
       const res = await fetch("/api/flhas", {
@@ -81,9 +88,9 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       if (res.ok) flhaCounts = data.counts || {};
     } catch (e) { /* leave counts empty if the request fails */ }
 
-    setCompanies(cos || []);
+    setCompanies(cos);
     const c = {};
-    (cos || []).forEach(co => { c[co.id] = { flhas: flhaCounts[co.id] || 0, sops: 0 }; });
+    cos.forEach(co => { c[co.id] = { flhas: flhaCounts[co.id] || 0, sops: 0 }; });
     (ss || []).forEach(s => { if (c[s.company_id]) c[s.company_id].sops++; });
     setCounts(c);
     setLoading(false);
@@ -121,29 +128,25 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setNewWorkerCode(`${p}-W${randomSuffix()}`);
     setNewSupervisorCode(`${p}-S${randomSuffix()}`);
   };
+
+  // Company creation now goes through our protected server endpoint.
   const addCompany = async () => {
     setMsg("");
     if (!newName.trim()) { setMsg("Enter a company name."); return; }
     if (!newWorkerCode.trim() || !newSupervisorCode.trim()) { setMsg("Codes cannot be empty."); return; }
     setSaving(true);
-    const { data: existing } = await supabase.from("companies").select("id")
-      .or(`worker_code.eq.${newWorkerCode.trim()},supervisor_code.eq.${newSupervisorCode.trim()}`);
-    if (existing && existing.length > 0) { setMsg("One of those codes is already in use. Edit and try again."); setSaving(false); return; }
-
-    // Generate a unique 6-digit account number
-    let acct = genAccountNumber();
-    for (let tries = 0; tries < 5; tries++) {
-      const { data: clash } = await supabase.from("companies").select("id").eq("account_number", acct).limit(1);
-      if (!clash || clash.length === 0) break;
-      acct = genAccountNumber();
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_company", token, name: newName, workerCode: newWorkerCode, supervisorCode: newSupervisorCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't add company."); setSaving(false); return; }
+      setNewName(""); setNewWorkerCode(""); setNewSupervisorCode(""); await loadAll(); setView("home");
+    } catch (e) {
+      setMsg("Couldn't add company. Try again.");
     }
-
-    const { error } = await supabase.from("companies").insert({
-      name: newName.trim(), worker_code: newWorkerCode.trim(), supervisor_code: newSupervisorCode.trim(),
-      account_number: acct,
-    });
-    if (error) { setMsg("Couldn't add company: " + error.message); }
-    else { setNewName(""); setNewWorkerCode(""); setNewSupervisorCode(""); await loadAll(); setView("home"); }
     setSaving(false);
   };
 
@@ -170,17 +173,23 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setView("manage");
   };
 
+  // Profile edits now go through our protected server endpoint.
   const saveProfile = async () => {
     setMsg("");
     if (!profile.name.trim()) { setMsg("Company name cannot be empty."); return; }
     setSaving(true);
-    const { error } = await supabase.from("companies").update({
-      name: profile.name.trim(), contact_name: profile.contact_name.trim(),
-      contact_email: profile.contact_email.trim(), contact_phone: profile.contact_phone.trim(),
-      address: profile.address.trim(), logo_url: profile.logo_url || null,
-    }).eq("id", activeId);
-    if (error) setMsg("Couldn't save: " + error.message);
-    else { setMsg("Profile saved"); await loadAll(); }
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_profile", token, companyId: activeId, profile }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't save."); setSaving(false); return; }
+      setMsg("Profile saved"); await loadAll();
+    } catch (e) {
+      setMsg("Couldn't save. Try again.");
+    }
     setSaving(false);
   };
 
@@ -273,12 +282,23 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   };
   const copyText = (t) => { try { navigator.clipboard?.writeText(t); setMsg("Copied " + t); setTimeout(() => setMsg(""), 1500); } catch (e) {} };
 
+  // Suspend/reactivate now goes through our protected server endpoint.
   const toggleSuspend = async (c, e) => {
     if (e) e.stopPropagation(); // don't open the card
     const next = !c.suspended;
     if (next && !window.confirm(`Suspend "${c.name}"? Workers will be blocked from creating FLHAs. Supervisors can still view and export existing records.`)) return;
-    const { error } = await supabase.from("companies").update({ suspended: next }).eq("id", c.id);
-    if (error) { setMsg("Couldn't update: " + error.message); return; }
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_suspend", token, companyId: c.id, suspended: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't update."); return; }
+    } catch (e2) {
+      setMsg("Couldn't update. Try again.");
+      return;
+    }
     await loadAll();
     setMsg(next ? `${c.name} suspended` : `${c.name} reactivated`);
     setTimeout(() => setMsg(""), 2500);
@@ -355,22 +375,26 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setFieldList(prev => prev.filter(f => f.id !== id));
   };
 
+  // Company deletion now goes through our protected server endpoint, which
+  // checks ALL record types (not just FLHAs) before allowing the delete.
   const deleteCompany = async () => {
-    const cnt = counts[activeId] || { flhas: 0 };
-    if (cnt.flhas > 0) {
-      setMsg("Couldn't delete: this company has " + cnt.flhas + " FLHA record(s). Companies with submitted FLHAs can't be deleted.");
-      return;
-    }
     if (!window.confirm(`Delete "${activeCompany?.name}"? This removes the company, its SOPs and sites. This cannot be undone.`)) return;
     setSaving(true);
-    // Clean up related rows first (no FLHAs exist, so safe)
-    await supabase.from("sops").delete().eq("company_id", activeId);
-    await supabase.from("sites").delete().eq("company_id", activeId);
-    const { error } = await supabase.from("companies").delete().eq("id", activeId);
-    if (error) { setMsg("Couldn't delete: " + error.message); setSaving(false); return; }
-    await loadAll();
-    setSaving(false);
-    setView("home");
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_company", token, companyId: activeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't delete."); setSaving(false); return; }
+      await loadAll();
+      setSaving(false);
+      setView("home");
+    } catch (e) {
+      setMsg("Couldn't delete. Try again.");
+      setSaving(false);
+    }
   };
 
   // ── shared styles ────────────────────────────────────────
@@ -788,9 +812,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 Delete company
               </button>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-                {(counts[activeId]?.flhas || 0) > 0
-                  ? `This company has ${counts[activeId].flhas} FLHA record(s), so it can't be deleted.`
-                  : "Only companies with no FLHA records can be deleted."}
+                Only companies with no submitted records (FLHAs, incidents, near misses, inspections, toolbox talks, or daily reports) can be deleted.
               </div>
             </div>
           </div>
