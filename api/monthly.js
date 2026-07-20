@@ -1,8 +1,6 @@
 // api/monthly.js
-// Admin-only endpoint for building monthly inspection forms — creating
-// forms, toggling them active/inactive, and managing their question list.
-// Worker submission and corrective-action tracking are separate phases
-// that will use this same file with additional actions.
+// Handles Monthly Inspection Forms — admin builder (forms/questions),
+// worker submission, and (in a later phase) corrective action tracking.
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -35,7 +33,8 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
-    // ── Admin: list forms for a company ─────────────────────────────
+    // ══ ADMIN: form builder ═══════════════════════════════════════════
+
     if (action === 'list_forms') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { companyId } = req.body;
@@ -49,7 +48,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ forms: data || [] });
     }
 
-    // ── Admin: create a new form ─────────────────────────────────────
     if (action === 'create_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { companyId, title } = req.body;
@@ -63,7 +61,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ form: data });
     }
 
-    // ── Admin: activate / deactivate a form ──────────────────────────
     if (action === 'toggle_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { formId, isActive } = req.body;
@@ -73,7 +70,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ── Admin: delete a form (only if nothing's been submitted) ─────
     if (action === 'delete_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { formId } = req.body;
@@ -89,7 +85,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ── Admin: list a form's questions ───────────────────────────────
     if (action === 'list_questions') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { formId } = req.body;
@@ -103,7 +98,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ questions: data || [] });
     }
 
-    // ── Admin: add a question ─────────────────────────────────────────
     if (action === 'add_question') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { formId, questionText } = req.body;
@@ -125,7 +119,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ question: data });
     }
 
-    // ── Admin: delete a question ──────────────────────────────────────
     if (action === 'delete_question') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { questionId } = req.body;
@@ -135,7 +128,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ── Admin: reorder questions ──────────────────────────────────────
     if (action === 'reorder_questions') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { updates } = req.body; // [{ id, sort_order }]
@@ -144,6 +136,102 @@ export default async function handler(req, res) {
         await supabaseAdmin.from('inspection_form_questions').update({ sort_order: u.sort_order }).eq('id', u.id);
       }
       return res.status(200).json({ ok: true });
+    }
+
+    // ══ WORKER: monthly submission ═════════════════════════════════════
+
+    // Find the active form for this site's company, plus its questions,
+    // plus whether a submission already exists for this site this month.
+    if (action === 'get_active_form') {
+      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      const { siteId } = req.body;
+      if (!siteId) return res.status(400).json({ error: 'Missing site.' });
+
+      const { data: siteRows, error: siteErr } = await supabaseAdmin.from('sites').select('id, company_id, name').eq('id', siteId).limit(1);
+      if (siteErr || !siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed for this site.' });
+      }
+
+      const { data: forms, error: formErr } = await supabaseAdmin
+        .from('inspection_forms')
+        .select('*')
+        .eq('company_id', session.companyId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (formErr) return res.status(500).json({ error: 'Could not load form.' });
+      const form = (forms && forms[0]) || null;
+      if (!form) return res.status(200).json({ form: null, questions: [], existingRecord: null });
+
+      const { data: questions, error: qErr } = await supabaseAdmin
+        .from('inspection_form_questions')
+        .select('*')
+        .eq('form_id', form.id)
+        .order('sort_order', { ascending: true });
+      if (qErr) return res.status(500).json({ error: 'Could not load questions.' });
+
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const { data: existing } = await supabaseAdmin
+        .from('inspection_records')
+        .select('id, submitted_by, created_at')
+        .eq('form_id', form.id)
+        .eq('site_id', siteId)
+        .eq('period_month', periodStart)
+        .limit(1);
+
+      return res.status(200).json({ form, questions: questions || [], existingRecord: (existing && existing[0]) || null });
+    }
+
+    // Submit a completed monthly inspection: creates the record, one
+    // answer row per question, and a corrective action for every "No".
+    if (action === 'submit_monthly') {
+      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl } = req.body;
+      if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
+        return res.status(400).json({ error: 'Missing details.' });
+      }
+
+      const { data: siteRows } = await supabaseAdmin.from('sites').select('id, company_id').eq('id', siteId).limit(1);
+      if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed for this site.' });
+      }
+      const { data: formRows } = await supabaseAdmin.from('inspection_forms').select('id, company_id').eq('id', formId).limit(1);
+      if (!formRows || formRows.length === 0 || formRows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed for this form.' });
+      }
+
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+
+      const { data: record, error: recErr } = await supabaseAdmin
+        .from('inspection_records')
+        .insert({
+          form_id: formId, site_id: siteId, submitted_by: submittedBy,
+          period_month: periodStart, ai_summary: aiSummary || null,
+          pdf_url: pdfUrl || null, status: 'complete',
+        })
+        .select()
+        .single();
+      if (recErr) return res.status(500).json({ error: 'Save failed. Try again.' });
+
+      for (const a of answers) {
+        const { data: answerRow, error: ansErr } = await supabaseAdmin
+          .from('inspection_answers')
+          .insert({ record_id: record.id, question_id: a.questionId, answer: !!a.answer, notes: a.note || null })
+          .select()
+          .single();
+        if (ansErr || !answerRow) continue;
+        if (!a.answer) {
+          await supabaseAdmin.from('corrective_actions').insert({
+            answer_id: answerRow.id,
+            description: (a.note || '').trim() || 'No description provided.',
+            status: 'open',
+          });
+        }
+      }
+
+      return res.status(200).json({ id: record.id });
     }
 
     return res.status(400).json({ error: 'Unknown action.' });
