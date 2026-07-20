@@ -112,7 +112,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove }) {
 
         {h.sopAlerts?.length > 0 && (
           <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#C2410C", marginBottom: 6 }}>⚠️ SOP ALERTS TRIGGERED</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6 }}>⚠️ SOP ALERTS TRIGGERED</div>
             {h.sopAlerts.map((a, i) => <div key={i} style={{ fontSize: 13, color: "#9A3412", marginBottom: 2 }}>• {a}</div>)}
           </div>
         )}
@@ -209,6 +209,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove }) {
 function InspectionCard({ insp, onClose, onDelete }) {
   const r = insp.results_json || {};
   const items = r.items || [];
+  const isPost = insp.trip_type === "posttrip";
   const condColor = { Good: "#16A34A", Monitor: "#D97706", Defective: "#DC2626" };
   const condBg = { Good: "#F0FDF4", Monitor: "#FFFBEB", Defective: "#FEF2F2" };
   return (
@@ -216,7 +217,10 @@ function InspectionCard({ insp, onClose, onDelete }) {
       <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E293B" }}>Equipment Inspection</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 18, color: "#1E293B" }}>{isPost ? "Post-Trip Inspection" : "Pre-Trip Inspection"}</div>
+              <span style={{ fontSize: 10, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 8px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
+            </div>
             <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(insp.created_at).toLocaleString("en-CA")}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -232,19 +236,41 @@ function InspectionCard({ insp, onClose, onDelete }) {
 
         <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#1E293B" }}>{insp.equipment_label}</div>
-          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Inspector: {insp.worker_name}</div>
+          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>{isPost ? "Technician" : "Inspector"}: {insp.worker_name}</div>
           {r.machineSummary && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{r.machineSummary}</div>}
+          {(insp.start_reading || insp.end_reading) && (
+            <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+              {insp.start_reading && <div style={{ fontSize: 12, color: "#374151" }}>Start: <strong>{insp.start_reading} {insp.reading_unit}</strong></div>}
+              {insp.end_reading && <div style={{ fontSize: 12, color: "#374151" }}>End: <strong>{insp.end_reading} {insp.reading_unit}</strong></div>}
+            </div>
+          )}
         </div>
 
-        {items.map((it, i) => (
-          <div key={i} style={{ border: `1.5px solid ${condColor[it.condition] || "#E5E7EB"}40`, background: condBg[it.condition] || "#fff", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{it.item}</div>
-              <span style={{ fontSize: 12, fontWeight: 800, color: condColor[it.condition] }}>{it.condition}</span>
+        {isPost ? (
+          <>
+            {insp.has_changes === false && (
+              <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#166534" }}>✓ No changes reported since Pre-Trip</div>
+              </div>
+            )}
+            {insp.has_changes === true && (
+              <div style={{ border: `1.5px solid ${r.changeCondition === "Defective" ? "#FCA5A5" : "#FCD34D"}`, background: r.changeCondition === "Defective" ? "#FEF2F2" : "#FFFBEB", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: r.changeCondition === "Defective" ? "#991B1B" : "#92400E", marginBottom: 4 }}>⚠ Change reported — {r.changeCondition}</div>
+                <div style={{ fontSize: 13, color: "#374151" }}>{r.changeNotes}</div>
+              </div>
+            )}
+          </>
+        ) : (
+          items.map((it, i) => (
+            <div key={i} style={{ border: `1.5px solid ${condColor[it.condition] || "#E5E7EB"}40`, background: condBg[it.condition] || "#fff", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{it.item}</div>
+                <span style={{ fontSize: 12, fontWeight: 800, color: condColor[it.condition] }}>{it.condition}</span>
+              </div>
+              {it.note && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>Note: {it.note}</div>}
             </div>
-            {it.note && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>Note: {it.note}</div>}
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
@@ -680,14 +706,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: ss }, { data: dr }] = await Promise.all([
+      const [{ data: cos }, { data: ss }] = await Promise.all([
         supabase.from("companies").select("*"),
         supabase.from("sops").select("*"),
-        supabase.from("daily_reports").select("id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at").order("created_at", { ascending: false }),
       ]);
 
-      // FLHAs, incidents, near misses, inspections, and toolbox talks now
-      // come from our protected server endpoints instead of Supabase directly.
       let fs = [];
       try {
         const flhaRes = await fetch("/api/flhas", {
@@ -738,7 +761,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         if (tbtRes.ok) tbt = tbtData.records || [];
       } catch (e) { /* leave tbt empty if the request fails */ }
 
-      // Supervisors only see their own company; admins see all.
+      let dr = [];
+      try {
+        const drRes = await fetch("/api/logs", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "daily", action: "list", token }),
+        });
+        const drData = await drRes.json();
+        if (drRes.ok) dr = drData.records || [];
+      } catch (e) { /* leave dr empty if the request fails */ }
+
       const visibleCompanies = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)
         : (cos || []);
@@ -749,7 +781,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setToolboxTalks(tbt);
       setNearMisses(nm);
       setIncidents(inc);
-      setDailyReports(dr || []);
+      setDailyReports(dr);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
@@ -767,12 +799,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const deleteDaily = async (id) => {
     if (!window.confirm("Delete this daily report? This cannot be undone.")) return;
-    await supabase.from("daily_reports").delete().eq("id", id);
+    try {
+      await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "daily", action: "delete", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setDailyReports(prev => prev.filter(d => d.id !== id));
     setSelectedDaily(null);
   };
 
-  // Supervisor summary metrics
   const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
   const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
   const incidentCount = companyIncidents.length;
@@ -781,7 +817,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily,
   ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
 
-  // Near Miss review goes through our protected server endpoint.
   const reviewNearMiss = async (id, notes) => {
     try {
       const res = await fetch("/api/reports", {
@@ -798,7 +833,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedNearMiss(null);
   };
 
-  // Incident review goes through our protected server endpoint.
   const reviewIncident = async (id, notes) => {
     try {
       const res = await fetch("/api/reports", {
@@ -815,7 +849,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIncident(null);
   };
 
-  // Incident delete goes through our protected server endpoint.
   const deleteIncident = async (id) => {
     if (!window.confirm("Delete this incident report? This cannot be undone.")) return;
     try {
@@ -830,7 +863,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
-  // Inspection delete goes through our protected server endpoint.
   const deleteInspection = async (id, workerName) => {
     if (!window.confirm(`Delete the inspection by ${workerName || "this worker"}? This cannot be undone.`)) return;
     try {
@@ -843,7 +875,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedInspection(null);
   };
 
-  // Toolbox Talk delete goes through our protected server endpoint.
   const deleteToolbox = async (id) => {
     if (!window.confirm("Delete this toolbox talk? This cannot be undone.")) return;
     try {
@@ -856,7 +887,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedToolbox(null);
   };
 
-  // Near Miss delete goes through our protected server endpoint.
   const deleteNearMiss = async (id) => {
     if (!window.confirm("Delete this near miss report? This cannot be undone.")) return;
     try {
@@ -869,7 +899,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedNearMiss(null);
   };
 
-  // Helper: highest risk level in an FLHA (for sorting)
   const riskRank = (f) => {
     const hz = f.hazards_json?.hazards || [];
     if (hz.some(h => h.risk === "Extreme")) return 4;
@@ -878,7 +907,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     return 1;
   };
 
-  // ── Apply date filter ────────────────────────────────────
   const now = new Date();
   const inDateRange = (f) => {
     if (dateFilter === "all") return true;
@@ -890,7 +918,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     return true;
   };
 
-  // ── Apply search ─────────────────────────────────────────
   const matchesSearch = (f) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -898,7 +925,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
            (f.job_site || "").toLowerCase().includes(q);
   };
 
-  // ── Filter + sort ────────────────────────────────────────
   let processedFlhas = companyFlhas.filter(f => inDateRange(f) && matchesSearch(f));
 
   processedFlhas = [...processedFlhas].sort((a, b) => {
@@ -912,7 +938,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     }
   });
 
-  // ── Group ────────────────────────────────────────────────
   const grouped = {};
   if (groupBy === "none") {
     grouped["All Assessments"] = processedFlhas;
@@ -988,7 +1013,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Company selector — admin only */}
         {isAdmin && companies.length > 1 && (
           <div style={styles.card}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8 }}>COMPANY</div>
@@ -1006,7 +1030,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Supervisor summary — action cards */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
           <div onClick={() => setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: awaitingSignOff > 0 ? "#fff" : "#94A3B8" }}>{awaitingSignOff}</div>
@@ -1026,7 +1049,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         </div>
 
-        {/* Tabs */}
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12 }}>
           <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
@@ -1041,7 +1063,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
-        {/* FLHAs tab */}
         {activeTab === "flhas" && (
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
@@ -1067,7 +1088,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               )}
             </div>
 
-            {/* Search */}
             <input
               style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" }}
               placeholder="🔍 Search worker or site…"
@@ -1075,7 +1095,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               onChange={e => setSearch(e.target.value)}
             />
 
-            {/* Controls: sort / date / group */}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={styles.select}>
                 <option value="newest">Newest first</option>
@@ -1157,7 +1176,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Inspections tab */}
         {activeTab === "inspections" && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
@@ -1172,8 +1190,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             ) : (
               companyInspections.map((insp, i) => {
                 const r = insp.results_json || {};
-                const def = r.defectiveCount || 0;
-                const mon = r.monitorCount || 0;
+                const isPost = insp.trip_type === "posttrip";
+                const def = isPost ? (r.defectiveCount || 0) : (r.defectiveCount || 0);
+                const mon = isPost ? (r.monitorCount || 0) : (r.monitorCount || 0);
                 return (
                   <div key={insp.id} style={{
                     padding: "12px 14px", borderBottom: i < companyInspections.length - 1 ? "1px solid #F3F4F6" : "none",
@@ -1181,8 +1200,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                   }} onClick={() => setSelectedInspection(insp)}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
+                          <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
+                        </div>
                         <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                        {(insp.start_reading || insp.end_reading) && (
+                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
+                            {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
+                          </div>
+                        )}
                         <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                           {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                         </div>
@@ -1205,7 +1232,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Toolbox Talks tab */}
         {activeTab === "toolbox" && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
@@ -1248,7 +1274,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Near Misses tab */}
         {activeTab === "nearmiss" && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
@@ -1290,7 +1315,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Incidents tab */}
         {activeTab === "incident" && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
@@ -1332,7 +1356,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* Daily Reports tab */}
         {activeTab === "daily" && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
@@ -1372,7 +1395,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {/* SOPs tab */}
         {activeTab === "sops" && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
