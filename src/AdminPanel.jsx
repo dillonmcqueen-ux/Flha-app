@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -596,12 +597,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       <div style={st.body}>
         {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#FEE2E2" : "#DCFCE7", color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#991B1B" : "#166534", fontSize: 14 }}>{msg}</div>}
 
-        <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 14 }}>
+        <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
           <button style={st.tab(manageTab === "profile")} onClick={() => { setManageTab("profile"); setMsg(""); }}>Profile</button>
           <button style={st.tab(manageTab === "sops")} onClick={() => { setManageTab("sops"); setMsg(""); }}>SOPs</button>
           <button style={st.tab(manageTab === "sites")} onClick={() => { setManageTab("sites"); setMsg(""); }}>Sites</button>
           <button style={st.tab(manageTab === "equipment")} onClick={() => { setManageTab("equipment"); setMsg(""); }}>Equipment</button>
           <button style={st.tab(manageTab === "fields")} onClick={() => { setManageTab("fields"); setMsg(""); }}>Fields</button>
+          <button style={st.tab(manageTab === "monthly")} onClick={() => { setManageTab("monthly"); setMsg(""); }}>Monthly</button>
           <button style={st.tab(manageTab === "codes")} onClick={() => { setManageTab("codes"); setMsg(""); }}>Codes</button>
         </div>
 
@@ -783,6 +785,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               ))}
             </div>
           </div>
+        )}
+
+        {manageTab === "monthly" && (
+          <MonthlyInspectionBuilder companyId={activeId} token={token} />
         )}
 
         {manageTab === "codes" && (
