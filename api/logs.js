@@ -1,7 +1,7 @@
 // api/logs.js
-// Handles Equipment Inspections and Toolbox Talks — submitting, viewing,
-// and deleting — with the same session checks as the other protected
-// endpoints. One file covers both since they work the same way.
+// Handles Equipment Inspections (pre-trip + post-trip), Toolbox Talks, and
+// Daily Reports — submitting, viewing, and deleting — with the same
+// session checks as the other protected endpoints.
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -29,11 +29,15 @@ function verifySession(token) {
 const TABLES = {
   inspection: {
     name: 'inspections',
-    listColumns: 'id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url',
+    listColumns: 'id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes',
   },
   toolbox: {
     name: 'toolbox_talks',
     listColumns: 'id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at',
+  },
+  daily: {
+    name: 'daily_reports',
+    listColumns: 'id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at',
   },
 };
 
@@ -48,6 +52,39 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Worker: check a piece of equipment before starting an inspection ─
+    // Only applies to inspections. Returns:
+    //  - openPretrip: a pre-trip from TODAY on this machine with no matching
+    //    post-trip yet (so the worker can be offered "do the post-trip")
+    //  - lastInspection: the most recent inspection of any kind on this
+    //    machine, so we can flag if it had defects/monitor items
+    if (action === 'check_equipment') {
+      if (type !== 'inspection') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      const { equipmentLabel } = req.body;
+      if (!equipmentLabel) return res.status(400).json({ error: 'Missing equipment.' });
+
+      const { data, error } = await supabaseAdmin
+        .from('inspections')
+        .select('id, worker_name, equipment_label, created_at, results_json, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes')
+        .eq('company_id', session.companyId)
+        .eq('equipment_label', equipmentLabel)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) return res.status(500).json({ error: 'Could not check equipment history.' });
+
+      const rows = data || [];
+      const lastInspection = rows[0] || null;
+
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const pretripsToday = rows.filter(r => (r.trip_type || 'pretrip') === 'pretrip' && new Date(r.created_at) >= startOfDay);
+      const openPretrip = pretripsToday.find(pt =>
+        !rows.some(r => r.trip_type === 'posttrip' && r.linked_inspection_id === pt.id)
+      ) || null;
+
+      return res.status(200).json({ openPretrip, lastInspection });
+    }
+
     // ── Worker: submit a new record ─────────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
