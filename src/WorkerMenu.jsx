@@ -5,6 +5,7 @@ import ToolboxTalk from "./ToolboxTalk.jsx";
 import NearMiss from "./NearMiss.jsx";
 import Incident from "./Incident.jsx";
 import DailyReport from "./DailyReport.jsx";
+import MonthlyInspection from "./MonthlyInspection.jsx";
 
 // Document types. `ready: false` shows a "coming soon" state.
 const DOC_TYPES = [
@@ -14,6 +15,7 @@ const DOC_TYPES = [
   { key: "nearmiss", icon: "⚠️", title: "Near Miss Report", desc: "Report a close call", ready: true, accent: "#D97706" },
   { key: "incident", icon: "🚑", title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626" },
   { key: "daily", icon: "📋", title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
+  { key: "monthly", icon: "🗓️", title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
 ];
 
 export default function WorkerMenu({ companyId, companyName, onLogout, token }) {
@@ -35,7 +37,10 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
     return <Incident companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "daily") {
-    return <DailyReport companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} />;
+    return <DailyReport companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+  }
+  if (doc === "monthly") {
+    return <MonthlyInspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
 
   const s = {
