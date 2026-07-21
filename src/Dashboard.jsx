@@ -587,6 +587,89 @@ function DailyCard({ dr, onClose, onDelete }) {
   );
 }
 
+function MonthlyRecordCard({ data, onClose }) {
+  if (!data) return null;
+  const { record, form, site, items } = data;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#4338CA" }}>{form?.title}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{site?.name} · {record.period_month}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#4338CA", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        {record.ai_summary && (
+          <div style={{ background: "#EEF2FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", marginBottom: 4 }}>SUMMARY</div>
+            <div style={{ fontSize: 14, color: "#374151" }}>{record.ai_summary}</div>
+          </div>
+        )}
+        <div style={{ fontSize: 13, color: "#374151", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
+
+        {items.map((it, i) => (
+          <div key={it.id} style={{ border: `1.5px solid ${it.answer ? "#86EFAC" : "#FCA5A5"}`, background: it.answer ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{i + 1}. {it.question_text}</div>
+              <span style={{ fontSize: 12, fontWeight: 800, color: it.answer ? "#16A34A" : "#DC2626", flexShrink: 0, marginLeft: 8 }}>{it.answer ? "YES" : "NO"}</span>
+            </div>
+            {it.notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
+            {it.corrective_action && (
+              <div style={{ fontSize: 12, marginTop: 6, color: it.corrective_action.status === "resolved" ? "#166534" : "#991B1B", fontWeight: 700 }}>
+                {it.corrective_action.status === "resolved" ? "✓ Resolved" : "⚠ Open"}
+                {it.corrective_action.responsible_name ? ` · ${it.corrective_action.responsible_name}` : ""}
+                {it.corrective_action.target_date ? ` · Due ${it.corrective_action.target_date}` : ""}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CorrectiveActionRow({ ca, onUpdate }) {
+  const [responsibleName, setResponsibleName] = useState(ca.responsible_name || "");
+  const [targetDate, setTargetDate] = useState(ca.target_date || "");
+  const [saving, setSaving] = useState(false);
+  const isResolved = ca.status === "resolved";
+
+  const save = async (newStatus) => {
+    setSaving(true);
+    await onUpdate(ca.id, { responsibleName, targetDate, status: newStatus });
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ border: `1.5px solid ${isResolved ? "#86EFAC" : "#FCA5A5"}`, background: isResolved ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 2 }}>{ca.question_text}</div>
+      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>{ca.site_name} · {ca.period_month} · reported by {ca.submitted_by}</div>
+      <div style={{ fontSize: 13, color: "#374151", marginBottom: 10, fontStyle: "italic" }}>{ca.description}</div>
+      {isResolved ? (
+        <div style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>
+          ✓ Resolved by {ca.responsible_name || "—"} · {ca.resolved_at ? new Date(ca.resolved_at).toLocaleDateString("en-CA") : ""}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <input placeholder="Responsible person" value={responsibleName} onChange={e => setResponsibleName(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} />
+            <input type="date" value={targetDate || ""} onChange={e => setTargetDate(e.target.value)} style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => save("open")} disabled={saving} style={{ flex: 1, background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Save Assignment</button>
+            <button onClick={() => save("resolved")} disabled={saving} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✓ Mark Resolved</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, token = null }) {
   const [companies, setCompanies] = useState([]);
@@ -602,6 +685,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [selectedDaily, setSelectedDaily] = useState(null);
   const [sops, setSops] = useState([]);
   const [selectedInspection, setSelectedInspection] = useState(null);
+  const [monthlyRecords, setMonthlyRecords] = useState([]);
+  const [monthlyActions, setMonthlyActions] = useState([]);
+  const [selectedMonthlyRecord, setSelectedMonthlyRecord] = useState(null);
+  const [monthlySubTab, setMonthlySubTab] = useState("records"); // records | actions
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -638,7 +725,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIds(new Set());
   };
 
-  // FLHA deletes go through our protected server endpoint.
   const deleteFlha = async (id, workerName) => {
     if (!window.confirm(`Delete the FLHA for ${workerName || "this worker"}? This cannot be undone.`)) return;
     try {
@@ -653,8 +739,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
-  // FLHA approval goes through our protected server endpoint (the PDF
-  // itself is still generated in the browser, same as before).
   const approveFLHA = async (record, supName, supSignature) => {
     const now = new Date();
     const co = companies.find(c => c.id === record.company_id);
@@ -688,7 +772,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedFlha(null);
   };
 
-  // FLHA bulk delete goes through our protected server endpoint.
   const deleteSelected = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
@@ -771,6 +854,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         if (drRes.ok) dr = drData.records || [];
       } catch (e) { /* leave dr empty if the request fails */ }
 
+      let mr = [];
+      try {
+        const mrRes = await fetch("/api/monthly", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_records", token }),
+        });
+        const mrData = await mrRes.json();
+        if (mrRes.ok) mr = mrData.records || [];
+      } catch (e) { /* leave mr empty if the request fails */ }
+
+      let ma = [];
+      try {
+        const maRes = await fetch("/api/monthly", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_corrective_actions", token }),
+        });
+        const maData = await maRes.json();
+        if (maRes.ok) ma = maData.actions || [];
+      } catch (e) { /* leave ma empty if the request fails */ }
+
       const visibleCompanies = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)
         : (cos || []);
@@ -782,6 +885,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setNearMisses(nm);
       setIncidents(inc);
       setDailyReports(dr);
+      setMonthlyRecords(mr);
+      setMonthlyActions(ma);
       setSops(ss || []);
       if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
       setLoading(false);
@@ -796,6 +901,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const companyNearMisses = nearMisses.filter(n => n.company_id === selectedCompany);
   const companyIncidents = incidents.filter(n => n.company_id === selectedCompany);
   const companyDaily = dailyReports.filter(d => d.company_id === selectedCompany);
+  const companyMonthlyRecords = monthlyRecords.filter(r => r.company_id === selectedCompany);
+  const companyMonthlyActions = monthlyActions.filter(a => a.company_id === selectedCompany);
 
   const deleteDaily = async (id) => {
     if (!window.confirm("Delete this daily report? This cannot be undone.")) return;
@@ -809,13 +916,40 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedDaily(null);
   };
 
+  const openMonthlyRecord = async (record) => {
+    try {
+      const res = await fetch("/api/monthly", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_record_detail", token, recordId: record.id }),
+      });
+      const data = await res.json();
+      if (res.ok) setSelectedMonthlyRecord(data);
+    } catch (e) { /* ignore */ }
+  };
+
+  const updateCorrectiveAction = async (actionId, { responsibleName, targetDate, status }) => {
+    try {
+      const res = await fetch("/api/monthly", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_corrective_action", token, actionId, responsibleName, targetDate, status }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMonthlyActions(prev => prev.map(a => a.id === actionId
+          ? { ...a, responsible_name: responsibleName, target_date: targetDate, status, resolved_at: status === "resolved" ? new Date().toISOString() : null }
+          : a));
+      }
+    } catch (e) { /* ignore */ }
+  };
+
   const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
   const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
   const docsThisWeek = [
-    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily,
+    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily, ...companyMonthlyRecords,
   ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
+  const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
   const reviewNearMiss = async (id, notes) => {
     try {
@@ -991,6 +1125,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} />}
       {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} />}
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
+      {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
 
       <div style={styles.header}>
         <div>
@@ -1039,9 +1174,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             <div style={{ fontSize: 26, fontWeight: 800, color: needsReview > 0 ? "#fff" : "#94A3B8" }}>{needsReview}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚩 Needs Review</div>
           </div>
-          <div onClick={() => setActiveTab("incident")} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: incidentCount > 0 ? "#DC2626" : "#94A3B8" }}>{incidentCount}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚑 Incidents</div>
+          <div onClick={() => { setActiveTab("monthly"); setMonthlySubTab("actions"); }} style={{ background: openCorrectiveCount > 0 ? "#4338CA" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: openCorrectiveCount > 0 ? "none" : "1px solid #F1F5F9" }}>
+            <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
           </div>
           <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
@@ -1049,7 +1184,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         </div>
 
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12 }}>
+        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
           <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
           <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
@@ -1060,6 +1195,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
           </button>
           <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
+          <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
+            🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
+          </button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -1191,8 +1329,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               companyInspections.map((insp, i) => {
                 const r = insp.results_json || {};
                 const isPost = insp.trip_type === "posttrip";
-                const def = isPost ? (r.defectiveCount || 0) : (r.defectiveCount || 0);
-                const mon = isPost ? (r.monitorCount || 0) : (r.monitorCount || 0);
+                const def = r.defectiveCount || 0;
+                const mon = r.monitorCount || 0;
                 return (
                   <div key={insp.id} style={{
                     padding: "12px 14px", borderBottom: i < companyInspections.length - 1 ? "1px solid #F3F4F6" : "none",
@@ -1393,6 +1531,93 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               })
             )}
           </div>
+        )}
+
+        {activeTab === "monthly" && (
+          <>
+            <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
+              <button style={styles.tab(monthlySubTab === "records")} onClick={() => setMonthlySubTab("records")}>Submissions</button>
+              <button style={styles.tab(monthlySubTab === "actions")} onClick={() => setMonthlySubTab("actions")}>
+                Corrective Actions{companyMonthlyActions.filter(a => a.status !== "resolved").length > 0 ? ` (${companyMonthlyActions.filter(a => a.status !== "resolved").length})` : ""}
+              </button>
+            </div>
+
+            {monthlySubTab === "records" && (
+              <div style={styles.card}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+                  {company?.name} — Monthly Inspections
+                </div>
+                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any submission to view full details.</div>
+                {companyMonthlyRecords.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🗓️</div>
+                    No monthly inspections submitted yet.
+                  </div>
+                ) : (
+                  companyMonthlyRecords.map((r, i) => (
+                    <div key={r.id} style={{
+                      padding: "12px 14px", borderBottom: i < companyMonthlyRecords.length - 1 ? "1px solid #F3F4F6" : "none",
+                      cursor: "pointer"
+                    }} onClick={() => openMonthlyRecord(r)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ flex: 1, paddingRight: 10 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                          {r.open_actions > 0
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
+                            : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
+                          <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
+                            {r.pdf_url ? "📄 PDF" : "No PDF"} →
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {monthlySubTab === "actions" && (
+              <div style={styles.card}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+                  {company?.name} — Corrective Actions
+                </div>
+                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Assign a responsible person and target date, then mark resolved once complete.</div>
+                {companyMonthlyActions.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                    No corrective actions logged yet.
+                  </div>
+                ) : (
+                  <>
+                    {companyMonthlyActions.filter(a => a.status !== "resolved").length > 0 && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                          Open ({companyMonthlyActions.filter(a => a.status !== "resolved").length})
+                        </div>
+                        {companyMonthlyActions.filter(a => a.status !== "resolved").map(ca => (
+                          <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={updateCorrectiveAction} />
+                        ))}
+                      </div>
+                    )}
+                    {companyMonthlyActions.filter(a => a.status === "resolved").length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                          Resolved ({companyMonthlyActions.filter(a => a.status === "resolved").length})
+                        </div>
+                        {companyMonthlyActions.filter(a => a.status === "resolved").map(ca => (
+                          <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={updateCorrectiveAction} />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {activeTab === "sops" && (
