@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
+import CustomFormBuilder from "./CustomFormBuilder.jsx";
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -57,6 +58,34 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [fieldList, setFieldList] = useState([]);
   const [newField, setNewField] = useState({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
   const [newEquip, setNewEquip] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
+
+  // ── document active/deactivated toggles ────────────────────
+  const [docSettings, setDocSettings] = useState([]);
+  const [loadingDocSettings, setLoadingDocSettings] = useState(false);
+
+  const loadDocSettings = async (companyId) => {
+    setLoadingDocSettings(true);
+    try {
+      const res = await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_document_settings", token, companyId }),
+      });
+      const data = await res.json();
+      if (res.ok) setDocSettings(data.documents || []);
+    } catch (e) { /* leave list as-is */ }
+    setLoadingDocSettings(false);
+  };
+
+  const toggleDocSetting = async (doc) => {
+    const nextActive = !doc.isActive;
+    setDocSettings(prev => prev.map(d => d.key === doc.key ? { ...d, isActive: nextActive } : d));
+    try {
+      await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_document_setting", token, companyId: activeId, documentKey: doc.key, isActive: nextActive }),
+      });
+    } catch (e) { /* leave optimistic state if the request fails */ }
+  };
 
   // Companies now come from our protected server endpoint (it has the real
   // worker/supervisor codes and contact info, so it needs to be admin-only).
@@ -574,6 +603,18 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     );
   }
 
+  // ═══ MANAGE — CUSTOM DOCUMENTS (full-screen builder) ═════════
+  if (view === "manage" && manageTab === "custom") {
+    return (
+      <CustomFormBuilder
+        companyId={activeId}
+        companyName={activeCompany?.name}
+        onBack={() => setManageTab("profile")}
+        token={token}
+      />
+    );
+  }
+
   // ═══ MANAGE ═══════════════════════════════════════════════
   const cnt = counts[activeId] || { flhas: 0, sops: 0 };
   const stp = activeCompany ? steps(activeCompany) : {};
@@ -604,6 +645,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <button style={st.tab(manageTab === "equipment")} onClick={() => { setManageTab("equipment"); setMsg(""); }}>Equipment</button>
           <button style={st.tab(manageTab === "fields")} onClick={() => { setManageTab("fields"); setMsg(""); }}>Fields</button>
           <button style={st.tab(manageTab === "monthly")} onClick={() => { setManageTab("monthly"); setMsg(""); }}>Monthly</button>
+          <button style={st.tab(manageTab === "custom")} onClick={() => { setManageTab("custom"); setMsg(""); }}>Custom</button>
+          <button style={st.tab(manageTab === "forms")} onClick={() => { setManageTab("forms"); setMsg(""); loadDocSettings(activeId); }}>Forms</button>
           <button style={st.tab(manageTab === "codes")} onClick={() => { setManageTab("codes"); setMsg(""); }}>Codes</button>
         </div>
 
@@ -789,6 +832,56 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
         {manageTab === "monthly" && (
           <MonthlyInspectionBuilder companyId={activeId} token={token} />
+        )}
+
+        {manageTab === "forms" && (
+          <div style={st.card}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Forms — Active / Deactivated</div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>Control which document types this company's workers can see and submit. Deactivating a form hides it from the worker menu, but doesn't delete any submitted records.</div>
+
+            {loadingDocSettings ? (
+              <div style={{ textAlign: "center", padding: "24px 0", color: C.muted }}>Loading…</div>
+            ) : docSettings.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "24px 0", color: C.muted }}>Nothing to show yet.</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 4 }}>Built-in forms</div>
+                {docSettings.filter(d => !d.isCustom).map((d, i, arr) => (
+                  <div key={d.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{d.label}</div>
+                    <button onClick={() => toggleDocSetting(d)} style={{
+                      background: d.isActive ? "#DCFCE7" : "#F1F5F9",
+                      color: d.isActive ? C.green : C.muted,
+                      border: "none", borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 800, cursor: "pointer",
+                    }}>
+                      {d.isActive ? "● Active" : "○ Inactive"}
+                    </button>
+                  </div>
+                ))}
+
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 20 }}>Custom documents</div>
+                {docSettings.filter(d => d.isCustom).length === 0 ? (
+                  <div style={{ color: C.muted, padding: "10px 0", fontSize: 13 }}>No custom documents created yet for this company.</div>
+                ) : (
+                  docSettings.filter(d => d.isCustom).map((d, i, arr) => (
+                    <div key={d.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span>{d.icon}</span>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{d.label}</div>
+                      </div>
+                      <button onClick={() => toggleDocSetting(d)} style={{
+                        background: d.isActive ? "#DCFCE7" : "#F1F5F9",
+                        color: d.isActive ? C.green : C.muted,
+                        border: "none", borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 800, cursor: "pointer",
+                      }}>
+                        {d.isActive ? "● Active" : "○ Inactive"}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </>
+            )}
+          </div>
         )}
 
         {manageTab === "codes" && (
