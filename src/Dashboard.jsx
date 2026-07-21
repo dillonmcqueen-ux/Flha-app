@@ -686,7 +686,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [sops, setSops] = useState([]);
   const [selectedInspection, setSelectedInspection] = useState(null);
   const [monthlyRecords, setMonthlyRecords] = useState([]);
-  const [debugInfo, setDebugInfo] = useState("");
   const [monthlyActions, setMonthlyActions] = useState([]);
   const [selectedMonthlyRecord, setSelectedMonthlyRecord] = useState(null);
   const [monthlySubTab, setMonthlySubTab] = useState("records"); // records | actions
@@ -862,11 +861,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           body: JSON.stringify({ action: "list_records", token }),
         });
         const mrData = await mrRes.json();
-        setDebugInfo(`Status: ${mrRes.status} | ${JSON.stringify(mrData)}`);
         if (mrRes.ok) mr = mrData.records || [];
-      } catch (e) {
-        setDebugInfo(`FETCH ERROR: ${e.message}`);
-      }
+      } catch (e) { /* leave mr empty if the request fails */ }
 
       let ma = [];
       try {
@@ -1123,7 +1119,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   return (
     <div style={styles.wrap}>
-      {debugInfo && <div style={{ background: "#000", color: "#0f0", padding: 10, fontSize: 11, wordBreak: "break-all", position: "relative", zIndex: 999 }}>{debugInfo}</div>}
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
