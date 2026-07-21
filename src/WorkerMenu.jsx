@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import App from "./App.jsx";
 import Inspection from "./Inspection.jsx";
 import ToolboxTalk from "./ToolboxTalk.jsx";
@@ -6,9 +6,10 @@ import NearMiss from "./NearMiss.jsx";
 import Incident from "./Incident.jsx";
 import DailyReport from "./DailyReport.jsx";
 import MonthlyInspection from "./MonthlyInspection.jsx";
+import CustomForm from "./CustomForm.jsx";
 
-// Document types. `ready: false` shows a "coming soon" state.
-const DOC_TYPES = [
+// Built-in document types. `ready: false` shows a "coming soon" state.
+const BUILTIN_TYPES = [
   { key: "flha", icon: "🦺", title: "FLHA", desc: "Field Level Hazard Assessment", ready: true, accent: "#F97316" },
   { key: "inspection", icon: "🚜", title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1" },
   { key: "toolbox", icon: "🧰", title: "Toolbox Talk", desc: "Crew safety meeting record", ready: true, accent: "#7C3AED" },
@@ -20,6 +21,34 @@ const DOC_TYPES = [
 
 export default function WorkerMenu({ companyId, companyName, onLogout, token }) {
   const [doc, setDoc] = useState(null);
+  const [customFormId, setCustomFormId] = useState(null);
+  const [builtinActive, setBuiltinActive] = useState(null); // null = loading
+  const [customForms, setCustomForms] = useState([]);
+
+  useEffect(() => {
+    async function loadDocs() {
+      try {
+        const res = await fetch("/api/customforms", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_worker_documents", token }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setBuiltinActive(data.builtinActive || {});
+          setCustomForms(data.customForms || []);
+        } else {
+          // If the endpoint fails, default to showing everything so workers
+          // aren't locked out by a transient error.
+          setBuiltinActive({});
+          setCustomForms([]);
+        }
+      } catch (e) {
+        setBuiltinActive({});
+        setCustomForms([]);
+      }
+    }
+    loadDocs();
+  }, [token]);
 
   if (doc === "flha") {
     return <App forcedCompanyId={companyId} onLogout={() => setDoc(null)} token={token} />;
@@ -42,6 +71,9 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
   if (doc === "monthly") {
     return <MonthlyInspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
+  if (doc === "custom" && customFormId) {
+    return <CustomForm companyId={companyId} companyName={companyName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
+  }
 
   const s = {
     wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
@@ -53,6 +85,12 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
       display: "flex", alignItems: "center", gap: 14, opacity: ready ? 1 : 0.55,
     }),
   };
+
+  const visibleBuiltins = builtinActive
+    ? BUILTIN_TYPES.filter(d => builtinActive[d.key] !== false)
+    : BUILTIN_TYPES; // show everything while loading, then narrow once loaded
+
+  const loading = builtinActive === null;
 
   return (
     <div style={s.wrap}>
@@ -66,7 +104,7 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
 
       <div style={s.body}>
         <div style={{ display: "grid", gap: 12 }}>
-          {DOC_TYPES.map(d => (
+          {visibleBuiltins.map(d => (
             <div key={d.key} style={s.card(d.accent, d.ready)} onClick={() => d.ready && setDoc(d.key)}>
               <div style={{ width: 52, height: 52, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{d.icon}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -78,6 +116,24 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
                 : <span style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", background: "#F1F5F9", padding: "4px 9px", borderRadius: 20, flexShrink: 0 }}>SOON</span>}
             </div>
           ))}
+
+          {customForms.map(f => (
+            <div key={f.id} style={s.card(f.accent_color || "#4338CA", true)} onClick={() => { setCustomFormId(f.id); setDoc("custom"); }}>
+              <div style={{ width: 52, height: 52, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{f.icon || "📄"}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "#1E293B" }}>{f.title}</div>
+                <div style={{ fontSize: 13, color: "#64748B", marginTop: 1 }}>Custom document</div>
+              </div>
+              <span style={{ fontSize: 20, color: "#94A3B8", flexShrink: 0 }}>→</span>
+            </div>
+          ))}
+
+          {!loading && visibleBuiltins.length === 0 && customForms.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#9CA3AF" }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+              No forms are currently set up for your company. Ask your admin.
+            </div>
+          )}
         </div>
       </div>
     </div>
