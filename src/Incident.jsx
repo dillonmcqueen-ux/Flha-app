@@ -43,7 +43,7 @@ export default function Incident({ companyId, companyName, onBack, onLogout, tok
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null);
   const [companyLogo, setCompanyLogo] = useState("");
-  const cf = useCustomFields(companyId, "incident");
+  const cf = useCustomFields(companyId, "incident", token);
 
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
