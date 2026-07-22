@@ -25,7 +25,7 @@ export default function NearMiss({ companyId, companyName, onBack, onLogout, tok
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null); // { whatHappened, contributingFactors:[], potentialOutcome, correctiveActions:[] }
   const [companyLogo, setCompanyLogo] = useState("");
-  const cf = useCustomFields(companyId, "nearmiss");
+  const cf = useCustomFields(companyId, "nearmiss", token);
 
   // editing
   const [editField, setEditField] = useState(null);
