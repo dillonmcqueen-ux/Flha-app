@@ -22,7 +22,7 @@ export default function Inspection({ companyId, companyName, onBack, onLogout, t
   const [items, setItems] = useState([]);        // [{ item, condition, note }]
   const [inspectionMeta, setInspectionMeta] = useState({});
   const [companyLogo, setCompanyLogo] = useState("");
-  const cf = useCustomFields(companyId, "inspection");
+  const cf = useCustomFields(companyId, "inspection", token);
   const [signed, setSigned] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
   const canvasRef = useRef(null);
