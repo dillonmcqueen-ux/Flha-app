@@ -176,18 +176,39 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
         console.error("custom fields read error:", e.message);
       }
 
-      let sopsData = null;
+            let sopsData = null;
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sops", token, companyId: company.id }),
         });
-        sopsData = await sopsRes.json();
-        if (!sopsRes.ok) {
-          setDebugInfo(`sops query error: ${sopsData.error} | token:${token ? "present" : "MISSING"} | sites:${JSON.stringify(siteData)} | cf:${JSON.stringify(cfData)}`);
+        const rawText = await sopsRes.text();
+        try {
+          sopsData = JSON.parse(rawText);
+        } catch (parseErr) {
+          setDebugInfo(`sops NON-JSON response — status:${sopsRes.status} | raw:${rawText.slice(0, 200)}`);
           setSopsLoading(false);
           return;
+        }
+        if (!sopsRes.ok) {
+          setDebugInfo(`sops query error: ${sopsData.error} | status:${sopsRes.status}`);
+          setSopsLoading(false);
+          return;
+        }
+        const sops = sopsData.sops || [];
+        if (sops.length === 0) {
+          setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
+          setSopsLoading(false);
+          return;
+        }
+        setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
+      } catch (e) {
+        setDebugInfo(`sops fetch error: ${e.message}`);
+        setSopsLoading(false);
+        return;
+      }
+
         }
         const sops = sopsData.sops || [];
         if (sops.length === 0) {
