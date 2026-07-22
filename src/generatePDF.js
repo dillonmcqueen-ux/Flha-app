@@ -24,15 +24,13 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval, crewSignatures }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   const W = 210, margin = 16, contentW = W - margin * 2;
   let y = 20;
 
-  // Try to load the company logo (remote URL → data URL) before drawing.
-  // Use fetch→blob→dataURL which avoids canvas CORS tainting issues.
   let logoDataUrl = null;
   if (companyLogo) {
     try {
@@ -45,7 +43,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
         reader.readAsDataURL(blob);
       });
     } catch (e) {
-      logoDataUrl = null; // skip logo if it can't load
+      logoDataUrl = null;
     }
   }
 
@@ -55,12 +53,11 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text("FLHA Report", margin, 13);
+  doc.text("Job Hazard Analysis (JHA)", margin, 13);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text("Field Level Hazard Assessment", margin, 20);
 
-  // Logo top-right (if available), else date
   if (logoDataUrl) {
     try {
       const fmt = logoDataUrl.includes("image/png") ? "PNG" : logoDataUrl.includes("image/webp") ? "WEBP" : "JPEG";
@@ -164,88 +161,127 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     y += 4;
   }
 
-  // ── Hazards & Controls ───────────────────────────────────
+  // ── Hazard / Control / SOP Ref — JHA-style table ─────────
+  const COL = {
+    num: margin,
+    numW: 8,
+    hazard: margin + 8,
+    hazardW: contentW * 0.30,
+    control: margin + 8 + contentW * 0.30,
+    controlW: contentW * 0.34,
+    sop: margin + 8 + contentW * 0.64,
+    sopW: contentW * 0.19,
+    risk: margin + contentW - (contentW - contentW * 0.83) + (contentW * 0.02),
+    riskW: contentW * 0.17,
+  };
+  // simpler fixed columns (mm), sums to contentW
+  const cNumX = margin, cNumW = 8;
+  const cHazX = cNumX + cNumW, cHazW = 46;
+  const cCtrlX = cHazX + cHazW, cCtrlW = 56;
+  const cSopX = cCtrlX + cCtrlW, cSopW = 40;
+  const cRiskX = cSopX + cSopW, cRiskW = contentW - cNumW - cHazW - cCtrlW - cSopW;
+
+  const drawTableHeader = () => {
+    doc.setFillColor(30, 58, 95);
+    doc.rect(margin, y, contentW, 7, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.text("#", cNumX + 2, y + 4.8);
+    doc.text("HAZARD", cHazX + 2, y + 4.8);
+    doc.text("CONTROL MEASURE", cCtrlX + 2, y + 4.8);
+    doc.text("SOP REF", cSopX + 2, y + 4.8);
+    doc.text("RISK", cRiskX + 2, y + 4.8);
+    y += 7;
+  };
+
+  const riskColors = {
+    Extreme: { bg: [254, 226, 226], text: [127, 29, 29] },
+    High: { bg: [254, 242, 242], text: [220, 38, 38] },
+    Medium: { bg: [255, 251, 235], text: [217, 119, 6] },
+    Low: { bg: [240, 253, 244], text: [22, 163, 74] },
+  };
+
   if (flha.hazards?.length) {
     doc.setTextColor(30, 58, 95);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("Hazards & Controls", margin, y);
+    doc.text("Hazard / Control / SOP Reference Checklist", margin, y);
     y += 6;
+
+    drawTableHeader();
 
     flha.hazards.forEach((hz, hzIdx) => {
       // Task section header when the task changes
       const prevTask = hzIdx > 0 ? flha.hazards[hzIdx - 1].task : null;
       if (hz.task && hz.task !== prevTask) {
         const taskNum = [...new Set(flha.hazards.slice(0, hzIdx + 1).map(x => x.task))].length;
-        const taskHeaderH = 10;
-        if (y + taskHeaderH > 275) { doc.addPage(); y = 20; }
+        if (y + 10 > 275) { doc.addPage(); y = 20; drawTableHeader(); }
         doc.setFillColor(239, 246, 255);
-        doc.roundedRect(margin, y, contentW, 9, 2, 2, "F");
+        doc.rect(margin, y, contentW, 8, "F");
         doc.setTextColor(30, 58, 95);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(8);
-        doc.text(`TASK ${taskNum}`, margin + 3, y + 3.5);
+        doc.setFontSize(7.5);
+        doc.text(`TASK ${taskNum}: `, margin + 2, y + 5.2);
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        const taskLine = doc.splitTextToSize(hz.task, contentW - 6)[0];
-        doc.text(taskLine, margin + 3, y + 7);
-        y += 12;
+        const taskLabelW = doc.getTextWidth(`TASK ${taskNum}: `);
+        const taskLine = doc.splitTextToSize(hz.task, contentW - taskLabelW - 6)[0];
+        doc.text(taskLine, margin + 2 + taskLabelW, y + 5.2);
+        y += 8;
       }
-      const riskColors = {
-        Extreme: [254, 226, 226],
-        High: [254, 242, 242],
-        Medium: [255, 251, 235],
-        Low: [240, 253, 244],
-      };
-      const riskText = {
-        Extreme: [127, 29, 29],
-        High: [220, 38, 38],
-        Medium: [217, 119, 6],
-        Low: [22, 163, 74],
-      };
-      const bg = riskColors[hz.risk] || riskColors.Low;
-      const tc = riskText[hz.risk] || riskText.Low;
 
-      // estimate height
-      const hazardLines = doc.splitTextToSize(hz.hazard, contentW - 30).length;
-      const controlLines = doc.splitTextToSize(`Control: ${hz.control}`, contentW - 8).length;
-      const boxH = 8 + hazardLines * 5 + controlLines * 5 + (hz.sopRef ? 5 : 0) + 4;
+      const hazardLines = doc.splitTextToSize(hz.hazard || "", cHazW - 4);
+      const controlLines = doc.splitTextToSize(hz.control || "", cCtrlW - 4);
+      const sopLines = doc.splitTextToSize(hz.sopRef || "—", cSopW - 4);
+      const maxLines = Math.max(hazardLines.length, controlLines.length, sopLines.length, 1);
+      const rowH = Math.max(9, maxLines * 4.2 + 3);
 
-      // Break to next page if the whole box won't fit above the footer (footer ~285mm)
-      if (y + boxH > 275) { doc.addPage(); y = 20; }
+      if (y + rowH > 280) { doc.addPage(); y = 20; drawTableHeader(); }
 
-      doc.setFillColor(...bg);
-      doc.roundedRect(margin, y, contentW, boxH, 2, 2, "F");
+      const rc = riskColors[hz.risk] || riskColors.Low;
+      const zebra = hzIdx % 2 === 1;
+      doc.setFillColor(...(zebra ? [248, 250, 252] : [255, 255, 255]));
+      doc.rect(margin, y, contentW, rowH, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.15);
+      doc.rect(margin, y, contentW, rowH, "S");
 
-      // Risk badge
-      doc.setFillColor(...tc);
-      doc.roundedRect(W - margin - 22, y + 2, 20, 6, 1, 1, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(7);
+      const textY = y + 4.5;
+      doc.setTextColor(148, 163, 184);
       doc.setFont("helvetica", "bold");
-      doc.text(hz.risk || "Low", W - margin - 12, y + 6.5, { align: "center" });
-
-      // Hazard name
-      doc.setTextColor(30, 58, 95);
-      doc.setFontSize(9);
-      doc.text(hz.hazard, margin + 4, y + 6, { maxWidth: contentW - 30 });
-      let rowY = y + 6 + hazardLines * 5;
-
-      // Control
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(55, 65, 81);
       doc.setFontSize(8);
-      rowY = wrapText(doc, `Control: ${hz.control}`, margin + 4, rowY, contentW - 8, 4.5);
+      doc.text(String(hzIdx + 1), cNumX + 2, textY);
 
-      // SOP ref
-      if (hz.sopRef) {
-        doc.setTextColor(107, 114, 128);
-        doc.setFontSize(7);
-        rowY = wrapText(doc, `SOP: ${hz.sopRef}`, margin + 4, rowY, contentW - 8, 4);
-      }
+      doc.setTextColor(30, 41, 59);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      hazardLines.forEach((line, li) => doc.text(line, cHazX + 2, textY + li * 4.2));
 
-      y += boxH + 3;
+      doc.setTextColor(55, 65, 81);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      controlLines.forEach((line, li) => doc.text(line, cCtrlX + 2, textY + li * 4.2));
+
+      doc.setTextColor(107, 114, 128);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(6.8);
+      sopLines.forEach((line, li) => doc.text(line, cSopX + 2, textY + li * 4.2));
+
+      // Risk badge, vertically centered in the row
+      const badgeW = cRiskW - 4, badgeH = 6;
+      const badgeY = y + rowH / 2 - badgeH / 2;
+      doc.setFillColor(...rc.bg);
+      doc.roundedRect(cRiskX + 2, badgeY, badgeW, badgeH, 1, 1, "F");
+      doc.setTextColor(...rc.text);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.text((hz.risk || "Low").toUpperCase(), cRiskX + 2 + badgeW / 2, badgeY + 4.2, { align: "center" });
+
+      y += rowH;
     });
+
+    // Column divider lines for the whole table run (visual polish)
+    y += 2;
   }
 
   // ── PPE Required ─────────────────────────────────────────
@@ -273,7 +309,23 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     y += 12;
   }
 
-  // ── Signature block ──────────────────────────────────────
+  if (flha.additionalNotes) {
+    if (y > 255) { doc.addPage(); y = 20; }
+    doc.setFillColor(249, 250, 251);
+    doc.roundedRect(margin, y, contentW, 6, 2, 2, "F");
+    doc.setTextColor(30, 58, 95);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("ADDITIONAL NOTES", margin + 4, y + 4.5);
+    y += 10;
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(55, 65, 81);
+    doc.setFontSize(8.5);
+    y = wrapText(doc, flha.additionalNotes, margin + 2, y, contentW - 4, 4.5);
+    y += 4;
+  }
+
+  // ── Primary worker signature block ───────────────────────
   if (y > 230) { doc.addPage(); y = 20; }
   y += 4;
   doc.setDrawColor(209, 213, 219);
@@ -286,15 +338,11 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.text("Worker Signature", margin, y);
   y += 4;
 
-  // Embed the drawn signature image if provided
   if (signatureDataUrl) {
     try {
       doc.addImage(signatureDataUrl, "PNG", margin, y, 70, 21);
-    } catch (e) {
-      // if image fails, skip silently
-    }
+    } catch (e) {}
   }
-  // signature underline
   doc.setDrawColor(150, 150, 150);
   doc.line(margin, y + 23, margin + 70, y + 23);
 
@@ -310,10 +358,46 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.text(amendedNote, margin, y + 34);
     doc.setFont("helvetica", "normal");
   }
+  y += 40;
+
+  // ── Crew sign-off block — other workers covered by this FLHA ──
+  if (crewSignatures && crewSignatures.length > 0) {
+    if (y > 245) { doc.addPage(); y = 20; }
+    doc.setDrawColor(209, 213, 219);
+    doc.line(margin, y, W - margin, y);
+    y += 8;
+    doc.setTextColor(30, 58, 95);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(`Additional Crew Sign-Off (${crewSignatures.length})`, margin, y);
+    y += 6;
+
+    const sigW = (contentW - 8) / 2, sigH = 26;
+    let col = 0;
+    crewSignatures.forEach((c) => {
+      if (col === 0 && y + sigH > 280) { doc.addPage(); y = 20; }
+      const x = margin + col * (sigW + 8);
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.2);
+      doc.roundedRect(x, y, sigW, sigH, 2, 2, "S");
+      if (c.signature) {
+        try { doc.addImage(c.signature, "PNG", x + 3, y + 2, sigW - 6, 14); } catch (e) {}
+      }
+      doc.setDrawColor(180, 180, 180);
+      doc.line(x + 3, y + 17, x + sigW - 3, y + 17);
+      doc.setTextColor(71, 85, 105);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.text(c.name || "—", x + 3, y + 22, { maxWidth: sigW - 6 });
+      if (col === 1) { y += sigH + 6; col = 0; } else { col = 1; }
+    });
+    if (col === 1) y += sigH + 6;
+    y += 2;
+  }
 
   // ── Supervisor approval block (extreme-risk sign-off) ────
   if (supervisorApproval) {
-    let sy = y + 40;
+    let sy = y + 6;
     if (sy > 240) { doc.addPage(); sy = 20; }
     doc.setDrawColor(22, 163, 74);
     doc.setLineWidth(0.4);
@@ -350,7 +434,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   } catch (e) { foraLogo = null; }
 
   // ── FORA branding footer on every page ───────────────────
-  const H = 297; // A4 height mm
+  const H = 297;
   const pageCount = doc.internal.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
@@ -397,7 +481,6 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     return null;
   }
 
-  // Get public URL
   const { data: urlData } = supabase.storage
     .from("flha-reports")
     .getPublicUrl(filename);
