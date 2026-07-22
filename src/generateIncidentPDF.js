@@ -18,8 +18,23 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   return y;
 }
 
+async function fetchAsDataUrl(url) {
+  try {
+    const resp = await fetch(url, { mode: "cors" });
+    const blob = await resp.blob();
+    return await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onloadend = () => res({ dataUrl: r.result, type: blob.type });
+      r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function generateAndUploadIncident(data) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields } = data;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields, photoUrls } = data;
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -102,6 +117,33 @@ export async function generateAndUploadIncident(data) {
   section("Root Cause", report?.rootCause || "—");
   section("Immediate Actions Taken", report?.immediateActions || []);
   section("Corrective Actions", report?.correctiveActions || []);
+
+  // photos — 2-column grid, fetched and embedded
+  if (photoUrls && photoUrls.length > 0) {
+    if (y > 240) { doc.addPage(); y = 20; }
+    doc.setTextColor(153, 27, 27); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+    doc.text(`Photos (${photoUrls.length})`, margin, y);
+    y += 8;
+
+    const colW = (contentW - 6) / 2, imgH = 55;
+    let col = 0;
+    for (const url of photoUrls) {
+      const fetched = await fetchAsDataUrl(url);
+      if (y + imgH > 280) { doc.addPage(); y = 20; col = 0; }
+      const x = margin + col * (colW + 6);
+      if (fetched) {
+        try {
+          const fmt = fetched.type.includes("png") ? "PNG" : "JPEG";
+          doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3);
+          doc.rect(x, y, colW, imgH);
+          doc.addImage(fetched.dataUrl, fmt, x + 1, y + 1, colW - 2, imgH - 2, undefined, "MEDIUM");
+        } catch (e) { /* skip this photo if it fails to embed */ }
+      }
+      if (col === 1) { y += imgH + 6; col = 0; } else { col = 1; }
+    }
+    if (col === 1) y += imgH + 6; // close out a half-filled row
+    y += 4;
+  }
 
   // signature
   if (y > 235) { doc.addPage(); y = 20; }
