@@ -176,7 +176,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
         console.error("custom fields read error:", e.message);
       }
 
-            let sopsData = null;
+      let sopsData = null;
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
