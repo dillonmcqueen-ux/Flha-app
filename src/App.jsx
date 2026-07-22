@@ -13,6 +13,45 @@ const FALLBACK_SOPS = {
 
 const STEPS = ["company", "voice", "review", "done"];
 
+// ── SOP relevance pre-filter ──────────────────────────────
+// With a short hand-typed policy list, sending everything to the model is
+// fine. But once a company condenses a long SOP document into 15-25+
+// policies, dumping the whole list dilutes the signal and the model tends
+// to fall back on generic, broadly-applicable policies (PPE, "do an FLHA")
+// rather than correctly picking the narrow, task-specific ones. So for
+// larger policy sets, we score each policy against the task description by
+// simple keyword overlap and only send the strongest matches.
+const SOP_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
+  "is", "are", "be", "must", "will", "all", "at", "by", "as", "this",
+  "that", "it", "should", "may", "not", "before", "after", "any", "into",
+  "from", "must", "when", "each", "such", "their", "has", "have",
+]);
+
+function tokenize(text) {
+  return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
+    w => w.length > 2 && !SOP_STOPWORDS.has(w)
+  );
+}
+
+function scorePolicyRelevance(policy, taskWordsSet) {
+  const policyWords = tokenize(policy);
+  let score = 0;
+  policyWords.forEach(w => { if (taskWordsSet.has(w)) score += 1; });
+  return score;
+}
+
+// Returns the policies most relevant to the task. If the company has a
+// small policy list, everything is sent as before — filtering only kicks
+// in once the list is large enough to cause dilution.
+function selectRelevantPolicies(policies, taskText, maxCount = 25) {
+  if (!policies || policies.length <= maxCount) return policies || [];
+  const taskWords = new Set(tokenize(taskText));
+  const scored = policies.map((p, i) => ({ p, i, score: scorePolicyRelevance(p, taskWords) }));
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  return scored.slice(0, maxCount).sort((a, b) => a.i - b.i).map(s => s.p);
+}
+
 function Badge({ text, color = "blue" }) {
   const colors = {
     blue: "background:#1D4ED820;color:#1D4ED8;border:1px solid #1D4ED840",
@@ -304,6 +343,11 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
     setGenError(false);
     const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
     const taskLabel = cleanTranscript;
+
+    // Pre-filter SOPs by relevance to this task before building the prompt.
+    // For small policy lists this is a no-op (everything is sent, as before).
+    const relevantPolicies = selectRelevantPolicies(sopData.policies, cleanTranscript, 25);
+
     const prompt = `You are an experienced field safety officer reviewing a worker's task description before they begin work. Your job is to identify ONLY the hazards that are genuinely relevant to what this specific worker has described — not a generic list.
 
 Company: ${companyName}
@@ -311,14 +355,14 @@ Worker: ${workerName}
 Job Site: ${jobSite}
 Task Description: "${cleanTranscript}"
 
-Company SOPs and Policies:
-${sopData.policies.map((p, i) => `${i + 1}. ${p}`).join("\n")}
+Company SOPs and Policies (pre-filtered to those most likely relevant to this task):
+${relevantPolicies.map((p, i) => `${i + 1}. ${p}`).join("\n")}
 
 INSTRUCTIONS:
 - Read the task description carefully. Only flag hazards that are directly present or likely given what the worker described.
 - Do NOT include generic hazards that have nothing to do with this task.
 - If the worker mentions excavation, flag excavation hazards. If they don't mention heights, don't flag fall hazards.
-- For sopAlerts, only include SOPs that are specifically triggered by this task — e.g. if no hot work is mentioned, don't include the hot work SOP.
+- For sopAlerts and sopRef, only cite a policy if it is SPECIFICALLY and clearly triggered by a concrete detail in the task description (a named piece of equipment, a specific hazard type, or a specific procedure) — not because it's broadly applicable to almost any task. Do NOT default to citing general catch-all policies (e.g. a blanket "PPE is mandatory" or "conduct an FLHA before starting" policy) as the reason for a hazard's control unless the hazard specifically calls for PPE or a procedure beyond the baseline. Every citation should feel like it was picked FOR this task, not reused from the last one.
 - For ppeRequired, only list PPE actually needed for this specific task.
 - Identify all hazards genuinely relevant to this task — typically 4-8. Include the everyday ones that belong on a thorough FLHA even when they are Low risk, such as weather/environmental conditions, communication/coordination, housekeeping, manual handling, and site access — as long as they actually relate to this task. The strict rating rules above are about HOW you rate a hazard's severity, NOT about excluding lower-risk hazards. A good FLHA captures the full picture: a few higher-risk items plus the routine Low/Medium ones.
 - Risk levels — rate the RESIDUAL risk (the risk that REMAINS after accounting for the safeguards and controls the worker has already described). Apply STRICTLY:
