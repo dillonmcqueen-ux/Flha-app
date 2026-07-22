@@ -74,6 +74,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // Admin-only: returns { [companyId]: sopCount } across all companies,
+    // for the console's completeness meter — avoids N calls to list_sops.
+    if (action === 'list_sops_counts') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { data, error } = await supabaseAdmin.from('sops').select('company_id');
+      if (error) return res.status(500).json({ error: 'Could not load SOP counts.' });
+      const counts = {};
+      (data || []).forEach(row => { counts[row.company_id] = (counts[row.company_id] || 0) + 1; });
+      return res.status(200).json({ counts });
+    }
+
     // ══ SITES ════════════════════════════════════════════════════════
 
     if (action === 'list_sites') {
