@@ -104,7 +104,17 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       setMsg("Could not load companies.");
     }
 
-    const { data: ss } = await supabase.from("sops").select("id, company_id");
+    // SOP counts (for the completeness meter) now come from the protected
+    // /api/companydata endpoint instead of a direct table read.
+    let sopCounts = {};
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_sops_counts", token }),
+      });
+      const data = await res.json();
+      if (res.ok) sopCounts = data.counts || {};
+    } catch (e) { /* leave counts empty if the request fails */ }
 
     // FLHA counts still come from the protected /api/flhas endpoint.
     let flhaCounts = {};
@@ -120,8 +130,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
 
     setCompanies(cos);
     const c = {};
-    cos.forEach(co => { c[co.id] = { flhas: flhaCounts[co.id] || 0, sops: 0 }; });
-    (ss || []).forEach(s => { if (c[s.company_id]) c[s.company_id].sops++; });
+    cos.forEach(co => { c[co.id] = { flhas: flhaCounts[co.id] || 0, sops: sopCounts[co.id] || 0 }; });
     setCounts(c);
     setLoading(false);
   };
@@ -186,18 +195,47 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       name: c.name || "", contact_name: c.contact_name || "", contact_email: c.contact_email || "",
       contact_phone: c.contact_phone || "", address: c.address || "", logo_url: c.logo_url || "",
     });
-    const { data: ss } = await supabase.from("sops").select("id, policy_text").eq("company_id", c.id).order("id");
-    setExistingSops(ss || []);
-    const { data: siteRows } = await supabase.from("sites").select("id, name").eq("company_id", c.id).order("name");
-    setSiteList(siteRows || []);
+
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_sops", token, companyId: c.id }),
+      });
+      const data = await res.json();
+      setExistingSops(res.ok ? (data.sops || []) : []);
+    } catch (e) { setExistingSops([]); }
+
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_sites", token, companyId: c.id }),
+      });
+      const data = await res.json();
+      setSiteList(res.ok ? (data.sites || []) : []);
+    } catch (e) { setSiteList([]); }
     setNewSite("");
-    const { data: eqRows, error: eqErr } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", c.id).order("id");
-    if (eqErr) setMsg("Equipment read error: " + eqErr.message);
-    setEquipList(eqRows || []);
+
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_equipment", token, companyId: c.id }),
+      });
+      const data = await res.json();
+      if (res.ok) setEquipList(data.equipment || []);
+      else { setMsg("Equipment read error: " + data.error); setEquipList([]); }
+    } catch (e) { setMsg("Equipment read error: " + e.message); setEquipList([]); }
     setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
-    const { data: fRows } = await supabase.from("custom_fields").select("id, doc_type, label, field_type, options, required").eq("company_id", c.id).order("id");
-    setFieldList(fRows || []);
+
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_custom_fields", token, companyId: c.id }),
+      });
+      const data = await res.json();
+      setFieldList(res.ok ? (data.fields || []) : []);
+    } catch (e) { setFieldList([]); }
     setNewField({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
+
     setManageTab("profile");
     setSopText(""); setMsg("");
     setView("manage");
@@ -241,14 +279,24 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     const lines = sopText.split("\n").map(l => l.trim()).filter(Boolean);
     if (lines.length === 0) { setMsg("Enter at least one policy, one per line."); return; }
     setSaving(true);
-    const rows = lines.map(policy_text => ({ company_id: activeId, policy_text }));
-    const { error } = await supabase.from("sops").insert(rows);
-    if (error) setMsg("Couldn't add policies: " + error.message);
-    else {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_sops", token, companyId: activeId, policies: lines }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg("Couldn't add policies: " + data.error); setSaving(false); return; }
       setMsg(`Added ${lines.length} ${lines.length > 1 ? "policies" : "policy"}`);
       setSopText("");
-      const { data: ss } = await supabase.from("sops").select("id, policy_text").eq("company_id", activeId).order("id");
-      setExistingSops(ss || []); await loadAll();
+      const listRes = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_sops", token, companyId: activeId }),
+      });
+      const listData = await listRes.json();
+      setExistingSops(listRes.ok ? (listData.sops || []) : []);
+      await loadAll();
+    } catch (e) {
+      setMsg("Couldn't add policies. Try again.");
     }
     setSaving(false);
   };
@@ -306,7 +354,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   };
 
   const deleteSop = async (id) => {
-    await supabase.from("sops").delete().eq("id", id);
+    try {
+      await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_sop", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setExistingSops(prev => prev.filter(s => s.id !== id));
     await loadAll();
   };
@@ -340,41 +393,70 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     if (!name) { setMsg("Enter a site name."); return; }
     if (siteList.some(s => s.name.toLowerCase() === name.toLowerCase())) { setMsg("That site already exists."); return; }
     setSaving(true);
-    const { error } = await supabase.from("sites").insert({ company_id: activeId, name });
-    if (error) setMsg("Couldn't add site: " + error.message);
-    else {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_site", token, companyId: activeId, name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg("Couldn't add site: " + data.error); setSaving(false); return; }
       setNewSite("");
-      const { data } = await supabase.from("sites").select("id, name").eq("company_id", activeId).order("name");
-      setSiteList(data || []);
+      const listRes = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_sites", token, companyId: activeId }),
+      });
+      const listData = await listRes.json();
+      setSiteList(listRes.ok ? (listData.sites || []) : []);
+    } catch (e) {
+      setMsg("Couldn't add site. Try again.");
     }
     setSaving(false);
   };
   const deleteSite = async (id) => {
-    await supabase.from("sites").delete().eq("id", id);
+    try {
+      await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_site", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setSiteList(prev => prev.filter(s => s.id !== id));
   };
 
   const addEquip = async () => {
     setMsg("");
-    const { year, make, model, type } = newEquip;
+    const { make, model, type } = newEquip;
     if (!make.trim() && !model.trim() && !type.trim()) { setMsg("Enter at least a make, model or type."); return; }
     setSaving(true);
-    const { error } = await supabase.from("equipment").insert({
-      company_id: activeId,
-      year: newEquip.year.trim(), make: newEquip.make.trim(), model: newEquip.model.trim(),
-      type: newEquip.type.trim(), unit_number: newEquip.unit_number.trim(),
-    });
-    if (error) setMsg("Couldn't add equipment: " + error.message);
-    else {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_equipment", token, companyId: activeId,
+          year: newEquip.year, make: newEquip.make, model: newEquip.model, type: newEquip.type, unitNumber: newEquip.unit_number,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg("Couldn't add equipment: " + data.error); setSaving(false); return; }
       setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
-      const { data, error: reErr } = await supabase.from("equipment").select("id, year, make, model, type, unit_number").eq("company_id", activeId).order("id");
-      if (reErr) setMsg("Equipment read error: " + reErr.message);
-      setEquipList(data || []);
+      const listRes = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_equipment", token, companyId: activeId }),
+      });
+      const listData = await listRes.json();
+      if (listRes.ok) setEquipList(listData.equipment || []);
+      else setMsg("Equipment read error: " + listData.error);
+    } catch (e) {
+      setMsg("Couldn't add equipment. Try again.");
     }
     setSaving(false);
   };
   const deleteEquip = async (id) => {
-    await supabase.from("equipment").delete().eq("id", id);
+    try {
+      await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_equipment", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setEquipList(prev => prev.filter(e => e.id !== id));
   };
 
@@ -383,25 +465,37 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     if (!newField.label.trim()) { setMsg("Give the field a label."); return; }
     if (newField.field_type === "dropdown" && !newField.options.trim()) { setMsg("Add dropdown options, separated by commas."); return; }
     setSaving(true);
-    const { error } = await supabase.from("custom_fields").insert({
-      company_id: activeId,
-      doc_type: newField.doc_type,
-      label: newField.label.trim(),
-      field_type: newField.field_type,
-      options: newField.field_type === "dropdown" ? newField.options.trim() : "",
-      required: newField.required,
-    });
-    if (error) setMsg("Couldn't add field: " + error.message);
-    else {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_custom_field", token, companyId: activeId,
+          docType: newField.doc_type, label: newField.label, fieldType: newField.field_type,
+          options: newField.options, required: newField.required,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg("Couldn't add field: " + data.error); setSaving(false); return; }
       setNewField({ doc_type: newField.doc_type, label: "", field_type: "text", options: "", required: false });
-      const { data } = await supabase.from("custom_fields").select("id, doc_type, label, field_type, options, required").eq("company_id", activeId).order("id");
-      setFieldList(data || []);
+      const listRes = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_custom_fields", token, companyId: activeId }),
+      });
+      const listData = await listRes.json();
+      setFieldList(listRes.ok ? (listData.fields || []) : []);
       setMsg("Field added");
+    } catch (e) {
+      setMsg("Couldn't add field. Try again.");
     }
     setSaving(false);
   };
   const deleteField = async (id) => {
-    await supabase.from("custom_fields").delete().eq("id", id);
+    try {
+      await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_custom_field", token, id }),
+      });
+    } catch (e) { /* leave list as-is if the request fails */ }
     setFieldList(prev => prev.filter(f => f.id !== id));
   };
 
