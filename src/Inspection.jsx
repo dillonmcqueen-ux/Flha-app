@@ -42,16 +42,29 @@ export default function Inspection({ companyId, companyName, onBack, onLogout, t
   // Load equipment registry + logo
   useEffect(() => {
     async function load() {
-      const { data: eq } = await supabase.from("equipment")
-        .select("id, year, make, model, type, unit_number")
-        .eq("company_id", companyId).order("make");
-      setEquipment(eq || []);
-      if (!eq || eq.length === 0) setEqMode("other");
+      // Equipment — via protected endpoint
+      try {
+        const eqRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_equipment", token, companyId }),
+        });
+        const eqData = await eqRes.json();
+        if (eqRes.ok) {
+          setEquipment(eqData.equipment || []);
+          if (!eqData.equipment || eqData.equipment.length === 0) setEqMode("other");
+        } else {
+          setEqMode("other");
+        }
+      } catch (e) {
+        setEqMode("other");
+      }
+
+      // Company name/logo remain a direct, low-risk public read
       const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
       if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
     }
     load();
-  }, [companyId]);
+  }, [companyId, token]);
 
   const equipmentLabel = () => {
     if (eqMode === "list" && selectedEq) return selectedEq;
@@ -168,7 +181,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const label = equipmentLabel();
     const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries() };
 
-    // Auto-save a free-typed rental to the fleet.
+    // Auto-save a free-typed rental to the fleet, via the protected endpoint.
     const typedSomething = (freeEq.make || freeEq.model || freeEq.type || freeEq.year).trim();
     if (typedSomething) {
       const typedLabel = [freeEq.year, freeEq.make, freeEq.model, freeEq.type].filter(v => v && v.trim()).join(" ").trim().toLowerCase();
@@ -176,15 +189,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ").trim().toLowerCase() === typedLabel
       );
       if (!alreadyInFleet) {
-        const { error: eqInsErr } = await supabase.from("equipment").insert({
-          company_id: companyId,
-          year: (freeEq.year || "").trim(),
-          make: (freeEq.make || "").trim(),
-          model: (freeEq.model || "").trim(),
-          type: (freeEq.type || "").trim(),
-          unit_number: "",
-        });
-        if (eqInsErr) console.error("rental auto-save failed:", eqInsErr.message);
+        try {
+          await fetch("/api/companydata", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "add_equipment", token, companyId,
+              year: freeEq.year, make: freeEq.make, model: freeEq.model, type: freeEq.type, unitNumber: "",
+            }),
+          });
+        } catch (e) {
+          console.error("rental auto-save failed:", e.message);
+        }
       }
     }
 
