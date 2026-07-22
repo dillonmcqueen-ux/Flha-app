@@ -35,6 +35,9 @@ export default function Incident({ companyId, companyName, onBack, onLogout, tok
   const [witnesses, setWitnesses] = useState("");
   const [evidence, setEvidence] = useState("");
 
+  const [photos, setPhotos] = useState([]); // [{ file, previewUrl, uploading, uploadedUrl }]
+  const [uploadingCount, setUploadingCount] = useState(0);
+
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
@@ -67,6 +70,47 @@ export default function Incident({ companyId, companyName, onBack, onLogout, tok
   const draw = (e) => { if (!drawingRef.current) return; e.preventDefault(); const ctx = canvasRef.current.getContext("2d"); const { x, y } = getPos(e); ctx.lineTo(x, y); ctx.strokeStyle = "#1E293B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setHasSignature(true); };
   const endDraw = () => { drawingRef.current = false; };
   const clearSig = () => { const c = canvasRef.current; if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height); setHasSignature(false); };
+
+  // ── photo upload ────────────────────────────────────────
+  const handlePhotoSelect = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    const newEntries = files.map(file => ({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      uploading: true,
+      uploadedUrl: null,
+      error: false,
+    }));
+    setPhotos(prev => [...prev, ...newEntries]);
+    setUploadingCount(prev => prev + newEntries.length);
+
+    for (const entry of newEntries) {
+      try {
+        const ext = (entry.file.name.split(".").pop() || "jpg").toLowerCase();
+        const filename = `incident_${companyId}_${entry.id}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+        const { error } = await supabase.storage.from("incident-photos").upload(filename, entry.file, { contentType: entry.file.type, upsert: false });
+        if (error) throw error;
+        const { data } = supabase.storage.from("incident-photos").getPublicUrl(filename);
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: data?.publicUrl || null } : p));
+      } catch (e) {
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+      }
+      setUploadingCount(prev => Math.max(0, prev - 1));
+    }
+  };
+
+  const removePhoto = (id) => {
+    setPhotos(prev => {
+      const target = prev.find(p => p.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter(p => p.id !== id);
+    });
+  };
+
+  const uploadedPhotoUrls = () => photos.filter(p => p.uploadedUrl).map(p => p.uploadedUrl);
 
   const generateReport = async () => {
     setLoading(true); setGenError(false);
@@ -137,7 +181,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSaving(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
-    const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig });
+    const photoUrls = uploadedPhotoUrls();
+    const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig, photoUrls });
     try {
       await fetch("/api/reports", {
         method: "POST",
@@ -154,6 +199,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             report_json: { ...report, customFields: cf.entries() },
             signed_by: reporter,
             pdf_url: pdfUrl || null,
+            photo_urls: photoUrls,
           },
         }),
       });
@@ -247,15 +293,42 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <input style={s.input} placeholder="Names of anyone who saw it" value={witnesses} onChange={e => setWitnesses(e.target.value)} />
 
           <label style={s.label}>Evidence on file</label>
-          <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="Describe any photos, videos, or physical evidence and where it's stored (e.g. 4 photos of the damaged scaffold on my phone, emailed to supervisor)" value={evidence} onChange={e => setEvidence(e.target.value)} />
+          <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="Describe any physical evidence not covered by the photos below" value={evidence} onChange={e => setEvidence(e.target.value)} />
+
+          <label style={s.label}>Photos</label>
+          <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 10 }}>Add photos of the scene, damage, or injury. Uploads automatically.</div>
+
+          {photos.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: 8, marginBottom: 12 }}>
+              {photos.map(p => (
+                <div key={p.id} style={{ position: "relative", aspectRatio: "1", borderRadius: 9, overflow: "hidden", border: "1.5px solid #E2E8F0", background: "#F1F5F9" }}>
+                  <img src={p.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: p.uploading ? 0.5 : 1 }} />
+                  {p.uploading && (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#475569" }}>⏳</div>
+                  )}
+                  {p.error && (
+                    <div style={{ position: "absolute", inset: 0, background: "#FEF2F2CC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#991B1B" }}>Failed</div>
+                  )}
+                  <button onClick={() => removePhoto(p.id)} style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", background: "#00000090", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <label style={{ display: "block", background: "#F1F5F9", color: "#334155", border: "1.5px dashed #CBD5E1", borderRadius: 9, padding: "14px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center", marginBottom: 14 }}>
+            📷 Add photos
+            <input type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => { handlePhotoSelect(e.target.files); e.target.value = ""; }} />
+          </label>
 
           <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
 
-          <button style={s.btn("#DC2626")} onClick={() => {
+          <button style={s.btn(uploadingCount > 0 ? "#94A3B8" : "#DC2626")} disabled={uploadingCount > 0} onClick={() => {
             const missing = cf.missingRequired();
             if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
             setStep("describe");
-          }}>Continue →</button>
+          }}>
+            {uploadingCount > 0 ? `⏳ Uploading ${uploadingCount} photo${uploadingCount > 1 ? "s" : ""}…` : "Continue →"}
+          </button>
           <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
         </div>
       )}
@@ -313,6 +386,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           <ListEditor s={s} title="Immediate Actions Taken" field="immediateActions" report={report} updateList={updateList} removeListItem={removeListItem} addListItem={addListItem} />
           <ListEditor s={s} title="Corrective Actions" field="correctiveActions" report={report} updateList={updateList} removeListItem={removeListItem} addListItem={addListItem} />
+
+          {photos.length > 0 && (
+            <div style={s.card}>
+              <div style={s.section}>Photos ({photos.filter(p => p.uploadedUrl).length})</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: 8 }}>
+                {photos.filter(p => p.uploadedUrl).map(p => (
+                  <img key={p.id} src={p.previewUrl} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 9, border: "1.5px solid #E2E8F0" }} />
+                ))}
+              </div>
+            </div>
+          )}
 
           <button style={s.btn("#DC2626")} onClick={() => setStep("sign")}>Continue to Sign →</button>
           <button style={s.ghost} onClick={() => setStep("describe")}>← Back</button>
