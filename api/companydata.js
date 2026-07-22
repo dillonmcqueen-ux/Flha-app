@@ -132,12 +132,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ equipment: data || [] });
     }
 
+    // Admins can add equipment to any company. Workers/supervisors can add
+    // equipment to their OWN company only — this covers the "auto-save a
+    // rental machine" behavior in Inspection.jsx.
     if (action === 'add_equipment') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId, year, make, model, type, unitNumber } = req.body;
+      const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { year, make, model, type, unitNumber } = req.body;
       if (!(make || '').trim() && !(model || '').trim() && !(type || '').trim()) {
         return res.status(400).json({ error: 'Enter at least a make, model or type.' });
+      }
+      const { error } = await supabaseAdmin.from('equipment').insert({
+        company_id: companyId,
+        year: (year || '').trim(), make: (make || '').trim(), model: (model || '').trim(),
+        type: (type || '').trim(), unit_number: (unitNumber || '').trim(),
+      });
+      if (error) return res.status(500).json({ error: "Couldn't add equipment: " + error.message });
+      return res.status(200).json({ ok: true });
+    }
+
       }
       const { error } = await supabaseAdmin.from('equipment').insert({
         company_id: companyId,
