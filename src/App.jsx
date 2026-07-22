@@ -176,7 +176,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
         console.error("custom fields read error:", e.message);
       }
 
-      let sopsData = null;
+            let sopsData = null;
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
@@ -209,19 +209,6 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
         return;
       }
 
-        }
-        const sops = sopsData.sops || [];
-        if (sops.length === 0) {
-          setDebugInfo(`sops returned 0 rows for company_id=${company.id} | token:${token ? "present" : "MISSING"} | sites:${JSON.stringify(siteData)}`);
-          setSopsLoading(false);
-          return;
-        }
-        setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
-      } catch (e) {
-        setDebugInfo(`sops query error: ${e.message} | token:${token ? "present" : "MISSING"}`);
-        setSopsLoading(false);
-        return;
-      }
 
       // Success path — still show a debug summary so you can confirm counts.
       setDebugInfo(`OK — sites:${(siteData?.sites || []).length} sops:${(sopsData?.sops || []).length} token:${token ? "present" : "MISSING"}`);
