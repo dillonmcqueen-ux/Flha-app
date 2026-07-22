@@ -29,7 +29,7 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null); // { workSummary, delaysSummary, tomorrowPlan }
   const [companyLogo, setCompanyLogo] = useState("");
-  const cf = useCustomFields(companyId, "daily");
+  const cf = useCustomFields(companyId, "daily", token);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
