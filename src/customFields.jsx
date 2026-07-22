@@ -1,30 +1,32 @@
 import { useState, useEffect } from "react";
-import { supabase } from "./supabaseClient";
 
 // Loads a company's custom fields for one document type and tracks their values.
 // Usage:
-//   const cf = useCustomFields(companyId, "inspection");
+//   const cf = useCustomFields(companyId, "inspection", token);
 //   ...render:  <CustomFieldInputs cf={cf} />
 //   ...validate: cf.missingRequired()  -> array of labels not filled
 //   ...save:     cf.entries()          -> [{label, value}] for storing/PDF
-export function useCustomFields(companyId, docType) {
+export function useCustomFields(companyId, docType, token) {
   const [fields, setFields] = useState([]);
   const [values, setValues] = useState({});
 
   useEffect(() => {
     async function load() {
-      if (!companyId) return;
-      const { data, error } = await supabase
-        .from("custom_fields")
-        .select("id, label, field_type, options, required")
-        .eq("company_id", companyId)
-        .eq("doc_type", docType)
-        .order("id");
-      if (error) { console.error("custom fields read error:", error.message); return; }
-      setFields(data || []);
+      if (!companyId || !token) return;
+      try {
+        const res = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_custom_fields", token, companyId, docType }),
+        });
+        const data = await res.json();
+        if (res.ok) setFields(data.fields || []);
+        else console.error("custom fields read error:", data.error);
+      } catch (e) {
+        console.error("custom fields read error:", e.message);
+      }
     }
     load();
-  }, [companyId, docType]);
+  }, [companyId, docType, token]);
 
   const setValue = (id, val) => setValues(v => ({ ...v, [id]: val }));
   const missingRequired = () => fields.filter(f => f.required && !(values[f.id] || "").trim()).map(f => f.label);
