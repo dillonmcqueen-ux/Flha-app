@@ -105,6 +105,11 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
   const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
 
+  // Load company + SOPs/sites/custom fields on first render.
+  // If forcedCompanyId is provided (from login), load that specific company.
+  // Company name/logo still come straight from Supabase (public, low-risk
+  // read); SOPs, sites, and custom fields now go through the protected
+  // /api/companydata endpoint instead of the anon key.
   useEffect(() => {
     async function loadSops() {
       let companies, companyErr;
@@ -138,46 +143,69 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
       setCompanyLogo(company.logo_url || "");
       setCompanyName(company.name);
 
-      const { data: siteRows, error: siteErr } = await supabase
-        .from("sites")
-        .select("id, name")
-        .eq("company_id", company.id)
-        .order("id");
-      if (siteErr) console.error("sites read error:", siteErr.message);
-      setSites(siteRows || []);
-      if (!siteRows || siteRows.length === 0) setSiteMode("other");
+      // Sites — via protected endpoint
+      try {
+        const siteRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sites", token, companyId: company.id }),
+        });
+        const siteData = await siteRes.json();
+        if (siteRes.ok) {
+          setSites(siteData.sites || []);
+          if (!siteData.sites || siteData.sites.length === 0) setSiteMode("other");
+        } else {
+          console.error("sites read error:", siteData.error);
+          setSiteMode("other");
+        }
+      } catch (e) {
+        console.error("sites read error:", e.message);
+        setSiteMode("other");
+      }
 
-      const { data: cfRows, error: cfErr } = await supabase
-        .from("custom_fields")
-        .select("id, label, field_type, options, required")
-        .eq("company_id", company.id)
-        .eq("doc_type", "flha")
-        .order("id");
-      if (cfErr) console.error("custom fields read error:", cfErr.message);
-      setCustomFields(cfRows || []);
-      const { data: sops, error: sopsErr } = await supabase
-        .from("sops")
-        .select("policy_text")
-        .eq("company_id", company.id);
+      // Custom FLHA fields — via protected endpoint
+      try {
+        const cfRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_custom_fields", token, companyId: company.id, docType: "flha" }),
+        });
+        const cfData = await cfRes.json();
+        if (cfRes.ok) setCustomFields(cfData.fields || []);
+        else console.error("custom fields read error:", cfData.error);
+      } catch (e) {
+        console.error("custom fields read error:", e.message);
+      }
 
-      if (sopsErr) {
-        setDebugInfo(`sops query error: ${sopsErr.message}`);
+      // SOPs — via protected endpoint
+      try {
+        const sopsRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sops", token, companyId: company.id }),
+        });
+        const sopsData = await sopsRes.json();
+        if (!sopsRes.ok) {
+          setDebugInfo(`sops query error: ${sopsData.error}`);
+          setSopsLoading(false);
+          return;
+        }
+        const sops = sopsData.sops || [];
+        if (sops.length === 0) {
+          setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
+          setSopsLoading(false);
+          return;
+        }
+        setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
+      } catch (e) {
+        setDebugInfo(`sops query error: ${e.message}`);
         setSopsLoading(false);
         return;
       }
-      if (!sops?.length) {
-        setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
-        setSopsLoading(false);
-        return;
-      }
 
-      setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
       setCompanyName(company.name);
       setDebugInfo("");
       setSopsLoading(false);
     }
     loadSops();
-  }, [forcedCompanyId]);
+  }, [forcedCompanyId, token]);
 
 
   const [workerName, setWorkerName] = useState("");
@@ -201,7 +229,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
   const drawingRef = useRef(false);
 
   // ── crew (multi-signature) ────────────────────────────────
-  const [crew, setCrew] = useState([]); // [{ name, signature }] — additional crew beyond the primary worker
+  const [crew, setCrew] = useState([]);
   const [crewName, setCrewName] = useState("");
   const [crewHasSig, setCrewHasSig] = useState(false);
   const crewCanvasRef = useRef(null);
@@ -678,10 +706,19 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             if (!workerName || !jobSite) return;
             const missing = customFields.filter(f => f.required && !(customValues[f.id] || "").trim());
             if (missing.length > 0) { alert(`Please fill in: ${missing.map(m => m.label).join(", ")}`); return; }
+            // Auto-save a newly typed site via the protected endpoint
+            // (case-insensitive dedupe is handled server-side too).
             const trimmed = jobSite.trim();
             const exists = sites.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
             if (!exists && companyId) {
-              await supabase.from("sites").insert({ company_id: companyId, name: trimmed });
+              try {
+                const res = await fetch("/api/companydata", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "add_site", token, companyId, name: trimmed }),
+                });
+                const data = await res.json();
+                if (res.ok && data.site) setSites(prev => [...prev, data.site]);
+              } catch (e) { /* proceed even if the save fails — not worth blocking the FLHA */ }
             }
             setStep("voice");
           }}>
@@ -821,7 +858,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
-            {/* Checklist-style header row (desktop-friendly; wraps naturally on mobile via each row's own layout) */}
             {flha.hazards?.length > 0 && (
               <div style={{ display: "flex", padding: "0 4px 6px", fontSize: 10, fontWeight: 800, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.4 }}>
                 <div style={{ flex: "0 0 46px" }}>#</div>
