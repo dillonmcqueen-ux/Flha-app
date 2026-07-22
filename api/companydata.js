@@ -151,16 +151,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-      }
-      const { error } = await supabaseAdmin.from('equipment').insert({
-        company_id: companyId,
-        year: (year || '').trim(), make: (make || '').trim(), model: (model || '').trim(),
-        type: (type || '').trim(), unit_number: (unitNumber || '').trim(),
-      });
-      if (error) return res.status(500).json({ error: "Couldn't add equipment: " + error.message });
-      return res.status(200).json({ ok: true });
-    }
-
     if (action === 'delete_equipment') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
