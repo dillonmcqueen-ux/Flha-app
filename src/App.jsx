@@ -11,16 +11,9 @@ const FALLBACK_SOPS = {
   ],
 };
 
-const STEPS = ["company", "voice", "review", "done"];
+const STEPS = ["company", "voice", "review", "signoff", "done"];
 
 // ── SOP relevance pre-filter ──────────────────────────────
-// With a short hand-typed policy list, sending everything to the model is
-// fine. But once a company condenses a long SOP document into 15-25+
-// policies, dumping the whole list dilutes the signal and the model tends
-// to fall back on generic, broadly-applicable policies (PPE, "do an FLHA")
-// rather than correctly picking the narrow, task-specific ones. So for
-// larger policy sets, we score each policy against the task description by
-// simple keyword overlap and only send the strongest matches.
 const SOP_STOPWORDS = new Set([
   "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
   "is", "are", "be", "must", "will", "all", "at", "by", "as", "this",
@@ -41,9 +34,6 @@ function scorePolicyRelevance(policy, taskWordsSet) {
   return score;
 }
 
-// Returns the policies most relevant to the task. If the company has a
-// small policy list, everything is sent as before — filtering only kicks
-// in once the list is large enough to cause dilution.
 function selectRelevantPolicies(policies, taskText, maxCount = 25) {
   if (!policies || policies.length <= maxCount) return policies || [];
   const taskWords = new Set(tokenize(taskText));
@@ -68,7 +58,7 @@ function Badge({ text, color = "blue" }) {
 }
 
 function Stepper({ step }) {
-  const labels = ["Setup", "Voice Input", "Review", "Complete"];
+  const labels = ["Setup", "Voice Input", "Review", "Sign-Off", "Complete"];
   return (
     <div style={{ display: "flex", gap: 0, marginBottom: 28 }}>
       {labels.map((label, i) => {
@@ -79,17 +69,17 @@ function Stepper({ step }) {
             <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
               {i > 0 && <div style={{ flex: 1, height: 2, background: done || active ? "#F97316" : "#E5E7EB" }} />}
               <div style={{
-                width: 32, height: 32, borderRadius: "50%",
+                width: 30, height: 30, borderRadius: "50%",
                 background: done ? "#F97316" : active ? "#1E3A5F" : "#E5E7EB",
                 color: done || active ? "#fff" : "#9CA3AF",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontWeight: 700, fontSize: 14, flexShrink: 0
+                fontWeight: 700, fontSize: 13, flexShrink: 0
               }}>
                 {done ? "✓" : i + 1}
               </div>
-              {i < 3 && <div style={{ flex: 1, height: 2, background: done ? "#F97316" : "#E5E7EB" }} />}
+              {i < labels.length - 1 && <div style={{ flex: 1, height: 2, background: done ? "#F97316" : "#E5E7EB" }} />}
             </div>
-            <span style={{ fontSize: 11, marginTop: 4, color: active ? "#1E3A5F" : done ? "#F97316" : "#9CA3AF", fontWeight: active ? 700 : 400 }}>
+            <span style={{ fontSize: 10, marginTop: 4, color: active ? "#1E3A5F" : done ? "#F97316" : "#9CA3AF", fontWeight: active ? 700 : 400, textAlign: "center" }}>
               {label}
             </span>
           </div>
@@ -98,6 +88,13 @@ function Stepper({ step }) {
     </div>
   );
 }
+
+const RISK_ROW_STYLE = {
+  Extreme: { bg: "#FEF2F2", border: "#7F1D1D", badgeBg: "#7F1D1D", badgeText: "#fff" },
+  High: { bg: "#FEF2F2", border: "#FCA5A5", badgeBg: "#FEE2E2", badgeText: "#DC2626" },
+  Medium: { bg: "#FFFBEB", border: "#FCD34D", badgeBg: "#FEF3C7", badgeText: "#D97706" },
+  Low: { bg: "#F0FDF4", border: "#86EFAC", badgeBg: "#DCFCE7", badgeText: "#16A34A" },
+};
 
 export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token = null }) {
   const [step, setStep] = useState("company");
@@ -108,8 +105,6 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
   const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
 
-  // Load company + SOPs from Supabase on first render.
-  // If forcedCompanyId is provided (from login), load that specific company.
   useEffect(() => {
     async function loadSops() {
       let companies, companyErr;
@@ -143,7 +138,6 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
       setCompanyLogo(company.logo_url || "");
       setCompanyName(company.name);
 
-      // Load saved sites for this company
       const { data: siteRows, error: siteErr } = await supabase
         .from("sites")
         .select("id, name")
@@ -153,7 +147,6 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
       setSites(siteRows || []);
       if (!siteRows || siteRows.length === 0) setSiteMode("other");
 
-      // Load this company's custom FLHA fields
       const { data: cfRows, error: cfErr } = await supabase
         .from("custom_fields")
         .select("id, label, field_type, options, required")
@@ -207,7 +200,31 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
 
-  // ── Signature pad drawing handlers ───────────────────────
+  // ── crew (multi-signature) ────────────────────────────────
+  const [crew, setCrew] = useState([]); // [{ name, signature }] — additional crew beyond the primary worker
+  const [crewName, setCrewName] = useState("");
+  const [crewHasSig, setCrewHasSig] = useState(false);
+  const crewCanvasRef = useRef(null);
+  const crewDrawingRef = useRef(false);
+
+  const getCrewPos = (e) => {
+    const c = crewCanvasRef.current, r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
+    return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) };
+  };
+  const startCrewDraw = (e) => { e.preventDefault(); crewDrawingRef.current = true; const ctx = crewCanvasRef.current.getContext("2d"); const { x, y } = getCrewPos(e); ctx.beginPath(); ctx.moveTo(x, y); };
+  const crewDraw = (e) => { if (!crewDrawingRef.current) return; e.preventDefault(); const ctx = crewCanvasRef.current.getContext("2d"); const { x, y } = getCrewPos(e); ctx.lineTo(x, y); ctx.strokeStyle = "#1E293B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setCrewHasSig(true); };
+  const endCrewDraw = () => { crewDrawingRef.current = false; };
+  const clearCrewSig = () => { const c = crewCanvasRef.current; if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height); setCrewHasSig(false); };
+  const addCrewMember = () => {
+    if (!crewName.trim() || !crewHasSig) return;
+    const sig = crewCanvasRef.current.toDataURL("image/png");
+    setCrew(prev => [...prev, { name: crewName.trim(), signature: sig }]);
+    setCrewName("");
+    clearCrewSig();
+  };
+  const removeCrewMember = (i) => setCrew(prev => prev.filter((_, idx) => idx !== i));
+
+  // ── Signature pad drawing handlers (primary worker) ──────
   const getCanvasPos = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -292,16 +309,14 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
     setTranscript(t => t.replace(/\[live\].*/s, "").trim());
   };
 
-  const [addingTask, setAddingTask] = useState(false); // true when generating an additional task
-  const [amendingId, setAmendingId] = useState(null);   // FLHA id being amended (null = new)
-  const [amendSignature, setAmendSignature] = useState(null); // original signature to preserve
+  const [addingTask, setAddingTask] = useState(false);
+  const [amendingId, setAmendingId] = useState(null);
+  const [amendSignature, setAmendSignature] = useState(null);
   const [pendingApproval, setPendingApproval] = useState(false);
   const [resumeName, setResumeName] = useState("");
   const [resumeError, setResumeError] = useState("");
-  const [resumeChoices, setResumeChoices] = useState([]); // if multiple found
+  const [resumeChoices, setResumeChoices] = useState([]);
 
-  // Find today's FLHA for this worker name + company and load it for amending.
-  // This now goes through our protected server endpoint instead of Supabase directly.
   const resumeTodaysFLHA = async () => {
     setResumeError("");
     setResumeChoices([]);
@@ -319,7 +334,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
       const matches = data.matches || [];
       if (matches.length === 0) { setResumeError("No FLHA found for that name today. Check the spelling or start a new one."); return; }
       if (matches.length === 1) { loadForAmend(matches[0]); return; }
-      setResumeChoices(matches); // let them pick
+      setResumeChoices(matches);
     } catch (e) {
       setResumeError("Something went wrong. Try again.");
     }
@@ -331,8 +346,8 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
     setWorkerName(record.worker_name || "");
     setJobSite(record.job_site || "");
     setAmendingId(record.id);
-    // preserve original signature if it was stored in hazards_json (not currently), else keep null
     setAmendSignature(record.worker_signature || null);
+    setCrew(record.crew_signatures || []);
     setResumeChoices([]);
     setStep("review");
   };
@@ -344,8 +359,6 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
     const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
     const taskLabel = cleanTranscript;
 
-    // Pre-filter SOPs by relevance to this task before building the prompt.
-    // For small policy lists this is a no-op (everything is sent, as before).
     const relevantPolicies = selectRelevantPolicies(sopData.policies, cleanTranscript, 25);
 
     const prompt = `You are an experienced field safety officer reviewing a worker's task description before they begin work. Your job is to identify ONLY the hazards that are genuinely relevant to what this specific worker has described — not a generic list.
@@ -405,11 +418,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       }
       const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
-      // Tag each hazard with its task summary so we can group by task
       const tagged = (parsed.hazards || []).map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
 
       if (addingTask && flha) {
-        // Append this task's hazards + merge PPE/alerts into the existing FLHA
         setFlha(prev => {
           const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...(parsed.ppeRequired || [])]));
           const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...(parsed.sopAlerts || [])]));
@@ -424,7 +435,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         });
         setAddingTask(false);
       } else {
-        // First task — tag its hazards too, for consistent grouping
         setFlha({ ...parsed, hazards: tagged });
       }
       setStep("review");
@@ -437,7 +447,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     setLoading(false);
   };
 
-  // Start adding an additional task — go back to voice input
   const startAddTask = () => {
     setAddingTask(true);
     setTranscript("");
@@ -445,20 +454,15 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     setStep("voice");
   };
 
-  // Save the completed, signed FLHA back to the database (via our protected
-  // server endpoint) + generate the PDF.
   const saveFLHA = async () => {
     if (!flha) return;
 
-    // When amending, reuse the original signature; otherwise capture the drawn one.
     const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
     const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
 
-    // Any Extreme hazard requires supervisor sign-off.
     const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
     const newStatus = hasExtreme ? "pending_approval" : "complete";
 
-    // Attach this company's custom field values (label + value) to the record.
     const customEntries = customFields
       .map(f => ({ label: f.label, value: (customValues[f.id] || "").trim() }))
       .filter(e => e.value);
@@ -466,7 +470,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       ? { ...flha, customFields: customEntries }
       : (flha.customFields ? flha : { ...flha });
 
-    // Generate PDF and upload to Supabase Storage.
     const pdfUrl = await generateAndUploadFLHA({
       flha: flhaWithCustom,
       workerName,
@@ -477,12 +480,11 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       companyLogo,
       amendedNote,
       pendingApproval: newStatus === "pending_approval",
+      crewSignatures: crew,
     });
 
     try {
       if (amendingId) {
-        // Update the existing record (one clean document).
-        // Re-evaluate status: if an amendment added Extreme work, it needs approval again.
         await fetch("/api/flhas", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -496,6 +498,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               hazards_json: flhaWithCustom,
               pdf_url: pdfUrl || null,
               status: newStatus,
+              crew_signatures: crew,
             },
           }),
         });
@@ -515,6 +518,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               pdf_url: pdfUrl || null,
               status: newStatus,
               worker_signature: signatureDataUrl || null,
+              crew_signatures: crew,
             },
           }),
         });
@@ -528,7 +532,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
   const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
 
   // ── Hazard editing (worker can add/edit/remove) ──────────
-  const [editingHazard, setEditingHazard] = useState(null); // index being edited, or "new"
+  const [editingHazard, setEditingHazard] = useState(null);
   const [hazardDraft, setHazardDraft] = useState({ hazard: "", risk: "Medium", control: "" });
 
   const openNewHazard = () => { setHazardDraft({ hazard: "", risk: "Medium", control: "" }); setEditingHazard("new"); };
@@ -559,13 +563,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     label: { display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 },
     input: { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 15, boxSizing: "border-box", outline: "none" },
     btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 9, padding: "12px 20px", fontWeight: 700, fontSize: 15, cursor: "pointer", width: "100%" }),
+    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
     textarea: { width: "100%", minHeight: 90, padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, resize: "vertical", boxSizing: "border-box" },
-    hazardCard: (risk) => ({
-      border: `1.5px solid ${risk === "Extreme" ? "#7F1D1D" : risk === "High" ? "#FCA5A5" : risk === "Medium" ? "#FCD34D" : "#86EFAC"}`,
-      background: risk === "Extreme" ? "#FEF2F2" : risk === "High" ? "#FEF2F2" : risk === "Medium" ? "#FFFBEB" : "#F0FDF4",
-      borderLeft: risk === "Extreme" ? "5px solid #7F1D1D" : undefined,
-      borderRadius: 10, padding: "14px 16px", marginBottom: 10
-    })
   };
 
   return (
@@ -679,7 +678,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             if (!workerName || !jobSite) return;
             const missing = customFields.filter(f => f.required && !(customValues[f.id] || "").trim());
             if (missing.length > 0) { alert(`Please fill in: ${missing.map(m => m.label).join(", ")}`); return; }
-            // Auto-save a newly typed site (case-insensitive dedupe)
             const trimmed = jobSite.trim();
             const exists = sites.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
             if (!exists && companyId) {
@@ -783,7 +781,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 17 }}>FLHA Report</div>
+                <div style={{ fontWeight: 700, fontSize: 17 }}>Job Hazard Analysis</div>
                 <div style={{ fontSize: 13, color: "#6B7280" }}>{companyName} • {new Date().toLocaleDateString("en-CA")}</div>
               </div>
               <Badge text={`${workerName || "Worker"}`} color="blue" />
@@ -803,12 +801,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             )}
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>Hazards & Controls</div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Hazard / Control Checklist</div>
               <button onClick={openNewHazard} style={{ background: "#1E3A5F", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ Add hazard</button>
             </div>
 
             {editingHazard === "new" && (
-              <div style={{ ...styles.hazardCard("Medium"), border: "1.5px dashed #1E3A5F" }}>
+              <div style={{ border: "1.5px dashed #1E3A5F", borderRadius: 10, padding: "14px 16px", marginBottom: 10 }}>
                 <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Hazard (what's the risk?)" value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                   {["Low", "Medium", "High", "Extreme"].map(r => (
@@ -823,22 +821,32 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
+            {/* Checklist-style header row (desktop-friendly; wraps naturally on mobile via each row's own layout) */}
+            {flha.hazards?.length > 0 && (
+              <div style={{ display: "flex", padding: "0 4px 6px", fontSize: 10, fontWeight: 800, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                <div style={{ flex: "0 0 46px" }}>#</div>
+                <div style={{ flex: 1 }}>Hazard / Control / SOP Ref</div>
+                <div style={{ flex: "0 0 70px", textAlign: "right" }}>Risk</div>
+              </div>
+            )}
+
             {flha.hazards?.map((h, i) => {
               const prevTask = i > 0 ? flha.hazards[i - 1].task : null;
               const showTaskHeader = h.task && h.task !== prevTask;
               const taskNumber = showTaskHeader
                 ? [...new Set(flha.hazards.slice(0, i + 1).map(x => x.task))].length
                 : null;
+              const rowStyle = RISK_ROW_STYLE[h.risk] || RISK_ROW_STYLE.Low;
               return (
               <div key={i}>
               {showTaskHeader && (
-                <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 6 : 0 }}>
+                <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 10 : 0 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#1E3A5F", textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
                   <div style={{ fontSize: 13, color: "#374151", marginTop: 1 }}>{h.task}</div>
                 </div>
               )}
               {editingHazard === i ? (
-                <div style={{ ...styles.hazardCard(hazardDraft.risk), border: "1.5px dashed #1E3A5F" }}>
+                <div style={{ border: "1.5px dashed #1E3A5F", borderRadius: 10, padding: "14px 16px", marginBottom: 8 }}>
                   <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                   <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                     {["Low", "Medium", "High", "Extreme"].map(r => (
@@ -852,16 +860,19 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                   </div>
                 </div>
               ) : (
-                <div style={styles.hazardCard(h.risk)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{h.hazard}</div>
-                    <Badge text={h.risk} color={riskColor(h.risk)} />
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 0, borderLeft: `4px solid ${rowStyle.border}`, background: rowStyle.bg, borderRadius: 8, padding: "10px 12px", marginBottom: 6 }}>
+                  <div style={{ flex: "0 0 30px", fontWeight: 800, fontSize: 13, color: "#94A3B8", paddingTop: 1 }}>{i + 1}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 3 }}>{h.hazard}</div>
+                    <div style={{ fontSize: 13, color: "#374151", marginBottom: h.sopRef ? 3 : 0 }}><span style={{ fontWeight: 700, color: "#16A34A" }}>Control:</span> {h.control}</div>
+                    {h.sopRef && <div style={{ fontSize: 11, color: "#6B7280", fontStyle: "italic" }}>📋 SOP Ref: {h.sopRef}</div>}
+                    <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+                      <button onClick={() => openEditHazard(i)} style={{ background: "transparent", border: "none", color: "#1E3A5F", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
+                      <button onClick={() => removeHazard(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Remove</button>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13, color: "#374151", marginBottom: h.sopRef ? 6 : 6 }}>🛡 {h.control}</div>
-                  {h.sopRef && <div style={{ fontSize: 11, color: "#6B7280", fontStyle: "italic", marginBottom: 6 }}>SOP: {h.sopRef}</div>}
-                  <div style={{ display: "flex", gap: 12 }}>
-                    <button onClick={() => openEditHazard(i)} style={{ background: "transparent", border: "none", color: "#1E3A5F", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
-                    <button onClick={() => removeHazard(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Remove</button>
+                  <div style={{ flex: "0 0 66px", textAlign: "right", paddingTop: 1 }}>
+                    <span style={{ background: rowStyle.badgeBg, color: rowStyle.badgeText, borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 800 }}>{h.risk}</span>
                   </div>
                 </div>
               )}
@@ -887,66 +898,110 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             )}
           </div>
 
+          <button style={styles.btn("#F97316")} onClick={() => setStep("signoff")}>Continue to Sign-Off →</button>
+        </>
+      )}
+
+      {step === "signoff" && flha && (
+        <>
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Worker Acknowledgement</div>
-            {amendingId ? (
-              <>
-                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By confirming, I acknowledge I have reviewed the added task(s) and understand the hazards and controls. This amendment will be time-stamped on the document.</div>
-                <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, color: "#374151" }}>Worker: <strong>{workerName}</strong></div>
-                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Amendment will be recorded {new Date().toLocaleString("en-CA")}</div>
-                </div>
-                <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
-                  disabled={signed}
-                  onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-                  {signed ? "✓ Saved" : "Confirm & Update FLHA"}
-                </button>
-              </>
-            ) : (
-              <>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
-
-            <label style={styles.label}>Signature</label>
-            <div style={{ position: "relative", marginBottom: 6 }}>
-              <canvas
-                ref={canvasRef}
-                width={600}
-                height={180}
-                style={{
-                  width: "100%", height: 150, border: "1.5px solid #E5E7EB",
-                  borderRadius: 10, background: "#fff", touchAction: "none", display: "block"
-                }}
-                onMouseDown={startDraw}
-                onMouseMove={draw}
-                onMouseUp={endDraw}
-                onMouseLeave={endDraw}
-                onTouchStart={startDraw}
-                onTouchMove={draw}
-                onTouchEnd={endDraw}
-              />
-              {!hasSignature && (
-                <div style={{
-                  position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)",
-                  textAlign: "center", color: "#9CA3AF", fontSize: 14, pointerEvents: "none"
-                }}>Sign here with your finger</div>
-              )}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, color: "#374151" }}>Signed by: <strong>{workerName}</strong></div>
-              <button onClick={clearSignature} style={{
-                background: "transparent", border: "none", color: "#6B7280",
-                fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0
-              }}>Clear signature</button>
-            </div>
-
-            <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
-              disabled={!hasSignature || signed}
-              onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-              {signed ? "✓ Signed" : "Sign & Submit FLHA"}
-            </button>
-              </>
-            )}
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>{amendingId ? "Confirm Amendment" : "Worker Sign-Off"}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>Primary worker: <strong>{workerName}</strong>{amendingId ? " — confirming the added task(s)." : ""}</div>
           </div>
+
+          {amendingId ? (
+            <div style={styles.card}>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By confirming, I acknowledge I have reviewed the added task(s) and understand the hazards and controls. This amendment will be time-stamped on the document.</div>
+              <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, color: "#374151" }}>Worker: <strong>{workerName}</strong></div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Amendment will be recorded {new Date().toLocaleString("en-CA")}</div>
+              </div>
+              <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
+                disabled={signed}
+                onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
+                {signed ? "✓ Saved" : "Confirm & Update FLHA"}
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Primary worker signature */}
+              <div style={styles.card}>
+                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
+
+                <label style={styles.label}>Worker signature</label>
+                <div style={{ position: "relative", marginBottom: 6 }}>
+                  <canvas
+                    ref={canvasRef}
+                    width={600}
+                    height={180}
+                    style={{
+                      width: "100%", height: 150, border: "1.5px solid #E5E7EB",
+                      borderRadius: 10, background: "#fff", touchAction: "none", display: "block"
+                    }}
+                    onMouseDown={startDraw}
+                    onMouseMove={draw}
+                    onMouseUp={endDraw}
+                    onMouseLeave={endDraw}
+                    onTouchStart={startDraw}
+                    onTouchMove={draw}
+                    onTouchEnd={endDraw}
+                  />
+                  {!hasSignature && (
+                    <div style={{
+                      position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)",
+                      textAlign: "center", color: "#9CA3AF", fontSize: 14, pointerEvents: "none"
+                    }}>Sign here with your finger</div>
+                  )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 13, color: "#374151" }}>Signed by: <strong>{workerName}</strong></div>
+                  <button onClick={clearSignature} style={{
+                    background: "transparent", border: "none", color: "#6B7280",
+                    fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0
+                  }}>Clear signature</button>
+                </div>
+              </div>
+
+              {/* Crew sign-off — additional workers acknowledging the same FLHA */}
+              <div style={styles.card}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 4 }}>Additional crew (optional)</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>If other workers are covered by this same FLHA, have each of them sign below. Pass the device to each person.</div>
+
+                {crew.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    {crew.map((c, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < crew.length - 1 ? "1px solid #F1F5F9" : "none" }}>
+                        <span style={{ fontSize: 14, color: "#334155" }}>👷 {c.name}</span>
+                        <button onClick={() => removeCrewMember(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <label style={styles.label}>Crew member name</label>
+                <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Full name" value={crewName} onChange={e => setCrewName(e.target.value)} />
+                <label style={styles.label}>Signature</label>
+                <div style={{ position: "relative", marginBottom: 6 }}>
+                  <canvas ref={crewCanvasRef} width={600} height={160}
+                    style={{ width: "100%", height: 130, border: "1.5px solid #E5E7EB", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                    onMouseDown={startCrewDraw} onMouseMove={crewDraw} onMouseUp={endCrewDraw} onMouseLeave={endCrewDraw}
+                    onTouchStart={startCrewDraw} onTouchMove={crewDraw} onTouchEnd={endCrewDraw} />
+                  {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+                </div>
+                <div style={{ textAlign: "right", marginBottom: 10 }}>
+                  <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+                </div>
+                <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
+              </div>
+
+              <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
+                disabled={!hasSignature || signed}
+                onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
+                {signed ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
+              </button>
+              <button style={styles.ghost} onClick={() => setStep("review")}>← Back to review</button>
+            </>
+          )}
         </>
       )}
 
@@ -956,7 +1011,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <div style={{ fontSize: 64, marginBottom: 12 }}>{pendingApproval ? "⚠️" : "✅"}</div>
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>{pendingApproval ? "Awaiting Supervisor Sign-Off" : "FLHA Complete"}</div>
             <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 20 }}>
-              Submitted {new Date().toLocaleString("en-CA")} by <strong>{workerName}</strong>
+              Submitted {new Date().toLocaleString("en-CA")} by <strong>{workerName}</strong>{crew.length > 0 ? ` + ${crew.length} crew` : ""}
             </div>
 
             {pendingApproval && (
@@ -980,7 +1035,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>
