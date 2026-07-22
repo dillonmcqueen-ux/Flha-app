@@ -17,7 +17,7 @@ export default function ToolboxTalk({ companyId, companyName, onBack, onLogout, 
   const [genError, setGenError] = useState(false);
   const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[] }
   const [companyLogo, setCompanyLogo] = useState("");
-  const cf = useCustomFields(companyId, "toolbox");
+  const cf = useCustomFields(companyId, "toolbox", token);
 
   // Attendees
   const [attendees, setAttendees] = useState([]); // {name, signature}
