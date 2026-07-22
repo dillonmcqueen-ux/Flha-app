@@ -107,9 +107,6 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
 
   // Load company + SOPs/sites/custom fields on first render.
   // If forcedCompanyId is provided (from login), load that specific company.
-  // Company name/logo still come straight from Supabase (public, low-risk
-  // read); SOPs, sites, and custom fields now go through the protected
-  // /api/companydata endpoint instead of the anon key.
   useEffect(() => {
     async function loadSops() {
       let companies, companyErr;
@@ -143,13 +140,14 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
       setCompanyLogo(company.logo_url || "");
       setCompanyName(company.name);
 
+      let siteData = null;
       // Sites — via protected endpoint
       try {
         const siteRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sites", token, companyId: company.id }),
         });
-        const siteData = await siteRes.json();
+        siteData = await siteRes.json();
         if (siteRes.ok) {
           setSites(siteData.sites || []);
           if (!siteData.sites || siteData.sites.length === 0) setSiteMode("other");
@@ -158,50 +156,56 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
           setSiteMode("other");
         }
       } catch (e) {
+        siteData = { error: e.message };
         console.error("sites read error:", e.message);
         setSiteMode("other");
       }
 
+      let cfData = null;
       // Custom FLHA fields — via protected endpoint
       try {
         const cfRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_custom_fields", token, companyId: company.id, docType: "flha" }),
         });
-        const cfData = await cfRes.json();
+        cfData = await cfRes.json();
         if (cfRes.ok) setCustomFields(cfData.fields || []);
         else console.error("custom fields read error:", cfData.error);
       } catch (e) {
+        cfData = { error: e.message };
         console.error("custom fields read error:", e.message);
       }
 
+      let sopsData = null;
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sops", token, companyId: company.id }),
         });
-        const sopsData = await sopsRes.json();
+        sopsData = await sopsRes.json();
         if (!sopsRes.ok) {
-          setDebugInfo(`sops query error: ${sopsData.error}`);
+          setDebugInfo(`sops query error: ${sopsData.error} | token:${token ? "present" : "MISSING"} | sites:${JSON.stringify(siteData)} | cf:${JSON.stringify(cfData)}`);
           setSopsLoading(false);
           return;
         }
         const sops = sopsData.sops || [];
         if (sops.length === 0) {
-          setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
+          setDebugInfo(`sops returned 0 rows for company_id=${company.id} | token:${token ? "present" : "MISSING"} | sites:${JSON.stringify(siteData)}`);
           setSopsLoading(false);
           return;
         }
         setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
       } catch (e) {
-        setDebugInfo(`sops query error: ${e.message}`);
+        setDebugInfo(`sops query error: ${e.message} | token:${token ? "present" : "MISSING"}`);
         setSopsLoading(false);
         return;
       }
 
+      // Success path — still show a debug summary so you can confirm counts.
+      setDebugInfo(`OK — sites:${(siteData?.sites || []).length} sops:${(sopsData?.sops || []).length} token:${token ? "present" : "MISSING"}`);
+
       setCompanyName(company.name);
-      setDebugInfo("");
       setSopsLoading(false);
     }
     loadSops();
@@ -597,6 +601,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
   return (
     <div style={styles.wrap}>
+      {debugInfo && <div style={{ background: "#000", color: "#0f0", padding: 10, fontSize: 10, wordBreak: "break-all", marginBottom: 10, borderRadius: 6 }}>{debugInfo}</div>}
       <div style={{ ...styles.header, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {companyLogo
@@ -706,8 +711,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             if (!workerName || !jobSite) return;
             const missing = customFields.filter(f => f.required && !(customValues[f.id] || "").trim());
             if (missing.length > 0) { alert(`Please fill in: ${missing.map(m => m.label).join(", ")}`); return; }
-            // Auto-save a newly typed site via the protected endpoint
-            // (case-insensitive dedupe is handled server-side too).
             const trimmed = jobSite.trim();
             const exists = sites.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
             if (!exists && companyId) {
