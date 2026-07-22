@@ -789,10 +789,29 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const [{ data: cos }, { data: ss }] = await Promise.all([
-        supabase.from("companies").select("*"),
-        supabase.from("sops").select("*"),
-      ]);
+      const { data: cos } = await supabase.from("companies").select("*");
+
+      const visibleCompaniesRaw = forcedCompanyId
+        ? (cos || []).filter(c => c.id === forcedCompanyId)
+        : (cos || []);
+
+      // SOPs — via protected endpoint, one call per visible company (there
+      // are only ever a handful of companies for a supervisor/admin view).
+      let ss = [];
+      try {
+        const sopResults = await Promise.all(visibleCompaniesRaw.map(async (c) => {
+          try {
+            const res = await fetch("/api/companydata", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "list_sops", token, companyId: c.id }),
+            });
+            const data = await res.json();
+            if (res.ok) return (data.sops || []).map(s => ({ ...s, company_id: c.id }));
+            return [];
+          } catch (e) { return []; }
+        }));
+        ss = sopResults.flat();
+      } catch (e) { /* leave ss empty if the request fails */ }
 
       let fs = [];
       try {
@@ -874,11 +893,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         if (maRes.ok) ma = maData.actions || [];
       } catch (e) { /* leave ma empty if the request fails */ }
 
-      const visibleCompanies = forcedCompanyId
-        ? (cos || []).filter(c => c.id === forcedCompanyId)
-        : (cos || []);
-
-      setCompanies(visibleCompanies);
+      setCompanies(visibleCompaniesRaw);
       setFlhas(fs);
       setInspections(insp);
       setToolboxTalks(tbt);
@@ -888,7 +903,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setMonthlyRecords(mr);
       setMonthlyActions(ma);
       setSops(ss || []);
-      if (visibleCompanies.length) setSelectedCompany(visibleCompanies[0].id);
+      if (visibleCompaniesRaw.length) setSelectedCompany(visibleCompaniesRaw[0].id);
       setLoading(false);
     }
     loadAll();
