@@ -140,14 +140,13 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
       setCompanyLogo(company.logo_url || "");
       setCompanyName(company.name);
 
-      let siteData = null;
       // Sites — via protected endpoint
       try {
         const siteRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sites", token, companyId: company.id }),
         });
-        siteData = await siteRes.json();
+        const siteData = await siteRes.json();
         if (siteRes.ok) {
           setSites(siteData.sites || []);
           if (!siteData.sites || siteData.sites.length === 0) setSiteMode("other");
@@ -156,54 +155,48 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
           setSiteMode("other");
         }
       } catch (e) {
-        siteData = { error: e.message };
         console.error("sites read error:", e.message);
         setSiteMode("other");
       }
 
-      let cfData = null;
       // Custom FLHA fields — via protected endpoint
       try {
         const cfRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_custom_fields", token, companyId: company.id, docType: "flha" }),
         });
-        cfData = await cfRes.json();
+        const cfData = await cfRes.json();
         if (cfRes.ok) setCustomFields(cfData.fields || []);
         else console.error("custom fields read error:", cfData.error);
       } catch (e) {
-        cfData = { error: e.message };
         console.error("custom fields read error:", e.message);
       }
 
-      let sopsData = null;
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sops", token, companyId: company.id }),
         });
-        sopsData = await sopsRes.json();
+        const sopsData = await sopsRes.json();
         if (!sopsRes.ok) {
-          setDebugInfo(`sops query error: ${sopsData.error} | token:${token ? "present" : "MISSING"} | sites:${JSON.stringify(siteData)} | cf:${JSON.stringify(cfData)}`);
+          setDebugInfo(`sops query error: ${sopsData.error}`);
           setSopsLoading(false);
           return;
         }
         const sops = sopsData.sops || [];
         if (sops.length === 0) {
-          setDebugInfo(`sops returned 0 rows for company_id=${company.id} | token:${token ? "present" : "MISSING"} | sites:${JSON.stringify(siteData)}`);
+          setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
           setSopsLoading(false);
           return;
         }
         setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
+        setDebugInfo("");
       } catch (e) {
-        setDebugInfo(`sops query error: ${e.message} | token:${token ? "present" : "MISSING"}`);
+        setDebugInfo(`sops query error: ${e.message}`);
         setSopsLoading(false);
         return;
       }
-
-      // Success path — still show a debug summary so you can confirm counts.
-      setDebugInfo(`OK — sites:${(siteData?.sites || []).length} sops:${(sopsData?.sops || []).length} token:${token ? "present" : "MISSING"}`);
 
       setCompanyName(company.name);
       setSopsLoading(false);
@@ -601,7 +594,6 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
   return (
     <div style={styles.wrap}>
-      {debugInfo && <div style={{ background: "#000", color: "#0f0", padding: 10, fontSize: 10, wordBreak: "break-all", marginBottom: 10, borderRadius: 6 }}>{debugInfo}</div>}
       <div style={{ ...styles.header, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {companyLogo
