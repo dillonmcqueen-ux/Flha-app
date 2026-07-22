@@ -5,7 +5,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
-export default function DailyReport({ companyId, companyName, onBack, onLogout }) {
+export default function DailyReport({ companyId, companyName, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | notes | review | done
   const [reporter, setReporter] = useState("");
   const [site, setSite] = useState("");
@@ -34,18 +34,39 @@ export default function DailyReport({ companyId, companyName, onBack, onLogout }
 
   useEffect(() => {
     async function load() {
-      const { data: st } = await supabase.from("sites").select("id, name").eq("company_id", companyId).order("id");
-      setSites(st || []);
-      if (!st || st.length === 0) setSiteMode("other");
-      const { data: eq } = await supabase.from("equipment")
-        .select("id, year, make, model, type, unit_number")
-        .eq("company_id", companyId).order("make");
-      setEquipmentFleet(eq || []);
+      // Sites — via protected endpoint
+      try {
+        const siteRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sites", token, companyId }),
+        });
+        const siteData = await siteRes.json();
+        if (siteRes.ok) {
+          setSites(siteData.sites || []);
+          if (!siteData.sites || siteData.sites.length === 0) setSiteMode("other");
+        } else {
+          setSiteMode("other");
+        }
+      } catch (e) {
+        setSiteMode("other");
+      }
+
+      // Equipment — via protected endpoint
+      try {
+        const eqRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_equipment", token, companyId }),
+        });
+        const eqData = await eqRes.json();
+        if (eqRes.ok) setEquipmentFleet(eqData.equipment || []);
+      } catch (e) { /* leave fleet empty if the request fails */ }
+
+      // Company name/logo remain a direct, low-risk public read
       const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
       if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
     }
     load();
-  }, [companyId]);
+  }, [companyId, token]);
 
   const equipLabel = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
@@ -125,14 +146,26 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const weatherStr = weatherSummary();
     const meta = { reporter, site, reportDate, weather: weatherStr, temperature, crew, equipment, visitors, customFields: cf.entries() };
     const pdfUrl = await generateAndUploadDaily({ ...meta, report, companyName, companyLogo });
-    await supabase.from("daily_reports").insert({
-      company_id: companyId,
-      reporter_name: reporter,
-      site, report_date: reportDate, weather: weatherStr, temperature,
-      crew, equipment, visitors,
-      report_json: { ...report, customFields: cf.entries() },
-      pdf_url: pdfUrl || null,
-    });
+    try {
+      await fetch("/api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "daily",
+          action: "submit",
+          token,
+          record: {
+            reporter_name: reporter,
+            site, report_date: reportDate, weather: weatherStr, temperature,
+            crew, equipment, visitors,
+            report_json: { ...report, customFields: cf.entries() },
+            pdf_url: pdfUrl || null,
+          },
+        }),
+      });
+    } catch (e) {
+      console.error("Daily report save failed:", e);
+    }
     setSaving(false);
     setStep("done");
   };
