@@ -29,7 +29,7 @@ function verifySession(token) {
 const TABLES = {
   incident: {
     name: 'incidents',
-    listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
   nearmiss: {
     name: 'near_misses',
