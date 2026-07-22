@@ -40,14 +40,29 @@ export default function NearMiss({ companyId, companyName, onBack, onLogout, tok
 
   useEffect(() => {
     async function load() {
-      const { data: st } = await supabase.from("sites").select("id, name").eq("company_id", companyId).order("id");
-      setSites(st || []);
-      if (!st || st.length === 0) setSiteMode("other");
+      // Sites — via protected endpoint
+      try {
+        const siteRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sites", token, companyId }),
+        });
+        const siteData = await siteRes.json();
+        if (siteRes.ok) {
+          setSites(siteData.sites || []);
+          if (!siteData.sites || siteData.sites.length === 0) setSiteMode("other");
+        } else {
+          setSiteMode("other");
+        }
+      } catch (e) {
+        setSiteMode("other");
+      }
+
+      // Company name/logo remain a direct, low-risk public read
       const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
       if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
     }
     load();
-  }, [companyId]);
+  }, [companyId, token]);
 
   const reporterLabel = () => anonymous ? "Anonymous" : reporter;
 
