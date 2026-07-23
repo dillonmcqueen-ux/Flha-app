@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadFLHA } from "./generatePDF";
+import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
 
 const RISK_COLOR = {
   Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
@@ -670,6 +671,57 @@ function CorrectiveActionRow({ ca, onUpdate }) {
   );
 }
 
+function EquipmentReportCard({ data, onClose, onGeneratePdf, generating }) {
+  if (!data) return null;
+  const { report, company } = data;
+  const rj = report.report_json || {};
+  const equipment = rj.equipment || [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 680, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#0369A1" }}>Weekly Equipment Usage</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {report.pdf_url ? (
+              <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+            ) : (
+              <button onClick={() => onGeneratePdf(report)} disabled={generating} style={{ background: generating ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                {generating ? "Generating…" : "📄 Generate PDF"}
+              </button>
+            )}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        {equipment.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No equipment activity recorded this week.</div>
+        ) : (
+          equipment.map((eq, i) => (
+            <div key={i} style={{ border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 6 }}>{eq.equipmentLabel}</div>
+              <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
+                <div style={{ fontSize: 13, color: "#374151" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
+                <div style={{ fontSize: 13, color: "#374151" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
+              </div>
+              {eq.noPostTripCount > 0 && (
+                <div style={{ fontSize: 12, color: "#D97706", fontWeight: 700, marginBottom: 4 }}>⚠ Currently checked out — no post-trip logged</div>
+              )}
+              {eq.issues.map((iss, j) => (
+                <div key={j} style={{ fontSize: 12, color: "#DC2626", marginBottom: 2 }}>
+                  • {iss.type}: {iss.note} <span style={{ color: "#9CA3AF" }}>({iss.worker}, {new Date(iss.date).toLocaleDateString("en-CA")})</span>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, token = null }) {
   const [companies, setCompanies] = useState([]);
@@ -689,6 +741,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [monthlyActions, setMonthlyActions] = useState([]);
   const [selectedMonthlyRecord, setSelectedMonthlyRecord] = useState(null);
   const [monthlySubTab, setMonthlySubTab] = useState("records"); // records | actions
+  const [equipmentReports, setEquipmentReports] = useState([]);
+  const [loadingEquipmentReports, setLoadingEquipmentReports] = useState(false);
+  const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
+  const [generatingReportPdf, setGeneratingReportPdf] = useState(false);
+  const [generatingNewReport, setGeneratingNewReport] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -908,6 +965,74 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     }
     loadAll();
   }, [forcedCompanyId, token]);
+
+  // Load equipment reports for the selected company whenever that tab is opened or the company changes.
+  useEffect(() => {
+    async function loadEquipmentReports() {
+      if (activeTab !== "equipment" || !selectedCompany) return;
+      setLoadingEquipmentReports(true);
+      try {
+        const res = await fetch("/api/equipmentreports", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_reports", token, companyId: selectedCompany }),
+        });
+        const data = await res.json();
+        if (res.ok) setEquipmentReports(data.reports || []);
+      } catch (e) { /* leave list as-is if the request fails */ }
+      setLoadingEquipmentReports(false);
+    }
+    loadEquipmentReports();
+  }, [activeTab, selectedCompany, token]);
+
+  const openEquipmentReport = async (report) => {
+    try {
+      const res = await fetch("/api/equipmentreports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_report", token, reportId: report.id }),
+      });
+      const data = await res.json();
+      if (res.ok) setSelectedEquipmentReport(data);
+    } catch (e) { /* ignore */ }
+  };
+
+  const generateReportPdf = async (report) => {
+    setGeneratingReportPdf(true);
+    try {
+      const co = companies.find(c => c.id === report.company_id) || selectedEquipmentReport?.company;
+      const pdfUrl = await generateAndUploadEquipmentReport({
+        report, companyName: co?.name || "", companyLogo: co?.logo_url || "",
+      });
+      if (pdfUrl) {
+        await fetch("/api/equipmentreports", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "save_pdf_url", token, reportId: report.id, pdfUrl }),
+        });
+        setSelectedEquipmentReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
+        setEquipmentReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
+      }
+    } catch (e) { /* leave as-is if generation fails */ }
+    setGeneratingReportPdf(false);
+  };
+
+  const generateThisWeeksReport = async () => {
+    if (!selectedCompany) return;
+    setGeneratingNewReport(true);
+    try {
+      const res = await fetch("/api/equipmentreports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_now", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEquipmentReports(prev => {
+          const filtered = prev.filter(r => r.week_start !== data.report.week_start);
+          return [{ id: data.report.id, week_start: data.report.week_start, week_end: data.report.week_end, pdf_url: data.report.pdf_url, generated_by: data.report.generated_by, created_at: data.report.created_at }, ...filtered]
+            .sort((a, b) => new Date(b.week_start) - new Date(a.week_start));
+        });
+      }
+    } catch (e) { /* ignore */ }
+    setGeneratingNewReport(false);
+  };
 
   const company = companies.find(c => c.id === selectedCompany);
   const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
@@ -1141,6 +1266,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} />}
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
       {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
+      {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => setSelectedEquipmentReport(null)} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} />}
 
       <div style={styles.header}>
         <div>
@@ -1213,6 +1339,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
             🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
           </button>
+          <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -1633,6 +1760,50 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               </div>
             )}
           </>
+        )}
+
+        {activeTab === "equipment" && (
+          <div style={styles.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                {company?.name} — Weekly Equipment Usage
+              </div>
+              <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
+                background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0
+              }}>
+                {generatingNewReport ? "Generating…" : "+ Generate This Week"}
+              </button>
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+
+            {loadingEquipmentReports ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+            ) : equipmentReports.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🔧</div>
+                No equipment reports yet.
+              </div>
+            ) : (
+              equipmentReports.map((r, i) => {
+                const eqCount = 0; // count not available without fetching detail; keep row lightweight
+                return (
+                  <div key={r.id} style={{
+                    padding: "12px 14px", borderBottom: i < equipmentReports.length - 1 ? "1px solid #F3F4F6" : "none",
+                    cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+                  }} onClick={() => openEquipmentReport(r)}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.week_start} to {r.week_end}</div>
+                      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    </div>
+                    <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
+                      {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         )}
 
         {activeTab === "sops" && (
