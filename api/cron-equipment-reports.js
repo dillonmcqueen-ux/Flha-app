@@ -28,9 +28,19 @@ export default async function handler(req, res) {
     if (coErr) return res.status(500).json({ error: 'Could not load companies.' });
 
     const results = [];
-    for (const c of companies || []) {
+        for (const c of companies || []) {
       try {
+        const { data: settingRows } = await supabaseAdmin
+          .from('company_document_settings')
+          .select('is_active')
+          .eq('company_id', c.id)
+          .eq('document_key', 'equipment_reports')
+          .limit(1);
+        const isActive = settingRows && settingRows.length > 0 ? settingRows[0].is_active : true;
+        if (!isActive) { results.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); continue; }
+
         const reportJson = await buildReportForCompanyWeek(c.id, lastMonday.toISOString(), weekEndExclusiveISO);
+
         // Skip companies with no equipment activity that week — no point storing an empty report.
         if (!reportJson.equipment || reportJson.equipment.length === 0) {
           results.push({ companyId: c.id, skipped: true });
