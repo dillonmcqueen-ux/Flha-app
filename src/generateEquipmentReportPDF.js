@@ -125,10 +125,12 @@ export async function generateAndUploadEquipmentReport({ report, companyName, co
     doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 6.5, { align: "right" });
   }
 
-  const filename = `EQUIPMENT_${companyName || "co"}_${rj.weekStart}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
+  // Filename includes report.id so re-generating never collides with a
+  // previously uploaded file for the same company/week.
+  const filename = `EQUIPMENT_${companyName || "co"}_${rj.weekStart}_${report.id}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { throw new Error("PDF upload failed: " + error.message); }
+  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: true });
+  if (error) { throw new Error("Upload failed: " + error.message); }
   const { data: pub } = supabase.storage.from("flha-reports").getPublicUrl(filename);
   return pub?.publicUrl || null;
 }
