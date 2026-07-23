@@ -1,411 +1,295 @@
-// api/customforms.js
-// Handles fully custom document types — admin builder (forms/questions),
-// worker submission, supervisor/admin viewing, and the per-company
-// document active/deactivated toggle settings.
+import { useState, useEffect } from "react";
+import { supabase } from "./supabaseClient";
+import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 
-import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+export default function CustomForm({ companyId, companyName, formId, onBack, onLogout, token = null }) {
+  const [step, setStep] = useState("site"); // site | questions | review | sign | done
+  const [sites, setSites] = useState([]);
+  const [siteId, setSiteId] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [companyLogo, setCompanyLogo] = useState("");
 
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+  const [form, setForm] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState({});
 
-function verifySession(token) {
-  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
-  const [data, sig] = token.split('.');
-  const expectedSig = crypto
-    .createHmac('sha256', process.env.SESSION_SECRET)
-    .update(data)
-    .digest('base64url');
-  if (sig !== expectedSig) return null;
-  try {
-    return JSON.parse(Buffer.from(data, 'base64url').toString());
-  } catch (e) {
-    return null;
-  }
-}
+  const [workerName, setWorkerName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [genError, setGenError] = useState(false);
+  const [aiSummary, setAiSummary] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [hasSignature, setHasSignature] = useState(false);
 
-// Admins may act on any company they specify; supervisors are always
-// locked to their own session.companyId, regardless of what they send.
-function resolveCompanyId(session, requestedCompanyId) {
-  if (session.role === 'admin') return requestedCompanyId || null;
-  return session.companyId;
-}
-
-// Built-in document keys — used so the toggle system has a fixed list
-// of the non-custom types to show alongside custom ones.
-const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports'];
-
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
-  const { action, token } = req.body || {};
-  const session = verifySession(token);
-  if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
-
-  try {
-    // ══ ADMIN: custom form builder ═══════════════════════════════════
-
-    if (action === 'list_forms') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId } = req.body;
-      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { data, error } = await supabaseAdmin
-        .from('custom_forms')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false });
-      if (error) return res.status(500).json({ error: 'Could not load forms.' });
-      return res.status(200).json({ forms: data || [] });
+  useEffect(() => {
+    async function load() {
+      const { data: st } = await supabase.from("sites").select("id, name").eq("company_id", companyId).order("id");
+      setSites(st || []);
+      const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
+      if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
     }
+    load();
+  }, [companyId]);
 
-    if (action === 'create_form') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId, title, icon, accentColor } = req.body;
-      if (!companyId || !title?.trim()) return res.status(400).json({ error: 'Missing details.' });
-      const { data, error } = await supabaseAdmin
-        .from('custom_forms')
-        .insert({
-          company_id: companyId,
-          title: title.trim(),
-          icon: icon || '📄',
-          accent_color: accentColor || '#4338CA',
-          is_active: true,
-        })
-        .select()
-        .single();
-      if (error) return res.status(500).json({ error: "Couldn't create form." });
+  const siteName = () => sites.find(s => String(s.id) === String(siteId))?.name || "";
 
-      // Default the new form's toggle to active so it shows up immediately.
-      await supabaseAdmin.from('company_document_settings').upsert(
-        { company_id: companyId, document_key: `custom_${data.id}`, is_active: true },
-        { onConflict: 'company_id,document_key' }
-      );
-
-      return res.status(200).json({ form: data });
-    }
-
-    if (action === 'update_form') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId, title, icon, accentColor } = req.body;
-      if (!formId) return res.status(400).json({ error: 'Missing form id.' });
-      const updates = {};
-      if (title !== undefined) updates.title = title.trim();
-      if (icon !== undefined) updates.icon = icon;
-      if (accentColor !== undefined) updates.accent_color = accentColor;
-      const { error } = await supabaseAdmin.from('custom_forms').update(updates).eq('id', formId);
-      if (error) return res.status(500).json({ error: "Couldn't update form." });
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'toggle_form') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId, isActive } = req.body;
-      if (!formId) return res.status(400).json({ error: 'Missing form id.' });
-      const { error } = await supabaseAdmin.from('custom_forms').update({ is_active: !!isActive }).eq('id', formId);
-      if (error) return res.status(500).json({ error: "Couldn't update form." });
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'delete_form') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId } = req.body;
-      if (!formId) return res.status(400).json({ error: 'Missing form id.' });
-      const { data: records, error: recErr } = await supabaseAdmin.from('custom_form_records').select('id').eq('form_id', formId);
-      if (recErr) return res.status(500).json({ error: 'Could not check submissions.' });
-      if (records && records.length > 0) {
-        return res.status(400).json({ error: "Couldn't delete: this document already has submitted records." });
-      }
-      await supabaseAdmin.from('custom_form_questions').delete().eq('form_id', formId);
-      await supabaseAdmin.from('company_document_settings').delete().eq('document_key', `custom_${formId}`);
-      const { error } = await supabaseAdmin.from('custom_forms').delete().eq('id', formId);
-      if (error) return res.status(500).json({ error: "Couldn't delete form." });
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'list_questions') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId } = req.body;
-      if (!formId) return res.status(400).json({ error: 'Missing form id.' });
-      const { data, error } = await supabaseAdmin
-        .from('custom_form_questions')
-        .select('*')
-        .eq('form_id', formId)
-        .order('sort_order', { ascending: true });
-      if (error) return res.status(500).json({ error: 'Could not load questions.' });
-      return res.status(200).json({ questions: data || [] });
-    }
-
-    if (action === 'add_question') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId, questionText } = req.body;
-      if (!formId || !questionText?.trim()) return res.status(400).json({ error: 'Missing details.' });
-      const { data: existing, error: exErr } = await supabaseAdmin
-        .from('custom_form_questions')
-        .select('sort_order')
-        .eq('form_id', formId)
-        .order('sort_order', { ascending: false })
-        .limit(1);
-      if (exErr) return res.status(500).json({ error: 'Could not add question.' });
-      const nextOrder = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
-      const { data, error } = await supabaseAdmin
-        .from('custom_form_questions')
-        .insert({ form_id: formId, question_text: questionText.trim(), sort_order: nextOrder })
-        .select()
-        .single();
-      if (error) return res.status(500).json({ error: "Couldn't add question." });
-      return res.status(200).json({ question: data });
-    }
-
-    if (action === 'delete_question') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { questionId } = req.body;
-      if (!questionId) return res.status(400).json({ error: 'Missing question id.' });
-      const { error } = await supabaseAdmin.from('custom_form_questions').delete().eq('id', questionId);
-      if (error) return res.status(500).json({ error: "Couldn't remove question." });
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'reorder_questions') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { updates } = req.body; // [{ id, sort_order }]
-      if (!Array.isArray(updates)) return res.status(400).json({ error: 'Missing updates.' });
-      for (const u of updates) {
-        await supabaseAdmin.from('custom_form_questions').update({ sort_order: u.sort_order }).eq('id', u.id);
-      }
-      return res.status(200).json({ ok: true });
-    }
-
-    // ══ ADMIN + SUPERVISOR: document active/deactivated toggles ════════
-    // Admins can view/edit any company's toggles. Supervisors can only
-    // VIEW their own company's toggles (used by Dashboard.jsx to decide
-    // whether to show the Equipment tab) — they cannot change them.
-
-    if (action === 'get_document_settings') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      const companyId = resolveCompanyId(session, req.body.companyId);
-      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-
-      const { data: settingsRows, error: setErr } = await supabaseAdmin
-        .from('company_document_settings')
-        .select('document_key, is_active')
-        .eq('company_id', companyId);
-      if (setErr) return res.status(500).json({ error: 'Could not load settings.' });
-      const settingsMap = {}; (settingsRows || []).forEach(s => { settingsMap[s.document_key] = s.is_active; });
-
-      const { data: customForms, error: cfErr } = await supabaseAdmin
-        .from('custom_forms')
-        .select('id, title, icon, accent_color')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: true });
-      if (cfErr) return res.status(500).json({ error: 'Could not load custom forms.' });
-
-      const builtins = BUILTIN_DOC_KEYS.map(key => ({
-        key,
-        label: BUILTIN_LABELS[key] || key,
-        isCustom: false,
-        isActive: settingsMap[key] !== undefined ? settingsMap[key] : true,
-      }));
-
-      const customs = (customForms || []).map(f => ({
-        key: `custom_${f.id}`,
-        label: f.title,
-        icon: f.icon,
-        isCustom: true,
-        formId: f.id,
-        isActive: settingsMap[`custom_${f.id}`] !== undefined ? settingsMap[`custom_${f.id}`] : true,
-      }));
-
-      return res.status(200).json({ documents: [...builtins, ...customs] });
-    }
-
-    if (action === 'set_document_setting') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId, documentKey, isActive } = req.body;
-      if (!companyId || !documentKey) return res.status(400).json({ error: 'Missing details.' });
-      const { error } = await supabaseAdmin.from('company_document_settings').upsert(
-        { company_id: companyId, document_key: documentKey, is_active: !!isActive },
-        { onConflict: 'company_id,document_key' }
-      );
-      if (error) return res.status(500).json({ error: "Couldn't update setting." });
-      return res.status(200).json({ ok: true });
-    }
-
-    // ══ WORKER: which documents can this worker see + submission ═══════
-
-    // Called by WorkerMenu to build the dynamic list of doc types.
-    if (action === 'get_worker_documents') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
-
-      const { data: settingsRows } = await supabaseAdmin
-        .from('company_document_settings')
-        .select('document_key, is_active')
-        .eq('company_id', session.companyId);
-      const settingsMap = {}; (settingsRows || []).forEach(s => { settingsMap[s.document_key] = s.is_active; });
-
-      const { data: customForms } = await supabaseAdmin
-        .from('custom_forms')
-        .select('id, title, icon, accent_color')
-        .eq('company_id', session.companyId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: true });
-
-      const builtinActive = {};
-      BUILTIN_DOC_KEYS.forEach(key => {
-        builtinActive[key] = settingsMap[key] !== undefined ? settingsMap[key] : true;
+  const checkSiteAndProceed = async () => {
+    setChecking(true); setGenError(false);
+    try {
+      const res = await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_active_form", token, siteId, formId }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
 
-      const activeCustoms = (customForms || []).filter(f => {
-        const key = `custom_${f.id}`;
-        return settingsMap[key] !== undefined ? settingsMap[key] : true;
+      setForm(data.form);
+      setQuestions(data.questions || []);
+      const initial = {};
+      (data.questions || []).forEach(q => { initial[q.id] = { answer: null, note: "" }; });
+      setAnswers(initial);
+      setStep("questions");
+    } catch (e) {
+      setGenError(true);
+    }
+    setChecking(false);
+  };
+
+  const setAnswer = (qId, val) => setAnswers(prev => ({ ...prev, [qId]: { ...prev[qId], answer: val } }));
+  const setNote = (qId, val) => setAnswers(prev => ({ ...prev, [qId]: { ...prev[qId], note: val } }));
+
+  const allAnswered = questions.length > 0 && questions.every(q => answers[q.id]?.answer !== null);
+  const flaggedItems = questions.filter(q => answers[q.id]?.answer === false);
+  const notesComplete = flaggedItems.every(q => (answers[q.id]?.note || "").trim());
+
+  const generateSummary = async () => {
+    setLoading(true); setGenError(false);
+    const qa = questions.map(q => {
+      const a = answers[q.id];
+      return `- ${q.question_text}: ${a.answer ? "YES" : "NO"}${!a.answer && a.note ? ` (Note: ${a.note})` : ""}`;
+    }).join("\n");
+
+    const prompt = `You are a safety officer writing a short professional summary of a completed "${form.title}" document.
+
+Site: ${siteName()}
+Company: ${companyName}
+
+Results:
+${qa}
+
+INSTRUCTIONS:
+- Write a clean, professional 2-4 sentence summary of the overall condition/status.
+- If any items were flagged "NO", mention them factually.
+- If everything passed, say so plainly.
+- Do not invent details beyond what's given.
+
+Respond ONLY with valid JSON (no markdown, no backticks):
+{ "summary": "professional summary text" }`;
+
+    try {
+      const res = await fetch("/api/generate-flha", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
       });
-
-      return res.status(200).json({ builtinActive, customForms: activeCustoms });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const text = data.content?.map(b => b.text || "").join("") || "";
+      const a = text.indexOf("{"), b = text.lastIndexOf("}");
+      if (a === -1 || b === -1) throw new Error("bad response");
+      const parsed = JSON.parse(text.slice(a, b + 1));
+      setAiSummary(parsed.summary || "");
+      setStep("review");
+    } catch (e) {
+      setGenError(true);
     }
+    setLoading(false);
+  };
 
-    if (action === 'get_active_form') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
-      const { siteId, formId } = req.body;
-      if (!siteId || !formId) return res.status(400).json({ error: 'Missing details.' });
+  // ── signature pad ────────────────────────────────────────
+  const [canvasEl, setCanvasEl] = useState(null);
+  const canvasRefCallback = (node) => { if (node) setCanvasEl(node); };
+  const drawingRef = { current: false };
+  const getPos = (e, canvas) => {
+    const r = canvas.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
+    return { x: (t.clientX - r.left) * (canvas.width / r.width), y: (t.clientY - r.top) * (canvas.height / r.height) };
+  };
+  const startDraw = (e) => { e.preventDefault(); drawingRef.current = true; const ctx = canvasEl.getContext("2d"); const { x, y } = getPos(e, canvasEl); ctx.beginPath(); ctx.moveTo(x, y); };
+  const draw = (e) => { if (!drawingRef.current) return; e.preventDefault(); const ctx = canvasEl.getContext("2d"); const { x, y } = getPos(e, canvasEl); ctx.lineTo(x, y); ctx.strokeStyle = "#1E293B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setHasSignature(true); };
+  const endDraw = () => { drawingRef.current = false; };
+  const clearSig = () => { if (canvasEl) canvasEl.getContext("2d").clearRect(0, 0, canvasEl.width, canvasEl.height); setHasSignature(false); };
 
-      const { data: siteRows } = await supabaseAdmin.from('sites').select('id, company_id').eq('id', siteId).limit(1);
-      if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
-        return res.status(403).json({ error: 'Not allowed for this site.' });
-      }
+  const submit = async () => {
+    setSaving(true);
+    const sig = hasSignature && canvasEl ? canvasEl.toDataURL("image/png") : null;
 
-      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('*').eq('id', formId).limit(1);
-      const form = formRows && formRows[0];
-      if (!form || form.company_id !== session.companyId || !form.is_active) {
-        return res.status(404).json({ error: 'This document is not available.' });
-      }
+    const items = questions.map(q => ({
+      question: q.question_text,
+      answer: answers[q.id]?.answer,
+      note: answers[q.id]?.note || "",
+    }));
 
-      const { data: questions, error: qErr } = await supabaseAdmin
-        .from('custom_form_questions')
-        .select('*')
-        .eq('form_id', formId)
-        .order('sort_order', { ascending: true });
-      if (qErr) return res.status(500).json({ error: 'Could not load questions.' });
+    const pdfUrl = await generateAndUploadCustomForm({
+      formTitle: form.title, accentColor: form.accent_color, siteName: siteName(), companyName, companyLogo,
+      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig,
+    });
 
-      return res.status(200).json({ form, questions: questions || [] });
+    try {
+      await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "submit_custom", token,
+          siteId, formId: form.id, submittedBy: workerName, aiSummary, pdfUrl,
+          answers: questions.map(q => ({ questionId: q.id, answer: answers[q.id]?.answer, note: answers[q.id]?.note || "" })),
+        }),
+      });
+    } catch (e) {
+      console.error("Custom form save failed:", e);
     }
+    setSaving(false);
+    setStep("done");
+  };
 
-    if (action === 'submit_custom') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
-      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl } = req.body;
-      if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
-        return res.status(400).json({ error: 'Missing details.' });
-      }
+  const s = {
+    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: 16 },
+    header: (accent) => ({ background: `linear-gradient(135deg,${accent},${accent}dd)`, borderRadius: 14, padding: "18px 20px", marginBottom: 16, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }),
+    card: { background: "#fff", borderRadius: 14, padding: 18, marginBottom: 14, boxShadow: "0 1px 3px #0f172a12" },
+    label: { display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 },
+    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC" },
+    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer", width: "100%" }),
+    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
+  };
 
-      const { data: siteRows } = await supabaseAdmin.from('sites').select('id, company_id').eq('id', siteId).limit(1);
-      if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
-        return res.status(403).json({ error: 'Not allowed for this site.' });
-      }
-      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('id, company_id').eq('id', formId).limit(1);
-      if (!formRows || formRows.length === 0 || formRows[0].company_id !== session.companyId) {
-        return res.status(403).json({ error: 'Not allowed for this form.' });
-      }
+  const accent = form?.accent_color || "#4338CA";
 
-      const { data: record, error: recErr } = await supabaseAdmin
-        .from('custom_form_records')
-        .insert({
-          form_id: formId, site_id: siteId, submitted_by: submittedBy,
-          ai_summary: aiSummary || null, pdf_url: pdfUrl || null, status: 'complete',
-        })
-        .select()
-        .single();
-      if (recErr) return res.status(500).json({ error: 'Save failed. Try again.' });
+  return (
+    <div style={s.wrap}>
+      <div style={s.header(accent)}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>{form?.icon || "📄"}</span>}
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 19 }}>{form?.title || "Custom Document"}</div>
+          </div>
+        </div>
+        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Menu</button>
+      </div>
 
-      for (const a of answers) {
-        await supabaseAdmin.from('custom_form_answers').insert({
-          record_id: record.id, question_id: a.questionId, answer: !!a.answer, notes: a.note || null,
-        });
-      }
+      {/* STEP: pick site */}
+      {step === "site" && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Select site</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Which site is this for?</div>
+          {sites.length > 0 ? (
+            <select style={s.input} value={siteId} onChange={e => setSiteId(e.target.value)}>
+              <option value="">Select a site…</option>
+              {sites.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
+            </select>
+          ) : (
+            <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 11 }}>No sites registered for this company yet. Ask your admin to add one.</div>
+          )}
+          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't load this document. Try again.</div>}
+          <button style={s.btn(checking ? "#94A3B8" : siteId ? accent : "#94A3B8")} disabled={checking || !siteId} onClick={checkSiteAndProceed}>
+            {checking ? "⏳ Loading…" : "Continue →"}
+          </button>
+        </div>
+      )}
 
-      return res.status(200).json({ id: record.id });
-    }
+      {/* STEP: questions */}
+      {step === "questions" && form && (
+        <>
+          <div style={s.card}>
+            <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{form.title}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{siteName()}</div>
+            <label style={{ ...s.label, marginTop: 14 }}>Your name</label>
+            <input style={{ ...s.input, marginBottom: 0 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+          </div>
 
-    // ══ SUPERVISOR / ADMIN: viewing submissions ═════════════════════════
+          {questions.map((q, i) => {
+            const a = answers[q.id] || {};
+            return (
+              <div key={q.id} style={s.card}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 12 }}>{i + 1}. {q.question_text}</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: a.answer === false ? 11 : 0 }}>
+                  <button onClick={() => setAnswer(q.id, true)} style={{ flex: 1, padding: "12px", borderRadius: 9, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${a.answer === true ? "#16A34A" : "#E2E8F0"}`, background: a.answer === true ? "#F0FDF4" : "#fff", color: a.answer === true ? "#16A34A" : "#94A3B8" }}>Yes</button>
+                  <button onClick={() => setAnswer(q.id, false)} style={{ flex: 1, padding: "12px", borderRadius: 9, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${a.answer === false ? "#DC2626" : "#E2E8F0"}`, background: a.answer === false ? "#FEF2F2" : "#fff", color: a.answer === false ? "#DC2626" : "#94A3B8" }}>No</button>
+                </div>
+                {a.answer === false && (
+                  <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} placeholder="What's the issue?" value={a.note} onChange={e => setNote(q.id, e.target.value)} />
+                )}
+              </div>
+            );
+          })}
 
-    if (action === 'list_records') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the summary. Check your connection and try again.</div>}
+          <button style={s.btn(loading ? "#94A3B8" : (workerName && allAnswered && notesComplete) ? accent : "#94A3B8")} disabled={loading || !workerName || !allAnswered || !notesComplete} onClick={generateSummary}>
+            {loading ? "⏳ Writing summary…" : "Generate Summary"}
+          </button>
+          <button style={s.ghost} onClick={() => setStep("site")}>← Back</button>
+        </>
+      )}
 
-      let formsQuery = supabaseAdmin.from('custom_forms').select('id, company_id, title, icon, accent_color');
-      if (session.role === 'supervisor') formsQuery = formsQuery.eq('company_id', session.companyId);
-      const { data: forms, error: formsErr } = await formsQuery;
-      if (formsErr) return res.status(500).json({ error: 'Could not load forms.' });
-      const formIds = (forms || []).map(f => f.id);
-      if (formIds.length === 0) return res.status(200).json({ records: [] });
+      {/* STEP: review */}
+      {step === "review" && (
+        <>
+          <div style={s.card}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>{form.title}</div>
+            <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{siteName()} · By {workerName}</div>
+          </div>
 
-      const { data: records, error: recErr } = await supabaseAdmin
-        .from('custom_form_records')
-        .select('*')
-        .in('form_id', formIds)
-        .order('created_at', { ascending: false });
-      if (recErr) return res.status(500).json({ error: 'Could not load records.' });
+          <div style={s.card}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: accent, marginBottom: 8 }}>Summary</div>
+            <textarea style={{ ...s.input, minHeight: 90, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={aiSummary} onChange={e => setAiSummary(e.target.value)} />
+          </div>
 
-      const siteIds = [...new Set((records || []).map(r => r.site_id))];
-      const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
-      const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
-      const formMap = {}; (forms || []).forEach(f => { formMap[f.id] = f; });
+          {flaggedItems.length > 0 && (
+            <div style={{ ...s.card, background: "#FEF2F2", border: "1.5px solid #FCA5A5" }}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 8 }}>{flaggedItems.length} item{flaggedItems.length > 1 ? "s" : ""} flagged</div>
+              {flaggedItems.map(q => (
+                <div key={q.id} style={{ fontSize: 13, color: "#7F1D1D", marginBottom: 6 }}>
+                  • <strong>{q.question_text}</strong>{answers[q.id]?.note ? `: ${answers[q.id].note}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
 
-      const enriched = (records || []).map(r => ({
-        ...r,
-        site_name: siteMap[r.site_id] || 'Unknown site',
-        form_title: formMap[r.form_id]?.title || 'Unknown document',
-        form_icon: formMap[r.form_id]?.icon || '📄',
-        company_id: formMap[r.form_id]?.company_id,
-      }));
+          <button style={s.btn(accent)} onClick={() => setStep("sign")}>Continue to Sign →</button>
+          <button style={s.ghost} onClick={() => setStep("questions")}>← Back</button>
+        </>
+      )}
 
-      return res.status(200).json({ records: enriched });
-    }
+      {/* STEP: sign */}
+      {step === "sign" && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4, color: "#1E293B" }}>Sign & Submit</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Sign to confirm this is accurate and complete.</div>
+          <label style={s.label}>Signature</label>
+          <div style={{ position: "relative", marginBottom: 6 }}>
+            <canvas ref={canvasRefCallback} width={600} height={160}
+              style={{ width: "100%", height: 130, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+              onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+              onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
+            {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
+            <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+          </div>
+          <button style={s.btn(saving ? "#94A3B8" : hasSignature ? "#16A34A" : "#94A3B8")} disabled={saving || !hasSignature} onClick={submit}>
+            {saving ? "Submitting…" : "Sign & Submit"}
+          </button>
+          <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
 
-    if (action === 'get_record_detail') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      const { recordId } = req.body;
-      if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
-
-      const { data: recordRows, error: recErr } = await supabaseAdmin.from('custom_form_records').select('*').eq('id', recordId).limit(1);
-      if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
-      const record = recordRows[0];
-
-      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('id, company_id, title, icon, accent_color').eq('id', record.form_id).limit(1);
-      const form = formRows && formRows[0];
-      if (!form) return res.status(404).json({ error: 'Form not found.' });
-      if (session.role === 'supervisor' && form.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
-
-      const { data: siteRows } = await supabaseAdmin.from('sites').select('id, name').eq('id', record.site_id).limit(1);
-
-      const { data: answers, error: ansErr } = await supabaseAdmin.from('custom_form_answers').select('*').eq('record_id', recordId);
-      if (ansErr) return res.status(500).json({ error: 'Could not load answers.' });
-
-      const { data: questions } = await supabaseAdmin.from('custom_form_questions').select('id, question_text, sort_order').eq('form_id', record.form_id).order('sort_order', { ascending: true });
-      const questionMap = {}; (questions || []).forEach(q => { questionMap[q.id] = q; });
-
-      const items = (answers || [])
-        .map(a => ({
-          ...a,
-          question_text: questionMap[a.question_id]?.question_text || 'Unknown question',
-          sort_order: questionMap[a.question_id]?.sort_order ?? 0,
-        }))
-        .sort((a, b) => a.sort_order - b.sort_order);
-
-      return res.status(200).json({ record, form, site: siteRows && siteRows[0], items });
-    }
-
-    return res.status(400).json({ error: 'Unknown action.' });
-  } catch (e) {
-    return res.status(500).json({ error: 'Server error. Please try again.' });
-  }
+      {/* STEP: done */}
+      {step === "done" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>{flaggedItems.length > 0 ? "⚠️" : "✅"}</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Submitted</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 18 }}>{siteName()} · {new Date().toLocaleDateString("en-CA")}</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
-
-const BUILTIN_LABELS = {
-  flha: 'FLHA',
-  inspection: 'Equipment Inspection',
-  toolbox: 'Toolbox Talk',
-  nearmiss: 'Near Miss Report',
-  incident: 'Incident Report',
-  daily: 'Daily Report',
-  monthly: 'Monthly Site Inspection',
-  equipment_reports: 'Weekly Equipment Reports',
-};
