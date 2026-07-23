@@ -26,9 +26,16 @@ function verifySession(token) {
   }
 }
 
+// Admins may act on any company they specify; supervisors are always
+// locked to their own session.companyId, regardless of what they send.
+function resolveCompanyId(session, requestedCompanyId) {
+  if (session.role === 'admin') return requestedCompanyId || null;
+  return session.companyId;
+}
+
 // Built-in document keys — used so the toggle system has a fixed list
 // of the non-custom types to show alongside custom ones.
-const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly'];
+const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports'];
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -170,13 +177,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ══ ADMIN: document active/deactivated toggles ═════════════════════
+    // ══ ADMIN + SUPERVISOR: document active/deactivated toggles ════════
+    // Admins can view/edit any company's toggles. Supervisors can only
+    // VIEW their own company's toggles (used by Dashboard.jsx to decide
+    // whether to show the Equipment tab) — they cannot change them.
 
-    // Returns every built-in key plus every custom form for the company,
-    // each with its current active state (defaulting to true if no row exists).
     if (action === 'get_document_settings') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId } = req.body;
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
       const { data: settingsRows, error: setErr } = await supabaseAdmin
@@ -399,4 +407,5 @@ const BUILTIN_LABELS = {
   incident: 'Incident Report',
   daily: 'Daily Report',
   monthly: 'Monthly Site Inspection',
+  equipment_reports: 'Weekly Equipment Reports',
 };
