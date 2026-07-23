@@ -671,7 +671,7 @@ function CorrectiveActionRow({ ca, onUpdate }) {
   );
 }
 
-function EquipmentReportCard({ data, onClose, onGeneratePdf, generating }) {
+function EquipmentReportCard({ data, onClose, onGeneratePdf, generating, error }) {
   if (!data) return null;
   const { report, company } = data;
   const rj = report.report_json || {};
@@ -695,6 +695,8 @@ function EquipmentReportCard({ data, onClose, onGeneratePdf, generating }) {
             <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
+
+        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>⚠ {error}</div>}
 
         {equipment.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No equipment activity recorded this week.</div>
@@ -745,6 +747,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [loadingEquipmentReports, setLoadingEquipmentReports] = useState(false);
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
   const [generatingReportPdf, setGeneratingReportPdf] = useState(false);
+  const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
   const [equipmentReportsEnabled, setEquipmentReportsEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -1008,6 +1011,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   }, [activeTab, selectedCompany, token]);
 
   const openEquipmentReport = async (report) => {
+    setEquipmentPdfError("");
     try {
       const res = await fetch("/api/equipmentreports", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1019,6 +1023,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   };
 
   const generateReportPdf = async (report) => {
+    setEquipmentPdfError("");
     setGeneratingReportPdf(true);
     try {
       const co = companies.find(c => c.id === report.company_id) || selectedEquipmentReport?.company;
@@ -1033,7 +1038,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         setSelectedEquipmentReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
         setEquipmentReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
       }
-          } catch (e) { setEquipmentPdfError(e.message || "Something went wrong."); }
+    } catch (e) {
+      setEquipmentPdfError(e.message || "Something went wrong generating the PDF.");
+    }
     setGeneratingReportPdf(false);
   };
 
@@ -1289,7 +1296,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} />}
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
       {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
-      {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => setSelectedEquipmentReport(null)} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} />}
+      {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} error={equipmentPdfError} />}
 
       <div style={styles.header}>
         <div>
