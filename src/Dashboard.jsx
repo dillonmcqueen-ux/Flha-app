@@ -1033,7 +1033,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         setSelectedEquipmentReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
         setEquipmentReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
       }
-    } catch (e) { /* leave as-is if generation fails */ }
+      } catch (e) { alert("Equipment PDF error: " + e.message); }
     setGeneratingReportPdf(false);
   };
 
