@@ -746,6 +746,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
   const [generatingReportPdf, setGeneratingReportPdf] = useState(false);
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
+  const [equipmentReportsEnabled, setEquipmentReportsEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -965,6 +966,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     }
     loadAll();
   }, [forcedCompanyId, token]);
+
+  // Check whether Weekly Equipment Reports is turned on for the selected
+  // company, so the Equipment tab only shows up when an admin has it active.
+  useEffect(() => {
+    async function checkEquipmentReportsToggle() {
+      if (!selectedCompany) return;
+      try {
+        const res = await fetch("/api/customforms", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_document_settings", token, companyId: selectedCompany }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const entry = (data.documents || []).find(d => d.key === "equipment_reports");
+          setEquipmentReportsEnabled(entry ? entry.isActive : true);
+          if (entry && !entry.isActive && activeTab === "equipment") setActiveTab("flhas");
+        }
+      } catch (e) { /* default to shown if the check fails */ }
+    }
+    checkEquipmentReportsToggle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, token]);
 
   // Load equipment reports for the selected company whenever that tab is opened or the company changes.
   useEffect(() => {
@@ -1339,7 +1362,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
             🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
           </button>
-          <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
+          {equipmentReportsEnabled && (
+            <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
+          )}
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -1762,7 +1787,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </>
         )}
 
-        {activeTab === "equipment" && (
+        {activeTab === "equipment" && equipmentReportsEnabled && (
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
@@ -1785,23 +1810,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 No equipment reports yet.
               </div>
             ) : (
-              equipmentReports.map((r, i) => {
-                const eqCount = 0; // count not available without fetching detail; keep row lightweight
-                return (
-                  <div key={r.id} style={{
-                    padding: "12px 14px", borderBottom: i < equipmentReports.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
-                  }} onClick={() => openEquipmentReport(r)}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.week_start} to {r.week_end}</div>
-                      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                    </div>
-                    <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                      {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
-                    </div>
+              equipmentReports.map((r, i) => (
+                <div key={r.id} style={{
+                  padding: "12px 14px", borderBottom: i < equipmentReports.length - 1 ? "1px solid #F3F4F6" : "none",
+                  cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+                }} onClick={() => openEquipmentReport(r)}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.week_start} to {r.week_end}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                   </div>
-                );
-              })
+                  <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
+                    {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                  </div>
+                </div>
+              ))
             )}
           </div>
         )}
