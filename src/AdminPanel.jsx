@@ -87,6 +87,23 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { /* leave optimistic state if the request fails */ }
   };
 
+  // ── analytics dashboard tier (basic/advanced) ───────────────
+  const [analyticsTier, setAnalyticsTierState] = useState("basic");
+
+  const setAnalyticsTier = async (tier) => {
+    const prev = analyticsTier;
+    setAnalyticsTierState(tier);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_analytics_tier", token, companyId: activeId, tier }),
+      });
+      if (!res.ok) setAnalyticsTierState(prev);
+    } catch (e) {
+      setAnalyticsTierState(prev);
+    }
+  };
+
   // Companies now come from our protected server endpoint (it has the real
   // worker/supervisor codes and contact info, so it needs to be admin-only).
   const loadAll = async () => {
@@ -195,6 +212,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       name: c.name || "", contact_name: c.contact_name || "", contact_email: c.contact_email || "",
       contact_phone: c.contact_phone || "", address: c.address || "", logo_url: c.logo_url || "",
     });
+    setAnalyticsTierState(c.analytics_tier || "basic");
 
     try {
       const res = await fetch("/api/companydata", {
@@ -929,8 +947,25 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         )}
 
         {manageTab === "forms" && (
-          <div style={st.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Forms — Active / Deactivated</div>
+          <>
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Analytics Dashboard Tier</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 14 }}>Controls how much detail this company's supervisors see on the Dashboard's Analytics tab. Advanced adds trend charts, site scorecards, and corrective-action aging on top of everything in Basic.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["basic", "advanced"].map(t => (
+                  <button key={t} onClick={() => setAnalyticsTier(t)} style={{
+                    flex: 1, textTransform: "capitalize", border: analyticsTier === t ? "none" : `1.5px solid ${C.line}`,
+                    background: analyticsTier === t ? C.ink : "#fff", color: analyticsTier === t ? "#fff" : C.inkSoft,
+                    borderRadius: 10, padding: "10px", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                  }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Forms — Active / Deactivated</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>Control which document types this company's workers can see and submit. Deactivating a form hides it from the worker menu, but doesn't delete any submitted records.</div>
 
             {loadingDocSettings ? (
@@ -975,7 +1010,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 )}
               </>
             )}
-          </div>
+            </div>
+          </>
         )}
 
         {manageTab === "codes" && (

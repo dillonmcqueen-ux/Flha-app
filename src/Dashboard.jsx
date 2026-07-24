@@ -4,6 +4,7 @@ import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
+import AnalyticsPanel from "./Analytics";
 
 const RISK_COLOR = {
   Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
@@ -1804,6 +1805,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
           <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -2508,6 +2510,22 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               ))
             )}
           </div>
+        )}
+
+        {activeTab === "analytics" && (
+          <AnalyticsPanel
+            tier={company?.analytics_tier || "basic"}
+            companyName={company?.name}
+            flhas={companyFlhas}
+            inspections={companyInspections}
+            toolbox={companyToolbox}
+            nearMisses={companyNearMisses}
+            incidents={companyIncidents}
+            daily={companyDaily}
+            monthlyRecords={companyMonthlyRecords}
+            monthlyActions={companyMonthlyActions}
+            customDocs={companyCustomDocs}
+          />
         )}
 
         {activeTab === "equipment" && equipmentReportsEnabled && (
