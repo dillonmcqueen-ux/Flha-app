@@ -124,6 +124,11 @@ export default function Login() {
       background: "#1E1E1E", cursor: "pointer", marginBottom: 12, textAlign: "left",
       display: "flex", alignItems: "center", gap: 14, transition: "all 0.15s"
     }),
+    adminBtn: (accent) => ({
+      width: "auto", padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2A2A2A",
+      background: "#1E1E1E", cursor: "pointer", margin: "4px auto 0", textAlign: "left",
+      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s"
+    }),
     input: {
       width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #F9731660",
       background: "#1E1E1E", color: "#fff",
@@ -162,7 +167,7 @@ export default function Login() {
             <div style={{ fontSize: 13, fontWeight: 600, color: "#9CA3AF", marginBottom: 12, textAlign: "center" }}>
               Select your role to continue
             </div>
-            {["worker", "supervisor", "admin"].map(r => {
+            {["worker", "supervisor"].map(r => {
               const m = roleMeta[r];
               return (
                 <button key={r} style={styles.roleBtn(m.accent)} onClick={() => { setRole(r); setError(""); setCode(""); }}>
@@ -174,6 +179,13 @@ export default function Login() {
                 </button>
               );
             })}
+
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+              <button style={styles.adminBtn(roleMeta.admin.accent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>
+                <span style={{ fontSize: 15 }}>{roleMeta.admin.icon}</span>
+                <span style={{ fontWeight: 600, fontSize: 12, color: "#9CA3AF" }}>{roleMeta.admin.title}</span>
+              </button>
+            </div>
           </>
         ) : (
           <>
