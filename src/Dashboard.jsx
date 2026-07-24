@@ -805,7 +805,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [generatingReportPdf, setGeneratingReportPdf] = useState(false);
   const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
-  const [equipmentReportsEnabled, setEquipmentReportsEnabled] = useState(true);
+  const [docSettings, setDocSettings] = useState([]);
   const [equipmentSortBy, setEquipmentSortBy] = useState("newest");
   const [customDocRecords, setCustomDocRecords] = useState([]);
   const [selectedCustomDocRecord, setSelectedCustomDocRecord] = useState(null);
@@ -1078,27 +1078,54 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     loadAll();
   }, [forcedCompanyId, token]);
 
-  // Check whether Weekly Equipment Reports is turned on for the selected
-  // company, so the Equipment tab only shows up when an admin has it active.
+  // Load which document types the admin has active for the selected company,
+  // so the whole Dashboard — not just the Equipment tab — only shows tabs
+  // for forms this company actually has turned on.
   useEffect(() => {
-    async function checkEquipmentReportsToggle() {
-      if (!selectedCompany) return;
+    async function loadDocSettings() {
+      if (!selectedCompany) { setDocSettings([]); return; }
       try {
         const res = await fetch("/api/customforms", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "get_document_settings", token, companyId: selectedCompany }),
         });
         const data = await res.json();
-        if (res.ok) {
-          const entry = (data.documents || []).find(d => d.key === "equipment_reports");
-          setEquipmentReportsEnabled(entry ? entry.isActive : true);
-          if (entry && !entry.isActive && activeTab === "equipment") setActiveTab("flhas");
-        }
+        if (res.ok) setDocSettings(data.documents || []);
       } catch (e) { /* default to shown if the check fails */ }
     }
-    checkEquipmentReportsToggle();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadDocSettings();
   }, [selectedCompany, token]);
+
+  const isDocActive = (key) => {
+    const entry = docSettings.find(d => d.key === key);
+    return entry ? entry.isActive : true; // not loaded yet / unknown key → default to shown
+  };
+  const equipmentReportsEnabled = isDocActive("equipment_reports");
+  const hasActiveCustomForm = docSettings.some(d => d.isCustom && d.isActive);
+
+  const TAB_VISIBLE = {
+    flhas: isDocActive("flha"),
+    inspections: isDocActive("inspection"),
+    toolbox: isDocActive("toolbox"),
+    nearmiss: isDocActive("nearmiss"),
+    incident: isDocActive("incident"),
+    daily: isDocActive("daily"),
+    monthly: isDocActive("monthly"),
+    equipment: equipmentReportsEnabled,
+    customdocs: hasActiveCustomForm,
+    analytics: true,
+    sops: true,
+  };
+
+  // If the currently open tab just got deactivated (or the company changed
+  // to one that doesn't have it active), bounce to the first tab that is.
+  useEffect(() => {
+    if (docSettings.length === 0) return;
+    if (TAB_VISIBLE[activeTab]) return;
+    const fallback = Object.keys(TAB_VISIBLE).find(t => TAB_VISIBLE[t]);
+    if (fallback) setActiveTab(fallback);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docSettings, selectedCompany]);
 
   // Load equipment reports for the selected company whenever that tab is opened or the company changes.
   useEffect(() => {
@@ -1769,15 +1796,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-          <div onClick={() => setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
+          <div onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: awaitingSignOff > 0 ? "#fff" : "#94A3B8" }}>{awaitingSignOff}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: awaitingSignOff > 0 ? "#FECACA" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🛑 Awaiting Sign-Off</div>
           </div>
-          <div onClick={() => setActiveTab(companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss")} style={{ background: needsReview > 0 ? "#B45309" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: needsReview > 0 ? "none" : "1px solid #F1F5F9" }}>
+          <div onClick={() => {
+            const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
+            if (TAB_VISIBLE[target]) setActiveTab(target);
+            else if (TAB_VISIBLE.incident) setActiveTab("incident");
+            else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
+          }} style={{ background: needsReview > 0 ? "#B45309" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: needsReview > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: needsReview > 0 ? "#fff" : "#94A3B8" }}>{needsReview}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚩 Needs Review</div>
           </div>
-          <div onClick={() => { setActiveTab("monthly"); setMonthlySubTab("actions"); }} style={{ background: openCorrectiveCount > 0 ? "#4338CA" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: openCorrectiveCount > 0 ? "none" : "1px solid #F1F5F9" }}>
+          <div onClick={() => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } }} style={{ background: openCorrectiveCount > 0 ? "#4338CA" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: openCorrectiveCount > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
           </div>
@@ -1788,28 +1820,44 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         </div>
 
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
-          <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
-          <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
-          <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
-            ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
-          </button>
-          <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
-            🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
-          </button>
-          <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
-          <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
-            🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
-          </button>
-          {equipmentReportsEnabled && (
+          {TAB_VISIBLE.flhas && (
+            <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
+          )}
+          {TAB_VISIBLE.inspections && (
+            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
+          )}
+          {TAB_VISIBLE.toolbox && (
+            <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
+          )}
+          {TAB_VISIBLE.nearmiss && (
+            <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
+              ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
+            </button>
+          )}
+          {TAB_VISIBLE.incident && (
+            <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
+              🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
+            </button>
+          )}
+          {TAB_VISIBLE.daily && (
+            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
+          )}
+          {TAB_VISIBLE.monthly && (
+            <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
+              🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
+            </button>
+          )}
+          {TAB_VISIBLE.equipment && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
-          <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          {TAB_VISIBLE.customdocs && (
+            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          )}
           <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
-        {activeTab === "flhas" && (
+        {activeTab === "flhas" && TAB_VISIBLE.flhas && (
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div>
@@ -1922,7 +1970,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {activeTab === "inspections" && (
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Equipment Inspections
@@ -2012,7 +2060,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {activeTab === "toolbox" && (
+        {activeTab === "toolbox" && TAB_VISIBLE.toolbox && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Toolbox Talks
@@ -2088,7 +2136,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {activeTab === "nearmiss" && (
+        {activeTab === "nearmiss" && TAB_VISIBLE.nearmiss && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Near Miss Reports
@@ -2166,7 +2214,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {activeTab === "incident" && (
+        {activeTab === "incident" && TAB_VISIBLE.incident && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Incident Reports
@@ -2244,7 +2292,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {activeTab === "daily" && (
+        {activeTab === "daily" && TAB_VISIBLE.daily && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Daily Reports
@@ -2316,7 +2364,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         )}
 
-        {activeTab === "monthly" && (
+        {activeTab === "monthly" && TAB_VISIBLE.monthly && (
           <>
             <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
               <button style={styles.tab(monthlySubTab === "records")} onClick={() => setMonthlySubTab("records")}>Submissions</button>
@@ -2445,7 +2493,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </>
         )}
 
-        {activeTab === "customdocs" && (
+        {activeTab === "customdocs" && TAB_VISIBLE.customdocs && (
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Custom Document Submissions
