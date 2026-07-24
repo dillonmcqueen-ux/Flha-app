@@ -22,13 +22,22 @@ export default function CustomForm({ companyId, companyName, formId, onBack, onL
 
   useEffect(() => {
     async function load() {
-      const { data: st } = await supabase.from("sites").select("id, name").eq("company_id", companyId).order("id");
-      setSites(st || []);
+      try {
+        const res = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sites", token, companyId }),
+        });
+        const data = await res.json();
+        if (res.ok) setSites(data.sites || []);
+        else console.error("sites read error:", data.error);
+      } catch (e) {
+        console.error("sites read error:", e.message);
+      }
       const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
       if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
     }
     load();
-  }, [companyId]);
+  }, [companyId, token]);
 
   const siteName = () => sites.find(s => String(s.id) === String(siteId))?.name || "";
 
