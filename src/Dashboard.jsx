@@ -760,6 +760,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [search, setSearch] = useState("");
   const [groupBy, setGroupBy] = useState("none");
 
+  // ── Inspections tab: search/sort/group state ──────────────
+  const [inspSearch, setInspSearch] = useState("");
+  const [inspSortBy, setInspSortBy] = useState("newest");
+  const [inspGroupBy, setInspGroupBy] = useState("none");
+
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -1258,6 +1263,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     return hazards.some(h => h.risk === "High");
   }).length;
 
+  // ── Inspections: search/sort/group processing (mirrors FLHA pattern) ──
+  const inspIssueCount = (i) => {
+    const r = i.results_json || {};
+    return (r.defectiveCount || 0) + (r.monitorCount || 0);
+  };
+
+  const inspMatchesSearch = (i) => {
+    if (!inspSearch.trim()) return true;
+    const q = inspSearch.toLowerCase();
+    return (i.worker_name || "").toLowerCase().includes(q) ||
+           (i.equipment_label || "").toLowerCase().includes(q);
+  };
+
+  let processedInspections = companyInspections.filter(inspMatchesSearch);
+
+  processedInspections = [...processedInspections].sort((a, b) => {
+    switch (inspSortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "worker": return (a.worker_name || "").localeCompare(b.worker_name || "");
+      case "equipment": return (a.equipment_label || "").localeCompare(b.equipment_label || "");
+      case "issues": return inspIssueCount(b) - inspIssueCount(a);
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedInspections = {};
+  if (inspGroupBy === "none") {
+    groupedInspections["All Inspections"] = processedInspections;
+  } else {
+    processedInspections.forEach(i => {
+      const key = inspGroupBy === "equipment" ? (i.equipment_label || "Unknown equipment") : (i.worker_name || "Unknown worker");
+      if (!groupedInspections[key]) groupedInspections[key] = [];
+      groupedInspections[key].push(i);
+    });
+  }
+
   const styles = {
     wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
     header: {
@@ -1493,53 +1535,87 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Equipment Inspections
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any row to view the full inspection.</div>
-            {companyInspections.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+              {processedInspections.length} of {companyInspections.length} shown — tap any row to view.
+            </div>
+
+            <input
+              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" }}
+              placeholder="🔍 Search worker or equipment…"
+              value={inspSearch}
+              onChange={e => setInspSearch(e.target.value)}
+            />
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={inspSortBy} onChange={e => setInspSortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="worker">Worker (A–Z)</option>
+                <option value="equipment">Equipment (A–Z)</option>
+                <option value="issues">Most issues first</option>
+              </select>
+              <select value={inspGroupBy} onChange={e => setInspGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="equipment">Group by equipment</option>
+                <option value="worker">Group by worker</option>
+              </select>
+            </div>
+
+            {processedInspections.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>🚜</div>
-                No inspections submitted yet.
+                {companyInspections.length === 0 ? "No inspections submitted yet." : "No inspections match your filters."}
               </div>
             ) : (
-              companyInspections.map((insp, i) => {
-                const r = insp.results_json || {};
-                const isPost = insp.trip_type === "posttrip";
-                const def = r.defectiveCount || 0;
-                const mon = r.monitorCount || 0;
-                return (
-                  <div key={insp.id} style={{
-                    padding: "12px 14px", borderBottom: i < companyInspections.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer"
-                  }} onClick={() => setSelectedInspection(insp)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
-                          <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
-                        </div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
-                        {(insp.start_reading || insp.end_reading) && (
-                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
-                            {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
-                          </div>
-                        )}
-                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                          {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                        {def > 0
-                          ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
-                          : mon > 0
-                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
-                            : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
-                        <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                          {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
-                        </div>
-                      </div>
+              Object.entries(groupedInspections).map(([groupName, groupItems]) => (
+                <div key={groupName} style={{ marginBottom: inspGroupBy === "none" ? 0 : 12 }}>
+                  {inspGroupBy !== "none" && (
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#0369A1", background: "#EFF6FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 }}>
+                      {inspGroupBy === "equipment" ? "🚜" : "👷"} {groupName} ({groupItems.length})
                     </div>
-                  </div>
-                );
-              })
+                  )}
+                  {groupItems.map((insp, i) => {
+                    const r = insp.results_json || {};
+                    const isPost = insp.trip_type === "posttrip";
+                    const def = r.defectiveCount || 0;
+                    const mon = r.monitorCount || 0;
+                    return (
+                      <div key={insp.id} style={{
+                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                        cursor: "pointer"
+                      }} onClick={() => setSelectedInspection(insp)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                            {(insp.start_reading || insp.end_reading) && (
+                              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
+                                {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                              {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                            {def > 0
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
+                              : mon > 0
+                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
+                                : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
+                            <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
+                              {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
             )}
           </div>
         )}
