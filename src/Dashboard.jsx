@@ -750,6 +750,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
   const [equipmentReportsEnabled, setEquipmentReportsEnabled] = useState(true);
+  const [equipmentSortBy, setEquipmentSortBy] = useState("newest");
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -764,6 +765,34 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [inspSearch, setInspSearch] = useState("");
   const [inspSortBy, setInspSortBy] = useState("newest");
   const [inspGroupBy, setInspGroupBy] = useState("none");
+
+  // ── Toolbox tab: search/sort/group state ──────────────────
+  const [tbtSearch, setTbtSearch] = useState("");
+  const [tbtSortBy, setTbtSortBy] = useState("newest");
+  const [tbtGroupBy, setTbtGroupBy] = useState("none");
+
+  // ── Near Miss tab: search/sort/group state ─────────────────
+  const [nmSearch, setNmSearch] = useState("");
+  const [nmSortBy, setNmSortBy] = useState("newest");
+  const [nmGroupBy, setNmGroupBy] = useState("none");
+
+  // ── Incidents tab: search/sort/group state ─────────────────
+  const [incSearch, setIncSearch] = useState("");
+  const [incSortBy, setIncSortBy] = useState("newest");
+  const [incGroupBy, setIncGroupBy] = useState("none");
+
+  // ── Daily tab: search/sort/group state ─────────────────────
+  const [dailySearch, setDailySearch] = useState("");
+  const [dailySortBy, setDailySortBy] = useState("newest");
+  const [dailyGroupBy, setDailyGroupBy] = useState("none");
+
+  // ── Monthly Submissions tab: search/sort/group state ────────
+  const [moSearch, setMoSearch] = useState("");
+  const [moSortBy, setMoSortBy] = useState("newest");
+  const [moGroupBy, setMoGroupBy] = useState("none");
+
+  // ── Monthly Corrective Actions tab: search state ────────────
+  const [moaSearch, setMoaSearch] = useState("");
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
@@ -1263,7 +1292,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     return hazards.some(h => h.risk === "High");
   }).length;
 
-  // ── Inspections: search/sort/group processing (mirrors FLHA pattern) ──
+  // ── Inspections: search/sort/group processing ──
   const inspIssueCount = (i) => {
     const r = i.results_json || {};
     return (r.defectiveCount || 0) + (r.monitorCount || 0);
@@ -1300,6 +1329,192 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     });
   }
 
+  // ── Toolbox: search/sort/group processing ──
+  const tbtMatchesSearch = (t) => {
+    if (!tbtSearch.trim()) return true;
+    const q = tbtSearch.toLowerCase();
+    return (t.presenter_name || "").toLowerCase().includes(q) ||
+           (t.site || "").toLowerCase().includes(q);
+  };
+
+  let processedToolbox = companyToolbox.filter(tbtMatchesSearch);
+
+  processedToolbox = [...processedToolbox].sort((a, b) => {
+    switch (tbtSortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "presenter": return (a.presenter_name || "").localeCompare(b.presenter_name || "");
+      case "site": return (a.site || "").localeCompare(b.site || "");
+      case "attendees": return (b.attendees_json || []).length - (a.attendees_json || []).length;
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedToolbox = {};
+  if (tbtGroupBy === "none") {
+    groupedToolbox["All Toolbox Talks"] = processedToolbox;
+  } else {
+    processedToolbox.forEach(t => {
+      const key = tbtGroupBy === "site" ? (t.site || "No site") : (t.meeting_type || "Other");
+      if (!groupedToolbox[key]) groupedToolbox[key] = [];
+      groupedToolbox[key].push(t);
+    });
+  }
+
+  // ── Near Miss: search/sort/group processing ──
+  const sevRank = (rec) => {
+    const sev = (rec.report_json || {}).severity || "Medium";
+    return { Critical: 4, High: 3, Medium: 2, Low: 1 }[sev] || 2;
+  };
+
+  const nmMatchesSearch = (n) => {
+    if (!nmSearch.trim()) return true;
+    const q = nmSearch.toLowerCase();
+    const who = n.is_anonymous ? "anonymous" : (n.reporter_name || "");
+    return who.toLowerCase().includes(q) || (n.site || "").toLowerCase().includes(q);
+  };
+
+  let processedNearMisses = companyNearMisses.filter(nmMatchesSearch);
+
+  processedNearMisses = [...processedNearMisses].sort((a, b) => {
+    switch (nmSortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "reporter": return (a.is_anonymous ? "Anonymous" : a.reporter_name || "").localeCompare(b.is_anonymous ? "Anonymous" : b.reporter_name || "");
+      case "site": return (a.site || "").localeCompare(b.site || "");
+      case "severity": return sevRank(b) - sevRank(a);
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedNearMisses = {};
+  if (nmGroupBy === "none") {
+    groupedNearMisses["__flat__"] = processedNearMisses;
+  } else {
+    processedNearMisses.forEach(n => {
+      const key = nmGroupBy === "site" ? (n.site || "No site") : ((n.report_json || {}).severity || "Medium");
+      if (!groupedNearMisses[key]) groupedNearMisses[key] = [];
+      groupedNearMisses[key].push(n);
+    });
+  }
+  const nmAwaiting = processedNearMisses.filter(n => !n.reviewed);
+  const nmReviewed = processedNearMisses.filter(n => n.reviewed);
+
+  // ── Incidents: search/sort/group processing ──
+  const incMatchesSearch = (n) => {
+    if (!incSearch.trim()) return true;
+    const q = incSearch.toLowerCase();
+    return (n.reporter_name || "").toLowerCase().includes(q) ||
+           (n.site || "").toLowerCase().includes(q) ||
+           (n.incident_type || "").toLowerCase().includes(q);
+  };
+
+  let processedIncidents = companyIncidents.filter(incMatchesSearch);
+
+  processedIncidents = [...processedIncidents].sort((a, b) => {
+    switch (incSortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "reporter": return (a.reporter_name || "").localeCompare(b.reporter_name || "");
+      case "site": return (a.site || "").localeCompare(b.site || "");
+      case "severity": return sevRank(b) - sevRank(a);
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedIncidents = {};
+  if (incGroupBy === "none") {
+    groupedIncidents["__flat__"] = processedIncidents;
+  } else {
+    processedIncidents.forEach(n => {
+      const key = incGroupBy === "site" ? (n.site || "No site") : (n.incident_type || "Other");
+      if (!groupedIncidents[key]) groupedIncidents[key] = [];
+      groupedIncidents[key].push(n);
+    });
+  }
+  const incAwaiting = processedIncidents.filter(n => !n.reviewed);
+  const incReviewed = processedIncidents.filter(n => n.reviewed);
+
+  // ── Daily: search/sort/group processing ──
+  const dailyMatchesSearch = (d) => {
+    if (!dailySearch.trim()) return true;
+    const q = dailySearch.toLowerCase();
+    return (d.site || "").toLowerCase().includes(q) || (d.reporter_name || "").toLowerCase().includes(q);
+  };
+
+  let processedDaily = companyDaily.filter(dailyMatchesSearch);
+
+  processedDaily = [...processedDaily].sort((a, b) => {
+    switch (dailySortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "site": return (a.site || "").localeCompare(b.site || "");
+      case "reporter": return (a.reporter_name || "").localeCompare(b.reporter_name || "");
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedDaily = {};
+  if (dailyGroupBy === "none") {
+    groupedDaily["All Daily Reports"] = processedDaily;
+  } else {
+    processedDaily.forEach(d => {
+      const key = dailyGroupBy === "site" ? (d.site || "No site") : (d.reporter_name || "Unknown reporter");
+      if (!groupedDaily[key]) groupedDaily[key] = [];
+      groupedDaily[key].push(d);
+    });
+  }
+
+  // ── Monthly Submissions: search/sort/group processing ──
+  const moMatchesSearch = (r) => {
+    if (!moSearch.trim()) return true;
+    const q = moSearch.toLowerCase();
+    return (r.site_name || "").toLowerCase().includes(q) ||
+           (r.submitted_by || "").toLowerCase().includes(q) ||
+           (r.form_title || "").toLowerCase().includes(q);
+  };
+
+  let processedMonthly = companyMonthlyRecords.filter(moMatchesSearch);
+
+  processedMonthly = [...processedMonthly].sort((a, b) => {
+    switch (moSortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "site": return (a.site_name || "").localeCompare(b.site_name || "");
+      case "submitter": return (a.submitted_by || "").localeCompare(b.submitted_by || "");
+      case "open": return (b.open_actions || 0) - (a.open_actions || 0);
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedMonthly = {};
+  if (moGroupBy === "none") {
+    groupedMonthly["All Submissions"] = processedMonthly;
+  } else {
+    processedMonthly.forEach(r => {
+      const key = moGroupBy === "site" ? (r.site_name || "Unknown site") : (r.form_title || "Unknown form");
+      if (!groupedMonthly[key]) groupedMonthly[key] = [];
+      groupedMonthly[key].push(r);
+    });
+  }
+
+  // ── Monthly Corrective Actions: search processing ──
+  const moaMatchesSearch = (a) => {
+    if (!moaSearch.trim()) return true;
+    const q = moaSearch.toLowerCase();
+    return (a.question_text || "").toLowerCase().includes(q) ||
+           (a.site_name || "").toLowerCase().includes(q) ||
+           (a.submitted_by || "").toLowerCase().includes(q);
+  };
+  const processedMonthlyActions = companyMonthlyActions.filter(moaMatchesSearch);
+
+  // ── Equipment: sort processing ──
+  const sortedEquipmentReports = [...equipmentReports].sort((a, b) =>
+    equipmentSortBy === "oldest"
+      ? new Date(a.week_start) - new Date(b.week_start)
+      : new Date(b.week_start) - new Date(a.week_start)
+  );
+
   const styles = {
     wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
     header: {
@@ -1318,6 +1533,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     }),
     flhaRow: { padding: "12px 14px", borderBottom: "1px solid #F3F4F6", cursor: "pointer" },
     select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", outline: "none" },
+    searchInput: { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" },
+    groupHeaderPurple: { fontSize: 12, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
+    groupHeaderAmber: { fontSize: 12, fontWeight: 700, color: "#B45309", background: "#FFFBEB", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
+    groupHeaderRed: { fontSize: 12, fontWeight: 700, color: "#991B1B", background: "#FEF2F2", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
+    groupHeaderGreen: { fontSize: 12, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
+    groupHeaderIndigo: { fontSize: 12, fontWeight: 700, color: "#4338CA", background: "#EEF2FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
   };
 
   if (loading) return (
@@ -1443,7 +1664,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             </div>
 
             <input
-              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" }}
+              style={styles.searchInput}
               placeholder="🔍 Search worker or site…"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -1479,7 +1700,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               Object.entries(grouped).map(([groupName, groupFlhas]) => (
                 <div key={groupName} style={{ marginBottom: groupBy === "none" ? 0 : 12 }}>
                   {groupBy !== "none" && (
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 }}>
+                    <div style={styles.groupHeaderPurple}>
                       {groupBy === "site" ? "📍" : "👷"} {groupName} ({groupFlhas.length})
                     </div>
                   )}
@@ -1540,7 +1761,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             </div>
 
             <input
-              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" }}
+              style={styles.searchInput}
               placeholder="🔍 Search worker or equipment…"
               value={inspSearch}
               onChange={e => setInspSearch(e.target.value)}
@@ -1625,121 +1846,229 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Toolbox Talks
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any meeting to view the talk and attendance.</div>
-            {companyToolbox.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+              {processedToolbox.length} of {companyToolbox.length} shown — tap any meeting to view.
+            </div>
+
+            <input
+              style={styles.searchInput}
+              placeholder="🔍 Search presenter or site…"
+              value={tbtSearch}
+              onChange={e => setTbtSearch(e.target.value)}
+            />
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={tbtSortBy} onChange={e => setTbtSortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="presenter">Presenter (A–Z)</option>
+                <option value="site">Site (A–Z)</option>
+                <option value="attendees">Most attendees first</option>
+              </select>
+              <select value={tbtGroupBy} onChange={e => setTbtGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="site">Group by site</option>
+                <option value="type">Group by meeting type</option>
+              </select>
+            </div>
+
+            {processedToolbox.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>🧰</div>
-                No toolbox talks recorded yet.
+                {companyToolbox.length === 0 ? "No toolbox talks recorded yet." : "No toolbox talks match your filters."}
               </div>
             ) : (
-              companyToolbox.map((t, i) => {
-                const attendees = t.attendees_json || [];
-                return (
-                  <div key={t.id} style={{
-                    padding: "12px 14px", borderBottom: i < companyToolbox.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer"
-                  }} onClick={() => setSelectedToolbox(t)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
-                        </div>
-                        <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
-                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                          {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
-                        {t.pdf_url ? "📄 PDF" : "No PDF"} →
-                      </div>
+              Object.entries(groupedToolbox).map(([groupName, groupItems]) => (
+                <div key={groupName} style={{ marginBottom: tbtGroupBy === "none" ? 0 : 12 }}>
+                  {tbtGroupBy !== "none" && (
+                    <div style={styles.groupHeaderPurple}>
+                      {tbtGroupBy === "site" ? "📍" : "🧰"} {groupName} ({groupItems.length})
                     </div>
-                  </div>
-                );
-              })
+                  )}
+                  {groupItems.map((t, i) => {
+                    const attendees = t.attendees_json || [];
+                    return (
+                      <div key={t.id} style={{
+                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                        cursor: "pointer"
+                      }} onClick={() => setSelectedToolbox(t)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
+                            </div>
+                            <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                              {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
+                            {t.pdf_url ? "📄 PDF" : "No PDF"} →
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
             )}
           </div>
         )}
 
         {activeTab === "nearmiss" && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Near Miss Reports
             </div>
-            {companyNearMisses.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+              {processedNearMisses.length} of {companyNearMisses.length} shown.
+            </div>
+
+            <input
+              style={styles.searchInput}
+              placeholder="🔍 Search reporter or site…"
+              value={nmSearch}
+              onChange={e => setNmSearch(e.target.value)}
+            />
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={nmSortBy} onChange={e => setNmSortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="reporter">Reporter (A–Z)</option>
+                <option value="site">Site (A–Z)</option>
+                <option value="severity">Highest severity</option>
+              </select>
+              <select value={nmGroupBy} onChange={e => setNmGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="site">Group by site</option>
+                <option value="severity">Group by severity</option>
+              </select>
+            </div>
+
+            {processedNearMisses.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
-                No near miss reports yet.
+                {companyNearMisses.length === 0 ? "No near miss reports yet." : "No near miss reports match your filters."}
               </div>
-            ) : (
+            ) : nmGroupBy === "none" ? (
               <>
-                {companyNearMisses.filter(n => !n.reviewed).length > 0 && (
+                {nmAwaiting.length > 0 && (
                   <>
                     <div style={{ background: "#B45309", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 22 }}>🚩</span>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{companyNearMisses.filter(n => !n.reviewed).length} Awaiting Review</div>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{nmAwaiting.length} Awaiting Review</div>
                         <div style={{ fontSize: 12, opacity: 0.9 }}>Tap to review and record action taken</div>
                       </div>
                     </div>
                     <div style={{ background: "#FFFBEB", borderRadius: 10, border: "1.5px solid #FDE68A", padding: "4px 12px", marginBottom: 20 }}>
-                      {companyNearMisses.filter(n => !n.reviewed).map((n, i, arr) => (
+                      {nmAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                       ))}
                     </div>
                   </>
                 )}
-                {companyNearMisses.filter(n => n.reviewed).length > 0 && (
+                {nmReviewed.length > 0 && (
                   <>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
-                    {companyNearMisses.filter(n => n.reviewed).map((n, i, arr) => (
+                    {nmReviewed.map((n, i, arr) => (
                       <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                     ))}
                   </>
                 )}
               </>
+            ) : (
+              Object.entries(groupedNearMisses).map(([groupName, groupItems]) => (
+                <div key={groupName} style={{ marginBottom: 12 }}>
+                  <div style={styles.groupHeaderAmber}>
+                    {nmGroupBy === "site" ? "📍" : "⚠️"} {groupName} ({groupItems.length})
+                  </div>
+                  {groupItems.map((n, i, arr) => (
+                    <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
+                  ))}
+                </div>
+              ))
             )}
           </div>
         )}
 
         {activeTab === "incident" && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Incident Reports
             </div>
-            {companyIncidents.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+              {processedIncidents.length} of {companyIncidents.length} shown.
+            </div>
+
+            <input
+              style={styles.searchInput}
+              placeholder="🔍 Search reporter, site, or type…"
+              value={incSearch}
+              onChange={e => setIncSearch(e.target.value)}
+            />
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={incSortBy} onChange={e => setIncSortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="reporter">Reporter (A–Z)</option>
+                <option value="site">Site (A–Z)</option>
+                <option value="severity">Highest severity</option>
+              </select>
+              <select value={incGroupBy} onChange={e => setIncGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="site">Group by site</option>
+                <option value="type">Group by incident type</option>
+              </select>
+            </div>
+
+            {processedIncidents.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>🚑</div>
-                No incident reports yet.
+                {companyIncidents.length === 0 ? "No incident reports yet." : "No incident reports match your filters."}
               </div>
-            ) : (
+            ) : incGroupBy === "none" ? (
               <>
-                {companyIncidents.filter(n => !n.reviewed).length > 0 && (
+                {incAwaiting.length > 0 && (
                   <>
                     <div style={{ background: "#991B1B", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 22 }}>🚩</span>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{companyIncidents.filter(n => !n.reviewed).length} Awaiting Review</div>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{incAwaiting.length} Awaiting Review</div>
                         <div style={{ fontSize: 12, opacity: 0.9 }}>Incident reports require your review — tap to record action taken</div>
                       </div>
                     </div>
                     <div style={{ background: "#FEF2F2", borderRadius: 10, border: "1.5px solid #FCA5A5", padding: "4px 12px", marginBottom: 20 }}>
-                      {companyIncidents.filter(n => !n.reviewed).map((n, i, arr) => (
+                      {incAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                       ))}
                     </div>
                   </>
                 )}
-                {companyIncidents.filter(n => n.reviewed).length > 0 && (
+                {incReviewed.length > 0 && (
                   <>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
-                    {companyIncidents.filter(n => n.reviewed).map((n, i, arr) => (
+                    {incReviewed.map((n, i, arr) => (
                       <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                     ))}
                   </>
                 )}
               </>
+            ) : (
+              Object.entries(groupedIncidents).map(([groupName, groupItems]) => (
+                <div key={groupName} style={{ marginBottom: 12 }}>
+                  <div style={styles.groupHeaderRed}>
+                    {incGroupBy === "site" ? "📍" : "🚑"} {groupName} ({groupItems.length})
+                  </div>
+                  {groupItems.map((n, i, arr) => (
+                    <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
+                  ))}
+                </div>
+              ))
             )}
           </div>
         )}
@@ -1749,36 +2078,69 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
               {company?.name} — Daily Reports
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any report to view the full day's summary.</div>
-            {companyDaily.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+              {processedDaily.length} of {companyDaily.length} shown — tap any report to view.
+            </div>
+
+            <input
+              style={styles.searchInput}
+              placeholder="🔍 Search site or reporter…"
+              value={dailySearch}
+              onChange={e => setDailySearch(e.target.value)}
+            />
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={dailySortBy} onChange={e => setDailySortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="site">Site (A–Z)</option>
+                <option value="reporter">Reporter (A–Z)</option>
+              </select>
+              <select value={dailyGroupBy} onChange={e => setDailyGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="site">Group by site</option>
+                <option value="reporter">Group by reporter</option>
+              </select>
+            </div>
+
+            {processedDaily.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
-                No daily reports yet.
+                {companyDaily.length === 0 ? "No daily reports yet." : "No daily reports match your filters."}
               </div>
             ) : (
-              companyDaily.map((d, i) => {
-                const r = d.report_json || {};
-                return (
-                  <div key={d.id} style={{
-                    padding: "12px 14px", borderBottom: i < companyDaily.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer"
-                  }} onClick={() => setSelectedDaily(d)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, paddingRight: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{d.report_date}</div>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
-                        </div>
-                        <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
-                      </div>
-                      <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
-                        {d.pdf_url ? "📄 PDF" : ""} →
-                      </div>
+              Object.entries(groupedDaily).map(([groupName, groupItems]) => (
+                <div key={groupName} style={{ marginBottom: dailyGroupBy === "none" ? 0 : 12 }}>
+                  {dailyGroupBy !== "none" && (
+                    <div style={styles.groupHeaderGreen}>
+                      {dailyGroupBy === "site" ? "📍" : "👷"} {groupName} ({groupItems.length})
                     </div>
-                  </div>
-                );
-              })
+                  )}
+                  {groupItems.map((d, i) => {
+                    const r = d.report_json || {};
+                    return (
+                      <div key={d.id} style={{
+                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                        cursor: "pointer"
+                      }} onClick={() => setSelectedDaily(d)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ flex: 1, paddingRight: 10 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{d.report_date}</div>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
+                            </div>
+                            <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                          </div>
+                          <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
+                            {d.pdf_url ? "📄 PDF" : ""} →
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
             )}
           </div>
         )}
@@ -1797,33 +2159,67 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
                   {company?.name} — Monthly Inspections
                 </div>
-                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Tap any submission to view full details.</div>
-                {companyMonthlyRecords.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+                  {processedMonthly.length} of {companyMonthlyRecords.length} shown — tap any submission to view.
+                </div>
+
+                <input
+                  style={styles.searchInput}
+                  placeholder="🔍 Search site, submitted by, or form…"
+                  value={moSearch}
+                  onChange={e => setMoSearch(e.target.value)}
+                />
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                  <select value={moSortBy} onChange={e => setMoSortBy(e.target.value)} style={styles.select}>
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="site">Site (A–Z)</option>
+                    <option value="submitter">Submitted by (A–Z)</option>
+                    <option value="open">Most open actions first</option>
+                  </select>
+                  <select value={moGroupBy} onChange={e => setMoGroupBy(e.target.value)} style={styles.select}>
+                    <option value="none">No grouping</option>
+                    <option value="site">Group by site</option>
+                    <option value="form">Group by form</option>
+                  </select>
+                </div>
+
+                {processedMonthly.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                     <div style={{ fontSize: 32, marginBottom: 8 }}>🗓️</div>
-                    No monthly inspections submitted yet.
+                    {companyMonthlyRecords.length === 0 ? "No monthly inspections submitted yet." : "No submissions match your filters."}
                   </div>
                 ) : (
-                  companyMonthlyRecords.map((r, i) => (
-                    <div key={r.id} style={{
-                      padding: "12px 14px", borderBottom: i < companyMonthlyRecords.length - 1 ? "1px solid #F3F4F6" : "none",
-                      cursor: "pointer"
-                    }} onClick={() => openMonthlyRecord(r)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1, paddingRight: 10 }}>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                  Object.entries(groupedMonthly).map(([groupName, groupItems]) => (
+                    <div key={groupName} style={{ marginBottom: moGroupBy === "none" ? 0 : 12 }}>
+                      {moGroupBy !== "none" && (
+                        <div style={styles.groupHeaderIndigo}>
+                          {moGroupBy === "site" ? "📍" : "🗓️"} {groupName} ({groupItems.length})
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                          {r.open_actions > 0
-                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
-                            : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
-                          <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
-                            {r.pdf_url ? "📄 PDF" : "No PDF"} →
+                      )}
+                      {groupItems.map((r, i) => (
+                        <div key={r.id} style={{
+                          padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                          cursor: "pointer"
+                        }} onClick={() => openMonthlyRecord(r)}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                            <div style={{ flex: 1, paddingRight: 10 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
+                              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
+                              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                              {r.open_actions > 0
+                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
+                                : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
+                              <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
+                                {r.pdf_url ? "📄 PDF" : "No PDF"} →
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
                   ))
                 )}
@@ -1836,29 +2232,37 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                   {company?.name} — Corrective Actions
                 </div>
                 <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Assign a responsible person and target date, then mark resolved once complete.</div>
-                {companyMonthlyActions.length === 0 ? (
+
+                <input
+                  style={styles.searchInput}
+                  placeholder="🔍 Search question, site, or submitted by…"
+                  value={moaSearch}
+                  onChange={e => setMoaSearch(e.target.value)}
+                />
+
+                {processedMonthlyActions.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                     <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                    No corrective actions logged yet.
+                    {companyMonthlyActions.length === 0 ? "No corrective actions logged yet." : "No corrective actions match your search."}
                   </div>
                 ) : (
                   <>
-                    {companyMonthlyActions.filter(a => a.status !== "resolved").length > 0 && (
+                    {processedMonthlyActions.filter(a => a.status !== "resolved").length > 0 && (
                       <div style={{ marginBottom: 16 }}>
                         <div style={{ fontSize: 12, fontWeight: 800, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
-                          Open ({companyMonthlyActions.filter(a => a.status !== "resolved").length})
+                          Open ({processedMonthlyActions.filter(a => a.status !== "resolved").length})
                         </div>
-                        {companyMonthlyActions.filter(a => a.status !== "resolved").map(ca => (
+                        {processedMonthlyActions.filter(a => a.status !== "resolved").map(ca => (
                           <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={updateCorrectiveAction} />
                         ))}
                       </div>
                     )}
-                    {companyMonthlyActions.filter(a => a.status === "resolved").length > 0 && (
+                    {processedMonthlyActions.filter(a => a.status === "resolved").length > 0 && (
                       <div>
                         <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
-                          Resolved ({companyMonthlyActions.filter(a => a.status === "resolved").length})
+                          Resolved ({processedMonthlyActions.filter(a => a.status === "resolved").length})
                         </div>
-                        {companyMonthlyActions.filter(a => a.status === "resolved").map(ca => (
+                        {processedMonthlyActions.filter(a => a.status === "resolved").map(ca => (
                           <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={updateCorrectiveAction} />
                         ))}
                       </div>
@@ -1883,19 +2287,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 {generatingNewReport ? "Generating…" : "+ Generate This Week"}
               </button>
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+
+            {equipmentReports.length > 1 && (
+              <div style={{ marginBottom: 14 }}>
+                <select value={equipmentSortBy} onChange={e => setEquipmentSortBy(e.target.value)} style={styles.select}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+            )}
 
             {loadingEquipmentReports ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
-            ) : equipmentReports.length === 0 ? (
+            ) : sortedEquipmentReports.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>🔧</div>
                 No equipment reports yet.
               </div>
             ) : (
-              equipmentReports.map((r, i) => (
+              sortedEquipmentReports.map((r, i) => (
                 <div key={r.id} style={{
-                  padding: "12px 14px", borderBottom: i < equipmentReports.length - 1 ? "1px solid #F3F4F6" : "none",
+                  padding: "12px 14px", borderBottom: i < sortedEquipmentReports.length - 1 ? "1px solid #F3F4F6" : "none",
                   cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
                 }} onClick={() => openEquipmentReport(r)}>
                   <div>
