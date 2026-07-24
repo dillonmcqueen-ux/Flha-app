@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
+import { generateAndUploadIncident } from "./generateIncidentPDF";
+import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 
 const RISK_COLOR = {
   Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
@@ -529,6 +531,19 @@ function IncidentCard({ inc, onClose, onDelete, onReview }) {
         <List title="Immediate Actions Taken" items={r.immediateActions} />
         <List title="Corrective Actions" items={r.correctiveActions} />
 
+        {inc.photo_urls && inc.photo_urls.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>Photos ({inc.photo_urls.length})</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {inc.photo_urls.map((url, i) => (
+                <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: "block", borderRadius: 8, overflow: "hidden", border: "1px solid #FCA5A5" }}>
+                  <img src={url} alt={`Incident photo ${i + 1}`} style={{ width: "100%", height: 140, objectFit: "cover", display: "block" }} />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {inc.reviewed ? (
           <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(inc.reviewed_by || "").toUpperCase()}</div>
@@ -627,6 +642,46 @@ function MonthlyRecordCard({ data, onClose }) {
                 {it.corrective_action.target_date ? ` · Due ${it.corrective_action.target_date}` : ""}
               </div>
             )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomDocCard({ data, onClose }) {
+  if (!data) return null;
+  const { record, form, site, items } = data;
+  const accent = form?.accent_color || "#4338CA";
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: accent }}>{form?.icon} {form?.title}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{site?.name} · {new Date(record.created_at).toLocaleString("en-CA")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        {record.ai_summary && (
+          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4 }}>SUMMARY</div>
+            <div style={{ fontSize: 14, color: "#374151" }}>{record.ai_summary}</div>
+          </div>
+        )}
+        <div style={{ fontSize: 13, color: "#374151", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
+
+        {items.map((it, i) => (
+          <div key={it.id} style={{ border: `1.5px solid ${it.answer ? "#86EFAC" : "#FCA5A5"}`, background: it.answer ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{i + 1}. {it.question_text}</div>
+              <span style={{ fontSize: 12, fontWeight: 800, color: it.answer ? "#16A34A" : "#DC2626", flexShrink: 0, marginLeft: 8 }}>{it.answer ? "YES" : "NO"}</span>
+            </div>
+            {it.notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
           </div>
         ))}
       </div>
@@ -751,6 +806,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
   const [equipmentReportsEnabled, setEquipmentReportsEnabled] = useState(true);
   const [equipmentSortBy, setEquipmentSortBy] = useState("newest");
+  const [customDocRecords, setCustomDocRecords] = useState([]);
+  const [selectedCustomDocRecord, setSelectedCustomDocRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -793,6 +850,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   // ── Monthly Corrective Actions tab: search state ────────────
   const [moaSearch, setMoaSearch] = useState("");
+
+  // ── Custom Documents tab: search/sort/group state ───────────
+  const [cdSearch, setCdSearch] = useState("");
+  const [cdSortBy, setCdSortBy] = useState("newest");
+  const [cdGroupBy, setCdGroupBy] = useState("none");
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
@@ -988,6 +1050,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         if (maRes.ok) ma = maData.actions || [];
       } catch (e) { /* leave ma empty if the request fails */ }
 
+      let cd = [];
+      try {
+        const cdRes = await fetch("/api/customforms", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_records", token }),
+        });
+        const cdData = await cdRes.json();
+        if (cdRes.ok) cd = cdData.records || [];
+      } catch (e) { /* leave cd empty if the request fails */ }
+
       setCompanies(visibleCompaniesRaw);
       setFlhas(fs);
       setInspections(insp);
@@ -997,6 +1069,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       setDailyReports(dr);
       setMonthlyRecords(mr);
       setMonthlyActions(ma);
+      setCustomDocRecords(cd);
       setSops(ss || []);
       if (visibleCompaniesRaw.length) setSelectedCompany(visibleCompaniesRaw[0].id);
       setLoading(false);
@@ -1107,6 +1180,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const companyDaily = dailyReports.filter(d => d.company_id === selectedCompany);
   const companyMonthlyRecords = monthlyRecords.filter(r => r.company_id === selectedCompany);
   const companyMonthlyActions = monthlyActions.filter(a => a.company_id === selectedCompany);
+  const companyCustomDocs = customDocRecords.filter(r => r.company_id === selectedCompany);
 
   const deleteDaily = async (id) => {
     if (!window.confirm("Delete this daily report? This cannot be undone.")) return;
@@ -1128,6 +1202,17 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       });
       const data = await res.json();
       if (res.ok) setSelectedMonthlyRecord(data);
+    } catch (e) { /* ignore */ }
+  };
+
+  const openCustomDocRecord = async (record) => {
+    try {
+      const res = await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_record_detail", token, recordId: record.id }),
+      });
+      const data = await res.json();
+      if (res.ok) setSelectedCustomDocRecord(data);
     } catch (e) { /* ignore */ }
   };
 
@@ -1156,15 +1241,36 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
   const reviewNearMiss = async (id, notes) => {
+    const record = nearMisses.find(n => n.id === id);
+    const reviewedBy = isAdmin ? "Admin" : "Supervisor";
+    const reviewedAt = new Date().toLocaleString("en-CA");
+    let pdfUrl = record?.pdf_url || null;
+    if (record) {
+      const co = companies.find(c => c.id === record.company_id);
+      try {
+        pdfUrl = await generateAndUploadNearMiss({
+          reporter: record.is_anonymous ? "Anonymous" : record.reporter_name,
+          site: record.site,
+          occurredAt: record.occurred_at,
+          involved: record.involved,
+          report: record.report_json || {},
+          companyName: co?.name || "",
+          companyLogo: co?.logo_url || "",
+          signatureDataUrl: null,
+          customFields: record.report_json?.customFields || [],
+          reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
+        }) || record.pdf_url || null;
+      } catch (e) { /* keep old pdf if regen fails */ }
+    }
     try {
       const res = await fetch("/api/reports", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "nearmiss", action: "review", token, id, notes }),
+        body: JSON.stringify({ type: "nearmiss", action: "review", token, id, notes, pdfUrl }),
       });
       const data = await res.json();
       if (res.ok) {
         setNearMisses(prev => prev.map(n => n.id === id
-          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null }
+          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null, pdf_url: pdfUrl || n.pdf_url }
           : n));
       }
     } catch (e) { /* leave as-is if the request fails */ }
@@ -1172,15 +1278,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   };
 
   const reviewIncident = async (id, notes) => {
+    const record = incidents.find(n => n.id === id);
+    const reviewedBy = isAdmin ? "Admin" : "Supervisor";
+    const reviewedAt = new Date().toLocaleString("en-CA");
+    let pdfUrl = record?.pdf_url || null;
+    if (record) {
+      const co = companies.find(c => c.id === record.company_id);
+      try {
+        pdfUrl = await generateAndUploadIncident({
+          reporter: record.reporter_name,
+          site: record.site,
+          occurredAt: record.occurred_at,
+          incidentType: record.incident_type,
+          injuredPerson: record.injured_person,
+          bodyPart: record.body_part,
+          treatment: record.treatment,
+          medicalAttention: record.medical_attention,
+          witnesses: record.witnesses,
+          evidence: record.evidence,
+          report: record.report_json || {},
+          companyName: co?.name || "",
+          companyLogo: co?.logo_url || "",
+          signatureDataUrl: null,
+          customFields: record.report_json?.customFields || [],
+          photoUrls: record.photo_urls || [],
+          reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
+        }) || record.pdf_url || null;
+      } catch (e) { /* keep old pdf if regen fails */ }
+    }
     try {
       const res = await fetch("/api/reports", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "incident", action: "review", token, id, notes }),
+        body: JSON.stringify({ type: "incident", action: "review", token, id, notes, pdfUrl }),
       });
       const data = await res.json();
       if (res.ok) {
         setIncidents(prev => prev.map(n => n.id === id
-          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null }
+          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null, pdf_url: pdfUrl || n.pdf_url }
           : n));
       }
     } catch (e) { /* leave as-is if the request fails */ }
@@ -1498,6 +1632,39 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     });
   }
 
+  // ── Custom Documents: search/sort/group processing ──
+  const cdMatchesSearch = (r) => {
+    if (!cdSearch.trim()) return true;
+    const q = cdSearch.toLowerCase();
+    return (r.site_name || "").toLowerCase().includes(q) ||
+           (r.submitted_by || "").toLowerCase().includes(q) ||
+           (r.form_title || "").toLowerCase().includes(q);
+  };
+
+  let processedCustomDocs = companyCustomDocs.filter(cdMatchesSearch);
+
+  processedCustomDocs = [...processedCustomDocs].sort((a, b) => {
+    switch (cdSortBy) {
+      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+      case "site": return (a.site_name || "").localeCompare(b.site_name || "");
+      case "submitter": return (a.submitted_by || "").localeCompare(b.submitted_by || "");
+      case "form": return (a.form_title || "").localeCompare(b.form_title || "");
+      case "newest":
+      default: return new Date(b.created_at) - new Date(a.created_at);
+    }
+  });
+
+  const groupedCustomDocs = {};
+  if (cdGroupBy === "none") {
+    groupedCustomDocs["All Submissions"] = processedCustomDocs;
+  } else {
+    processedCustomDocs.forEach(r => {
+      const key = cdGroupBy === "site" ? (r.site_name || "Unknown site") : (r.form_title || "Unknown form");
+      if (!groupedCustomDocs[key]) groupedCustomDocs[key] = [];
+      groupedCustomDocs[key].push(r);
+    });
+  }
+
   // ── Monthly Corrective Actions: search processing ──
   const moaMatchesSearch = (a) => {
     if (!moaSearch.trim()) return true;
@@ -1560,6 +1727,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
       {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} error={equipmentPdfError} />}
+      {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} />}
 
       <div style={styles.header}>
         <div>
@@ -1635,6 +1803,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           {equipmentReportsEnabled && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
+          <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
           <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
         </div>
 
@@ -2272,6 +2441,73 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               </div>
             )}
           </>
+        )}
+
+        {activeTab === "customdocs" && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+              {company?.name} — Custom Document Submissions
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+              {processedCustomDocs.length} of {companyCustomDocs.length} shown — tap any submission to view.
+            </div>
+
+            <input
+              style={styles.searchInput}
+              placeholder="🔍 Search document, site, or submitted by…"
+              value={cdSearch}
+              onChange={e => setCdSearch(e.target.value)}
+            />
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="form">Document (A–Z)</option>
+                <option value="site">Site (A–Z)</option>
+                <option value="submitter">Submitted by (A–Z)</option>
+              </select>
+              <select value={cdGroupBy} onChange={e => setCdGroupBy(e.target.value)} style={styles.select}>
+                <option value="none">No grouping</option>
+                <option value="site">Group by site</option>
+                <option value="form">Group by document</option>
+              </select>
+            </div>
+
+            {processedCustomDocs.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+                {companyCustomDocs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
+              </div>
+            ) : (
+              Object.entries(groupedCustomDocs).map(([groupName, groupItems]) => (
+                <div key={groupName} style={{ marginBottom: cdGroupBy === "none" ? 0 : 12 }}>
+                  {cdGroupBy !== "none" && (
+                    <div style={styles.groupHeaderIndigo}>
+                      {cdGroupBy === "site" ? "📍" : "🗂️"} {groupName} ({groupItems.length})
+                    </div>
+                  )}
+                  {groupItems.map((r, i) => (
+                    <div key={r.id} style={{
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      cursor: "pointer"
+                    }} onClick={() => openCustomDocRecord(r)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ flex: 1, paddingRight: 10 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                        </div>
+                        <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
+                          {r.pdf_url ? "📄 PDF" : ""} →
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
         )}
 
         {activeTab === "equipment" && equipmentReportsEnabled && (

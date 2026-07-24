@@ -18,7 +18,7 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   return y;
 }
 
-export async function generateAndUploadNearMiss({ reporter, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl, customFields }) {
+export async function generateAndUploadNearMiss({ reporter, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl, customFields, reviewed }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -94,6 +94,23 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   section("Potential Outcome", report?.potentialOutcome || "—");
   section("Immediate Actions Taken", report?.immediateActions || []);
   section("Recommended Next Steps", report?.nextSteps || []);
+
+  // reviewed stamp
+  if (reviewed && reviewed.by) {
+    const boxH = reviewed.notes ? 28 : 16;
+    if (y + boxH > 280) { doc.addPage(); y = 20; }
+    doc.setFillColor(240, 253, 244); doc.setDrawColor(134, 239, 172); doc.setLineWidth(0.4);
+    doc.roundedRect(margin, y, contentW, boxH, 3, 3, "FD");
+    doc.setTextColor(22, 101, 52); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text(`✓ REVIEWED BY ${reviewed.by.toUpperCase()}`, margin + 5, y + 7);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(55, 65, 81);
+    doc.text(reviewed.at || "", margin + 5, y + 12);
+    if (reviewed.notes) {
+      doc.setTextColor(55, 65, 81);
+      wrap(doc, `Action taken: ${reviewed.notes}`, margin + 5, y + 18, contentW - 10, 4.5, y + boxH - 2);
+    }
+    y += boxH + 6;
+  }
 
   // signature
   if (y > 235) { doc.addPage(); y = 20; }

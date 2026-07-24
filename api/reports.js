@@ -75,7 +75,7 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: mark a report reviewed ───────────────────
     if (action === 'review') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      const { id, notes } = req.body;
+      const { id, notes, pdfUrl } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
       if (session.role === 'supervisor') {
@@ -86,9 +86,9 @@ export default async function handler(req, res) {
       }
       const now = new Date().toISOString();
       const reviewedBy = session.role === 'admin' ? 'Admin' : 'Supervisor';
-      const { error } = await supabaseAdmin.from(table.name).update({
-        reviewed: true, reviewed_by: reviewedBy, reviewed_at: now, review_notes: notes || null,
-      }).eq('id', id);
+      const update = { reviewed: true, reviewed_by: reviewedBy, reviewed_at: now, review_notes: notes || null };
+      if (pdfUrl) update.pdf_url = pdfUrl;
+      const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Review failed.' });
       return res.status(200).json({ ok: true, reviewed_by: reviewedBy, reviewed_at: now });
     }

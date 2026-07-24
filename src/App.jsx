@@ -372,7 +372,9 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
     setJobSite(record.job_site || "");
     setAmendingId(record.id);
     setAmendSignature(record.worker_signature || null);
-    setCrew(record.crew_signatures || []);
+    // Crew acknowledged the pre-amendment hazards only — don't carry their old
+    // signatures forward onto content they haven't seen. Reopen sign-off.
+    setCrew([]);
     setResumeChoices([]);
     setStep("review");
   };
@@ -947,84 +949,91 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                 <div style={{ fontSize: 13, color: "#374151" }}>Worker: <strong>{workerName}</strong></div>
                 <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Amendment will be recorded {new Date().toLocaleString("en-CA")}</div>
               </div>
-              <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
-                disabled={signed}
-                onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-                {signed ? "✓ Saved" : "Confirm & Update FLHA"}
-              </button>
             </div>
           ) : (
-            <>
-              {/* Primary worker signature */}
-              <div style={styles.card}>
-                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
+            <div style={styles.card}>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
 
-                <label style={styles.label}>Worker signature</label>
-                <div style={{ position: "relative", marginBottom: 6 }}>
-                  <canvas
-                    ref={canvasRef}
-                    width={600}
-                    height={180}
-                    style={{
-                      width: "100%", height: 150, border: "1.5px solid #E5E7EB",
-                      borderRadius: 10, background: "#fff", touchAction: "none", display: "block"
-                    }}
-                    onMouseDown={startDraw}
-                    onMouseMove={draw}
-                    onMouseUp={endDraw}
-                    onMouseLeave={endDraw}
-                    onTouchStart={startDraw}
-                    onTouchMove={draw}
-                    onTouchEnd={endDraw}
-                  />
-                  {!hasSignature && (
-                    <div style={{
-                      position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)",
-                      textAlign: "center", color: "#9CA3AF", fontSize: 14, pointerEvents: "none"
-                    }}>Sign here with your finger</div>
-                  )}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ fontSize: 13, color: "#374151" }}>Signed by: <strong>{workerName}</strong></div>
-                  <button onClick={clearSignature} style={{
-                    background: "transparent", border: "none", color: "#6B7280",
-                    fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0
-                  }}>Clear signature</button>
-                </div>
-              </div>
-
-              {/* Crew sign-off — additional workers acknowledging the same FLHA */}
-              <div style={styles.card}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 4 }}>Additional crew (optional)</div>
-                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>If other workers are covered by this same FLHA, have each of them sign below. Pass the device to each person.</div>
-
-                {crew.length > 0 && (
-                  <div style={{ marginBottom: 14 }}>
-                    {crew.map((c, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < crew.length - 1 ? "1px solid #F1F5F9" : "none" }}>
-                        <span style={{ fontSize: 14, color: "#334155" }}>👷 {c.name}</span>
-                        <button onClick={() => removeCrewMember(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
-                      </div>
-                    ))}
-                  </div>
+              <label style={styles.label}>Worker signature</label>
+              <div style={{ position: "relative", marginBottom: 6 }}>
+                <canvas
+                  ref={canvasRef}
+                  width={600}
+                  height={180}
+                  style={{
+                    width: "100%", height: 150, border: "1.5px solid #E5E7EB",
+                    borderRadius: 10, background: "#fff", touchAction: "none", display: "block"
+                  }}
+                  onMouseDown={startDraw}
+                  onMouseMove={draw}
+                  onMouseUp={endDraw}
+                  onMouseLeave={endDraw}
+                  onTouchStart={startDraw}
+                  onTouchMove={draw}
+                  onTouchEnd={endDraw}
+                />
+                {!hasSignature && (
+                  <div style={{
+                    position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)",
+                    textAlign: "center", color: "#9CA3AF", fontSize: 14, pointerEvents: "none"
+                  }}>Sign here with your finger</div>
                 )}
-
-                <label style={styles.label}>Crew member name</label>
-                <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Full name" value={crewName} onChange={e => setCrewName(e.target.value)} />
-                <label style={styles.label}>Signature</label>
-                <div style={{ position: "relative", marginBottom: 6 }}>
-                  <canvas ref={crewCanvasRef} width={600} height={160}
-                    style={{ width: "100%", height: 130, border: "1.5px solid #E5E7EB", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
-                    onMouseDown={startCrewDraw} onMouseMove={crewDraw} onMouseUp={endCrewDraw} onMouseLeave={endCrewDraw}
-                    onTouchStart={startCrewDraw} onTouchMove={crewDraw} onTouchEnd={endCrewDraw} />
-                  {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
-                </div>
-                <div style={{ textAlign: "right", marginBottom: 10 }}>
-                  <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
-                </div>
-                <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
               </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 13, color: "#374151" }}>Signed by: <strong>{workerName}</strong></div>
+                <button onClick={clearSignature} style={{
+                  background: "transparent", border: "none", color: "#6B7280",
+                  fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0
+                }}>Clear signature</button>
+              </div>
+            </div>
+          )}
 
+          {/* Crew sign-off — additional workers acknowledging the same FLHA. Reopened on
+              amendments too, since the crew hasn't yet acknowledged the amended hazards. */}
+          <div style={styles.card}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 4 }}>Additional crew (optional)</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>
+              {amendingId
+                ? "This amendment changed the FLHA — if other workers are covered by it, have each of them re-sign below."
+                : "If other workers are covered by this same FLHA, have each of them sign below. Pass the device to each person."}
+            </div>
+
+            {crew.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                {crew.map((c, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < crew.length - 1 ? "1px solid #F1F5F9" : "none" }}>
+                    <span style={{ fontSize: 14, color: "#334155" }}>👷 {c.name}</span>
+                    <button onClick={() => removeCrewMember(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <label style={styles.label}>Crew member name</label>
+            <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Full name" value={crewName} onChange={e => setCrewName(e.target.value)} />
+            <label style={styles.label}>Signature</label>
+            <div style={{ position: "relative", marginBottom: 6 }}>
+              <canvas ref={crewCanvasRef} width={600} height={160}
+                style={{ width: "100%", height: 130, border: "1.5px solid #E5E7EB", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                onMouseDown={startCrewDraw} onMouseMove={crewDraw} onMouseUp={endCrewDraw} onMouseLeave={endCrewDraw}
+                onTouchStart={startCrewDraw} onTouchMove={crewDraw} onTouchEnd={endCrewDraw} />
+              {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+            </div>
+            <div style={{ textAlign: "right", marginBottom: 10 }}>
+              <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+            </div>
+            <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
+          </div>
+
+          {amendingId ? (
+            <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
+              disabled={signed}
+              onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
+              {signed ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
+            </button>
+          ) : (
+            <>
               <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
                 disabled={!hasSignature || signed}
                 onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>

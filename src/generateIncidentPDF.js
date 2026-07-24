@@ -34,7 +34,7 @@ async function fetchAsDataUrl(url) {
 }
 
 export async function generateAndUploadIncident(data) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields, photoUrls } = data;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields, photoUrls, reviewed } = data;
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -143,6 +143,23 @@ export async function generateAndUploadIncident(data) {
     }
     if (col === 1) y += imgH + 6; // close out a half-filled row
     y += 4;
+  }
+
+  // reviewed stamp
+  if (reviewed && reviewed.by) {
+    const boxH = reviewed.notes ? 28 : 16;
+    if (y + boxH > 280) { doc.addPage(); y = 20; }
+    doc.setFillColor(240, 253, 244); doc.setDrawColor(134, 239, 172); doc.setLineWidth(0.4);
+    doc.roundedRect(margin, y, contentW, boxH, 3, 3, "FD");
+    doc.setTextColor(22, 101, 52); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text(`✓ REVIEWED BY ${reviewed.by.toUpperCase()}`, margin + 5, y + 7);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(55, 65, 81);
+    doc.text(reviewed.at || "", margin + 5, y + 12);
+    if (reviewed.notes) {
+      doc.setTextColor(55, 65, 81);
+      wrap(doc, `Action taken: ${reviewed.notes}`, margin + 5, y + 18, contentW - 10, 4.5, y + boxH - 2);
+    }
+    y += boxH + 6;
   }
 
   // signature
