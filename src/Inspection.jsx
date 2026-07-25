@@ -14,6 +14,7 @@ export default function Inspection({ companyId, companyName, onBack, onLogout, t
   const [equipment, setEquipment] = useState([]);
   const [eqMode, setEqMode] = useState("list"); // list | other
   const [selectedEq, setSelectedEq] = useState("");
+  const [selectedEqId, setSelectedEqId] = useState("");
   const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "" });
   const [workerName, setWorkerName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -65,6 +66,8 @@ export default function Inspection({ companyId, companyName, onBack, onLogout, t
     }
     load();
   }, [companyId, token]);
+
+  const labelFor = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
   const equipmentLabel = () => {
     if (eqMode === "list" && selectedEq) return selectedEq;
@@ -220,6 +223,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           record: {
             worker_name: workerName,
             equipment_label: label,
+            equipment_id: eqMode === "list" ? (selectedEqId || null) : null,
             results_json: resultsJson,
             signed_by: workerName,
             pdf_url: pdfUrl || null,
@@ -271,6 +275,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           record: {
             worker_name: workerName,
             equipment_label: label,
+            equipment_id: eqMode === "list" ? (selectedEqId || null) : null,
             results_json: resultsJson,
             signed_by: workerName,
             pdf_url: pdfUrl || null,
@@ -343,15 +348,18 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {equipment.length > 0 && eqMode === "list" ? (
             <>
               <label style={s.label}>Machine</label>
-              <select style={s.input} value={selectedEq} onChange={e => {
-                if (e.target.value === "__other__") { setEqMode("other"); setSelectedEq(""); }
-                else setSelectedEq(e.target.value);
+              <select style={s.input} value={selectedEqId} onChange={e => {
+                if (e.target.value === "__other__") { setEqMode("other"); setSelectedEq(""); setSelectedEqId(""); }
+                else {
+                  const eq = equipment.find(e2 => String(e2.id) === e.target.value);
+                  setSelectedEqId(e.target.value);
+                  setSelectedEq(eq ? labelFor(eq) : "");
+                }
               }}>
                 <option value="">Select a machine…</option>
-                {equipment.map(eq => {
-                  const lbl = [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
-                  return <option key={eq.id} value={lbl}>{lbl}</option>;
-                })}
+                {equipment.map(eq => (
+                  <option key={eq.id} value={eq.id}>{labelFor(eq)}</option>
+                ))}
                 <option value="__other__">＋ Other / rental (enter details)</option>
               </select>
             </>

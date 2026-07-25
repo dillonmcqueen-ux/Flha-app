@@ -2,6 +2,7 @@ import {
   severityBreakdown, nearMissIncidentRatio, reviewBacklog, highRiskFlhaRate,
   equipmentIssueStats, fieldSiteActivity, scheduledSiteActivity, monthlyTrend,
   correctiveActionAging, reporterLeaderboard, monthlyPassRate, toolboxAvgAttendance,
+  maintenanceSummary,
 } from "./analyticsUtils";
 
 const TONE = { neutral: "#1E3A5F", good: "#16A34A", warn: "#D97706", bad: "#DC2626" };
@@ -117,12 +118,13 @@ function TrendBars({ buckets, series, emptyLabel = "Not enough data yet." }) {
 export default function AnalyticsPanel({
   tier, companyName,
   flhas = [], inspections = [], toolbox = [], nearMisses = [], incidents = [],
-  daily = [], monthlyRecords = [], monthlyActions = [], customDocs = [],
+  daily = [], monthlyRecords = [], monthlyActions = [], customDocs = [], maintenanceStatus = [],
 }) {
   const isAdvanced = tier === "advanced";
 
   const sev = severityBreakdown(nearMisses, incidents);
   const ratio = nearMissIncidentRatio(nearMisses, incidents);
+  const maintenance = maintenanceSummary(maintenanceStatus);
   const backlog = reviewBacklog(nearMisses, incidents);
   const riskRate = highRiskFlhaRate(flhas);
   const equipStats = equipmentIssueStats(inspections);
@@ -145,6 +147,9 @@ export default function AnalyticsPanel({
           <StatTile label="Open Corrective Actions" value={openActionsCount} tone={openActionsCount > 0 ? "warn" : "good"} />
           <StatTile label="Toolbox Talks" value={toolbox.length} sub={attendance.count > 0 ? `avg ${attendance.avg} attendees` : null} />
           <StatTile label="Daily Reports" value={daily.length} />
+          {maintenance.total > 0 && (
+            <StatTile label="Equipment Overdue for Maintenance" value={maintenance.overdue} sub={maintenance.dueSoon > 0 ? `${maintenance.dueSoon} due soon` : null} tone={maintenance.overdue > 0 ? "bad" : "good"} />
+          )}
         </div>
       </SectionCard>
 
