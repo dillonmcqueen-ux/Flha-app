@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
+import CollapsibleGroup from "./CollapsibleGroup.jsx";
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -219,6 +220,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [masterCodeInput, setMasterCodeInput] = useState("");
   const [savingMasterCode, setSavingMasterCode] = useState(false);
   const [masterLoginLogs, setMasterLoginLogs] = useState([]);
+  const [logsShown, setLogsShown] = useState(10);
 
   const loadAllCodesView = async () => {
     try {
@@ -228,6 +230,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       });
       const data = await res.json();
       if (res.ok) setMasterLoginLogs(data.logs || []);
+      setLogsShown(10);
     } catch (e) { /* leave list as-is if the request fails */ }
   };
 
@@ -928,12 +931,21 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
             {masterLoginLogs.length === 0 ? (
               <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No master-code logins yet.</div>
-            ) : masterLoginLogs.map((l, i) => (
-              <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < masterLoginLogs.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
-                <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
-                <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
-              </div>
-            ))}
+            ) : (
+              <>
+                {masterLoginLogs.slice(0, logsShown).map((l, i, arr) => (
+                  <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
+                    <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
+                    <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
+                  </div>
+                ))}
+                {masterLoginLogs.length > logsShown && (
+                  <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
+                    Show more ({masterLoginLogs.length - logsShown} more)
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -978,6 +990,20 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   }
 
   // ═══ MANAGE ═══════════════════════════════════════════════
+  const MANAGE_CATEGORIES = [
+    { key: "company", label: "🏢 Company Setup", tabs: ["profile", "sops", "sites", "equipment"] },
+    { key: "documents", label: "📄 Documents", tabs: ["fields", "monthly", "custom", "forms"] },
+    { key: "people", label: "👤 People & Access", tabs: ["roster", "codes"] },
+  ];
+  const MANAGE_CATEGORY_OF = Object.fromEntries(MANAGE_CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
+  const activeManageCategory = MANAGE_CATEGORY_OF[manageTab] || MANAGE_CATEGORIES[0].key;
+  const goToManageTab = (tab) => {
+    setManageTab(tab);
+    setMsg("");
+    if (tab === "forms") loadDocSettings(activeId);
+    if (tab === "roster") { setRevealedPin(null); loadRoster(activeId); }
+  };
+
   const cnt = counts[activeId] || { flhas: 0, sops: 0 };
   const stp = activeCompany ? steps(activeCompany) : {};
   return (
@@ -1000,17 +1026,39 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       <div style={st.body}>
         {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#FEE2E2" : "#DCFCE7", color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#991B1B" : "#166534", fontSize: 14 }}>{msg}</div>}
 
+        <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+          {MANAGE_CATEGORIES.map(cat => (
+            <button
+              key={cat.key}
+              style={st.tab(activeManageCategory === cat.key)}
+              onClick={() => goToManageTab(cat.tabs[0])}
+            >{cat.label}</button>
+          ))}
+        </div>
+
         <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
-          <button style={st.tab(manageTab === "profile")} onClick={() => { setManageTab("profile"); setMsg(""); }}>Profile</button>
-          <button style={st.tab(manageTab === "sops")} onClick={() => { setManageTab("sops"); setMsg(""); }}>SOPs</button>
-          <button style={st.tab(manageTab === "sites")} onClick={() => { setManageTab("sites"); setMsg(""); }}>Sites</button>
-          <button style={st.tab(manageTab === "equipment")} onClick={() => { setManageTab("equipment"); setMsg(""); }}>Equipment</button>
-          <button style={st.tab(manageTab === "fields")} onClick={() => { setManageTab("fields"); setMsg(""); }}>Fields</button>
-          <button style={st.tab(manageTab === "monthly")} onClick={() => { setManageTab("monthly"); setMsg(""); }}>Monthly</button>
-          <button style={st.tab(manageTab === "custom")} onClick={() => { setManageTab("custom"); setMsg(""); }}>Custom</button>
-          <button style={st.tab(manageTab === "forms")} onClick={() => { setManageTab("forms"); setMsg(""); loadDocSettings(activeId); }}>Forms</button>
-          <button style={st.tab(manageTab === "roster")} onClick={() => { setManageTab("roster"); setMsg(""); setRevealedPin(null); loadRoster(activeId); }}>Roster</button>
-          <button style={st.tab(manageTab === "codes")} onClick={() => { setManageTab("codes"); setMsg(""); }}>Codes</button>
+          {activeManageCategory === "company" && (
+            <>
+              <button style={st.tab(manageTab === "profile")} onClick={() => goToManageTab("profile")}>Profile</button>
+              <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
+              <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
+              <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
+            </>
+          )}
+          {activeManageCategory === "documents" && (
+            <>
+              <button style={st.tab(manageTab === "fields")} onClick={() => goToManageTab("fields")}>Fields</button>
+              <button style={st.tab(manageTab === "monthly")} onClick={() => goToManageTab("monthly")}>Monthly</button>
+              <button style={st.tab(manageTab === "custom")} onClick={() => goToManageTab("custom")}>Custom</button>
+              <button style={st.tab(manageTab === "forms")} onClick={() => goToManageTab("forms")}>Forms</button>
+            </>
+          )}
+          {activeManageCategory === "people" && (
+            <>
+              <button style={st.tab(manageTab === "roster")} onClick={() => goToManageTab("roster")}>Roster</button>
+              <button style={st.tab(manageTab === "codes")} onClick={() => goToManageTab("codes")}>Codes</button>
+            </>
+          )}
         </div>
 
         {manageTab === "profile" && (
@@ -1312,8 +1360,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   const group = rosterMembers.filter(m => m.role === roleGroup);
                   if (group.length === 0) return null;
                   return (
-                    <div key={roleGroup} style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>{roleGroup}s</div>
+                    <CollapsibleGroup
+                      key={roleGroup}
+                      icon={roleGroup === "supervisor" ? "🦺" : "👷"}
+                      label={`${roleGroup}s`}
+                      count={group.length}
+                      colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"}
+                      defaultOpen={true}
+                    >
                       {group.map((m, i) => (
                         <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? `1px solid ${C.line}` : "none", opacity: m.active ? 1 : 0.6 }}>
                           <div style={{ flex: 1 }}>
@@ -1332,7 +1386,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                           )}
                         </div>
                       ))}
-                    </div>
+                    </CollapsibleGroup>
                   );
                 })
               )}
