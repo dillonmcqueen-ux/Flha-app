@@ -11,6 +11,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
@@ -20,7 +22,9 @@ function verifySession(token) {
     .digest('base64url');
   if (sig !== expectedSig) return null;
   try {
-    return JSON.parse(Buffer.from(data, 'base64url').toString());
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+    if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+    return payload;
   } catch (e) {
     return null;
   }
@@ -51,6 +55,10 @@ export default async function handler(req, res) {
     // ── Worker: submit a new report ─────────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
+      if (coRows && coRows[0] && coRows[0].suspended) {
+        return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
+      }
       const { record } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
       const { data, error } = await supabaseAdmin

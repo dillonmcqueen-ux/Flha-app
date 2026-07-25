@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { supabase } from "./supabaseClient";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
 
 export default function MonthlyInspection({ companyId, companyName, onBack, onLogout, token = null }) {
@@ -35,8 +34,15 @@ export default function MonthlyInspection({ companyId, companyName, onBack, onLo
       } catch (e) {
         console.error("sites read error:", e.message);
       }
-      const { data: co } = await supabase.from("companies").select("logo_url").eq("id", companyId).limit(1);
-      if (co && co[0]) setCompanyLogo(co[0].logo_url || "");
+      // Company logo — via protected endpoint
+      try {
+        const logoRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_company_logo", token, companyId }),
+        });
+        const logoData = await logoRes.json();
+        if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
+      } catch (e) { /* leave logo blank if the request fails */ }
     }
     load();
   }, [companyId, token]);
