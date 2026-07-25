@@ -127,7 +127,7 @@ export default async function handler(req, res) {
     if (action === 'list_equipment') {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { data, error } = await supabaseAdmin.from('equipment').select('id, year, make, model, type, unit_number').eq('company_id', companyId).order('id');
+      const { data, error } = await supabaseAdmin.from('equipment').select('id, year, make, model, type, unit_number, pm_interval').eq('company_id', companyId).order('id');
       if (error) return res.status(500).json({ error: 'Could not load equipment.' });
       return res.status(200).json({ equipment: data || [] });
     }
@@ -157,6 +157,45 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'Missing id.' });
       const { error } = await supabaseAdmin.from('equipment').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove equipment." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Turns preventative-maintenance tracking on/off for a piece of
+    // equipment. Turning it on for the first time requires a starting
+    // reading, which becomes that equipment's maintenance-log baseline —
+    // status math in api/maintenance.js never has to guess one.
+    if (action === 'set_equipment_pm_interval') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, pmInterval, startingReading, readingUnit } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const interval = pmInterval != null && pmInterval !== '' ? parseFloat(pmInterval) : null;
+      if (interval != null && (Number.isNaN(interval) || interval <= 0)) {
+        return res.status(400).json({ error: 'Enter a valid maintenance interval.' });
+      }
+
+      if (interval != null) {
+        const { data: eqRows, error: eqErr } = await supabaseAdmin.from('equipment').select('id, company_id').eq('id', id).limit(1);
+        if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+        const { data: existingLog } = await supabaseAdmin.from('equipment_maintenance_log').select('id').eq('equipment_id', id).limit(1);
+        if (!existingLog || existingLog.length === 0) {
+          const reading = startingReading != null && startingReading !== '' ? parseFloat(startingReading) : null;
+          if (reading == null || Number.isNaN(reading) || !(readingUnit || '').trim()) {
+            return res.status(400).json({ error: 'Enter a starting reading and unit to begin tracking.' });
+          }
+          const { error: logErr } = await supabaseAdmin.from('equipment_maintenance_log').insert({
+            company_id: eqRows[0].company_id,
+            equipment_id: id,
+            service_reading: reading,
+            reading_unit: readingUnit.trim(),
+            performed_by: 'Baseline (tracking enabled)',
+          });
+          if (logErr) return res.status(500).json({ error: "Couldn't set starting reading." });
+        }
+      }
+
+      const { error } = await supabaseAdmin.from('equipment').update({ pm_interval: interval }).eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't update maintenance tracking." });
       return res.status(200).json({ ok: true });
     }
 

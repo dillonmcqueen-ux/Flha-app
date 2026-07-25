@@ -181,3 +181,9 @@ export function toolboxAvgAttendance(toolbox) {
   const total = toolbox.reduce((sum, t) => sum + (t.attendees_json || []).length, 0);
   return { count: toolbox.length, avg: Math.round((total / toolbox.length) * 10) / 10 };
 }
+
+export function maintenanceSummary(maintenanceStatus) {
+  const overdue = maintenanceStatus.filter(e => e.status === "overdue").length;
+  const dueSoon = maintenanceStatus.filter(e => e.status === "due_soon").length;
+  return { total: maintenanceStatus.length, overdue, dueSoon };
+}

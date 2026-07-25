@@ -809,6 +809,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [equipmentSortBy, setEquipmentSortBy] = useState("newest");
   const [customDocRecords, setCustomDocRecords] = useState([]);
   const [selectedCustomDocRecord, setSelectedCustomDocRecord] = useState(null);
+  const [maintenanceStatus, setMaintenanceStatus] = useState([]);
+  const [logServiceFor, setLogServiceFor] = useState(null);
+  const [logServiceForm, setLogServiceForm] = useState({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" });
+  const [savingService, setSavingService] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -1095,6 +1099,45 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     }
     loadDocSettings();
   }, [selectedCompany, token]);
+
+  const loadMaintenanceStatus = async () => {
+    if (!selectedCompany) { setMaintenanceStatus([]); return; }
+    try {
+      const res = await fetch("/api/maintenance", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_status", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setMaintenanceStatus(data.equipment || []);
+    } catch (e) { /* leave list as-is if the request fails */ }
+  };
+
+  useEffect(() => {
+    loadMaintenanceStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, token]);
+
+  const submitLogService = async (eq) => {
+    setSavingService(true);
+    try {
+      const res = await fetch("/api/maintenance", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "log_service", token, equipmentId: eq.id,
+          serviceDate: logServiceForm.serviceDate, serviceReading: logServiceForm.serviceReading,
+          readingUnit: logServiceForm.readingUnit, performedBy: logServiceForm.performedBy, notes: logServiceForm.notes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Couldn't log service."); setSavingService(false); return; }
+      setLogServiceFor(null);
+      setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" });
+      await loadMaintenanceStatus();
+    } catch (e) {
+      alert("Couldn't log service. Try again.");
+    }
+    setSavingService(false);
+  };
 
   const isDocActive = (key) => {
     const entry = docSettings.find(d => d.key === key);
@@ -1850,6 +1893,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           {TAB_VISIBLE.equipment && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
+          <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
+            🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
+          </button>
           {TAB_VISIBLE.customdocs && (
             <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
           )}
@@ -2573,6 +2619,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             monthlyRecords={companyMonthlyRecords}
             monthlyActions={companyMonthlyActions}
             customDocs={companyCustomDocs}
+            maintenanceStatus={maintenanceStatus}
           />
         )}
 
@@ -2622,6 +2669,79 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {activeTab === "maintenance" && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+              {company?.name} — Preventative Maintenance
+            </div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>
+              Tracked equipment, flagged by usage since last service. Set up tracking for a machine from Admin Panel → Equipment.
+            </div>
+
+            {maintenanceStatus.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🛠️</div>
+                No equipment is currently tracked for maintenance.
+              </div>
+            ) : (
+              maintenanceStatus.map((eq, i) => {
+                const STATUS = {
+                  overdue: { label: "Overdue", color: "#991B1B", bg: "#FEF2F2", border: "#FCA5A5" },
+                  due_soon: { label: "Due Soon", color: "#92400E", bg: "#FFFBEB", border: "#FCD34D" },
+                  ok: { label: "OK", color: "#166534", bg: "#F0FDF4", border: "#86EFAC" },
+                  unit_mismatch: { label: "Unit mismatch — check readings", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" },
+                  not_started: { label: "No baseline reading", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" },
+                };
+                const sc = STATUS[eq.status] || STATUS.not_started;
+                const pct = eq.usageSinceService != null && eq.pmInterval ? Math.min(100, Math.round((eq.usageSinceService / eq.pmInterval) * 100)) : null;
+                return (
+                  <div key={eq.id} style={{ padding: "12px 0", borderBottom: i < maintenanceStatus.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{eq.label}</div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                          {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}` : "No readings recorded yet"}
+                          {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
+                        </div>
+                        {pct != null && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                            <div style={{ flex: 1, background: "#F1F5F9", borderRadius: 6, height: 6 }}>
+                              <div style={{ width: `${pct}%`, background: sc.color, height: 6, borderRadius: 6 }} />
+                            </div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0 }}>{eq.usageSinceService} / {eq.pmInterval} {eq.lastService?.reading_unit}</div>
+                          </div>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{sc.label}</span>
+                    </div>
+
+                    {logServiceFor === eq.id ? (
+                      <div style={{ marginTop: 10, background: "#F8FAFC", borderRadius: 8, padding: 10 }}>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                          <input type="date" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} value={logServiceForm.serviceDate} onChange={e => setLogServiceForm(p => ({ ...p, serviceDate: e.target.value }))} />
+                          <input type="number" placeholder="Reading (optional if today)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} value={logServiceForm.serviceReading} onChange={e => setLogServiceForm(p => ({ ...p, serviceReading: e.target.value }))} />
+                          <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", width: 80 }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
+                            <option value="Hours">Hours</option>
+                            <option value="KM">KM</option>
+                          </select>
+                        </div>
+                        <input placeholder="Performed by" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }} value={logServiceForm.performedBy} onChange={e => setLogServiceForm(p => ({ ...p, performedBy: e.target.value }))} />
+                        <input placeholder="Notes (optional)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={logServiceForm.notes} onChange={e => setLogServiceForm(p => ({ ...p, notes: e.target.value }))} />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : "✓ Log Service"}</button>
+                          <button onClick={() => { setLogServiceFor(null); setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" }); }} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setLogServiceFor(eq.id); setLogServiceForm({ serviceDate: new Date().toISOString().slice(0, 10), serviceReading: "", readingUnit: eq.current?.readingUnit || "Hours", performedBy: "", notes: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", marginTop: 8, padding: 0 }}>+ Log Service</button>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         )}
