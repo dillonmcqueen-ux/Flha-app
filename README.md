@@ -1,33 +1,82 @@
 # FORA
 
-AI-powered Field Level Hazard Assessment app. Workers describe a task by voice
-or text, and the app cross-references it against the company's uploaded SOPs
-to generate hazards, controls, required PPE, and compliance alerts.
+AI-assisted field safety paperwork. Workers describe a task by voice or text
+and the app cross-references it against the company's uploaded SOPs to
+generate hazards, controls, required PPE, and compliance alerts — alongside
+seven other document types (equipment inspections, toolbox talks, near
+miss/incident reports, daily reports, monthly site inspections, and custom
+documents). Multi-tenant: every company's data, forms, and users are
+isolated from every other company's.
 
-## Before you deploy
+## Roles & login
 
-1. **Add your Supabase credentials** in `src/supabaseClient.js`
-   (Project URL and anon public key — find these in Supabase under
-   Project Settings -> API).
+Three roles: **worker**, **supervisor**, and **admin**.
 
-2. **Add at least one company + SOP row** in Supabase so the app has
-   real policies to load:
-   - Table Editor -> `companies` -> insert a row (id auto-generates, name = your company)
-   - Table Editor -> `sops` -> insert a row per policy (company_id = the id you just created, policy_text = the policy)
+- **Company login** — each company gets its own login code(s). New
+  companies start on a single shared `company_code`; some companies
+  predate that and still use separate legacy `worker_code`/`supervisor_code`
+  values. Admin can edit any of these from the Admin Panel's Codes tab.
+- **Individual roster login** — a company can opt into per-person logins
+  instead of a shared code: each worker/supervisor gets their own name and a
+  4-digit PIN (managed from the Admin Panel's Roster tab), so deactivating
+  one person cuts off exactly that person, immediately. This is what
+  auto-fills a person's name on the paperwork they submit.
+- **Master code** — a single admin-settable code that logs into any
+  company as either role, for admin use. Every use is logged
+  (Admin Panel → All Codes → recent master-code logins).
 
-3. **Get an Anthropic API key** at console.anthropic.com (you'll add this
-   as an environment variable on Vercel, never in the code itself).
+## Plan tiers
 
-## Deploy to Vercel (free)
+Each company is set to **Basic** (up to 10 seats) or **Advanced** (11–50
+seats) from the Admin Panel. This caps how many active roster
+workers+supervisors a company can have, and controls how much detail shows
+on that company's Analytics tab.
 
-1. Push this whole folder to a GitHub repo.
-2. Go to vercel.com -> New Project -> Import your GitHub repo.
-3. Before deploying, add an environment variable:
-   - Name: `ANTHROPIC_API_KEY`
-   - Value: your key from console.anthropic.com
-4. Click Deploy. Vercel will give you a live link like `flha-app.vercel.app`.
+## What's in the app
 
-That link is shareable with anyone — no login needed to view the demo.
+- **Worker forms**: FLHA, Equipment Inspection, Toolbox Talk, Near Miss,
+  Incident, Daily Report, Monthly Site Inspection, and admin-defined Custom
+  Documents — each toggleable per company from the Admin Panel.
+- **Supervisor Dashboard**: reviews every submission type, groupable and
+  collapsible for high-volume companies, plus equipment/preventative-
+  maintenance tracking, a tiered Analytics view, and SOP management.
+- **Admin Panel**: onboard and configure companies, manage plan tier,
+  manage each company's login codes and roster, toggle which document
+  types a company uses, and view cross-company code/login activity.
+
+## Architecture
+
+React (Vite) frontend, Vercel serverless functions in `api/`, Supabase
+(Postgres) for storage. The service-role key used by the `api/` functions
+is the real access-control boundary — every request is checked against a
+signed session before it touches the database. Row Level Security is
+enabled on every table as a deny-by-default backstop (no policies are
+defined, so direct anon-key access is refused), not the primary gate.
+
+## Environment variables
+
+Set these on Vercel (Project Settings → Environment Variables):
+
+| Variable | Required | Used for |
+|---|---|---|
+| `SUPABASE_URL` | Yes | Every `api/*.js` function |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Every `api/*.js` function — bypasses RLS, the real access-control layer |
+| `SESSION_SECRET` | Yes | Signs session and login-ticket tokens |
+| `ANTHROPIC_API_KEY` | Yes | `/api/generate-flha` (AI hazard generation) |
+| `ADMIN_CODE` | No | A bootstrap admin login code, separate from the in-app admin-settable master code |
+| `CRON_SECRET` | No | Secures the weekly equipment-report cron job (`vercel.json`) |
+
+`src/supabaseClient.js` separately hardcodes the Supabase project URL and
+**anon publishable key** — that's expected, not a leaked secret: it's a
+public key with no table access (see the RLS note above), used only for
+things like file storage.
+
+## Deploy to Vercel
+
+1. Push this repo to GitHub.
+2. Go to vercel.com → New Project → Import your GitHub repo.
+3. Before deploying, add the environment variables listed above.
+4. Click Deploy. Vercel gives you a live link like `flha-app.vercel.app`.
 
 ## Local development
 
