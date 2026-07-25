@@ -13,6 +13,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
@@ -22,7 +24,9 @@ function verifySession(token) {
     .digest('base64url');
   if (sig !== expectedSig) return null;
   try {
-    return JSON.parse(Buffer.from(data, 'base64url').toString());
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+    if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+    return payload;
   } catch (e) {
     return null;
   }
@@ -44,6 +48,32 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ══ COMPANY (branding-only, no codes/contact info) ═════════════════
+    // These exist so the Dashboard and worker-facing forms never need to
+    // query the companies table directly with the anon key — that table
+    // also holds worker_code/supervisor_code (login credentials) and
+    // contact info, none of which belong in these responses.
+
+    // Admin: every company (for the multi-company selector). Supervisor:
+    // just their own, as a one-element array — same shape either way so
+    // Dashboard.jsx doesn't need to branch on role.
+    if (action === 'list_companies_brief') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      let query = supabaseAdmin.from('companies').select('id, name, logo_url, analytics_tier').order('id');
+      if (session.role === 'supervisor') query = query.eq('id', session.companyId);
+      const { data, error } = await query;
+      if (error) return res.status(500).json({ error: 'Could not load companies.' });
+      return res.status(200).json({ companies: data || [] });
+    }
+
+    if (action === 'get_company_logo') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin.from('companies').select('logo_url').eq('id', companyId).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load company.' });
+      return res.status(200).json({ logo_url: (data && data[0] && data[0].logo_url) || '' });
+    }
+
     // ══ SOPs ═════════════════════════════════════════════════════════
 
     if (action === 'list_sops') {

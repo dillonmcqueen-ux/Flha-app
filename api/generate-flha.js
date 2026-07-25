@@ -9,6 +9,8 @@ export const config = {
   maxDuration: 30,
 };
 
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
@@ -18,7 +20,9 @@ function verifySession(token) {
     .digest('base64url');
   if (sig !== expectedSig) return null;
   try {
-    return JSON.parse(Buffer.from(data, 'base64url').toString());
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+    if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+    return payload;
   } catch (e) {
     return null;
   }

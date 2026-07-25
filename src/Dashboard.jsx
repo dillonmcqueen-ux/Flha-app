@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "./supabaseClient";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
@@ -954,7 +953,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   useEffect(() => {
     async function loadAll() {
-      const { data: cos } = await supabase.from("companies").select("*");
+      let cos = [];
+      try {
+        const cosRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_companies_brief", token }),
+        });
+        const cosData = await cosRes.json();
+        if (cosRes.ok) cos = cosData.companies || [];
+      } catch (e) { /* leave companies empty if the request fails */ }
 
       const visibleCompaniesRaw = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)

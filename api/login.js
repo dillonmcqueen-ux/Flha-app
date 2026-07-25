@@ -11,6 +11,15 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Hash-then-compare so mismatched-length inputs never short-circuit —
+// timingSafeEqual itself throws on unequal-length buffers, and fixed-length
+// digests sidestep that while still comparing in constant time.
+function safeEqual(a, b) {
+  const ah = crypto.createHash('sha256').update(String(a)).digest();
+  const bh = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ah, bh);
+}
+
 // Creates a signed "pass" (session token) that proves this login was checked
 // and approved by our server. It cannot be faked without knowing SESSION_SECRET,
 // which only lives in Vercel's settings.
@@ -37,7 +46,7 @@ export default async function handler(req, res) {
 
   // ── Admin path — checked against the secret ADMIN_CODE in Vercel ──────
   if (role === 'admin') {
-    if (entered === process.env.ADMIN_CODE) {
+    if (process.env.ADMIN_CODE && safeEqual(entered, process.env.ADMIN_CODE)) {
       const payload = { role: 'admin', companyId: null, issuedAt: Date.now() };
       const token = signSession(payload);
       return res.status(200).json({ session: payload, token });

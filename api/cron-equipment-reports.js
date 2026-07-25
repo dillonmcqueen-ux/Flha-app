@@ -4,6 +4,7 @@
 // so it can't be triggered by anyone else.
 
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 import { buildReportForCompanyWeek, mondayOf, toISODate } from './equipmentreports.js';
 
 const supabaseAdmin = createClient(
@@ -11,9 +12,18 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Hash-then-compare so mismatched-length headers never short-circuit —
+// timingSafeEqual itself throws on unequal-length buffers, and fixed-length
+// digests sidestep that while still comparing in constant time.
+function safeEqual(a, b) {
+  const ah = crypto.createHash('sha256').update(String(a)).digest();
+  const bh = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ah, bh);
+}
+
 export default async function handler(req, res) {
   const authHeader = req.headers['authorization'];
-  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || !authHeader || !safeEqual(authHeader, `Bearer ${process.env.CRON_SECRET}`)) {
     return res.status(401).json({ error: 'Unauthorized.' });
   }
 
