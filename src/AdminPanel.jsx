@@ -478,45 +478,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setEquipList(prev => prev.filter(e => e.id !== id));
   };
 
-  // ── preventative maintenance tracking per equipment ─────────
-  const [pmFormFor, setPmFormFor] = useState(null);
-  const [pmForm, setPmForm] = useState({ interval: "", unit: "Hours", startingReading: "" });
-
-  const savePmInterval = async (eq) => {
-    setMsg("");
-    if (!pmForm.interval.trim() || !pmForm.startingReading.trim()) {
-      setMsg("Enter both the maintenance interval and a starting reading.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetch("/api/companydata", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "set_equipment_pm_interval", token, id: eq.id,
-          pmInterval: pmForm.interval, startingReading: pmForm.startingReading, readingUnit: pmForm.unit,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setMsg(data.error || "Couldn't update maintenance tracking."); setSaving(false); return; }
-      setEquipList(prev => prev.map(e => e.id === eq.id ? { ...e, pm_interval: parseFloat(pmForm.interval) } : e));
-      setPmFormFor(null);
-      setPmForm({ interval: "", unit: "Hours", startingReading: "" });
-    } catch (e) {
-      setMsg("Couldn't update maintenance tracking. Try again.");
-    }
-    setSaving(false);
-  };
-
-  const disablePmTracking = async (eq) => {
-    setEquipList(prev => prev.map(e => e.id === eq.id ? { ...e, pm_interval: null } : e));
-    try {
-      await fetch("/api/companydata", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_equipment_pm_interval", token, id: eq.id, pmInterval: null }),
-      });
-    } catch (e) { /* leave optimistic state if the request fails */ }
-  };
 
   const addField = async () => {
     setMsg("");
@@ -910,39 +871,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               {equipList.length === 0 ? (
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No equipment yet.</div>
               ) : equipList.map((eq, i) => (
-                <div key={eq.id} style={{ padding: "11px 0", borderBottom: i < equipList.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
-                    <span style={{ fontSize: 18 }}>🚜</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
-                      {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
-                    </div>
-                    <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                <div key={eq.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < equipList.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                  <span style={{ fontSize: 18 }}>🚜</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
+                    {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
                   </div>
-
-                  {eq.pm_interval ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, marginLeft: 29 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: C.amberDark, background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>🔧 PM tracked — every {eq.pm_interval}</span>
-                      <button onClick={() => disablePmTracking(eq)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Turn off</button>
-                    </div>
-                  ) : pmFormFor === eq.id ? (
-                    <div style={{ marginTop: 8, marginLeft: 29, background: C.bg, borderRadius: 8, padding: 10 }}>
-                      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                        <input style={{ ...st.input, marginBottom: 0, flex: 1 }} type="number" placeholder="Interval (e.g. 250)" value={pmForm.interval} onChange={e => setPmForm(p => ({ ...p, interval: e.target.value }))} />
-                        <select style={{ ...st.input, marginBottom: 0, width: 90 }} value={pmForm.unit} onChange={e => setPmForm(p => ({ ...p, unit: e.target.value }))}>
-                          <option value="Hours">Hours</option>
-                          <option value="KM">KM</option>
-                        </select>
-                      </div>
-                      <input style={{ ...st.input, marginBottom: 6 }} type="number" placeholder="Current reading (starting point)" value={pmForm.startingReading} onChange={e => setPmForm(p => ({ ...p, startingReading: e.target.value }))} />
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button style={{ ...st.darkBtn, flex: 1 }} onClick={() => savePmInterval(eq)} disabled={saving}>{saving ? "Saving…" : "Start tracking"}</button>
-                        <button onClick={() => { setPmFormFor(null); setPmForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={() => setPmFormFor(eq.id)} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, cursor: "pointer", fontWeight: 600, marginTop: 6, marginLeft: 29, padding: 0 }}>+ Set up maintenance tracking</button>
-                  )}
+                  <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -1032,7 +967,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Forms — Active / Deactivated</div>
-            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>Control which document types this company's workers can see and submit. Deactivating a form hides it from the worker menu, but doesn't delete any submitted records.</div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>Control which document types and dashboard features this company has access to. Deactivating a worker-facing form hides it from the worker menu; deactivating a feature like Preventative Maintenance hides its Dashboard tab. Nothing already submitted or logged is deleted.</div>
 
             {loadingDocSettings ? (
               <div style={{ textAlign: "center", padding: "24px 0", color: C.muted }}>Loading…</div>

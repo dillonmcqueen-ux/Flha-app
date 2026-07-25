@@ -183,7 +183,8 @@ export function toolboxAvgAttendance(toolbox) {
 }
 
 export function maintenanceSummary(maintenanceStatus) {
-  const overdue = maintenanceStatus.filter(e => e.status === "overdue").length;
-  const dueSoon = maintenanceStatus.filter(e => e.status === "due_soon").length;
-  return { total: maintenanceStatus.length, overdue, dueSoon };
+  const tracked = maintenanceStatus.filter(e => e.status !== "not_tracked");
+  const overdue = tracked.filter(e => e.status === "overdue").length;
+  const dueSoon = tracked.filter(e => e.status === "due_soon").length;
+  return { total: tracked.length, overdue, dueSoon };
 }
