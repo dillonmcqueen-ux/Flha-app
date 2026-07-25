@@ -15,7 +15,7 @@ const supabaseAdmin = createClient(
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-function verifySession(token) {
+async function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
   const expectedSig = crypto
@@ -23,13 +23,29 @@ function verifySession(token) {
     .update(data)
     .digest('base64url');
   if (sig !== expectedSig) return null;
+  let payload;
   try {
-    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
-    if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
-    return payload;
+    payload = JSON.parse(Buffer.from(data, 'base64url').toString());
   } catch (e) {
     return null;
   }
+  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+
+  // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
+  // no userId — nothing to live-check beyond the signature+TTL above.
+  if (payload.role === 'admin' || !payload.userId) return payload;
+
+  // Individually-identified (roster) sessions: re-check `active` on every
+  // request, so deactivating someone takes effect on their very next call
+  // instead of waiting out the token's TTL.
+  const { data: rows, error } = await supabaseAdmin
+    .from('roster')
+    .select('active, role, company_id')
+    .eq('id', payload.userId)
+    .limit(1);
+  if (error || !rows || rows.length === 0 || !rows[0].active) return null;
+  if (rows[0].company_id !== payload.companyId) return null;
+  return { ...payload, role: rows[0].role };
 }
 
 // For any read/write scoped to a company: admins may act on any company
@@ -40,11 +56,31 @@ function resolveCompanyId(session, requestedCompanyId) {
   return session.companyId;
 }
 
+// Total active roster seats a plan tier allows — workers and supervisors
+// combined, since both count as a "user" for billing.
+const SEAT_CAP_BY_TIER = { basic: 10, advanced: 50 };
+
+function genSalt() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function hashPin(pin, salt) {
+  return crypto.scryptSync(String(pin), salt, 64).toString('hex');
+}
+
+// No cross-member uniqueness check — login always resolves a specific
+// roster row by name before the PIN is ever checked, so two people sharing
+// a 4-digit PIN has no security impact, and skipping the check keeps this
+// O(1) instead of re-hashing against every existing member on the roster.
+function genPin() {
+  return String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { action, token } = req.body || {};
-  const session = verifySession(token);
+  const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
@@ -59,7 +95,7 @@ export default async function handler(req, res) {
     // Dashboard.jsx doesn't need to branch on role.
     if (action === 'list_companies_brief') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      let query = supabaseAdmin.from('companies').select('id, name, logo_url, analytics_tier').order('id');
+      let query = supabaseAdmin.from('companies').select('id, name, logo_url, plan_tier').order('id');
       if (session.role === 'supervisor') query = query.eq('id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load companies.' });
@@ -72,6 +108,164 @@ export default async function handler(req, res) {
       const { data, error } = await supabaseAdmin.from('companies').select('logo_url').eq('id', companyId).limit(1);
       if (error) return res.status(500).json({ error: 'Could not load company.' });
       return res.status(200).json({ logo_url: (data && data[0] && data[0].logo_url) || '' });
+    }
+
+    // ══ ROSTER ═══════════════════════════════════════════════════════
+    // Individually-named, individually-PIN'd workers and supervisors,
+    // replacing the two shared company-wide codes. Deactivating one row
+    // (below) cuts off exactly that person on their very next request —
+    // verifySession live-checks `active` for any session carrying a
+    // userId. Admins can manage any company's roster; supervisors only
+    // their own, same resolveCompanyId pattern as everything else here.
+
+    if (action === 'list_roster') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data: members, error } = await supabaseAdmin
+        .from('roster')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at')
+        .eq('company_id', companyId)
+        .order('role', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) return res.status(500).json({ error: 'Could not load roster.' });
+
+      const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', companyId).limit(1);
+      if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
+      const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
+      const activeSeatCount = (members || []).filter(m => m.active).length;
+
+      return res.status(200).json({ members: members || [], activeSeatCount, cap: SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic, tier });
+    }
+
+    // Admin-only: { [companyId]: { total, active } } across all companies,
+    // for the console's per-company seat-usage display.
+    if (action === 'list_roster_counts') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { data, error } = await supabaseAdmin.from('roster').select('company_id, active');
+      if (error) return res.status(500).json({ error: 'Could not load roster counts.' });
+      const counts = {};
+      (data || []).forEach(row => {
+        if (!counts[row.company_id]) counts[row.company_id] = { total: 0, active: 0 };
+        counts[row.company_id].total += 1;
+        if (row.active) counts[row.company_id].active += 1;
+      });
+      return res.status(200).json({ counts });
+    }
+
+    if (action === 'add_roster_member') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const name = (req.body.name || '').trim();
+      const role = req.body.role;
+      if (!name) return res.status(400).json({ error: 'Enter a name.' });
+      if (role !== 'worker' && role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+
+      const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', companyId).limit(1);
+      if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
+      const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
+      const cap = SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic;
+
+      const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized').eq('company_id', companyId).eq('active', true);
+      if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
+      if ((activeRows || []).length >= cap) {
+        return res.status(400).json({ error: `Seat limit reached for this plan (${cap} on ${tier === 'advanced' ? 'Advanced' : 'Basic'}). Upgrade the plan or deactivate someone first.` });
+      }
+      if ((activeRows || []).some(r => r.name_normalized === name.toLowerCase())) {
+        return res.status(400).json({ error: `"${name}" is already active on this roster. Add a last initial to tell them apart.` });
+      }
+
+      const salt = genSalt();
+      const pin = genPin();
+      const { data, error } = await supabaseAdmin
+        .from('roster')
+        .insert({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt })
+        .select('id, name, role, active, created_at')
+        .single();
+      if (error) return res.status(500).json({ error: "Couldn't add to the roster: " + error.message });
+      return res.status(200).json({ ok: true, member: data, pin });
+    }
+
+    if (action === 'deactivate_roster_member' || action === 'reactivate_roster_member') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      const member = rows[0];
+      if (session.role === 'supervisor' && member.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+
+      const activating = action === 'reactivate_roster_member';
+      if (activating) {
+        const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', member.company_id).limit(1);
+        if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
+        const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
+        const cap = SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic;
+        const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id').eq('company_id', member.company_id).eq('active', true);
+        if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
+        if ((activeRows || []).length >= cap) {
+          return res.status(400).json({ error: `Seat limit reached for this plan (${cap} on ${tier === 'advanced' ? 'Advanced' : 'Basic'}). Upgrade the plan or deactivate someone first.` });
+        }
+      }
+
+      const updates = activating
+        ? { active: true, deactivated_at: null, failed_pin_attempts: 0, pin_locked_until: null }
+        : { active: false, deactivated_at: new Date().toISOString() };
+      const { error } = await supabaseAdmin.from('roster').update(updates).eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't update." });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'reset_roster_pin') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+
+      const salt = genSalt();
+      const pin = genPin();
+      const { error } = await supabaseAdmin
+        .from('roster')
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+        .eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
+      return res.status(200).json({ ok: true, pin });
+    }
+
+    // Flips a company between the legacy shared-code login and the roster/PIN
+    // login. Turning it ON requires at least one active worker and one
+    // active supervisor already set up, so no one can strand a company with
+    // no way to log in. Turning it OFF is always allowed — an instant,
+    // lossless rollback since the legacy codes are never touched.
+    if (action === 'set_roster_cutover') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const enabled = !!req.body.enabled;
+
+      if (enabled) {
+        const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('role').eq('company_id', companyId).eq('active', true);
+        if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
+        const hasWorker = (activeRows || []).some(r => r.role === 'worker');
+        const hasSupervisor = (activeRows || []).some(r => r.role === 'supervisor');
+        if (!hasWorker || !hasSupervisor) {
+          return res.status(400).json({ error: 'Add at least one active worker and one active supervisor before switching over.' });
+        }
+      }
+
+      const { error } = await supabaseAdmin.from('companies').update({ roster_enabled: enabled }).eq('id', companyId);
+      if (error) return res.status(500).json({ error: "Couldn't update." });
+      return res.status(200).json({ ok: true });
     }
 
     // ══ SOPs ═════════════════════════════════════════════════════════

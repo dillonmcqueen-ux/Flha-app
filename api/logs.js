@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-function verifySession(token) {
+async function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
   const expectedSig = crypto
@@ -21,13 +21,29 @@ function verifySession(token) {
     .update(data)
     .digest('base64url');
   if (sig !== expectedSig) return null;
+  let payload;
   try {
-    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
-    if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
-    return payload;
+    payload = JSON.parse(Buffer.from(data, 'base64url').toString());
   } catch (e) {
     return null;
   }
+  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+
+  // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
+  // no userId — nothing to live-check beyond the signature+TTL above.
+  if (payload.role === 'admin' || !payload.userId) return payload;
+
+  // Individually-identified (roster) sessions: re-check `active` on every
+  // request, so deactivating someone takes effect on their very next call
+  // instead of waiting out the token's TTL.
+  const { data: rows, error } = await supabaseAdmin
+    .from('roster')
+    .select('active, role, company_id')
+    .eq('id', payload.userId)
+    .limit(1);
+  if (error || !rows || rows.length === 0 || !rows[0].active) return null;
+  if (rows[0].company_id !== payload.companyId) return null;
+  return { ...payload, role: rows[0].role };
 }
 
 const TABLES = {
@@ -52,7 +68,7 @@ export default async function handler(req, res) {
   const table = TABLES[type];
   if (!table) return res.status(400).json({ error: 'Unknown record type.' });
 
-  const session = verifySession(token);
+  const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {

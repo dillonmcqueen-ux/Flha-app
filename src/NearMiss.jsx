@@ -10,9 +10,9 @@ const SEVERITY = {
 };
 const SEVERITY_LEVELS = ["Low", "Medium", "High", "Critical"];
 
-export default function NearMiss({ companyId, companyName, onBack, onLogout, token = null }) {
+export default function NearMiss({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | describe | review | sign | done
-  const [reporter, setReporter] = useState("");
+  const [reporter, setReporter] = useState(loginUserName);
   const [anonymous, setAnonymous] = useState(false);
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
@@ -212,7 +212,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {!anonymous && (
             <>
               <label style={s.label}>Your name</label>
-              <input style={s.input} placeholder="Reporter name" value={reporter} onChange={e => setReporter(e.target.value)} />
+              <input
+                style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+                placeholder="Reporter name" value={reporter}
+                onChange={e => setReporter(e.target.value)}
+                readOnly={!!loginUserName}
+              />
             </>
           )}
 

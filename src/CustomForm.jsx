@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 
-export default function CustomForm({ companyId, companyName, formId, onBack, onLogout, token = null }) {
+export default function CustomForm({ companyId, companyName, userName: loginUserName = "", formId, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("site"); // site | questions | review | sign | done
   const [sites, setSites] = useState([]);
   const [siteId, setSiteId] = useState("");
@@ -12,7 +12,7 @@ export default function CustomForm({ companyId, companyName, formId, onBack, onL
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
 
-  const [workerName, setWorkerName] = useState("");
+  const [workerName, setWorkerName] = useState(loginUserName);
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
@@ -214,7 +214,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{form.title}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{siteName()}</div>
             <label style={{ ...s.label, marginTop: 14 }}>Your name</label>
-            <input style={{ ...s.input, marginBottom: 0 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+            <input
+              style={{ ...s.input, marginBottom: 0, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+              placeholder="e.g. John Smith" value={workerName}
+              onChange={e => setWorkerName(e.target.value)}
+              readOnly={!!loginUserName}
+            />
           </div>
 
           {questions.map((q, i) => {

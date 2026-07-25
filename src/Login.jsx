@@ -17,17 +17,37 @@ function clearSession() {
 
 export default function Login() {
   const [session, setSession] = useState(null);
-  const [role, setRole] = useState(null); // "worker" | "supervisor" | "admin"
+  const [role, setRole] = useState(null); // "worker" | "supervisor" | "admin" — only used to pick the code-entry copy/legacy lookup column; the actual logged-in role comes back from the server
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
   const [adminDashCompany, setAdminDashCompany] = useState(null); // admin viewing a specific company's dashboard
+
+  // Roster login (companies that have cut over from the shared code)
+  const [companyTicket, setCompanyTicket] = useState(null);
+  const [rosterCompanyName, setRosterCompanyName] = useState("");
+  const [rosterNames, setRosterNames] = useState([]);
+  const [nameFilter, setNameFilter] = useState("");
+  const [selectedRoster, setSelectedRoster] = useState(null); // { id, name, role }
+  const [pin, setPin] = useState("");
 
   // Restore session on load
   useEffect(() => {
     const s = loadSession();
     if (s && s.role) setSession(s);
   }, []);
+
+  const resetToRolePick = () => {
+    setRole(null);
+    setCode("");
+    setError("");
+    setCompanyTicket(null);
+    setRosterCompanyName("");
+    setRosterNames([]);
+    setNameFilter("");
+    setSelectedRoster(null);
+    setPin("");
+  };
 
   const handleSubmit = async () => {
     setError("");
@@ -54,6 +74,31 @@ export default function Login() {
         return;
       }
 
+      if (data.stage === "need_identity") {
+        // This company has moved to individual roster logins — fetch the
+        // active name list and move on to the picker instead of logging in.
+        setCompanyTicket(data.companyTicket);
+        setRosterCompanyName(data.companyName || "");
+        try {
+          const namesRes = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "list_roster_names", companyTicket: data.companyTicket }),
+          });
+          const namesData = await namesRes.json();
+          if (!namesRes.ok) {
+            setError(namesData.error || "Something went wrong. Please try again.");
+            setChecking(false);
+            return;
+          }
+          setRosterNames(namesData.names || []);
+        } catch (e) {
+          setError("Connection error. Please try again.");
+        }
+        setChecking(false);
+        return;
+      }
+
       // data.session holds the role/company info; data.token is the signed
       // pass we'll use so other pages can prove this login was real.
       const s = { ...data.session, token: data.token };
@@ -65,18 +110,54 @@ export default function Login() {
     setChecking(false);
   };
 
+  const pickRosterName = (member) => {
+    setSelectedRoster(member);
+    setPin("");
+    setError("");
+  };
+
+  const submitPin = async (pinValue) => {
+    setError("");
+    setChecking(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "roster_login", companyTicket, rosterId: selectedRoster.id, pin: pinValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+        setPin("");
+        setChecking(false);
+        return;
+      }
+      const s = { ...data.session, token: data.token };
+      saveSession(s);
+      setSession(s);
+    } catch (e) {
+      setError("Connection error. Please try again.");
+      setPin("");
+    }
+    setChecking(false);
+  };
+
+  const onPinChange = (val) => {
+    const digits = val.replace(/\D/g, "").slice(0, 4);
+    setPin(digits);
+    if (digits.length === 4) submitPin(digits);
+  };
+
   const logout = () => {
     clearSession();
     setSession(null);
-    setRole(null);
-    setCode("");
-    setError("");
+    resetToRolePick();
   };
 
   // ── Authenticated views ──────────────────────────────────
   if (session) {
     if (session.role === "worker") {
-      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} onLogout={logout} token={session.token} />;
+      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} token={session.token} />;
     }
 
     if (session.role === "admin") {
@@ -103,6 +184,7 @@ export default function Login() {
         isAdmin={false}
         onLogout={logout}
         suspended={session.suspended}
+        userName={session.userName || ""}
         token={session.token}
       />
     );
@@ -137,6 +219,18 @@ export default function Login() {
       width: "100%", background: "#1E1E1E", color: "#F97316", border: "1.5px solid #F9731660", borderRadius: 10,
       padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", marginTop: 10
     },
+    nameBtn: (active) => ({
+      width: "100%", padding: "13px 14px", borderRadius: 10, border: `1.5px solid ${active ? "#F97316" : "#2A2A2A"}`,
+      background: active ? "#2A1A0F" : "#1E1E1E", color: "#fff", cursor: "pointer", marginBottom: 8,
+      textAlign: "left", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center"
+    }),
+    pinDots: {
+      display: "flex", justifyContent: "center", gap: 14, margin: "20px 0"
+    },
+    pinDot: (filled) => ({
+      width: 18, height: 18, borderRadius: "50%",
+      border: "1.5px solid #F97316", background: filled ? "#F97316" : "transparent"
+    }),
   };
 
   const roleMeta = {
@@ -144,6 +238,8 @@ export default function Login() {
     supervisor: { icon: "📋", title: "Supervisor / Safety", desc: "View your company dashboard", accent: "#1E3A5F" },
     admin: { icon: "🔑", title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
   };
+
+  const filteredNames = rosterNames.filter(m => m.name.toLowerCase().includes(nameFilter.trim().toLowerCase()));
 
   return (
     <div style={styles.wrap}>
@@ -175,7 +271,74 @@ export default function Login() {
               );
             })}
           </>
+        ) : companyTicket && !selectedRoster ? (
+          // ── Step 2: pick your name from this company's active roster ──
+          <>
+            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>{rosterCompanyName}</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Which of these is you?</div>
+
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="Type to filter…"
+              value={nameFilter}
+              onChange={e => setNameFilter(e.target.value)}
+              autoFocus
+            />
+
+            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              {filteredNames.length === 0 && (
+                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No names match.</div>
+              )}
+              {filteredNames.map(m => (
+                <button key={m.id} style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
+                  <span>{m.name}</span>
+                  <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase" }}>{m.role}</span>
+                </button>
+              ))}
+            </div>
+
+            {error && (
+              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: "#FCA5A5" }}>
+                {error}
+              </div>
+            )}
+
+            <button style={styles.backBtn} onClick={resetToRolePick}>← Start over</button>
+          </>
+        ) : companyTicket && selectedRoster ? (
+          // ── Step 3: PIN ──────────────────────────────────────────────
+          <>
+            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>{selectedRoster.name}</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>Enter your 4-digit PIN</div>
+
+            <input
+              style={{ ...styles.input, textAlign: "center", fontSize: 28, letterSpacing: 12, marginBottom: 0 }}
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              value={pin}
+              onChange={e => onPinChange(e.target.value)}
+              autoFocus
+              disabled={checking}
+            />
+            <div style={styles.pinDots}>
+              {[0, 1, 2, 3].map(i => <div key={i} style={styles.pinDot(i < pin.length)} />)}
+            </div>
+
+            {error && (
+              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
+                {error}
+              </div>
+            )}
+
+            <button style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); }}>
+              ← Not {selectedRoster.name}?
+            </button>
+          </>
         ) : (
+          // ── Step 1: admin code, or company code ─────────────────────
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <span style={{ fontSize: 26 }}>{roleMeta[role].icon}</span>
@@ -206,7 +369,7 @@ export default function Login() {
             <button style={styles.primaryBtn} onClick={handleSubmit} disabled={checking}>
               {checking ? "Checking…" : "Continue →"}
             </button>
-            <button style={styles.backBtn} onClick={() => { setRole(null); setError(""); setCode(""); }}>
+            <button style={styles.backBtn} onClick={resetToRolePick}>
               ← Back
             </button>
           </>

@@ -96,7 +96,7 @@ const RISK_ROW_STYLE = {
   Low: { bg: "#F0FDF4", border: "#86EFAC", badgeBg: "#DCFCE7", badgeText: "#16A34A" },
 };
 
-export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token = null }) {
+export default function FLHAApp({ forcedCompanyId = null, userName: loginUserName = "", onLogout = null, token = null }) {
   const [step, setStep] = useState("company");
   const [sopData, setSopData] = useState(FALLBACK_SOPS);
   const [sopsLoading, setSopsLoading] = useState(true);
@@ -205,7 +205,7 @@ export default function FLHAApp({ forcedCompanyId = null, onLogout = null, token
   }, [forcedCompanyId, token]);
 
 
-  const [workerName, setWorkerName] = useState("");
+  const [workerName, setWorkerName] = useState(loginUserName);
   const [jobSite, setJobSite] = useState("");
   const [sites, setSites] = useState([]);
   const [customFields, setCustomFields] = useState([]);
@@ -624,7 +624,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 18 }}>Pre-loaded with <strong>{sopData.company}</strong> SOPs ({sopData.policies.length} policies)</div>
 
           <label style={styles.label}>Worker Name</label>
-          <input style={{ ...styles.input, marginBottom: 14 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+          <input
+            style={{ ...styles.input, marginBottom: 14, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            placeholder="e.g. John Smith" value={workerName}
+            onChange={e => setWorkerName(e.target.value)}
+            readOnly={!!loginUserName}
+          />
 
           <label style={styles.label}>Job Site / Location</label>
           {sites.length > 0 && siteMode === "list" ? (

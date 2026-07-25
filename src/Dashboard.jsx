@@ -22,13 +22,13 @@ function RiskBadge({ risk }) {
   );
 }
 
-function FLHACard({ flha, onClose, onDelete, onApprove }) {
+function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
   const h = flha.hazards_json || {};
   const isPending = flha.status === "pending_approval";
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const [hasSignature, setHasSignature] = useState(false);
-  const [supName, setSupName] = useState("");
+  const [supName, setSupName] = useState(defaultSupName);
   const [approving, setApproving] = useState(false);
 
   const getPos = (e) => {
@@ -186,7 +186,11 @@ function FLHACard({ flha, onClose, onDelete, onApprove }) {
             <div style={{ fontWeight: 800, fontSize: 15, color: "#7F1D1D", marginBottom: 4 }}>Supervisor Sign-Off Required</div>
             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>By signing, I approve this extreme-risk work to proceed with the controls listed above.</div>
             <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Supervisor name</label>
-            <input value={supName} onChange={e => setSupName(e.target.value)} placeholder="Your full name" style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 12, background: "#F8FAFC" }} />
+            <input
+              value={supName} onChange={e => setSupName(e.target.value)} placeholder="Your full name"
+              readOnly={!!defaultSupName}
+              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 12, background: defaultSupName ? "#F3F4F6" : "#F8FAFC", color: defaultSupName ? "#6B7280" : "inherit" }}
+            />
             <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Signature</label>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
@@ -780,7 +784,7 @@ function EquipmentReportCard({ data, onClose, onGeneratePdf, generating, error }
 }
 
 
-export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, token = null }) {
+export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, userName = "", token = null }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [inspections, setInspections] = useState([]);
@@ -1359,7 +1363,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const reviewNearMiss = async (id, notes) => {
     const record = nearMisses.find(n => n.id === id);
-    const reviewedBy = isAdmin ? "Admin" : "Supervisor";
+    const reviewedBy = userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
     let pdfUrl = record?.pdf_url || null;
     if (record) {
@@ -1396,7 +1400,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const reviewIncident = async (id, notes) => {
     const record = incidents.find(n => n.id === id);
-    const reviewedBy = isAdmin ? "Admin" : "Supervisor";
+    const reviewedBy = userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
     let pdfUrl = record?.pdf_url || null;
     if (record) {
@@ -1836,7 +1840,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   return (
     <div style={styles.wrap}>
-      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} />}
+      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} defaultSupName={userName} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
       {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} />}
@@ -2656,7 +2660,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
         {activeTab === "analytics" && (
           <AnalyticsPanel
-            tier={company?.analytics_tier || "basic"}
+            tier={company?.plan_tier || "basic"}
             companyName={company?.name}
             flhas={companyFlhas}
             inspections={companyInspections}

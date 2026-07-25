@@ -4,9 +4,9 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly"];
 
-export default function ToolboxTalk({ companyId, companyName, onBack, onLogout, token = null }) {
+export default function ToolboxTalk({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | topic | review | signoff | done
-  const [presenter, setPresenter] = useState("");
+  const [presenter, setPresenter] = useState(loginUserName);
   const [meetingType, setMeetingType] = useState("Pre-Job");
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
@@ -181,7 +181,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <div style={s.card}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: "#1E293B" }}>Meeting details</div>
           <label style={s.label}>Presenter name</label>
-          <input style={s.input} placeholder="Who is leading the talk?" value={presenter} onChange={e => setPresenter(e.target.value)} />
+          <input
+            style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            placeholder="Who is leading the talk?" value={presenter}
+            onChange={e => setPresenter(e.target.value)}
+            readOnly={!!loginUserName}
+          />
 
           <label style={s.label}>Meeting type</label>
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
