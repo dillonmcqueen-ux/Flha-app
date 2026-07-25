@@ -4,6 +4,7 @@ import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import AnalyticsPanel from "./Analytics";
+import CollapsibleGroup from "./CollapsibleGroup";
 
 const RISK_COLOR = {
   Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
@@ -867,6 +868,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [cdSortBy, setCdSortBy] = useState("newest");
   const [cdGroupBy, setCdGroupBy] = useState("none");
 
+  // ── Collapsible group-by sections: which groups (per tab) are expanded ──
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+  const toggleGroup = (key) => setExpandedGroups(prev => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -1209,6 +1218,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     analytics: true,
     sops: true,
   };
+
+  const CATEGORIES = [
+    { key: "submissions", label: "📋 Submissions", tabs: ["flhas", "inspections", "toolbox", "nearmiss", "incident", "daily", "monthly", "customdocs"] },
+    { key: "equipment", label: "🔧 Equipment", tabs: ["equipment", "maintenance"] },
+    { key: "insights", label: "📊 Insights", tabs: ["analytics", "sops"] },
+  ];
+  const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
+  const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
 
   // If the currently open tab just got deactivated (or the company changed
   // to one that doesn't have it active), bounce to the first tab that is.
@@ -1822,11 +1839,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     flhaRow: { padding: "12px 14px", borderBottom: "1px solid #F3F4F6", cursor: "pointer" },
     select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", outline: "none" },
     searchInput: { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" },
-    groupHeaderPurple: { fontSize: 12, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
-    groupHeaderAmber: { fontSize: 12, fontWeight: 700, color: "#B45309", background: "#FFFBEB", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
-    groupHeaderRed: { fontSize: 12, fontWeight: 700, color: "#991B1B", background: "#FEF2F2", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
-    groupHeaderGreen: { fontSize: 12, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
-    groupHeaderIndigo: { fontSize: 12, fontWeight: 700, color: "#4338CA", background: "#EEF2FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 },
   };
 
   if (loading) return (
@@ -1912,47 +1924,64 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           </div>
         </div>
 
+        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => (
+            <button
+              key={cat.key}
+              style={styles.tab(activeCategory === cat.key)}
+              onClick={() => {
+                const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
+                if (firstVisible) setActiveTab(firstVisible);
+              }}
+            >{cat.label}</button>
+          ))}
+        </div>
+
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && (
+          {TAB_VISIBLE.flhas && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           )}
-          {TAB_VISIBLE.inspections && (
+          {TAB_VISIBLE.inspections && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
           )}
-          {TAB_VISIBLE.toolbox && (
+          {TAB_VISIBLE.toolbox && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
           )}
-          {TAB_VISIBLE.nearmiss && (
+          {TAB_VISIBLE.nearmiss && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
               ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.incident && (
+          {TAB_VISIBLE.incident && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
               🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.daily && (
+          {TAB_VISIBLE.daily && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
           )}
-          {TAB_VISIBLE.monthly && (
+          {TAB_VISIBLE.monthly && activeCategory === "submissions" && (
             <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
               🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.equipment && (
+          {TAB_VISIBLE.customdocs && activeCategory === "submissions" && (
+            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          )}
+          {TAB_VISIBLE.equipment && activeCategory === "equipment" && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
-          {TAB_VISIBLE.maintenance && (
+          {TAB_VISIBLE.maintenance && activeCategory === "equipment" && (
             <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
               🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.customdocs && (
-            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          {activeCategory === "insights" && (
+            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
           )}
-          <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
-          <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
+          {activeCategory === "insights" && (
+            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
+          )}
         </div>
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
@@ -2014,56 +2043,66 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 {companyFlhas.length === 0 ? "No FLHAs submitted yet for this company." : "No FLHAs match your filters."}
               </div>
             ) : (
-              Object.entries(grouped).map(([groupName, groupFlhas]) => (
-                <div key={groupName} style={{ marginBottom: groupBy === "none" ? 0 : 12 }}>
-                  {groupBy !== "none" && (
-                    <div style={styles.groupHeaderPurple}>
-                      {groupBy === "site" ? "📍" : "👷"} {groupName} ({groupFlhas.length})
-                    </div>
-                  )}
-                  {groupFlhas.map((f, i) => {
-                    const hazards = f.hazards_json?.hazards || [];
-                    const extremeRisk = hazards.filter(h => h.risk === "Extreme").length;
-                    const highRisk = hazards.filter(h => h.risk === "High").length;
-                    const medRisk = hazards.filter(h => h.risk === "Medium").length;
-                    return (
-                      <div key={f.id} style={{
-                        ...styles.flhaRow,
-                        borderBottom: i < groupFlhas.length - 1 ? "1px solid #F3F4F6" : "none",
-                        display: "flex", alignItems: "flex-start", gap: 10,
-                        background: selectedIds.has(f.id) ? "#F0F9FF" : "transparent"
-                      }}>
-                        <input type="checkbox" checked={selectedIds.has(f.id)}
-                          onChange={() => toggleSelect(f.id)}
-                          style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
-                          onClick={e => e.stopPropagation()}
-                        />
-                        <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <div>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
-                              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
-                              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                                {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
-                              </div>
+              Object.entries(grouped).map(([groupName, groupFlhas]) => {
+                const renderRows = () => groupFlhas.map((f, i) => {
+                  const hazards = f.hazards_json?.hazards || [];
+                  const extremeRisk = hazards.filter(h => h.risk === "Extreme").length;
+                  const highRisk = hazards.filter(h => h.risk === "High").length;
+                  const medRisk = hazards.filter(h => h.risk === "Medium").length;
+                  return (
+                    <div key={f.id} style={{
+                      ...styles.flhaRow,
+                      borderBottom: i < groupFlhas.length - 1 ? "1px solid #F3F4F6" : "none",
+                      display: "flex", alignItems: "flex-start", gap: 10,
+                      background: selectedIds.has(f.id) ? "#F0F9FF" : "transparent"
+                    }}>
+                      <input type="checkbox" checked={selectedIds.has(f.id)}
+                        onChange={() => toggleSelect(f.id)}
+                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+                        onClick={e => e.stopPropagation()}
+                      />
+                      <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                              {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                             </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                              {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#7F1D1D", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
-                              {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
-                              {highRisk > 0 && <RiskBadge risk="High" />}
-                              {medRisk > 0 && <RiskBadge risk="Medium" />}
-                              {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
-                              <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
-                                {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
-                              </div>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#7F1D1D", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
+                            {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
+                            {highRisk > 0 && <RiskBadge risk="High" />}
+                            {medRisk > 0 && <RiskBadge risk="Medium" />}
+                            {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
+                            <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
+                              {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
                             </div>
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ))
+                    </div>
+                  );
+                });
+                if (groupBy === "none") {
+                  return <div key={groupName}>{renderRows()}</div>;
+                }
+                const key = `flhas:${groupName}`;
+                return (
+                  <CollapsibleGroup
+                    key={groupName}
+                    icon={groupBy === "site" ? "📍" : "👷"}
+                    label={groupName}
+                    count={groupFlhas.length}
+                    colorPreset="purple"
+                    open={expandedGroups.has(key)}
+                    onToggle={() => toggleGroup(key)}
+                  >
+                    {renderRows()}
+                  </CollapsibleGroup>
+                );
+              })
             )}
           </div>
         )}
@@ -2105,55 +2144,65 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 {companyInspections.length === 0 ? "No inspections submitted yet." : "No inspections match your filters."}
               </div>
             ) : (
-              Object.entries(groupedInspections).map(([groupName, groupItems]) => (
-                <div key={groupName} style={{ marginBottom: inspGroupBy === "none" ? 0 : 12 }}>
-                  {inspGroupBy !== "none" && (
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#0369A1", background: "#EFF6FF", padding: "6px 10px", borderRadius: 6, marginBottom: 4, marginTop: 8 }}>
-                      {inspGroupBy === "equipment" ? "🚜" : "👷"} {groupName} ({groupItems.length})
-                    </div>
-                  )}
-                  {groupItems.map((insp, i) => {
-                    const r = insp.results_json || {};
-                    const isPost = insp.trip_type === "posttrip";
-                    const def = r.defectiveCount || 0;
-                    const mon = r.monitorCount || 0;
-                    return (
-                      <div key={insp.id} style={{
-                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                        cursor: "pointer"
-                      }} onClick={() => setSelectedInspection(insp)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
-                              <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
-                            </div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
-                            {(insp.start_reading || insp.end_reading) && (
-                              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
-                                {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
-                              </div>
-                            )}
-                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                              {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
-                            </div>
+              Object.entries(groupedInspections).map(([groupName, groupItems]) => {
+                const renderRows = () => groupItems.map((insp, i) => {
+                  const r = insp.results_json || {};
+                  const isPost = insp.trip_type === "posttrip";
+                  const def = r.defectiveCount || 0;
+                  const mon = r.monitorCount || 0;
+                  return (
+                    <div key={insp.id} style={{
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      cursor: "pointer"
+                    }} onClick={() => setSelectedInspection(insp)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
+                            <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
                           </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                            {def > 0
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
-                              : mon > 0
-                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
-                                : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
-                            <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                              {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                          {(insp.start_reading || insp.end_reading) && (
+                            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
+                              {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
                             </div>
+                          )}
+                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                            {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                          {def > 0
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
+                            : mon > 0
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
+                          <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
+                            {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ))
+                    </div>
+                  );
+                });
+                if (inspGroupBy === "none") {
+                  return <div key={groupName}>{renderRows()}</div>;
+                }
+                const key = `inspections:${groupName}`;
+                return (
+                  <CollapsibleGroup
+                    key={groupName}
+                    icon={inspGroupBy === "equipment" ? "🚜" : "👷"}
+                    label={groupName}
+                    count={groupItems.length}
+                    colorPreset="blue"
+                    open={expandedGroups.has(key)}
+                    onToggle={() => toggleGroup(key)}
+                  >
+                    {renderRows()}
+                  </CollapsibleGroup>
+                );
+              })
             )}
           </div>
         )}
@@ -2195,41 +2244,51 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 {companyToolbox.length === 0 ? "No toolbox talks recorded yet." : "No toolbox talks match your filters."}
               </div>
             ) : (
-              Object.entries(groupedToolbox).map(([groupName, groupItems]) => (
-                <div key={groupName} style={{ marginBottom: tbtGroupBy === "none" ? 0 : 12 }}>
-                  {tbtGroupBy !== "none" && (
-                    <div style={styles.groupHeaderPurple}>
-                      {tbtGroupBy === "site" ? "📍" : "🧰"} {groupName} ({groupItems.length})
-                    </div>
-                  )}
-                  {groupItems.map((t, i) => {
-                    const attendees = t.attendees_json || [];
-                    return (
-                      <div key={t.id} style={{
-                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                        cursor: "pointer"
-                      }} onClick={() => setSelectedToolbox(t)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
-                            </div>
-                            <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
-                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
-                              {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
-                            </div>
+              Object.entries(groupedToolbox).map(([groupName, groupItems]) => {
+                const renderRows = () => groupItems.map((t, i) => {
+                  const attendees = t.attendees_json || [];
+                  return (
+                    <div key={t.id} style={{
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      cursor: "pointer"
+                    }} onClick={() => setSelectedToolbox(t)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
                           </div>
-                          <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
-                            {t.pdf_url ? "📄 PDF" : "No PDF"} →
+                          <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
+                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                            {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
                         </div>
+                        <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
+                          {t.pdf_url ? "📄 PDF" : "No PDF"} →
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ))
+                    </div>
+                  );
+                });
+                if (tbtGroupBy === "none") {
+                  return <div key={groupName}>{renderRows()}</div>;
+                }
+                const key = `toolbox:${groupName}`;
+                return (
+                  <CollapsibleGroup
+                    key={groupName}
+                    icon={tbtGroupBy === "site" ? "📍" : "🧰"}
+                    label={groupName}
+                    count={groupItems.length}
+                    colorPreset="purple"
+                    open={expandedGroups.has(key)}
+                    onToggle={() => toggleGroup(key)}
+                  >
+                    {renderRows()}
+                  </CollapsibleGroup>
+                );
+              })
             )}
           </div>
         )}
@@ -2299,14 +2358,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               </>
             ) : (
               Object.entries(groupedNearMisses).map(([groupName, groupItems]) => (
-                <div key={groupName} style={{ marginBottom: 12 }}>
-                  <div style={styles.groupHeaderAmber}>
-                    {nmGroupBy === "site" ? "📍" : "⚠️"} {groupName} ({groupItems.length})
-                  </div>
+                <CollapsibleGroup
+                  key={groupName}
+                  icon={nmGroupBy === "site" ? "📍" : "⚠️"}
+                  label={groupName}
+                  count={groupItems.length}
+                  colorPreset="amber"
+                  open={expandedGroups.has(`nearmiss:${groupName}`)}
+                  onToggle={() => toggleGroup(`nearmiss:${groupName}`)}
+                >
                   {groupItems.map((n, i, arr) => (
                     <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                   ))}
-                </div>
+                </CollapsibleGroup>
               ))
             )}
           </div>
@@ -2377,14 +2441,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               </>
             ) : (
               Object.entries(groupedIncidents).map(([groupName, groupItems]) => (
-                <div key={groupName} style={{ marginBottom: 12 }}>
-                  <div style={styles.groupHeaderRed}>
-                    {incGroupBy === "site" ? "📍" : "🚑"} {groupName} ({groupItems.length})
-                  </div>
+                <CollapsibleGroup
+                  key={groupName}
+                  icon={incGroupBy === "site" ? "📍" : "🚑"}
+                  label={groupName}
+                  count={groupItems.length}
+                  colorPreset="red"
+                  open={expandedGroups.has(`incident:${groupName}`)}
+                  onToggle={() => toggleGroup(`incident:${groupName}`)}
+                >
                   {groupItems.map((n, i, arr) => (
                     <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                   ))}
-                </div>
+                </CollapsibleGroup>
               ))
             )}
           </div>
@@ -2426,38 +2495,48 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 {companyDaily.length === 0 ? "No daily reports yet." : "No daily reports match your filters."}
               </div>
             ) : (
-              Object.entries(groupedDaily).map(([groupName, groupItems]) => (
-                <div key={groupName} style={{ marginBottom: dailyGroupBy === "none" ? 0 : 12 }}>
-                  {dailyGroupBy !== "none" && (
-                    <div style={styles.groupHeaderGreen}>
-                      {dailyGroupBy === "site" ? "📍" : "👷"} {groupName} ({groupItems.length})
-                    </div>
-                  )}
-                  {groupItems.map((d, i) => {
-                    const r = d.report_json || {};
-                    return (
-                      <div key={d.id} style={{
-                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                        cursor: "pointer"
-                      }} onClick={() => setSelectedDaily(d)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div style={{ flex: 1, paddingRight: 10 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{d.report_date}</div>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
-                            </div>
-                            <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+              Object.entries(groupedDaily).map(([groupName, groupItems]) => {
+                const renderRows = () => groupItems.map((d, i) => {
+                  const r = d.report_json || {};
+                  return (
+                    <div key={d.id} style={{
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      cursor: "pointer"
+                    }} onClick={() => setSelectedDaily(d)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ flex: 1, paddingRight: 10 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{d.report_date}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
                           </div>
-                          <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
-                            {d.pdf_url ? "📄 PDF" : ""} →
-                          </div>
+                          <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                        </div>
+                        <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
+                          {d.pdf_url ? "📄 PDF" : ""} →
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ))
+                    </div>
+                  );
+                });
+                if (dailyGroupBy === "none") {
+                  return <div key={groupName}>{renderRows()}</div>;
+                }
+                const key = `daily:${groupName}`;
+                return (
+                  <CollapsibleGroup
+                    key={groupName}
+                    icon={dailyGroupBy === "site" ? "📍" : "👷"}
+                    label={groupName}
+                    count={groupItems.length}
+                    colorPreset="green"
+                    open={expandedGroups.has(key)}
+                    onToggle={() => toggleGroup(key)}
+                  >
+                    {renderRows()}
+                  </CollapsibleGroup>
+                );
+              })
             )}
           </div>
         )}
@@ -2508,37 +2587,47 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                     {companyMonthlyRecords.length === 0 ? "No monthly inspections submitted yet." : "No submissions match your filters."}
                   </div>
                 ) : (
-                  Object.entries(groupedMonthly).map(([groupName, groupItems]) => (
-                    <div key={groupName} style={{ marginBottom: moGroupBy === "none" ? 0 : 12 }}>
-                      {moGroupBy !== "none" && (
-                        <div style={styles.groupHeaderIndigo}>
-                          {moGroupBy === "site" ? "📍" : "🗓️"} {groupName} ({groupItems.length})
-                        </div>
-                      )}
-                      {groupItems.map((r, i) => (
-                        <div key={r.id} style={{
-                          padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                          cursor: "pointer"
-                        }} onClick={() => openMonthlyRecord(r)}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <div style={{ flex: 1, paddingRight: 10 }}>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
-                              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
-                              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                              {r.open_actions > 0
-                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
-                                : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
-                              <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
-                                {r.pdf_url ? "📄 PDF" : "No PDF"} →
-                              </div>
+                  Object.entries(groupedMonthly).map(([groupName, groupItems]) => {
+                    const renderRows = () => groupItems.map((r, i) => (
+                      <div key={r.id} style={{
+                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                        cursor: "pointer"
+                      }} onClick={() => openMonthlyRecord(r)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ flex: 1, paddingRight: 10 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                            {r.open_actions > 0
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
+                            <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
+                              {r.pdf_url ? "📄 PDF" : "No PDF"} →
                             </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ))
+                      </div>
+                    ));
+                    if (moGroupBy === "none") {
+                      return <div key={groupName}>{renderRows()}</div>;
+                    }
+                    const key = `monthly:${groupName}`;
+                    return (
+                      <CollapsibleGroup
+                        key={groupName}
+                        icon={moGroupBy === "site" ? "📍" : "🗓️"}
+                        label={groupName}
+                        count={groupItems.length}
+                        colorPreset="indigo"
+                        open={expandedGroups.has(key)}
+                        onToggle={() => toggleGroup(key)}
+                      >
+                        {renderRows()}
+                      </CollapsibleGroup>
+                    );
+                  })
                 )}
               </div>
             )}
@@ -2628,32 +2717,42 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                 {companyCustomDocs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
               </div>
             ) : (
-              Object.entries(groupedCustomDocs).map(([groupName, groupItems]) => (
-                <div key={groupName} style={{ marginBottom: cdGroupBy === "none" ? 0 : 12 }}>
-                  {cdGroupBy !== "none" && (
-                    <div style={styles.groupHeaderIndigo}>
-                      {cdGroupBy === "site" ? "📍" : "🗂️"} {groupName} ({groupItems.length})
-                    </div>
-                  )}
-                  {groupItems.map((r, i) => (
-                    <div key={r.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                      cursor: "pointer"
-                    }} onClick={() => openCustomDocRecord(r)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1, paddingRight: 10 }}>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
-                        </div>
-                        <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
-                          {r.pdf_url ? "📄 PDF" : ""} →
-                        </div>
+              Object.entries(groupedCustomDocs).map(([groupName, groupItems]) => {
+                const renderRows = () => groupItems.map((r, i) => (
+                  <div key={r.id} style={{
+                    padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                    cursor: "pointer"
+                  }} onClick={() => openCustomDocRecord(r)}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, paddingRight: 10 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
+                        {r.pdf_url ? "📄 PDF" : ""} →
                       </div>
                     </div>
-                  ))}
-                </div>
-              ))
+                  </div>
+                ));
+                if (cdGroupBy === "none") {
+                  return <div key={groupName}>{renderRows()}</div>;
+                }
+                const key = `customdocs:${groupName}`;
+                return (
+                  <CollapsibleGroup
+                    key={groupName}
+                    icon={cdGroupBy === "site" ? "📍" : "🗂️"}
+                    label={groupName}
+                    count={groupItems.length}
+                    colorPreset="indigo"
+                    open={expandedGroups.has(key)}
+                    onToggle={() => toggleGroup(key)}
+                  >
+                    {renderRows()}
+                  </CollapsibleGroup>
+                );
+              })
             )}
           </div>
         )}
