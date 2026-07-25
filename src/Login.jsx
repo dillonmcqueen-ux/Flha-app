@@ -448,6 +448,9 @@ export default function Login() {
               onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
               autoFocus
             />
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 12 }}>
+              Codes are case sensitive — enter it exactly as given.
+            </div>
 
             {error && (
               <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
