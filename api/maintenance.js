@@ -88,13 +88,13 @@ export default async function handler(req, res) {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
-      const { data: tracked, error: eqErr } = await supabaseAdmin
+      const { data: fleet, error: eqErr } = await supabaseAdmin
         .from('equipment')
         .select('id, year, make, model, type, unit_number, pm_interval')
         .eq('company_id', companyId)
-        .not('pm_interval', 'is', null);
+        .order('id');
       if (eqErr) return res.status(500).json({ error: 'Could not load equipment.' });
-      if (!tracked || tracked.length === 0) return res.status(200).json({ equipment: [] });
+      if (!fleet || fleet.length === 0) return res.status(200).json({ equipment: [] });
 
       const { data: inspections, error: inspErr } = await supabaseAdmin
         .from('inspections')
@@ -112,11 +112,14 @@ export default async function handler(req, res) {
       const currentReadings = latestReadingsByEquipment(inspections || []);
       const lastServices = latestServiceByEquipment(logs || []);
 
-      const equipmentStatus = tracked.map(eq => {
+      const equipmentStatus = fleet.map(eq => {
         const label = [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ') + (eq.unit_number ? ` (Unit ${eq.unit_number})` : '');
         const current = currentReadings[eq.id] || null;
         const baseline = lastServices[eq.id] || null;
 
+        if (eq.pm_interval == null) {
+          return { id: eq.id, label, pmInterval: null, current, lastService: null, usageSinceService: null, status: 'not_tracked' };
+        }
         if (!baseline) {
           return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: null, usageSinceService: null, status: 'not_started' };
         }

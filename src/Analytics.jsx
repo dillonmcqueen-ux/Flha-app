@@ -147,9 +147,6 @@ export default function AnalyticsPanel({
           <StatTile label="Open Corrective Actions" value={openActionsCount} tone={openActionsCount > 0 ? "warn" : "good"} />
           <StatTile label="Toolbox Talks" value={toolbox.length} sub={attendance.count > 0 ? `avg ${attendance.avg} attendees` : null} />
           <StatTile label="Daily Reports" value={daily.length} />
-          {maintenance.total > 0 && (
-            <StatTile label="Equipment Overdue for Maintenance" value={maintenance.overdue} sub={maintenance.dueSoon > 0 ? `${maintenance.dueSoon} due soon` : null} tone={maintenance.overdue > 0 ? "bad" : "good"} />
-          )}
         </div>
       </SectionCard>
 
@@ -196,7 +193,7 @@ export default function AnalyticsPanel({
       {isAdvanced && <AdvancedSections
         nearMisses={nearMisses} incidents={incidents} equipStats={equipStats} fieldSites={fieldSites}
         monthlyRecords={monthlyRecords} monthlyActions={monthlyActions} customDocs={customDocs}
-        flhas={flhas} inspections={inspections} toolbox={toolbox}
+        flhas={flhas} inspections={inspections} toolbox={toolbox} maintenance={maintenance}
       />}
 
       {!isAdvanced && (
@@ -208,7 +205,7 @@ export default function AnalyticsPanel({
   );
 }
 
-function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, monthlyRecords, monthlyActions, customDocs, flhas, inspections, toolbox }) {
+function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, monthlyRecords, monthlyActions, customDocs, flhas, inspections, toolbox, maintenance }) {
   const trend = monthlyTrend(nearMisses, incidents);
   const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs);
   const aging = correctiveActionAging(monthlyActions);
@@ -244,6 +241,16 @@ function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, month
           rows={equipStats}
         />
       </SectionCard>
+
+      {maintenance.total > 0 && (
+        <SectionCard title="Preventative Maintenance" subtitle="Tracked equipment, by usage since last service">
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <StatTile label="Tracked Equipment" value={maintenance.total} />
+            <StatTile label="Overdue" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
+            <StatTile label="Due Soon" value={maintenance.dueSoon} tone={maintenance.dueSoon > 0 ? "warn" : "good"} />
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Field Site Activity" subtitle="FLHAs, toolbox talks, daily reports, near misses & incidents by site">
         <SimpleTable

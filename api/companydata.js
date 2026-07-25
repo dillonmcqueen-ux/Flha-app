@@ -161,13 +161,23 @@ export default async function handler(req, res) {
     }
 
     // Turns preventative-maintenance tracking on/off for a piece of
-    // equipment. Turning it on for the first time requires a starting
-    // reading, which becomes that equipment's maintenance-log baseline —
-    // status math in api/maintenance.js never has to guess one.
+    // equipment. Supervisors run this from the Dashboard's Maintenance tab
+    // (whether that tab is even offered to them is controlled separately,
+    // company-wide, by the admin's "Preventative Maintenance" toggle in the
+    // Forms list — see BUILTIN_DOC_KEYS in api/customforms.js). Turning
+    // tracking on for the first time requires a starting reading, which
+    // becomes that equipment's maintenance-log baseline — status math in
+    // api/maintenance.js never has to guess one.
     if (action === 'set_equipment_pm_interval') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { id, pmInterval, startingReading, readingUnit } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: eqRows, error: eqErr } = await supabaseAdmin.from('equipment').select('id, company_id').eq('id', id).limit(1);
+      if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+      if (session.role === 'supervisor' && eqRows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed to change this equipment.' });
+      }
 
       const interval = pmInterval != null && pmInterval !== '' ? parseFloat(pmInterval) : null;
       if (interval != null && (Number.isNaN(interval) || interval <= 0)) {
@@ -175,8 +185,6 @@ export default async function handler(req, res) {
       }
 
       if (interval != null) {
-        const { data: eqRows, error: eqErr } = await supabaseAdmin.from('equipment').select('id, company_id').eq('id', id).limit(1);
-        if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
         const { data: existingLog } = await supabaseAdmin.from('equipment_maintenance_log').select('id').eq('equipment_id', id).limit(1);
         if (!existingLog || existingLog.length === 0) {
           const reading = startingReading != null && startingReading !== '' ? parseFloat(startingReading) : null;
@@ -188,7 +196,7 @@ export default async function handler(req, res) {
             equipment_id: id,
             service_reading: reading,
             reading_unit: readingUnit.trim(),
-            performed_by: 'Baseline (tracking enabled)',
+            performed_by: `Baseline (tracking enabled by ${session.role === 'admin' ? 'Admin' : 'Supervisor'})`,
           });
           if (logErr) return res.status(500).json({ error: "Couldn't set starting reading." });
         }
