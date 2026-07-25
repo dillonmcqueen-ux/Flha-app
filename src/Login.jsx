@@ -196,7 +196,7 @@ export default function Login() {
   // ── Authenticated views ──────────────────────────────────
   if (session) {
     if (session.role === "worker") {
-      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} token={session.token} />;
+      return <WorkerMenu companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} userId={session.userId || null} onLogout={logout} token={session.token} />;
     }
 
     if (session.role === "admin") {
@@ -224,6 +224,7 @@ export default function Login() {
         onLogout={logout}
         suspended={session.suspended}
         userName={session.userName || ""}
+        userId={session.userId || null}
         token={session.token}
       />
     );

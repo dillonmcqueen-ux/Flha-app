@@ -55,7 +55,7 @@ function resolveCompanyId(session, requestedCompanyId) {
 
 // Built-in document keys — used so the toggle system has a fixed list
 // of the non-custom types to show alongside custom ones.
-const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports', 'maintenance'];
+const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports', 'maintenance', 'timeclock'];
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -433,4 +433,5 @@ const BUILTIN_LABELS = {
   monthly: 'Monthly Site Inspection',
   equipment_reports: 'Weekly Equipment Reports',
   maintenance: 'Preventative Maintenance',
+  timeclock: 'Time Clock',
 };

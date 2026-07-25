@@ -7,6 +7,7 @@ import Incident from "./Incident.jsx";
 import DailyReport from "./DailyReport.jsx";
 import MonthlyInspection from "./MonthlyInspection.jsx";
 import CustomForm from "./CustomForm.jsx";
+import TimeClock from "./TimeClock.jsx";
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
 const BUILTIN_TYPES = [
@@ -17,9 +18,10 @@ const BUILTIN_TYPES = [
   { key: "incident", icon: "🚑", title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626" },
   { key: "daily", icon: "📋", title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
   { key: "monthly", icon: "🗓️", title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
+  { key: "timeclock", icon: "⏱️", title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2" },
 ];
 
-export default function WorkerMenu({ companyId, companyName, userName = "", onLogout, token }) {
+export default function WorkerMenu({ companyId, companyName, userName = "", userId = null, onLogout, token }) {
   const [doc, setDoc] = useState(null);
   const [customFormId, setCustomFormId] = useState(null);
   const [builtinActive, setBuiltinActive] = useState(null); // null = loading
@@ -74,6 +76,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", onLo
   if (doc === "custom" && customFormId) {
     return <CustomForm companyId={companyId} companyName={companyName} userName={userName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
   }
+  if (doc === "timeclock") {
+    return <TimeClock companyId={companyId} companyName={companyName} userName={userName} userId={userId} onBack={() => setDoc(null)} token={token} />;
+  }
 
   const s = {
     wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
@@ -86,9 +91,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", onLo
     }),
   };
 
-  const visibleBuiltins = builtinActive
+  const visibleBuiltins = (builtinActive
     ? BUILTIN_TYPES.filter(d => builtinActive[d.key] !== false)
-    : BUILTIN_TYPES; // show everything while loading, then narrow once loaded
+    : BUILTIN_TYPES // show everything while loading, then narrow once loaded
+  ).filter(d => d.key !== "timeclock" || userId); // needs a real per-person identity, regardless of loading state
 
   const loading = builtinActive === null;
 
