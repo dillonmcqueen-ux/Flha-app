@@ -23,9 +23,9 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
 
   const loadStatus = async () => {
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "my_status", token }),
+        body: JSON.stringify({ action: "my_time_status", token }),
       });
       const data = await res.json();
       if (res.ok) setStatus(data);
@@ -48,7 +48,7 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
     setError("");
     setWorking(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: status?.open ? "clock_out" : "clock_in", token }),
       });

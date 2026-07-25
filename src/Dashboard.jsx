@@ -1399,9 +1399,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     if (!userId) { setMyTimeLoading(false); return; }
     setMyTimeLoading(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "my_status", token }),
+        body: JSON.stringify({ action: "my_time_status", token }),
       });
       const data = await res.json();
       if (res.ok) setMyTimeStatus(data);
@@ -1425,7 +1425,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setMyTimeError("");
     setMyTimeWorking(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: myTimeStatus?.open ? "clock_out" : "clock_in", token }),
       });
@@ -1442,9 +1442,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     if (!selectedCompany) return;
     setLoadingTimeClockEntries(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_entries", token, companyId: selectedCompany }),
+        body: JSON.stringify({ action: "list_time_entries", token, companyId: selectedCompany }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -1466,9 +1466,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     if (!editEntryForm.clockIn) return;
     setSavingEntry(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "edit_entry", token, entryId, clockIn: editEntryForm.clockIn, clockOut: editEntryForm.clockOut || null }),
+        body: JSON.stringify({ action: "edit_time_entry", token, entryId, clockIn: editEntryForm.clockIn, clockOut: editEntryForm.clockOut || null }),
       });
       const data = await res.json();
       if (res.ok) { setEditingEntryId(null); await loadTimeClockEntries(); }
@@ -1481,9 +1481,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     if (!addEntryForm.rosterId || !addEntryForm.clockIn) return;
     setSavingEntry(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_entry", token, companyId: selectedCompany, rosterId: addEntryForm.rosterId, clockIn: addEntryForm.clockIn, clockOut: addEntryForm.clockOut || null }),
+        body: JSON.stringify({ action: "add_time_entry", token, companyId: selectedCompany, rosterId: addEntryForm.rosterId, clockIn: addEntryForm.clockIn, clockOut: addEntryForm.clockOut || null }),
       });
       const data = await res.json();
       if (res.ok) { setAddEntryOpen(false); setAddEntryForm({ rosterId: "", clockIn: "", clockOut: "" }); await loadTimeClockEntries(); }
@@ -1495,9 +1495,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const deleteTimeClockEntry = async (entryId) => {
     if (!window.confirm("Delete this time clock entry? This can't be undone.")) return;
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete_entry", token, entryId }),
+        body: JSON.stringify({ action: "delete_time_entry", token, entryId }),
       });
       const data = await res.json();
       if (res.ok) await loadTimeClockEntries();
@@ -1510,9 +1510,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     if (!selectedCompany) return;
     setLoadingTimeClockReports(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_reports", token, companyId: selectedCompany }),
+        body: JSON.stringify({ action: "list_time_reports", token, companyId: selectedCompany }),
       });
       const data = await res.json();
       if (res.ok) setTimeClockReports(data.reports || []);
@@ -1529,9 +1529,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const openTimeClockReport = async (report) => {
     setTimeClockPdfError("");
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_report", token, reportId: report.id }),
+        body: JSON.stringify({ action: "get_time_report", token, reportId: report.id }),
       });
       const data = await res.json();
       if (res.ok) setSelectedTimeClockReport(data);
@@ -1547,9 +1547,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         report, companyName: co?.name || "", companyLogo: co?.logo_url || "",
       });
       if (pdfUrl) {
-        await fetch("/api/timeclock", {
+        await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "save_pdf_url", token, reportId: report.id, pdfUrl }),
+          body: JSON.stringify({ action: "save_time_report_pdf_url", token, reportId: report.id, pdfUrl }),
         });
         setSelectedTimeClockReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
         setTimeClockReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
@@ -1564,9 +1564,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     if (!selectedCompany) return;
     setGeneratingNewTimeClockReport(true);
     try {
-      const res = await fetch("/api/timeclock", {
+      const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate_now", token, companyId: selectedCompany }),
+        body: JSON.stringify({ action: "generate_time_report_now", token, companyId: selectedCompany }),
       });
       const data = await res.json();
       if (res.ok) {
