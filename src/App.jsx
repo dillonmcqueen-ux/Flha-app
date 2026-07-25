@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { supabase } from "./supabaseClient";
 import { generateAndUploadFLHA } from "./generatePDF";
 
 // Fallback used only if Supabase has no data yet (e.g. first run)
@@ -96,55 +95,43 @@ const RISK_ROW_STYLE = {
   Low: { bg: "#F0FDF4", border: "#86EFAC", badgeBg: "#DCFCE7", badgeText: "#16A34A" },
 };
 
-export default function FLHAApp({ forcedCompanyId = null, userName: loginUserName = "", onLogout = null, token = null }) {
+export default function FLHAApp({ forcedCompanyId = null, companyName: propCompanyName = "", userName: loginUserName = "", onLogout = null, token = null }) {
   const [step, setStep] = useState("company");
   const [sopData, setSopData] = useState(FALLBACK_SOPS);
   const [sopsLoading, setSopsLoading] = useState(true);
-  const [companyName, setCompanyName] = useState(FALLBACK_SOPS.company);
+  const [companyName, setCompanyName] = useState(propCompanyName || FALLBACK_SOPS.company);
   const [companyId, setCompanyId] = useState(forcedCompanyId);
   const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
 
-  // Load company + SOPs/sites/custom fields on first render.
-  // If forcedCompanyId is provided (from login), load that specific company.
+  // Load SOPs/sites/custom fields for forcedCompanyId (from login) on first
+  // render. Company name comes from the login session (propCompanyName) —
+  // this used to also re-derive it via a direct client-side companies read,
+  // which RLS now blocks for everyone (see Phase 1 RLS remediation); every
+  // other worker form already avoided that by taking companyName as a prop
+  // and fetching only the logo via the protected endpoint, same as here.
   useEffect(() => {
     async function loadSops() {
-      let companies, companyErr;
-
-      if (forcedCompanyId) {
-        ({ data: companies, error: companyErr } = await supabase
-          .from("companies")
-          .select("id, name, logo_url")
-          .eq("id", forcedCompanyId)
-          .limit(1));
-      } else {
-        ({ data: companies, error: companyErr } = await supabase
-          .from("companies")
-          .select("id, name, logo_url")
-          .limit(1));
-      }
-
-      if (companyErr) {
-        setDebugInfo(`companies query error: ${companyErr.message}`);
-        setSopsLoading(false);
-        return;
-      }
-      if (!companies?.length) {
-        setDebugInfo("companies table returned 0 rows");
+      if (!forcedCompanyId) {
         setSopsLoading(false);
         return;
       }
 
-      const company = companies[0];
-      setCompanyId(company.id);
-      setCompanyLogo(company.logo_url || "");
-      setCompanyName(company.name);
+      // Company logo — via protected endpoint
+      try {
+        const logoRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_company_logo", token, companyId: forcedCompanyId }),
+        });
+        const logoData = await logoRes.json();
+        if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
+      } catch (e) { /* leave logo blank if the request fails */ }
 
       // Sites — via protected endpoint
       try {
         const siteRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_sites", token, companyId: company.id }),
+          body: JSON.stringify({ action: "list_sites", token, companyId: forcedCompanyId }),
         });
         const siteData = await siteRes.json();
         if (siteRes.ok) {
@@ -163,7 +150,7 @@ export default function FLHAApp({ forcedCompanyId = null, userName: loginUserNam
       try {
         const cfRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_custom_fields", token, companyId: company.id, docType: "flha" }),
+          body: JSON.stringify({ action: "list_custom_fields", token, companyId: forcedCompanyId, docType: "flha" }),
         });
         const cfData = await cfRes.json();
         if (cfRes.ok) setCustomFields(cfData.fields || []);
@@ -176,7 +163,7 @@ export default function FLHAApp({ forcedCompanyId = null, userName: loginUserNam
       try {
         const sopsRes = await fetch("/api/companydata", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_sops", token, companyId: company.id }),
+          body: JSON.stringify({ action: "list_sops", token, companyId: forcedCompanyId }),
         });
         const sopsData = await sopsRes.json();
         if (!sopsRes.ok) {
@@ -186,11 +173,11 @@ export default function FLHAApp({ forcedCompanyId = null, userName: loginUserNam
         }
         const sops = sopsData.sops || [];
         if (sops.length === 0) {
-          setDebugInfo(`sops returned 0 rows for company_id=${company.id}`);
+          setDebugInfo(`sops returned 0 rows for company_id=${forcedCompanyId}`);
           setSopsLoading(false);
           return;
         }
-        setSopData({ company: company.name, policies: sops.map(s => s.policy_text) });
+        setSopData({ company: propCompanyName || FALLBACK_SOPS.company, policies: sops.map(s => s.policy_text) });
         setDebugInfo("");
       } catch (e) {
         setDebugInfo(`sops query error: ${e.message}`);
@@ -198,11 +185,10 @@ export default function FLHAApp({ forcedCompanyId = null, userName: loginUserNam
         return;
       }
 
-      setCompanyName(company.name);
       setSopsLoading(false);
     }
     loadSops();
-  }, [forcedCompanyId, token]);
+  }, [forcedCompanyId, propCompanyName, token]);
 
 
   const [workerName, setWorkerName] = useState(loginUserName);

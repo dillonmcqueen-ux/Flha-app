@@ -51,7 +51,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", onLo
   }, [token]);
 
   if (doc === "flha") {
-    return <App forcedCompanyId={companyId} userName={userName} onLogout={() => setDoc(null)} token={token} />;
+    return <App forcedCompanyId={companyId} companyName={companyName} userName={userName} onLogout={() => setDoc(null)} token={token} />;
   }
   if (doc === "inspection") {
     return <Inspection companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
