@@ -87,6 +87,50 @@ function verifyPin(pin, salt, expectedHex) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// A short-lived ticket proving "this browser already knows the master
+// code" — carries no companyId (unlike a roster ticket), since the point
+// of the master flow is picking any company after the fact.
+function signMasterTicket() {
+  return signSession({ purpose: 'master', issuedAt: Date.now() });
+}
+
+function verifyMasterTicket(ticket) {
+  if (!ticket || typeof ticket !== 'string' || !ticket.includes('.')) return null;
+  const [data, sig] = ticket.split('.');
+  const expectedSig = crypto
+    .createHmac('sha256', process.env.SESSION_SECRET)
+    .update(data)
+    .digest('base64url');
+  if (sig !== expectedSig) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+    if (payload.purpose !== 'master') return null;
+    if (!payload.issuedAt || Date.now() - payload.issuedAt > ROSTER_TICKET_TTL_MS) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Checked against every worker/supervisor login attempt (see the plan doc
+// for why this isn't rate-limited: it's compared on every normal login
+// too, so a lockout here would eventually catch ordinary traffic). Stored
+// hashed, compared in constant time, and every successful use is logged
+// in master_login_log — that log is the visibility backstop in place of
+// a lockout.
+async function verifyMasterCode(entered) {
+  const { data, error } = await supabaseAdmin
+    .from('app_settings')
+    .select('master_code_hash, master_code_salt')
+    .eq('id', 1)
+    .limit(1);
+  if (error || !data || data.length === 0) return false;
+  const row = data[0];
+  const a = Buffer.from(hashPin(entered, row.master_code_salt), 'hex');
+  const b = Buffer.from(row.master_code_hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -169,6 +213,37 @@ export default async function handler(req, res) {
     return res.status(200).json({ session: payload, token });
   }
 
+  // ── Master code, step 2: pick a company + role ──────────────────────────
+  if (action === 'master_login') {
+    const { masterTicket, companyId, role: pickedRole } = req.body;
+    const ticket = verifyMasterTicket(masterTicket);
+    if (!ticket) return res.status(401).json({ error: 'That took too long — please start over.' });
+    if (!companyId || (pickedRole !== 'worker' && pickedRole !== 'supervisor')) {
+      return res.status(400).json({ error: 'Missing details.' });
+    }
+
+    const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('id, name').eq('id', companyId).limit(1);
+    if (coErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
+    const company = coRows && coRows[0];
+    if (!company) return res.status(404).json({ error: 'Company not found.' });
+
+    await supabaseAdmin.from('master_login_log').insert({ company_id: company.id, role: pickedRole });
+
+    // Legacy-shaped session, same as any pre-cutover login — deliberately
+    // ignores roster_enabled and the company's real suspended flag, since
+    // the whole point of this path is unrestricted access regardless of a
+    // given company's state.
+    const payload = {
+      role: pickedRole,
+      companyId: company.id,
+      companyName: company.name,
+      suspended: false,
+      issuedAt: Date.now(),
+    };
+    const token = signSession(payload);
+    return res.status(200).json({ session: payload, token });
+  }
+
   // ── Step 1: admin code, or company code ─────────────────────────────────
   const { role, code } = req.body || {};
   if (!role || !code) {
@@ -189,6 +264,14 @@ export default async function handler(req, res) {
 
   if (role !== 'worker' && role !== 'supervisor') {
     return res.status(400).json({ error: 'Invalid role.' });
+  }
+
+  // ── Master code — checked before any company lookup, for either role ────
+  if (await verifyMasterCode(entered)) {
+    const { data: companies, error: coErr } = await supabaseAdmin.from('companies').select('id, name').order('name', { ascending: true });
+    if (coErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
+    const masterTicket = signMasterTicket();
+    return res.status(200).json({ stage: 'pick_company', masterTicket, companies: companies || [] });
   }
 
   // ── Worker / Supervisor — look up the company ───────────────────────────
