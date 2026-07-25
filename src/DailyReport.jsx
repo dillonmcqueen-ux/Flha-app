@@ -4,9 +4,9 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
-export default function DailyReport({ companyId, companyName, onBack, onLogout, token = null }) {
+export default function DailyReport({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | notes | review | done
-  const [reporter, setReporter] = useState("");
+  const [reporter, setReporter] = useState(loginUserName);
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
   const [siteMode, setSiteMode] = useState("list");
@@ -205,7 +205,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: "#1E293B" }}>Site & conditions</div>
 
           <label style={s.label}>Your name</label>
-          <input style={s.input} placeholder="Reporter name" value={reporter} onChange={e => setReporter(e.target.value)} />
+          <input
+            style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            placeholder="Reporter name" value={reporter}
+            onChange={e => setReporter(e.target.value)}
+            readOnly={!!loginUserName}
+          />
 
           <label style={s.label}>Site / Location</label>
           {sites.length > 0 && siteMode === "list" ? (

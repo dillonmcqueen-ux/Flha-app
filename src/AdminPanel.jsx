@@ -17,6 +17,10 @@ function codePrefix(name) {
   return words.map(w => w[0]).join("").slice(0, 3);
 }
 
+// Display-only mirror of the server's cap (api/companydata.js) — the server
+// is the actual enforcement point, this just drives the "8/10 used" badge.
+const SEAT_CAP_BY_TIER = { basic: 10, advanced: 50 };
+
 // Design tokens
 const C = {
   ink: "#1E293B",       // deep slate — authority
@@ -42,8 +46,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [sortBy, setSortBy] = useState("name");
 
   const [newName, setNewName] = useState("");
-  const [newWorkerCode, setNewWorkerCode] = useState("");
-  const [newSupervisorCode, setNewSupervisorCode] = useState("");
+  const [newCompanyCode, setNewCompanyCode] = useState("");
 
   const [profile, setProfile] = useState({ name: "", contact_name: "", contact_email: "", contact_phone: "", address: "", logo_url: "" });
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -87,7 +90,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { /* leave optimistic state if the request fails */ }
   };
 
-  // ── analytics dashboard tier (basic/advanced) ───────────────
+  // ── plan tier (basic/advanced) — drives Analytics depth + roster seat cap
   const [analyticsTier, setAnalyticsTierState] = useState("basic");
 
   const setAnalyticsTier = async (tier) => {
@@ -96,12 +99,117 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     try {
       const res = await fetch("/api/admin", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_analytics_tier", token, companyId: activeId, tier }),
+        body: JSON.stringify({ action: "set_plan_tier", token, companyId: activeId, tier }),
       });
       if (!res.ok) setAnalyticsTierState(prev);
+      else setRosterCap(SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic);
     } catch (e) {
       setAnalyticsTierState(prev);
     }
+  };
+
+  // ── roster (individual worker/supervisor logins) ────────────
+  const [rosterMembers, setRosterMembers] = useState([]);
+  const [rosterActiveCount, setRosterActiveCount] = useState(0);
+  const [rosterCap, setRosterCap] = useState(10);
+  const [loadingRoster, setLoadingRoster] = useState(false);
+  const [newRosterName, setNewRosterName] = useState("");
+  const [newRosterRole, setNewRosterRole] = useState("worker");
+  const [revealedPin, setRevealedPin] = useState(null); // { name, pin }
+  const [rosterCounts, setRosterCounts] = useState({});
+  const [cutoverSaving, setCutoverSaving] = useState(false);
+
+  const loadRoster = async (companyId) => {
+    setLoadingRoster(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_roster", token, companyId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRosterMembers(data.members || []);
+        setRosterActiveCount(data.activeSeatCount || 0);
+        setRosterCap(data.cap || 10);
+      }
+    } catch (e) { /* leave list as-is */ }
+    setLoadingRoster(false);
+  };
+
+  const addRosterMember = async () => {
+    setMsg("");
+    const name = newRosterName.trim();
+    if (!name) { setMsg("Enter a name."); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_roster_member", token, companyId: activeId, name, role: newRosterRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't add to the roster."); setSaving(false); return; }
+      setNewRosterName("");
+      setRevealedPin({ name: data.member.name, pin: data.pin });
+      await loadRoster(activeId);
+    } catch (e) {
+      setMsg("Couldn't add to the roster. Try again.");
+    }
+    setSaving(false);
+  };
+
+  const deactivateRosterMember = async (id) => {
+    if (!window.confirm("Deactivate this person? They'll be signed out and blocked from logging in again until reactivated.")) return;
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deactivate_roster_member", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't deactivate."); return; }
+      await loadRoster(activeId);
+    } catch (e) { setMsg("Couldn't deactivate. Try again."); }
+  };
+
+  const reactivateRosterMember = async (id) => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reactivate_roster_member", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't reactivate."); return; }
+      await loadRoster(activeId);
+    } catch (e) { setMsg("Couldn't reactivate. Try again."); }
+  };
+
+  const resetRosterPin = async (id, name) => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_roster_pin", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't reset PIN."); return; }
+      setRevealedPin({ name, pin: data.pin });
+    } catch (e) { setMsg("Couldn't reset PIN. Try again."); }
+  };
+
+  const setCutover = async (enabled) => {
+    if (enabled && !window.confirm("Switch this company to individual logins? The shared company code will stop being offered — everyone will need their own name + PIN.")) return;
+    setCutoverSaving(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_roster_cutover", token, companyId: activeId, enabled }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't update."); setCutoverSaving(false); return; }
+      await loadAll();
+    } catch (e) {
+      setMsg("Couldn't update. Try again.");
+    }
+    setCutoverSaving(false);
   };
 
   // Companies now come from our protected server endpoint (it has the real
@@ -145,6 +253,16 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       if (res.ok) flhaCounts = data.counts || {};
     } catch (e) { /* leave counts empty if the request fails */ }
 
+    // Roster (seat) counts per company, for the console's usage-vs-cap badge.
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_roster_counts", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setRosterCounts(data.counts || {});
+    } catch (e) { /* leave counts empty if the request fails */ }
+
     setCompanies(cos);
     const c = {};
     cos.forEach(co => { c[co.id] = { flhas: flhaCounts[co.id] || 0, sops: sopCounts[co.id] || 0 }; });
@@ -159,7 +277,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const steps = (c) => {
     const cnt = counts[c.id] || { sops: 0 };
     return {
-      codes: !!(c.worker_code && c.supervisor_code),
+      codes: !!c.company_code,
       sops: cnt.sops > 0,
       logo: !!c.logo_url,
       contact: !!c.contact_email,
@@ -181,25 +299,24 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const handleNameChange = (val) => {
     setNewName(val);
     const p = codePrefix(val);
-    setNewWorkerCode(`${p}-W${randomSuffix()}`);
-    setNewSupervisorCode(`${p}-S${randomSuffix()}`);
+    setNewCompanyCode(`${p}-${randomSuffix()}`);
   };
 
   // Company creation now goes through our protected server endpoint.
   const addCompany = async () => {
     setMsg("");
     if (!newName.trim()) { setMsg("Enter a company name."); return; }
-    if (!newWorkerCode.trim() || !newSupervisorCode.trim()) { setMsg("Codes cannot be empty."); return; }
+    if (!newCompanyCode.trim()) { setMsg("Code cannot be empty."); return; }
     setSaving(true);
     try {
       const res = await fetch("/api/admin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create_company", token, name: newName, workerCode: newWorkerCode, supervisorCode: newSupervisorCode }),
+        body: JSON.stringify({ action: "create_company", token, name: newName, companyCode: newCompanyCode }),
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "Couldn't add company."); setSaving(false); return; }
-      setNewName(""); setNewWorkerCode(""); setNewSupervisorCode(""); await loadAll(); setView("home");
+      setNewName(""); setNewCompanyCode(""); await loadAll(); setView("home");
     } catch (e) {
       setMsg("Couldn't add company. Try again.");
     }
@@ -212,7 +329,9 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       name: c.name || "", contact_name: c.contact_name || "", contact_email: c.contact_email || "",
       contact_phone: c.contact_phone || "", address: c.address || "", logo_url: c.logo_url || "",
     });
-    setAnalyticsTierState(c.analytics_tier || "basic");
+    setAnalyticsTierState(c.plan_tier || "basic");
+    setRosterCap(SEAT_CAP_BY_TIER[c.plan_tier] || SEAT_CAP_BY_TIER.basic);
+    setRevealedPin(null);
 
     try {
       const res = await fetch("/api/companydata", {
@@ -594,7 +713,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-            <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>#{c.account_number || c.id} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>
+              #{c.account_number || c.id} · {cnt.flhas} FLHAs · {cnt.sops} SOPs
+              {" · "}{(rosterCounts[c.id]?.active || 0)}/{SEAT_CAP_BY_TIER[c.plan_tier] || SEAT_CAP_BY_TIER.basic} seats
+            </div>
           </div>
           {c.suspended
             ? <span style={{ fontSize: 11, fontWeight: 800, color: "#DC2626", background: "#FEE2E2", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>SUSPENDED</span>
@@ -702,13 +824,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <div style={st.body}>
           {msg && <div style={{ ...st.card, marginBottom: 14, background: "#FEE2E2", color: "#991B1B", fontSize: 14 }}>{msg}</div>}
           <div style={st.card}>
-            <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 16 }}>Start with the company name. Access codes generate automatically — edit them if you like. You'll add SOPs, logo and contact details next.</div>
+            <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 16 }}>Start with the company name. A company code generates automatically — edit it if you like. You'll build out their worker/supervisor roster and add SOPs, logo and contact details next.</div>
             <label style={st.label}>Company name</label>
             <input style={st.input} placeholder="e.g. Northern Builders Ltd." value={newName} onChange={e => handleNameChange(e.target.value)} autoFocus />
-            <label style={st.label}>Worker code</label>
-            <input style={st.input} value={newWorkerCode} onChange={e => setNewWorkerCode(e.target.value.toUpperCase())} />
-            <label style={st.label}>Supervisor code</label>
-            <input style={st.input} value={newSupervisorCode} onChange={e => setNewSupervisorCode(e.target.value.toUpperCase())} />
+            <label style={st.label}>Company code</label>
+            <input style={st.input} value={newCompanyCode} onChange={e => setNewCompanyCode(e.target.value.toUpperCase())} />
             <button style={{ ...st.amberBtn, width: "100%", marginTop: 6 }} onClick={addCompany} disabled={saving}>{saving ? "Creating…" : "Create & continue setup"}</button>
           </div>
         </div>
@@ -760,6 +880,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <button style={st.tab(manageTab === "monthly")} onClick={() => { setManageTab("monthly"); setMsg(""); }}>Monthly</button>
           <button style={st.tab(manageTab === "custom")} onClick={() => { setManageTab("custom"); setMsg(""); }}>Custom</button>
           <button style={st.tab(manageTab === "forms")} onClick={() => { setManageTab("forms"); setMsg(""); loadDocSettings(activeId); }}>Forms</button>
+          <button style={st.tab(manageTab === "roster")} onClick={() => { setManageTab("roster"); setMsg(""); setRevealedPin(null); loadRoster(activeId); }}>Roster</button>
           <button style={st.tab(manageTab === "codes")} onClick={() => { setManageTab("codes"); setMsg(""); }}>Codes</button>
         </div>
 
@@ -950,22 +1071,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         {manageTab === "forms" && (
           <>
             <div style={st.card}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Analytics Dashboard Tier</div>
-              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 14 }}>Controls how much detail this company's supervisors see on the Dashboard's Analytics tab. Advanced adds trend charts, site scorecards, and corrective-action aging on top of everything in Basic.</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {["basic", "advanced"].map(t => (
-                  <button key={t} onClick={() => setAnalyticsTier(t)} style={{
-                    flex: 1, textTransform: "capitalize", border: analyticsTier === t ? "none" : `1.5px solid ${C.line}`,
-                    background: analyticsTier === t ? C.ink : "#fff", color: analyticsTier === t ? "#fff" : C.inkSoft,
-                    borderRadius: 10, padding: "10px", fontWeight: 800, fontSize: 13, cursor: "pointer",
-                  }}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Forms — Active / Deactivated</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>Control which document types and dashboard features this company has access to. Deactivating a worker-facing form hides it from the worker menu; deactivating a feature like Preventative Maintenance hides its Dashboard tab. Nothing already submitted or logged is deleted.</div>
 
@@ -1015,18 +1120,144 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           </>
         )}
 
+        {manageTab === "roster" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Plan tier</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 14 }}>Sets this company's seat cap (Basic: up to 10, Advanced: 11–50) and how much detail supervisors see on the Analytics tab.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["basic", "advanced"].map(t => (
+                  <button key={t} onClick={() => setAnalyticsTier(t)} style={{
+                    flex: 1, textTransform: "capitalize", border: analyticsTier === t ? "none" : `1.5px solid ${C.line}`,
+                    background: analyticsTier === t ? C.ink : "#fff", color: analyticsTier === t ? "#fff" : C.inkSoft,
+                    borderRadius: 10, padding: "10px", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                  }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={st.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink }}>Seats used</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: rosterActiveCount >= rosterCap ? "#DC2626" : C.ink }}>{rosterActiveCount} / {rosterCap}</div>
+              </div>
+              <div style={{ height: 8, borderRadius: 4, background: C.line, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.min(100, (rosterActiveCount / rosterCap) * 100)}%`, background: rosterActiveCount >= rosterCap ? "#DC2626" : C.green, transition: "width 0.2s" }} />
+              </div>
+            </div>
+
+            {revealedPin && (
+              <div style={{ ...st.card, background: "#FFFBEB", border: `1.5px solid ${C.amber}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 4 }}>PIN for {revealedPin.name} — shown once, write it down now</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={st.code} onClick={() => copyText(revealedPin.pin)}>{revealedPin.pin}</span>
+                  <button onClick={() => setRevealedPin(null)} style={{ background: "transparent", border: "none", color: C.inkSoft, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
+                </div>
+              </div>
+            )}
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add to the roster</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Each person gets their own name and a 4-digit PIN, generated automatically and shown once.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="Full name" value={newRosterName}
+                  onChange={e => setNewRosterName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addRosterMember(); }} />
+                <select value={newRosterRole} onChange={e => setNewRosterRole(e.target.value)} style={{ padding: "11px 13px", borderRadius: 9, border: `1.5px solid ${C.line}`, fontSize: 15, background: "#F8FAFC", color: C.ink, fontWeight: 600 }}>
+                  <option value="worker">Worker</option>
+                  <option value="supervisor">Supervisor</option>
+                </select>
+                <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={addRosterMember} disabled={saving}>Add</button>
+              </div>
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Roster ({rosterMembers.length})</div>
+              {loadingRoster ? (
+                <div style={{ textAlign: "center", padding: "24px 0", color: C.muted }}>Loading…</div>
+              ) : rosterMembers.length === 0 ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No one on the roster yet.</div>
+              ) : (
+                ["supervisor", "worker"].map(roleGroup => {
+                  const group = rosterMembers.filter(m => m.role === roleGroup);
+                  if (group.length === 0) return null;
+                  return (
+                    <div key={roleGroup} style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>{roleGroup}s</div>
+                      {group.map((m, i) => (
+                        <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? `1px solid ${C.line}` : "none", opacity: m.active ? 1 : 0.6 }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{m.name}</div>
+                            <div style={{ fontSize: 12, color: C.muted }}>
+                              {m.active ? (m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in") : "Deactivated"}
+                            </div>
+                          </div>
+                          {m.active && (
+                            <button onClick={() => resetRosterPin(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Reset PIN</button>
+                          )}
+                          {m.active ? (
+                            <button onClick={() => deactivateRosterMember(m.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Deactivate</button>
+                          ) : (
+                            <button onClick={() => reactivateRosterMember(m.id)} style={{ background: "transparent", border: "none", color: C.green, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Reactivate</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ ...st.card, borderLeft: `4px solid ${activeCompany?.roster_enabled ? C.green : C.amber}` }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Login mode</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 14 }}>
+                {activeCompany?.roster_enabled
+                  ? "This company is on individual logins — the shared company code is no longer offered. Reverting is instant and safe."
+                  : "This company is still on the shared company code. Switching to individual logins requires at least one active worker and one active supervisor on the roster above."}
+              </div>
+              <button
+                onClick={() => setCutover(!activeCompany?.roster_enabled)}
+                disabled={cutoverSaving}
+                style={{
+                  width: "100%", borderRadius: 10, padding: "11px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer",
+                  border: activeCompany?.roster_enabled ? "1.5px solid #FCA5A5" : "none",
+                  background: activeCompany?.roster_enabled ? "#FEF2F2" : C.amber,
+                  color: activeCompany?.roster_enabled ? "#DC2626" : C.ink,
+                }}>
+                {cutoverSaving ? "Updating…" : activeCompany?.roster_enabled ? "Revert to shared company code" : "Switch to individual logins"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {manageTab === "codes" && (
           <div style={st.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Access codes</div>
-            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>Share these with the company. Tap to copy.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Company code</div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>
+              {activeCompany?.roster_enabled
+                ? "Everyone enters this, then picks their name and PIN — see the Roster tab."
+                : "Shared by everyone at this company to log in as worker or supervisor. Tap to copy."}
+            </div>
             <div style={{ marginBottom: 16 }}>
-              <div style={st.label}>Worker code</div>
-              <span style={st.code} onClick={() => copyText(activeCompany?.worker_code)}>{activeCompany?.worker_code || "—"}</span>
+              <span style={st.code} onClick={() => copyText(activeCompany?.company_code)}>{activeCompany?.company_code || "—"}</span>
             </div>
-            <div>
-              <div style={st.label}>Supervisor code</div>
-              <span style={st.code} onClick={() => copyText(activeCompany?.supervisor_code)}>{activeCompany?.supervisor_code || "—"}</span>
-            </div>
+
+            {(activeCompany?.worker_code || activeCompany?.supervisor_code) && (
+              <div style={{ marginTop: 6, paddingTop: 16, borderTop: `1px solid ${C.line}` }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 10 }}>
+                  Legacy — accepted until this company switches to individual logins
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={st.label}>Worker code</div>
+                  <span style={{ ...st.code, cursor: "default", opacity: 0.75 }}>{activeCompany?.worker_code || "—"}</span>
+                </div>
+                <div>
+                  <div style={st.label}>Supervisor code</div>
+                  <span style={{ ...st.code, cursor: "default", opacity: 0.75 }}>{activeCompany?.supervisor_code || "—"}</span>
+                </div>
+              </div>
+            )}
             {onViewDashboard && (
               <button style={{ ...st.darkBtn, width: "100%", marginTop: 22 }} onClick={() => onViewDashboard(activeId)}>
                 Open FLHA dashboard →

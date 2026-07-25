@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
 
-export default function MonthlyInspection({ companyId, companyName, onBack, onLogout, token = null }) {
+export default function MonthlyInspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("site"); // site | duplicate | none | questions | review | sign | done
   const [sites, setSites] = useState([]);
   const [siteId, setSiteId] = useState("");
@@ -13,7 +13,7 @@ export default function MonthlyInspection({ companyId, companyName, onBack, onLo
   const [existingRecord, setExistingRecord] = useState(null);
   const [answers, setAnswers] = useState({}); // { [questionId]: { answer: bool|null, note: string } }
 
-  const [workerName, setWorkerName] = useState("");
+  const [workerName, setWorkerName] = useState(loginUserName);
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
@@ -255,7 +255,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{form.title}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{siteName()}</div>
             <label style={{ ...s.label, marginTop: 14 }}>Your name</label>
-            <input style={{ ...s.input, marginBottom: 0 }} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+            <input
+              style={{ ...s.input, marginBottom: 0, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+              placeholder="e.g. John Smith" value={workerName}
+              onChange={e => setWorkerName(e.target.value)}
+              readOnly={!!loginUserName}
+            />
           </div>
 
           {questions.map((q, i) => {

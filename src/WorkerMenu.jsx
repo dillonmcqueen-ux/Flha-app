@@ -19,7 +19,7 @@ const BUILTIN_TYPES = [
   { key: "monthly", icon: "🗓️", title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
 ];
 
-export default function WorkerMenu({ companyId, companyName, onLogout, token }) {
+export default function WorkerMenu({ companyId, companyName, userName = "", onLogout, token }) {
   const [doc, setDoc] = useState(null);
   const [customFormId, setCustomFormId] = useState(null);
   const [builtinActive, setBuiltinActive] = useState(null); // null = loading
@@ -51,28 +51,28 @@ export default function WorkerMenu({ companyId, companyName, onLogout, token }) 
   }, [token]);
 
   if (doc === "flha") {
-    return <App forcedCompanyId={companyId} onLogout={() => setDoc(null)} token={token} />;
+    return <App forcedCompanyId={companyId} userName={userName} onLogout={() => setDoc(null)} token={token} />;
   }
   if (doc === "inspection") {
-    return <Inspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+    return <Inspection companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "toolbox") {
-    return <ToolboxTalk companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+    return <ToolboxTalk companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "nearmiss") {
-    return <NearMiss companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+    return <NearMiss companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "incident") {
-    return <Incident companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+    return <Incident companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "daily") {
-    return <DailyReport companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+    return <DailyReport companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "monthly") {
-    return <MonthlyInspection companyId={companyId} companyName={companyName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
+    return <MonthlyInspection companyId={companyId} companyName={companyName} userName={userName} onBack={() => setDoc(null)} onLogout={onLogout} token={token} />;
   }
   if (doc === "custom" && customFormId) {
-    return <CustomForm companyId={companyId} companyName={companyName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
+    return <CustomForm companyId={companyId} companyName={companyName} userName={userName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
   }
 
   const s = {

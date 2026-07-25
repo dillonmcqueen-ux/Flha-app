@@ -8,14 +8,14 @@ const CONDITIONS = [
   { key: "Defective", color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5" },
 ];
 
-export default function Inspection({ companyId, companyName, onBack, onLogout, token = null }) {
+export default function Inspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("equipment"); // equipment | choice | worker | inspect | posttrip | done
   const [equipment, setEquipment] = useState([]);
   const [eqMode, setEqMode] = useState("list"); // list | other
   const [selectedEq, setSelectedEq] = useState("");
   const [selectedEqId, setSelectedEqId] = useState("");
   const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "" });
-  const [workerName, setWorkerName] = useState("");
+  const [workerName, setWorkerName] = useState(loginUserName);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [genError, setGenError] = useState(false);
@@ -423,7 +423,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Inspector</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Inspecting: <strong>{equipmentLabel()}</strong></div>
             <label style={s.label}>Your name</label>
-            <input style={s.input} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+            <input
+              style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+              placeholder="e.g. John Smith" value={workerName}
+              onChange={e => setWorkerName(e.target.value)}
+              readOnly={!!loginUserName}
+            />
 
             <label style={s.label}>Reading type</label>
             <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
@@ -540,7 +545,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           <div style={s.card}>
             <label style={s.label}>Your name</label>
-            <input style={s.input} placeholder="e.g. John Smith" value={workerName} onChange={e => setWorkerName(e.target.value)} />
+            <input
+              style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+              placeholder="e.g. John Smith" value={workerName}
+              onChange={e => setWorkerName(e.target.value)}
+              readOnly={!!loginUserName}
+            />
             <label style={s.label}>Ending reading ({openPretrip.reading_unit || readingUnit})</label>
             <input style={{ ...s.input, marginBottom: 0 }} type="number" inputMode="decimal" placeholder="e.g. 1251.8" value={endReading} onChange={e => setEndReading(e.target.value)} />
           </div>

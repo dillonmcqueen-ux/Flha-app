@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-function verifySession(token) {
+async function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
   const expectedSig = crypto
@@ -21,13 +21,29 @@ function verifySession(token) {
     .update(data)
     .digest('base64url');
   if (sig !== expectedSig) return null;
+  let payload;
   try {
-    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
-    if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
-    return payload;
+    payload = JSON.parse(Buffer.from(data, 'base64url').toString());
   } catch (e) {
     return null;
   }
+  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+
+  // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
+  // no userId — nothing to live-check beyond the signature+TTL above.
+  if (payload.role === 'admin' || !payload.userId) return payload;
+
+  // Individually-identified (roster) sessions: re-check `active` on every
+  // request, so deactivating someone takes effect on their very next call
+  // instead of waiting out the token's TTL.
+  const { data: rows, error } = await supabaseAdmin
+    .from('roster')
+    .select('active, role, company_id')
+    .eq('id', payload.userId)
+    .limit(1);
+  if (error || !rows || rows.length === 0 || !rows[0].active) return null;
+  if (rows[0].company_id !== payload.companyId) return null;
+  return { ...payload, role: rows[0].role };
 }
 
 function genAccountNumber() {
@@ -38,7 +54,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { action, token } = req.body || {};
-  const session = verifySession(token);
+  const session = await verifySession(token);
   if (!session || session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
 
   try {
@@ -46,35 +62,41 @@ export default async function handler(req, res) {
     if (action === 'list_companies') {
       const { data, error } = await supabaseAdmin
         .from('companies')
-        .select('id, name, worker_code, supervisor_code, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number, analytics_tier')
+        .select('id, name, worker_code, supervisor_code, company_code, roster_enabled, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number, plan_tier')
         .order('id');
       if (error) return res.status(500).json({ error: 'Could not load companies.' });
       return res.status(200).json({ companies: data || [] });
     }
 
-    // ── Set a company's analytics dashboard tier (basic/advanced) ──────
-    if (action === 'set_analytics_tier') {
+    // ── Set a company's plan tier (basic/advanced) — drives both the
+    // Analytics dashboard's depth and the roster's seat cap ──────────
+    if (action === 'set_plan_tier') {
       const { companyId, tier } = req.body;
       if (!companyId || !['basic', 'advanced'].includes(tier)) {
         return res.status(400).json({ error: 'Missing or invalid tier.' });
       }
-      const { error } = await supabaseAdmin.from('companies').update({ analytics_tier: tier }).eq('id', companyId);
-      if (error) return res.status(500).json({ error: "Couldn't update analytics tier." });
+      const { error } = await supabaseAdmin.from('companies').update({ plan_tier: tier }).eq('id', companyId);
+      if (error) return res.status(500).json({ error: "Couldn't update plan tier." });
       return res.status(200).json({ ok: true });
     }
 
     // ── Onboard a new company ───────────────────────────────────────────
+    // New companies get only the unified company_code — no legacy
+    // worker_code/supervisor_code, since roster login is how they'll work
+    // from day one. roster_enabled defaults false until the admin (the
+    // only one with a session for a company with no roster yet) has added
+    // at least one active worker and supervisor and flips the cutover.
     if (action === 'create_company') {
-      const { name, workerCode, supervisorCode } = req.body;
-      if (!name?.trim() || !workerCode?.trim() || !supervisorCode?.trim()) {
+      const { name, companyCode } = req.body;
+      if (!name?.trim() || !companyCode?.trim()) {
         return res.status(400).json({ error: 'Missing company details.' });
       }
       const { data: existing } = await supabaseAdmin
         .from('companies')
         .select('id')
-        .or(`worker_code.eq.${workerCode.trim()},supervisor_code.eq.${supervisorCode.trim()}`);
+        .eq('company_code', companyCode.trim());
       if (existing && existing.length > 0) {
-        return res.status(400).json({ error: 'One of those codes is already in use. Edit and try again.' });
+        return res.status(400).json({ error: 'That code is already in use. Edit and try again.' });
       }
 
       let acct = genAccountNumber();
@@ -86,8 +108,7 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('companies').insert({
         name: name.trim(),
-        worker_code: workerCode.trim(),
-        supervisor_code: supervisorCode.trim(),
+        company_code: companyCode.trim(),
         account_number: acct,
       });
       if (error) return res.status(500).json({ error: "Couldn't add company: " + error.message });
@@ -182,6 +203,7 @@ export default async function handler(req, res) {
       }
       await supabaseAdmin.from('company_document_settings').delete().eq('company_id', companyId);
       await supabaseAdmin.from('equipment_reports').delete().eq('company_id', companyId);
+      await supabaseAdmin.from('roster').delete().eq('company_id', companyId);
       await supabaseAdmin.from('sops').delete().eq('company_id', companyId);
       await supabaseAdmin.from('sites').delete().eq('company_id', companyId);
       await supabaseAdmin.from('equipment').delete().eq('company_id', companyId);
