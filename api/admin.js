@@ -50,6 +50,14 @@ function genAccountNumber() {
   return Math.floor(100000 + Math.random() * 900000);
 }
 
+function genSalt() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function hashPin(pin, salt) {
+  return crypto.scryptSync(String(pin), salt, 64).toString('hex');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -78,6 +86,40 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin.from('companies').update({ plan_tier: tier }).eq('id', companyId);
       if (error) return res.status(500).json({ error: "Couldn't update plan tier." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ── Set the master login code — logs into any company, either role,
+    // straight from the public worker/supervisor login screen. No "confirm
+    // old code" step needed: only an authenticated admin session can even
+    // reach this action. ────────────────────────────────────────────────
+    if (action === 'set_master_code') {
+      const { newCode } = req.body;
+      if (!newCode || !String(newCode).trim()) return res.status(400).json({ error: 'Enter a code.' });
+      const salt = genSalt();
+      const hash = hashPin(String(newCode).trim(), salt);
+      const { error } = await supabaseAdmin
+        .from('app_settings')
+        .upsert({ id: 1, master_code_hash: hash, master_code_salt: salt, updated_at: new Date().toISOString() });
+      if (error) return res.status(500).json({ error: "Couldn't update the master code." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ── Recent master-code logins, newest first — the visibility backstop
+    // in place of rate-limiting the master code itself (see api/login.js).
+    if (action === 'list_master_login_log') {
+      const { data: logs, error: logErr } = await supabaseAdmin
+        .from('master_login_log')
+        .select('id, company_id, role, created_at')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (logErr) return res.status(500).json({ error: 'Could not load the login log.' });
+
+      const companyIds = [...new Set((logs || []).map(l => l.company_id))];
+      const { data: companies } = await supabaseAdmin.from('companies').select('id, name').in('id', companyIds.length ? companyIds : [0]);
+      const nameById = {}; (companies || []).forEach(c => { nameById[c.id] = c.name; });
+
+      const enriched = (logs || []).map(l => ({ ...l, company_name: nameById[l.company_id] || 'Unknown company' }));
+      return res.status(200).json({ logs: enriched });
     }
 
     // ── Onboard a new company ───────────────────────────────────────────

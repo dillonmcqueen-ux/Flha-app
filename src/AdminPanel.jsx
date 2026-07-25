@@ -212,6 +212,42 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setCutoverSaving(false);
   };
 
+  // ── All Codes view: every company's codes at a glance, plus the master
+  // login code and its recent-use log ─────────────────────────────────
+  const [masterCodeInput, setMasterCodeInput] = useState("");
+  const [savingMasterCode, setSavingMasterCode] = useState(false);
+  const [masterLoginLogs, setMasterLoginLogs] = useState([]);
+
+  const loadAllCodesView = async () => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_master_login_log", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setMasterLoginLogs(data.logs || []);
+    } catch (e) { /* leave list as-is if the request fails */ }
+  };
+
+  const saveMasterCode = async () => {
+    setMsg("");
+    if (!masterCodeInput.trim()) { setMsg("Enter a new code."); return; }
+    setSavingMasterCode(true);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_master_code", token, newCode: masterCodeInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't update the master code."); setSavingMasterCode(false); return; }
+      setMasterCodeInput("");
+      setMsg("Master code updated");
+    } catch (e) {
+      setMsg("Couldn't update the master code. Try again.");
+    }
+    setSavingMasterCode(false);
+  };
+
   // Companies now come from our protected server endpoint (it has the real
   // worker/supervisor codes and contact info, so it needs to be admin-only).
   const loadAll = async () => {
@@ -763,7 +799,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {msg && <div style={{ ...st.card, marginBottom: 14, background: "#DCFCE7", color: "#166534", fontSize: 14 }}>{msg}</div>}
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
-            <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
+              <button style={st.darkBtn} onClick={() => { setView("allCodes"); setMsg(""); loadAllCodesView(); }}>All Codes</button>
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.white, color: C.ink, fontWeight: 600, cursor: "pointer" }}>
@@ -806,6 +845,70 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               )}
             </>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ ALL CODES ════════════════════════════════════════════
+  if (view === "allCodes") {
+    return (
+      <div style={st.wrap}>
+        <div style={st.topbar}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: 20 }}>All Codes</div>
+            <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); }}>← Console</button>
+          </div>
+        </div>
+        <div style={st.body}>
+          {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("enter")) ? "#FEE2E2" : "#DCFCE7", color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("enter")) ? "#991B1B" : "#166534", fontSize: 14 }}>{msg}</div>}
+
+          <div style={{ ...st.card, marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Every company's code(s)</div>
+            {companies.length === 0 ? (
+              <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No companies yet.</div>
+            ) : (
+              [...companies].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c, i, arr) => (
+                <div key={c.id} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: C.ink, marginBottom: 6 }}>{c.name}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={st.code} onClick={() => copyText(c.company_code)}>{c.company_code || "—"}</span>
+                    {c.roster_enabled && <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: "#DCFCE7", padding: "3px 9px", borderRadius: 20 }}>ROSTER</span>}
+                    {(c.worker_code || c.supervisor_code) && (
+                      <>
+                        <span style={{ fontSize: 11, color: C.muted }}>legacy:</span>
+                        {c.worker_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.worker_code)}>{c.worker_code}</span>}
+                        {c.supervisor_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.supervisor_code)}>{c.supervisor_code}</span>}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={{ ...st.card, marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Master login code</div>
+            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+              Logs into any company, as either worker or supervisor, straight from the public login screen — no company code or PIN needed. Stored securely; the current value can't be viewed, only replaced.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="New master code" value={masterCodeInput} onChange={e => setMasterCodeInput(e.target.value)} />
+              <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={saveMasterCode} disabled={savingMasterCode}>{savingMasterCode ? "Saving…" : "Save"}</button>
+            </div>
+          </div>
+
+          <div style={st.card}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
+            {masterLoginLogs.length === 0 ? (
+              <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No master-code logins yet.</div>
+            ) : masterLoginLogs.map((l, i) => (
+              <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < masterLoginLogs.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
+                <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
+                <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );

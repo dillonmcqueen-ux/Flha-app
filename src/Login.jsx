@@ -31,6 +31,11 @@ export default function Login() {
   const [selectedRoster, setSelectedRoster] = useState(null); // { id, name, role }
   const [pin, setPin] = useState("");
 
+  // Master-code login (picks any company, either role)
+  const [masterTicket, setMasterTicket] = useState(null);
+  const [masterCompanies, setMasterCompanies] = useState([]);
+  const [companyFilter, setCompanyFilter] = useState("");
+
   // Restore session on load
   useEffect(() => {
     const s = loadSession();
@@ -47,6 +52,9 @@ export default function Login() {
     setNameFilter("");
     setSelectedRoster(null);
     setPin("");
+    setMasterTicket(null);
+    setMasterCompanies([]);
+    setCompanyFilter("");
   };
 
   const handleSubmit = async () => {
@@ -70,6 +78,13 @@ export default function Login() {
 
       if (!res.ok) {
         setError(data.error || "Something went wrong. Please try again.");
+        setChecking(false);
+        return;
+      }
+
+      if (data.stage === "pick_company") {
+        setMasterTicket(data.masterTicket);
+        setMasterCompanies(data.companies || []);
         setChecking(false);
         return;
       }
@@ -114,6 +129,30 @@ export default function Login() {
     setSelectedRoster(member);
     setPin("");
     setError("");
+  };
+
+  const pickMasterCompany = async (companyId) => {
+    setError("");
+    setChecking(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "master_login", masterTicket, companyId, role }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+        setChecking(false);
+        return;
+      }
+      const s = { ...data.session, token: data.token };
+      saveSession(s);
+      setSession(s);
+    } catch (e) {
+      setError("Connection error. Please try again.");
+    }
+    setChecking(false);
   };
 
   const submitPin = async (pinValue) => {
@@ -245,6 +284,7 @@ export default function Login() {
   };
 
   const filteredNames = rosterNames.filter(m => m.name.toLowerCase().includes(nameFilter.trim().toLowerCase()));
+  const filteredMasterCompanies = masterCompanies.filter(c => c.name.toLowerCase().includes(companyFilter.trim().toLowerCase()));
 
   return (
     <div style={styles.wrap}>
@@ -283,6 +323,40 @@ export default function Login() {
               </button>
             </div>
           </>
+        ) : masterTicket ? (
+          // ── Master code: pick any company ──────────────────────────
+          <>
+            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>Master login</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Pick a company to log into as {role}.</div>
+
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="Type to filter…"
+              value={companyFilter}
+              onChange={e => setCompanyFilter(e.target.value)}
+              autoFocus
+            />
+
+            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              {filteredMasterCompanies.length === 0 && (
+                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No companies match.</div>
+              )}
+              {filteredMasterCompanies.map(c => (
+                <button key={c.id} style={styles.nameBtn(false)} disabled={checking} onClick={() => pickMasterCompany(c.id)}>
+                  <span>{c.name}</span>
+                </button>
+              ))}
+            </div>
+
+            {error && (
+              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: "#FCA5A5" }}>
+                {error}
+              </div>
+            )}
+
+            <button style={styles.backBtn} onClick={resetToRolePick}>← Start over</button>
+          </>
         ) : companyTicket && !selectedRoster ? (
           // ── Step 2: pick your name from this company's active roster ──
           <>
@@ -292,22 +366,25 @@ export default function Login() {
             <input
               style={styles.input}
               type="text"
-              placeholder="Type to filter…"
+              placeholder="Start typing your name…"
               value={nameFilter}
               onChange={e => setNameFilter(e.target.value)}
               autoFocus
             />
 
             <div style={{ maxHeight: 320, overflowY: "auto" }}>
-              {filteredNames.length === 0 && (
+              {nameFilter.trim().length === 0 ? (
+                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>Start typing to find your name.</div>
+              ) : filteredNames.length === 0 ? (
                 <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No names match.</div>
+              ) : (
+                filteredNames.map(m => (
+                  <button key={m.id} style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
+                    <span>{m.name}</span>
+                    <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase" }}>{m.role}</span>
+                  </button>
+                ))
               )}
-              {filteredNames.map(m => (
-                <button key={m.id} style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
-                  <span>{m.name}</span>
-                  <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase" }}>{m.role}</span>
-                </button>
-              ))}
             </div>
 
             {error && (
