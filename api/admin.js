@@ -130,6 +130,32 @@ export default async function handler(req, res) {
         if (error) return res.status(500).json({ error: `Could not check ${t.replace('_', ' ')} records.` });
         counts[t] = (data || []).length;
       }
+
+      // Monthly inspection and custom document submissions are reached
+      // through their form definitions, not a direct company_id column —
+      // same two-hop check delete_form (api/customforms.js) uses for one form.
+      const { data: inspForms, error: inspFormsErr } = await supabaseAdmin.from('inspection_forms').select('id').eq('company_id', companyId);
+      if (inspFormsErr) return res.status(500).json({ error: 'Could not check monthly inspection forms.' });
+      const inspFormIds = (inspForms || []).map(f => f.id);
+      let inspectionRecordsCount = 0;
+      if (inspFormIds.length > 0) {
+        const { data: records, error: recErr } = await supabaseAdmin.from('inspection_records').select('id').in('form_id', inspFormIds);
+        if (recErr) return res.status(500).json({ error: 'Could not check monthly inspection submissions.' });
+        inspectionRecordsCount = (records || []).length;
+      }
+      counts['monthly inspection submissions'] = inspectionRecordsCount;
+
+      const { data: custForms, error: custFormsErr } = await supabaseAdmin.from('custom_forms').select('id').eq('company_id', companyId);
+      if (custFormsErr) return res.status(500).json({ error: 'Could not check custom document forms.' });
+      const custFormIds = (custForms || []).map(f => f.id);
+      let customRecordsCount = 0;
+      if (custFormIds.length > 0) {
+        const { data: records, error: recErr } = await supabaseAdmin.from('custom_form_records').select('id').in('form_id', custFormIds);
+        if (recErr) return res.status(500).json({ error: 'Could not check custom document submissions.' });
+        customRecordsCount = (records || []).length;
+      }
+      counts['custom document submissions'] = customRecordsCount;
+
       const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0);
       if (totalRecords > 0) {
         const parts = Object.entries(counts)
@@ -140,6 +166,18 @@ export default async function handler(req, res) {
         });
       }
 
+      // No submitted records remain — safe to clean up company-scoped
+      // config/settings. Children before parents where FK-constrained.
+      if (inspFormIds.length > 0) {
+        await supabaseAdmin.from('inspection_form_questions').delete().in('form_id', inspFormIds);
+        await supabaseAdmin.from('inspection_forms').delete().eq('company_id', companyId);
+      }
+      if (custFormIds.length > 0) {
+        await supabaseAdmin.from('custom_form_questions').delete().in('form_id', custFormIds);
+        await supabaseAdmin.from('custom_forms').delete().eq('company_id', companyId);
+      }
+      await supabaseAdmin.from('company_document_settings').delete().eq('company_id', companyId);
+      await supabaseAdmin.from('equipment_reports').delete().eq('company_id', companyId);
       await supabaseAdmin.from('sops').delete().eq('company_id', companyId);
       await supabaseAdmin.from('sites').delete().eq('company_id', companyId);
       await supabaseAdmin.from('equipment').delete().eq('company_id', companyId);
