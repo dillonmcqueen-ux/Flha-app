@@ -49,6 +49,8 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [newCompanyCode, setNewCompanyCode] = useState("");
 
   const [profile, setProfile] = useState({ name: "", contact_name: "", contact_email: "", contact_phone: "", address: "", logo_url: "" });
+  const [codesForm, setCodesForm] = useState({ companyCode: "", workerCode: "", supervisorCode: "" });
+  const [savingCodes, setSavingCodes] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const [sopText, setSopText] = useState("");
@@ -368,6 +370,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setAnalyticsTierState(c.plan_tier || "basic");
     setRosterCap(SEAT_CAP_BY_TIER[c.plan_tier] || SEAT_CAP_BY_TIER.basic);
     setRevealedPin(null);
+    setCodesForm({ companyCode: c.company_code || "", workerCode: c.worker_code || "", supervisorCode: c.supervisor_code || "" });
 
     try {
       const res = await fetch("/api/companydata", {
@@ -432,6 +435,29 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       setMsg("Couldn't save. Try again.");
     }
     setSaving(false);
+  };
+
+  const saveCodes = async () => {
+    setMsg("");
+    if (!codesForm.companyCode.trim()) { setMsg("Company code cannot be empty."); return; }
+    if (!window.confirm("Save these codes? Anyone using the old value will no longer be able to log in with it.")) return;
+    setSavingCodes(true);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_company_codes", token, companyId: activeId,
+          companyCode: codesForm.companyCode, workerCode: codesForm.workerCode, supervisorCode: codesForm.supervisorCode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't update codes."); setSavingCodes(false); return; }
+      setMsg("Codes updated"); await loadAll();
+    } catch (e) {
+      setMsg("Couldn't update codes. Try again.");
+    }
+    setSavingCodes(false);
   };
 
   const uploadLogo = async (file) => {
@@ -1340,10 +1366,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>
               {activeCompany?.roster_enabled
                 ? "Everyone enters this, then picks their name and PIN — see the Roster tab."
-                : "Shared by everyone at this company to log in as worker or supervisor. Tap to copy."}
+                : (activeCompany?.worker_code || activeCompany?.supervisor_code)
+                  ? "This company still has its own worker/supervisor codes below, which take priority over this one for logging in — changing this alone won't change what they type."
+                  : "Shared by everyone at this company to log in as worker or supervisor."}
             </div>
-            <div style={{ marginBottom: 16 }}>
-              <span style={st.code} onClick={() => copyText(activeCompany?.company_code)}>{activeCompany?.company_code || "—"}</span>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.companyCode} onChange={e => setCodesForm(f => ({ ...f, companyCode: e.target.value.toUpperCase() }))} />
+              <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={() => copyText(codesForm.companyCode)}>Copy</button>
             </div>
 
             {(activeCompany?.worker_code || activeCompany?.supervisor_code) && (
@@ -1351,16 +1380,31 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 10 }}>
                   Legacy — accepted until this company switches to individual logins
                 </div>
-                <div style={{ marginBottom: 12 }}>
-                  <div style={st.label}>Worker code</div>
-                  <span style={{ ...st.code, cursor: "default", opacity: 0.75 }}>{activeCompany?.worker_code || "—"}</span>
-                </div>
-                <div>
-                  <div style={st.label}>Supervisor code</div>
-                  <span style={{ ...st.code, cursor: "default", opacity: 0.75 }}>{activeCompany?.supervisor_code || "—"}</span>
-                </div>
+                {activeCompany?.worker_code && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={st.label}>Worker code</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.workerCode} onChange={e => setCodesForm(f => ({ ...f, workerCode: e.target.value.toUpperCase() }))} />
+                      <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={() => copyText(codesForm.workerCode)}>Copy</button>
+                    </div>
+                  </div>
+                )}
+                {activeCompany?.supervisor_code && (
+                  <div>
+                    <div style={st.label}>Supervisor code</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.supervisorCode} onChange={e => setCodesForm(f => ({ ...f, supervisorCode: e.target.value.toUpperCase() }))} />
+                      <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={() => copyText(codesForm.supervisorCode)}>Copy</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+
+            <button style={{ ...st.amberBtn, width: "100%", marginTop: 18 }} onClick={saveCodes} disabled={savingCodes}>
+              {savingCodes ? "Saving…" : "Save codes"}
+            </button>
+
             {onViewDashboard && (
               <button style={{ ...st.darkBtn, width: "100%", marginTop: 22 }} onClick={() => onViewDashboard(activeId)}>
                 Open FLHA dashboard →
