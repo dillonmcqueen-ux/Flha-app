@@ -157,6 +157,49 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ── Edit a company's login code(s) ──────────────────────────────────
+    // company_code is always required. worker_code/supervisor_code are only
+    // validated/updated when actually sent with a non-empty value — this is
+    // a pure edit of an existing legacy code, never a way to clear one to
+    // null and strand that company's logins.
+    if (action === 'update_company_codes') {
+      const { companyId, companyCode, workerCode, supervisorCode } = req.body;
+      if (!companyId || !companyCode?.trim()) {
+        return res.status(400).json({ error: 'Missing company code.' });
+      }
+
+      const { data: codeClash } = await supabaseAdmin
+        .from('companies')
+        .select('id')
+        .eq('company_code', companyCode.trim())
+        .neq('id', companyId);
+      if (codeClash && codeClash.length > 0) {
+        return res.status(400).json({ error: 'That company code is already in use.' });
+      }
+
+      const updates = { company_code: companyCode.trim() };
+
+      if (workerCode?.trim() || supervisorCode?.trim()) {
+        const orParts = [];
+        if (workerCode?.trim()) orParts.push(`worker_code.eq.${workerCode.trim()}`, `supervisor_code.eq.${workerCode.trim()}`);
+        if (supervisorCode?.trim()) orParts.push(`worker_code.eq.${supervisorCode.trim()}`, `supervisor_code.eq.${supervisorCode.trim()}`);
+        const { data: legacyClash } = await supabaseAdmin
+          .from('companies')
+          .select('id')
+          .or(orParts.join(','))
+          .neq('id', companyId);
+        if (legacyClash && legacyClash.length > 0) {
+          return res.status(400).json({ error: 'One of those codes is already in use.' });
+        }
+        if (workerCode?.trim()) updates.worker_code = workerCode.trim();
+        if (supervisorCode?.trim()) updates.supervisor_code = supervisorCode.trim();
+      }
+
+      const { error } = await supabaseAdmin.from('companies').update(updates).eq('id', companyId);
+      if (error) return res.status(500).json({ error: "Couldn't update codes: " + error.message });
+      return res.status(200).json({ ok: true });
+    }
+
     // ── Edit a company's profile ────────────────────────────────────────
     if (action === 'update_profile') {
       const { companyId, profile } = req.body;
