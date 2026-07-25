@@ -1,18 +1,38 @@
 // Vercel serverless function — calls Anthropic API securely server-side.
 // Set ANTHROPIC_API_KEY in Vercel: Project Settings -> Environment Variables
 
+import crypto from 'crypto';
+
 // Extend Vercel function timeout to 30 seconds (requires Pro on Vercel,
 // but maxDuration up to 10s works on Hobby — we'll also shorten the prompt)
 export const config = {
   maxDuration: 30,
 };
 
+function verifySession(token) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const [data, sig] = token.split('.');
+  const expectedSig = crypto
+    .createHmac('sha256', process.env.SESSION_SECRET)
+    .update(data)
+    .digest('base64url');
+  if (sig !== expectedSig) return null;
+  try {
+    return JSON.parse(Buffer.from(data, 'base64url').toString());
+  } catch (e) {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { prompt } = req.body;
+  const { prompt, token } = req.body;
+  const session = verifySession(token);
+  if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
+
   if (!prompt) {
     return res.status(400).json({ error: "Missing prompt" });
   }
