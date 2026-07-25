@@ -1,10 +1,20 @@
 import { useState, useEffect, useRef } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
+import { generateAndUploadTimeClockReport } from "./generateTimeClockReportPDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import AnalyticsPanel from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
+
+// Formats an ISO timestamp for a <input type="datetime-local"> value, in
+// the browser's local time (matching how that input type always displays).
+function toDatetimeLocal(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 const RISK_COLOR = {
   Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
@@ -785,7 +795,58 @@ function EquipmentReportCard({ data, onClose, onGeneratePdf, generating, error }
 }
 
 
-export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, userName = "", token = null }) {
+function TimeClockReportCard({ data, onClose, onGeneratePdf, generating, error }) {
+  if (!data) return null;
+  const { report, company } = data;
+  const rj = report.report_json || {};
+  const entries = rj.entries || [];
+  const grandTotal = entries.reduce((sum, p) => sum + (p.totalHours || 0), 0);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 680, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#0891B2" }}>Weekly Time Clock Report</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name} · {grandTotal.toFixed(1)} hrs total</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {report.pdf_url ? (
+              <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0891B2", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+            ) : (
+              <button onClick={() => onGeneratePdf(report)} disabled={generating} style={{ background: generating ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                {generating ? "Generating…" : "📄 Generate PDF"}
+              </button>
+            )}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>⚠ {error}</div>}
+
+        {entries.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No time clock activity recorded this week.</div>
+        ) : (
+          entries.map((p, i) => (
+            <div key={i} style={{ border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{p.name} <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>({p.role})</span></div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#0891B2" }}>{p.totalHours.toFixed(1)} hrs</div>
+              </div>
+              {p.days.map((d, j) => (
+                <div key={j} style={{ fontSize: 12, color: "#6B7280", display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                  <span>{d.date} · {new Date(d.clockIn).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {d.openAtReportTime ? "still open" : new Date(d.clockOut).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}{d.edited ? " (edited)" : ""}</span>
+                  <span>{d.hours != null ? `${d.hours.toFixed(2)} hrs` : "—"}</span>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, userName = "", userId = null, token = null }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [inspections, setInspections] = useState([]);
@@ -820,6 +881,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [pmSetupFor, setPmSetupFor] = useState(null);
   const [pmSetupForm, setPmSetupForm] = useState({ interval: "", unit: "Hours", startingReading: "" });
   const [savingPmSetup, setSavingPmSetup] = useState(false);
+
+  // ── Time Clock: my own status + everyone's entries + reports ──────────
+  const [myTimeStatus, setMyTimeStatus] = useState(null);
+  const [myTimeLoading, setMyTimeLoading] = useState(true);
+  const [myTimeWorking, setMyTimeWorking] = useState(false);
+  const [myTimeError, setMyTimeError] = useState("");
+  const [myTimeNow, setMyTimeNow] = useState(Date.now());
+  const [timeClockRoster, setTimeClockRoster] = useState([]);
+  const [timeClockEntries, setTimeClockEntries] = useState([]);
+  const [loadingTimeClockEntries, setLoadingTimeClockEntries] = useState(false);
+  const [timeClockWeekLabel, setTimeClockWeekLabel] = useState("");
+  const [editingEntryId, setEditingEntryId] = useState(null);
+  const [editEntryForm, setEditEntryForm] = useState({ clockIn: "", clockOut: "" });
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [addEntryOpen, setAddEntryOpen] = useState(false);
+  const [addEntryForm, setAddEntryForm] = useState({ rosterId: "", clockIn: "", clockOut: "" });
+  const [timeClockReports, setTimeClockReports] = useState([]);
+  const [loadingTimeClockReports, setLoadingTimeClockReports] = useState(false);
+  const [selectedTimeClockReport, setSelectedTimeClockReport] = useState(null);
+  const [generatingTimeClockPdf, setGeneratingTimeClockPdf] = useState(false);
+  const [timeClockPdfError, setTimeClockPdfError] = useState("");
+  const [generatingNewTimeClockReport, setGeneratingNewTimeClockReport] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -1215,6 +1298,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     equipment: equipmentReportsEnabled,
     customdocs: hasActiveCustomForm,
     maintenance: isDocActive("maintenance"),
+    timeclock: isDocActive("timeclock"),
     analytics: true,
     sops: true,
   };
@@ -1222,6 +1306,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const CATEGORIES = [
     { key: "submissions", label: "📋 Submissions", tabs: ["flhas", "inspections", "toolbox", "nearmiss", "incident", "daily", "monthly", "customdocs"] },
     { key: "equipment", label: "🔧 Equipment", tabs: ["equipment", "maintenance"] },
+    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock"] },
     { key: "insights", label: "📊 Insights", tabs: ["analytics", "sops"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
@@ -1307,6 +1392,192 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       }
     } catch (e) { /* ignore */ }
     setGeneratingNewReport(false);
+  };
+
+  // ── Time Clock: my own status ────────────────────────────────────────
+  const loadMyTimeStatus = async () => {
+    if (!userId) { setMyTimeLoading(false); return; }
+    setMyTimeLoading(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "my_status", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setMyTimeStatus(data);
+    } catch (e) { /* leave as-is if the request fails */ }
+    setMyTimeLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "timeclock" || !userId) return;
+    loadMyTimeStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, userId, token]);
+
+  useEffect(() => {
+    if (!myTimeStatus?.open) return;
+    const t = setInterval(() => setMyTimeNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [myTimeStatus?.open]);
+
+  const toggleMyClock = async () => {
+    setMyTimeError("");
+    setMyTimeWorking(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: myTimeStatus?.open ? "clock_out" : "clock_in", token }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMyTimeError(data.error || "Something went wrong."); setMyTimeWorking(false); return; }
+      await loadMyTimeStatus();
+      if (activeTab === "timeclock") loadTimeClockEntries();
+    } catch (e) { setMyTimeError("Connection error. Please try again."); }
+    setMyTimeWorking(false);
+  };
+
+  // ── Time Clock: everyone's entries (supervisor/admin) ────────────────
+  const loadTimeClockEntries = async () => {
+    if (!selectedCompany) return;
+    setLoadingTimeClockEntries(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_entries", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTimeClockRoster(data.roster || []);
+        setTimeClockEntries(data.entries || []);
+        setTimeClockWeekLabel(`${data.weekStart} to ${data.weekEnd}`);
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingTimeClockEntries(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "timeclock" || !selectedCompany) return;
+    loadTimeClockEntries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedCompany, token]);
+
+  const saveEditEntry = async (entryId) => {
+    if (!editEntryForm.clockIn) return;
+    setSavingEntry(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "edit_entry", token, entryId, clockIn: editEntryForm.clockIn, clockOut: editEntryForm.clockOut || null }),
+      });
+      const data = await res.json();
+      if (res.ok) { setEditingEntryId(null); await loadTimeClockEntries(); }
+      else alert(data.error || "Couldn't save the change.");
+    } catch (e) { alert("Couldn't save the change. Try again."); }
+    setSavingEntry(false);
+  };
+
+  const submitAddEntry = async () => {
+    if (!addEntryForm.rosterId || !addEntryForm.clockIn) return;
+    setSavingEntry(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add_entry", token, companyId: selectedCompany, rosterId: addEntryForm.rosterId, clockIn: addEntryForm.clockIn, clockOut: addEntryForm.clockOut || null }),
+      });
+      const data = await res.json();
+      if (res.ok) { setAddEntryOpen(false); setAddEntryForm({ rosterId: "", clockIn: "", clockOut: "" }); await loadTimeClockEntries(); }
+      else alert(data.error || "Couldn't add the entry.");
+    } catch (e) { alert("Couldn't add the entry. Try again."); }
+    setSavingEntry(false);
+  };
+
+  const deleteTimeClockEntry = async (entryId) => {
+    if (!window.confirm("Delete this time clock entry? This can't be undone.")) return;
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_entry", token, entryId }),
+      });
+      const data = await res.json();
+      if (res.ok) await loadTimeClockEntries();
+      else alert(data.error || "Couldn't delete the entry.");
+    } catch (e) { alert("Couldn't delete the entry. Try again."); }
+  };
+
+  // ── Time Clock: weekly PDF reports ───────────────────────────────────
+  const loadTimeClockReports = async () => {
+    if (!selectedCompany) return;
+    setLoadingTimeClockReports(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_reports", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setTimeClockReports(data.reports || []);
+    } catch (e) { /* leave list as-is if the request fails */ }
+    setLoadingTimeClockReports(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "timeclock" || !selectedCompany) return;
+    loadTimeClockReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedCompany, token]);
+
+  const openTimeClockReport = async (report) => {
+    setTimeClockPdfError("");
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_report", token, reportId: report.id }),
+      });
+      const data = await res.json();
+      if (res.ok) setSelectedTimeClockReport(data);
+    } catch (e) { /* ignore */ }
+  };
+
+  const generateTimeClockReportPdf = async (report) => {
+    setTimeClockPdfError("");
+    setGeneratingTimeClockPdf(true);
+    try {
+      const co = companies.find(c => c.id === report.company_id) || selectedTimeClockReport?.company;
+      const pdfUrl = await generateAndUploadTimeClockReport({
+        report, companyName: co?.name || "", companyLogo: co?.logo_url || "",
+      });
+      if (pdfUrl) {
+        await fetch("/api/timeclock", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "save_pdf_url", token, reportId: report.id, pdfUrl }),
+        });
+        setSelectedTimeClockReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
+        setTimeClockReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
+      }
+    } catch (e) {
+      setTimeClockPdfError(e.message || "Something went wrong generating the PDF.");
+    }
+    setGeneratingTimeClockPdf(false);
+  };
+
+  const generateThisWeeksTimeClockReport = async () => {
+    if (!selectedCompany) return;
+    setGeneratingNewTimeClockReport(true);
+    try {
+      const res = await fetch("/api/timeclock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_now", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTimeClockReports(prev => {
+          const filtered = prev.filter(r => r.week_start !== data.report.week_start);
+          return [{ id: data.report.id, week_start: data.report.week_start, week_end: data.report.week_end, pdf_url: data.report.pdf_url, generated_by: data.report.generated_by, created_at: data.report.created_at }, ...filtered]
+            .sort((a, b) => new Date(b.week_start) - new Date(a.week_start));
+        });
+      }
+    } catch (e) { /* ignore */ }
+    setGeneratingNewTimeClockReport(false);
   };
 
   const company = companies.find(c => c.id === selectedCompany);
@@ -1860,6 +2131,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
       {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} error={equipmentPdfError} />}
+      {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} onGeneratePdf={generateTimeClockReportPdf} generating={generatingTimeClockPdf} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} />}
 
       <div style={styles.header}>
@@ -1975,6 +2247,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
             <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
               🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
             </button>
+          )}
+          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
+            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
           )}
           {activeCategory === "insights" && (
             <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
@@ -2920,6 +3195,187 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
               })
             )}
           </div>
+        )}
+
+        {activeTab === "timeclock" && TAB_VISIBLE.timeclock && (
+          <>
+            {userId && (
+              <div style={{ ...styles.card, textAlign: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 10 }}>My Time</div>
+                {myTimeLoading ? (
+                  <div style={{ color: "#9CA3AF", padding: "12px 0" }}>Loading…</div>
+                ) : (
+                  <>
+                    {myTimeStatus?.open ? (
+                      <>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Clocked in since {new Date(myTimeStatus.open.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
+                        <div style={{ fontSize: 32, fontWeight: 800, color: "#0E7490", margin: "8px 0", fontVariantNumeric: "tabular-nums" }}>
+                          {(() => {
+                            const totalSec = Math.max(0, Math.floor((myTimeNow - new Date(myTimeStatus.open.clock_in).getTime()) / 1000));
+                            const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+                            const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+                            const sec = String(totalSec % 60).padStart(2, "0");
+                            return `${h}:${m}:${sec}`;
+                          })()}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 13, color: "#6B7280", margin: "8px 0 14px" }}>You're not clocked in.</div>
+                    )}
+                    <button onClick={toggleMyClock} disabled={myTimeWorking} style={{
+                      padding: "12px 28px", borderRadius: 10, border: "none", cursor: "pointer",
+                      fontWeight: 800, fontSize: 15, color: "#fff",
+                      background: myTimeWorking ? "#94A3B8" : myTimeStatus?.open ? "#DC2626" : "#16A34A",
+                    }}>
+                      {myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
+                    </button>
+                    {myTimeError && <div style={{ marginTop: 10, color: "#DC2626", fontSize: 13, fontWeight: 600 }}>{myTimeError}</div>}
+                  </>
+                )}
+              </div>
+            )}
+
+            <div style={styles.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                  {company?.name} — Everyone's Time{timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}
+                </div>
+                <button onClick={() => setAddEntryOpen(o => !o)} style={{ background: "#0891B2", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+                  {addEntryOpen ? "Cancel" : "+ Add Entry"}
+                </button>
+              </div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Only you can edit or add a punch — workers can't change their own time.</div>
+
+              {addEntryOpen && (
+                <div style={{ background: "#F8FAFC", borderRadius: 8, padding: 10, marginBottom: 14 }}>
+                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }}>
+                    <option value="">Select person…</option>
+                    {timeClockRoster.filter(m => m.active).map(m => <option key={m.id} value={m.id}>{m.name} ({m.role})</option>)}
+                  </select>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                      value={toDatetimeLocal(addEntryForm.clockIn)}
+                      onChange={e => setAddEntryForm(f => ({ ...f, clockIn: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
+                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                      value={toDatetimeLocal(addEntryForm.clockOut)}
+                      onChange={e => setAddEntryForm(f => ({ ...f, clockOut: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
+                  </div>
+                  <button onClick={submitAddEntry} disabled={savingEntry || !addEntryForm.rosterId || !addEntryForm.clockIn} style={{ width: "100%", background: (!addEntryForm.rosterId || !addEntryForm.clockIn) ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                    {savingEntry ? "Saving…" : "✓ Add Entry"}
+                  </button>
+                </div>
+              )}
+
+              {loadingTimeClockEntries ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+              ) : timeClockRoster.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>⏱️</div>
+                  No one on the roster yet.
+                </div>
+              ) : (
+                (() => {
+                  const byRoster = {};
+                  timeClockEntries.forEach(e => { (byRoster[e.roster_id] = byRoster[e.roster_id] || []).push(e); });
+                  return timeClockRoster.map(member => {
+                    const memberEntries = (byRoster[member.id] || []).slice().sort((a, b) => new Date(b.clock_in) - new Date(a.clock_in));
+                    const totalHours = memberEntries.reduce((sum, e) => sum + (e.clock_out ? (new Date(e.clock_out) - new Date(e.clock_in)) / 3600000 : 0), 0);
+                    return (
+                      <CollapsibleGroup
+                        key={member.id}
+                        icon={member.role === "supervisor" ? "🦺" : "👷"}
+                        label={`${member.name} — ${totalHours.toFixed(1)} hrs`}
+                        count={memberEntries.length}
+                        colorPreset={member.role === "supervisor" ? "indigo" : "purple"}
+                        defaultOpen={true}
+                      >
+                        {memberEntries.length === 0 ? (
+                          <div style={{ color: "#9CA3AF", padding: "10px 0", fontSize: 13 }}>No entries this week.</div>
+                        ) : memberEntries.map((e, i, arr) => (
+                          <div key={e.id} style={{ padding: "10px 0", borderBottom: i < arr.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                            {editingEntryId === e.id ? (
+                              <div style={{ background: "#F8FAFC", borderRadius: 8, padding: 10 }}>
+                                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                                    value={toDatetimeLocal(editEntryForm.clockIn)}
+                                    onChange={ev => setEditEntryForm(f => ({ ...f, clockIn: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
+                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                                    value={toDatetimeLocal(editEntryForm.clockOut)}
+                                    onChange={ev => setEditEntryForm(f => ({ ...f, clockOut: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
+                                </div>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button onClick={() => saveEditEntry(e.id)} disabled={savingEntry} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingEntry ? "Saving…" : "✓ Save"}</button>
+                                  <button onClick={() => setEditingEntryId(null)} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div>
+                                  <div style={{ fontWeight: 700, fontSize: 13, color: "#1E293B" }}>
+                                    {new Date(e.clock_in).toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric" })}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#6B7280" }}>
+                                    {new Date(e.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {e.clock_out ? new Date(e.clock_out).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "in progress"}
+                                    {e.edited_at ? " · edited" : ""}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 13, color: "#0891B2" }}>
+                                    {e.clock_out ? `${((new Date(e.clock_out) - new Date(e.clock_in)) / 3600000).toFixed(2)} hrs` : "—"}
+                                  </div>
+                                  <button onClick={() => { setEditingEntryId(e.id); setEditEntryForm({ clockIn: e.clock_in, clockOut: e.clock_out || "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
+                                  <button onClick={() => deleteTimeClockEntry(e.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Delete</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </CollapsibleGroup>
+                    );
+                  });
+                })()
+              )}
+            </div>
+
+            <div style={styles.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                  {company?.name} — Weekly Time Clock Reports
+                </div>
+                <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
+                  background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0
+                }}>
+                  {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
+                </button>
+              </div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+
+              {loadingTimeClockReports ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+              ) : timeClockReports.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                  No time clock reports yet.
+                </div>
+              ) : (
+                timeClockReports.map((r, i) => (
+                  <div key={r.id} style={{
+                    padding: "12px 14px", borderBottom: i < timeClockReports.length - 1 ? "1px solid #F3F4F6" : "none",
+                    cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+                  }} onClick={() => openTimeClockReport(r)}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.week_start} to {r.week_end}</div>
+                      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    </div>
+                    <div style={{ fontSize: 11, color: r.pdf_url ? "#0891B2" : "#9CA3AF" }}>
+                      {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
         )}
 
         {activeTab === "sops" && (
