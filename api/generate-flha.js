@@ -72,6 +72,16 @@ export default async function handler(req, res) {
       }),
     });
 
+    // Rate-limit headroom, logged on every call (success or failure) so it's
+    // visible in Vercel logs without needing to reproduce a 429 to see it.
+    console.log("Anthropic rate limits:", JSON.stringify({
+      requests: `${response.headers.get("anthropic-ratelimit-requests-remaining")}/${response.headers.get("anthropic-ratelimit-requests-limit")}`,
+      requestsReset: response.headers.get("anthropic-ratelimit-requests-reset"),
+      inputTokens: `${response.headers.get("anthropic-ratelimit-input-tokens-remaining")}/${response.headers.get("anthropic-ratelimit-input-tokens-limit")}`,
+      outputTokens: `${response.headers.get("anthropic-ratelimit-output-tokens-remaining")}/${response.headers.get("anthropic-ratelimit-output-tokens-limit")}`,
+      retryAfter: response.headers.get("retry-after"),
+    }));
+
     if (!response.ok) {
       const errText = await response.text();
       return res.status(500).json({ error: `Anthropic API error: ${response.status} ${errText}` });
