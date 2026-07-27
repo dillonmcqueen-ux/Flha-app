@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FORA — Field safety paperwork that writes itself</title>
+<meta name="description" content="FORA turns a spoken or typed task description into a complete, SOP-aware hazard assessment — plus seven other field safety documents, in one platform." />
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --black:#0A0A0A;
+    --panel:#141414;
+    --panel-2:#161616;
+    --line:#242424;
+    --orange:#F97316;
+    --orange-dim:#F9731640;
+    --muted:#9CA3AF;
+    --text:#F5F5F4;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--black);
+    color:var(--text);
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height:1.5;
+    overflow-x:hidden;
+  }
+  h1,h2,h3, .word{
+    font-family:'Space Grotesk', 'Inter', sans-serif;
+    letter-spacing:-0.02em;
+  }
+  a{color:inherit; text-decoration:none;}
+  img{display:block; max-width:100%;}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 24px;}
+  ::selection{background:var(--orange); color:#0A0A0A;}
+
+  /* texture */
+  .grain{
+    position:fixed; inset:0; pointer-events:none; z-index:1; opacity:.035; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* nav */
+  header{
+    position:fixed; top:0; left:0; right:0; z-index:50;
+    border-bottom:1px solid transparent;
+    transition:background .3s ease, border-color .3s ease;
+  }
+  header.solid{ background:#0A0A0Ade; backdrop-filter:blur(10px); border-color:var(--line); }
+  nav{ display:flex; align-items:center; justify-content:space-between; padding:18px 24px; }
+  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:20px; }
+  .logo .dot{ width:9px; height:9px; border-radius:50%; background:var(--orange); box-shadow:0 0 14px 2px var(--orange); }
+  .navlinks{ display:flex; gap:32px; font-size:14px; color:var(--muted); }
+  .navlinks a{ transition:color .2s ease; }
+  .navlinks a:hover{ color:var(--text); }
+  .cta-btn{
+    background:var(--orange); color:#0A0A0A; font-weight:600; font-size:14px;
+    padding:10px 20px; border-radius:8px; border:1px solid var(--orange);
+    transition:transform .15s ease, box-shadow .15s ease;
+    display:inline-block;
+  }
+  .cta-btn:hover{ transform:translateY(-1px); box-shadow:0 6px 24px -6px var(--orange-dim); }
+  .cta-ghost{
+    background:transparent; color:var(--text); font-weight:600; font-size:14px;
+    padding:10px 20px; border-radius:8px; border:1px solid var(--line);
+    transition:border-color .2s ease, background .2s ease;
+    display:inline-block;
+  }
+  .cta-ghost:hover{ border-color:var(--orange); background:#F9731612; }
+
+  /* hero */
+  .hero{
+    position:relative; min-height:100vh; display:flex; flex-direction:column;
+    justify-content:center; padding:140px 0 100px;
+    overflow:hidden;
+  }
+  .glow{
+    position:absolute; width:800px; height:800px; border-radius:50%;
+    background:radial-gradient(circle, #F9731633 0%, transparent 65%);
+    top:-280px; right:-200px; filter:blur(20px); z-index:0;
+    animation:float 12s ease-in-out infinite;
+  }
+  @keyframes float{ 0%,100%{ transform:translate(0,0);} 50%{ transform:translate(-30px,40px);} }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--orange);
+    border:1px solid var(--orange-dim); background:#F9731610; padding:6px 14px; border-radius:999px;
+    margin-bottom:28px; font-weight:500;
+  }
+  .hero h1{
+    font-size:clamp(40px, 6.5vw, 84px); font-weight:700; line-height:1.02; max-width:900px;
+    position:relative; z-index:1;
+  }
+  .hero h1 .out{ -webkit-text-stroke:1.5px var(--orange); color:transparent; }
+  .hero p.sub{
+    font-size:clamp(16px,2vw,20px); color:var(--muted); max-width:560px; margin-top:28px; position:relative; z-index:1;
+  }
+  .hero-cta{ display:flex; gap:16px; margin-top:40px; position:relative; z-index:1; flex-wrap:wrap; }
+  .hero-cta .cta-btn, .hero-cta .cta-ghost{ padding:14px 26px; font-size:15px; }
+
+  .scrollcue{ position:absolute; bottom:36px; left:24px; font-size:12px; color:var(--muted); display:flex; align-items:center; gap:10px; }
+  .scrollcue .bar{ width:1px; height:36px; background:linear-gradient(var(--orange), transparent); }
+
+  section{ position:relative; padding:120px 0; border-top:1px solid var(--line); }
+  .kicker{ color:var(--orange); font-size:13px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; margin-bottom:16px; }
+  .section-head{ max-width:640px; margin-bottom:64px; }
+  .section-head h2{ font-size:clamp(28px,4vw,44px); font-weight:700; line-height:1.1; }
+  .section-head p{ color:var(--muted); font-size:17px; margin-top:18px; }
+
+  /* what is fora */
+  .split{ display:grid; grid-template-columns:1fr 1fr; gap:64px; align-items:center; }
+  .split p{ color:var(--muted); font-size:17px; margin-bottom:18px; }
+  .split strong{ color:var(--text); font-weight:600; }
+
+  .mock{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:16px; padding:24px;
+    box-shadow:0 30px 60px -30px #000;
+  }
+  .mock .dots{ display:flex; gap:6px; margin-bottom:18px; }
+  .mock .dots span{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+  .mock-line{ height:10px; border-radius:4px; background:var(--line); margin-bottom:10px; }
+  .mock-input{
+    border:1px solid var(--orange-dim); background:#F9731608; border-radius:10px; padding:14px 16px;
+    font-size:13px; color:var(--text); margin-bottom:20px; display:flex; gap:10px; align-items:flex-start;
+  }
+  .mock-arrow{ text-align:center; color:var(--orange); font-size:12px; margin:14px 0; letter-spacing:.1em; }
+  .mock-out{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .mock-chip{
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:12px; color:var(--muted);
+  }
+  .mock-chip b{ display:block; color:var(--orange); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+
+  /* bento features */
+  .bento{ display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; }
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px;
+    transition:border-color .25s ease, transform .25s ease, background .25s ease;
+  }
+  .card:hover{ border-color:var(--orange-dim); transform:translateY(-3px); background:#161311; }
+  .card .icon{
+    width:38px; height:38px; border-radius:9px; background:#F9731614; border:1px solid var(--orange-dim);
+    display:flex; align-items:center; justify-content:center; font-size:18px; margin-bottom:18px;
+  }
+  .card h3{ font-size:16px; font-weight:600; margin-bottom:8px; }
+  .card p{ font-size:13.5px; color:var(--muted); }
+  .card.big{ grid-column:span 2; grid-row:span 2; display:flex; flex-direction:column; justify-content:flex-end; }
+  .card.big .icon{ margin-bottom:auto; }
+  .card.big h3{ font-size:22px; }
+  .card.big p{ font-size:14.5px; }
+
+  /* why different */
+  .diffs{ display:flex; flex-direction:column; }
+  .diff-row{
+    display:grid; grid-template-columns:80px 1fr 1fr; gap:32px; padding:36px 0; border-top:1px solid var(--line);
+    align-items:center;
+  }
+  .diff-row:last-child{ border-bottom:1px solid var(--line); }
+  .diff-num{ font-family:'Space Grotesk',sans-serif; font-size:32px; color:var(--orange); font-weight:700; opacity:.85; }
+  .diff-row h3{ font-size:20px; font-weight:600; margin-bottom:8px; }
+  .diff-row p{ color:var(--muted); font-size:15px; }
+
+  /* doc types strip */
+  .chips{ display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
+  .chip{
+    border:1px solid var(--line); padding:9px 16px; border-radius:999px; font-size:13.5px; color:var(--text);
+    background:var(--panel);
+  }
+  .chip .n{ color:var(--orange); margin-right:6px; }
+
+  /* cta band */
+  .band{
+    border-top:1px solid var(--line);
+    padding:120px 0; text-align:center; position:relative; overflow:hidden;
+  }
+  .band .glow{ top:auto; bottom:-320px; left:50%; transform:translateX(-50%); right:auto; width:900px; height:900px; }
+  .band h2{ font-size:clamp(32px,5vw,56px); font-weight:700; max-width:720px; margin:0 auto 20px; position:relative; z-index:1; }
+  .band p{ color:var(--muted); font-size:17px; max-width:520px; margin:0 auto 40px; position:relative; z-index:1; }
+  .band .btnrow{ display:flex; gap:16px; justify-content:center; flex-wrap:wrap; position:relative; z-index:1; }
+
+  footer{ border-top:1px solid var(--line); padding:48px 0; }
+  .foot-row{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:20px; }
+  .foot-links{ display:flex; gap:28px; font-size:13.5px; color:var(--muted); }
+  .foot-links a:hover{ color:var(--orange); }
+  .foot-copy{ font-size:13px; color:#555; }
+
+  [data-reveal]{ opacity:0; transform:translateY(24px); transition:opacity .7s ease, transform .7s ease; }
+  [data-reveal].show{ opacity:1; transform:translateY(0); }
+
+  @media (max-width: 860px){
+    .navlinks{ display:none; }
+    .split{ grid-template-columns:1fr; }
+    .bento{ grid-template-columns:repeat(2,1fr); }
+    .card.big{ grid-column:span 2; grid-row:span 1; }
+    .diff-row{ grid-template-columns:1fr; gap:10px; }
+    .diff-num{ font-size:24px; }
+  }
+  @media (max-width: 520px){
+    .bento{ grid-template-columns:1fr; }
+    .card.big{ grid-column:span 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+
+<header id="siteHeader">
+  <nav class="wrap">
+    <div class="logo"><span class="dot"></span>FORA</div>
+    <div class="navlinks">
+      <a href="#what">What is FORA</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#different">Why FORA</a>
+      <a href="#docs">Documents</a>
+    </div>
+    <a href="#get-started" class="cta-btn">Get started</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="glow"></div>
+  <div class="wrap">
+    <div class="eyebrow">● AI-assisted field safety documentation</div>
+    <h1>Paperwork that keeps up with <span class="out">the job site.</span></h1>
+    <p class="sub">Describe the task by voice or text. FORA cross-references your company's own procedures and hands back a complete hazard assessment — before you've put your gloves back on.</p>
+    <div class="hero-cta">
+      <a href="#get-started" class="cta-btn">Get started</a>
+      <a href="#what" class="cta-ghost">See how it works ↓</a>
+    </div>
+  </div>
+  <div class="scrollcue"><div class="bar"></div>SCROLL</div>
+</section>
+
+<section id="what">
+  <div class="wrap">
+    <div class="split">
+      <div data-reveal>
+        <div class="kicker">What is FORA</div>
+        <h2 style="font-size:36px; font-weight:700; margin-bottom:22px; line-height:1.15;">Field safety paperwork, generated — not filled in.</h2>
+        <p>Every shift starts with the same question: <strong>what are today's hazards?</strong> Normally that means digging through a binder, guessing at PPE, or copy-pasting last week's form.</p>
+        <p>FORA replaces the guesswork. A worker says or types what they're about to do, and FORA reads it against <strong>your company's own uploaded SOPs</strong> — not a generic template library — to produce hazards, controls, required PPE, and compliance alerts in seconds.</p>
+        <p>It's not a form builder wearing an AI badge. It's a safety platform that starts every document with your actual procedures.</p>
+      </div>
+      <div class="mock" data-reveal>
+        <div class="dots"><span></span><span></span><span></span></div>
+        <div class="mock-input">🎙️ <span>"Replacing a hydraulic hose on the loader, ground level, near active traffic."</span></div>
+        <div class="mock-arrow">↓ cross-referenced against site SOPs ↓</div>
+        <div class="mock-out">
+          <div class="mock-chip"><b>Hazard</b>Pressurized fluid release</div>
+          <div class="mock-chip"><b>Hazard</b>Struck-by / traffic exposure</div>
+          <div class="mock-chip"><b>Control</b>Lockout / bleed pressure</div>
+          <div class="mock-chip"><b>PPE</b>Face shield, gloves, hi-vis</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="capabilities">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">What it can do</div>
+      <h2>One platform for the whole safety workflow.</h2>
+      <p>Not just hazard assessments — FORA covers the full set of paperwork a field team generates in a normal week, all in one place.</p>
+    </div>
+    <div class="bento" data-reveal>
+      <div class="card big">
+        <div class="icon">✦</div>
+        <h3>AI-generated hazard assessments</h3>
+        <p>Voice or text in, a complete FLHA out — hazards, controls, PPE, and compliance flags, matched against your company's real procedures.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🗂</div>
+        <h3>Eight document types</h3>
+        <p>FLHA, equipment inspections, toolbox talks, near-miss and incident reports, daily reports, and monthly site inspections.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📊</div>
+        <h3>Supervisor dashboard</h3>
+        <p>Every submission in one grouped, filterable view — with equipment and preventative-maintenance tracking built in.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🏢</div>
+        <h3>Multi-tenant by design</h3>
+        <p>Every company's data, forms, and users are fully isolated from every other company's — no cross-visibility, ever.</p>
+      </div>
+      <div class="card">
+        <div class="icon">⚙️</div>
+        <h3>Admin control panel</h3>
+        <p>Onboard companies, manage rosters and login codes, toggle which documents each company uses, set plan tiers.</p>
+      </div>
+      <div class="card">
+        <div class="icon">⏱</div>
+        <h3>Time clock, built in</h3>
+        <p>Crews clock in and out without leaving the platform their paperwork already lives in.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📄</div>
+        <h3>PDF, every time</h3>
+        <p>Every submission exports to a clean, audit-ready PDF automatically — nothing to reformat.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="different">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">Why FORA is different</div>
+      <h2>It's not a form. It's not a chatbot. It's both, done right.</h2>
+    </div>
+    <div class="diffs">
+      <div class="diff-row" data-reveal>
+        <div class="diff-num">01</div>
+        <h3>Grounded in your SOPs, not the internet</h3>
+        <p>Most "AI safety" tools generate generic, plausible-sounding hazards. FORA cross-references your company's own uploaded procedures — the output reflects how your site actually operates.</p>
+      </div>
+      <div class="diff-row" data-reveal>
+        <div class="diff-num">02</div>
+        <h3>Built for the glove, not the desk</h3>
+        <p>Voice-first entry means a worker can generate a compliant hazard assessment standing in the field, phone in a dusty hand, without typing a paragraph.</p>
+      </div>
+      <div class="diff-row" data-reveal>
+        <div class="diff-num">03</div>
+        <h3>One tool, eight forms</h3>
+        <p>No stack of disconnected apps for inspections, toolbox talks, and incident reports. Everything a crew files lives in the same place, reviewed the same way.</p>
+      </div>
+      <div class="diff-row" data-reveal>
+        <div class="diff-num">04</div>
+        <h3>Multi-tenant isolation from day one</h3>
+        <p>Every company's data is walled off from every other's at the access-control layer — not a setting you have to remember to turn on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="wrap">
+    <div class="section-head" data-reveal style="margin-bottom:32px;">
+      <div class="kicker">Document library</div>
+      <h2 style="font-size:30px;">Everything your site files, in one place.</h2>
+    </div>
+    <div class="chips" data-reveal>
+      <div class="chip"><span class="n">01</span>Field Level Hazard Assessment</div>
+      <div class="chip"><span class="n">02</span>Equipment Inspection</div>
+      <div class="chip"><span class="n">03</span>Toolbox Talk</div>
+      <div class="chip"><span class="n">04</span>Near Miss Report</div>
+      <div class="chip"><span class="n">05</span>Incident Report</div>
+      <div class="chip"><span class="n">06</span>Daily Report</div>
+      <div class="chip"><span class="n">07</span>Monthly Site Inspection</div>
+      <div class="chip"><span class="n">08</span>Custom Documents</div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="get-started">
+  <div class="glow"></div>
+  <div class="wrap">
+    <h2 data-reveal>Give your crew paperwork that works as hard as they do.</h2>
+    <p data-reveal>Set up your company, upload your SOPs, and generate your first hazard assessment in minutes.</p>
+    <div class="btnrow" data-reveal>
+      <a href="#" class="cta-btn">Get started</a>
+      <a href="#" class="cta-ghost">Talk to us</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-row">
+    <div class="logo"><span class="dot"></span>FORA</div>
+    <div class="foot-links">
+      <a href="#what">What is FORA</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#different">Why FORA</a>
+    </div>
+    <div class="foot-copy">© <span id="year"></span> FORA. AI-assisted field safety documentation.</div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  const header = document.getElementById('siteHeader');
+  window.addEventListener('scroll', () => {
+    header.classList.toggle('solid', window.scrollY > 20);
+  }, { passive: true });
+
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('show'); });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('[data-reveal]').forEach(el => io.observe(el));
+</script>
+
+</body>
+</html>
