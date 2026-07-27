@@ -261,6 +261,27 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { /* optimistic update already applied; next reload will reconcile */ }
   };
 
+  const [approvingId, setApprovingId] = useState(null);
+  const [approvalResults, setApprovalResults] = useState({}); // { [requestId]: { companyCode, roster, skippedUserLines, sitesCreated } }
+
+  const approveOnboardingRequest = async (id) => {
+    setApprovingId(id);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve_onboarding_request", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't approve this request."); setApprovingId(null); return; }
+      setApprovalResults(prev => ({ ...prev, [id]: data }));
+      setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, status: "in_progress", created_company_id: data.companyId } : r));
+      await loadAll();
+    } catch (e) {
+      setMsg("Couldn't approve this request. Try again.");
+    }
+    setApprovingId(null);
+  };
+
   const saveMasterCode = async () => {
     setMsg("");
     if (!masterCodeInput.trim()) { setMsg("Enter a new code."); return; }
@@ -1007,9 +1028,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             onboardingRequests.map(r => (
               <div key={r.id} style={{ ...st.card, marginBottom: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 16, color: C.ink }}>{r.company_name || "Unnamed company"}</div>
-                    <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {r.logo_url && <img src={r.logo_url} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: "contain", background: C.bg, border: `1px solid ${C.line}` }} />}
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: C.ink }}>{r.company_name || "Unnamed company"}</div>
+                      <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
+                    </div>
                   </div>
                   <select
                     value={r.status}
@@ -1055,6 +1079,51 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Links expire after 1 hour — reopen this page for fresh ones.</div>
                   </div>
                 )}
+
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
+                  {r.created_company_id ? (
+                    approvalResults[r.id] ? (
+                      <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, padding: 14 }}>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: "#166534", marginBottom: 8 }}>
+                          Company created — code {approvalResults[r.id].companyCode}
+                        </div>
+                        {approvalResults[r.id].sitesCreated > 0 && (
+                          <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].sitesCreated} site(s) added.</div>
+                        )}
+                        {approvalResults[r.id].roster.length > 0 && (
+                          <>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 8, marginBottom: 4 }}>
+                              Roster PINs — shown once, copy these now
+                            </div>
+                            {approvalResults[r.id].roster.map((p, i) => (
+                              <div key={i} style={{ fontSize: 13, color: C.ink, fontFamily: "monospace" }}>
+                                {p.name} ({p.role}) — PIN <strong>{p.pin}</strong>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                        {approvalResults[r.id].skippedUserLines.length > 0 && (
+                          <div style={{ fontSize: 12, color: C.amberDark, marginTop: 8 }}>
+                            Couldn't parse (add manually): {approvalResults[r.id].skippedUserLines.join("; ")}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+                          Equipment wasn't auto-added — use the Units / equipment list above with the company's Equipment tab.
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, color: C.green, fontWeight: 700 }}>✓ Company already created from this request</div>
+                    )
+                  ) : (
+                    <button
+                      style={{ ...st.amberBtn, opacity: approvingId === r.id ? 0.7 : 1 }}
+                      disabled={approvingId === r.id}
+                      onClick={() => approveOnboardingRequest(r.id)}
+                    >
+                      {approvingId === r.id ? "Approving…" : "✓ Approve — create company"}
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}

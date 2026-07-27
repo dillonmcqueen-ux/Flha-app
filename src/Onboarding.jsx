@@ -45,6 +45,7 @@ const emptyForm = {
 export default function Onboarding() {
   const [form, setForm] = useState(emptyForm);
   const [files, setFiles] = useState([]);
+  const [logoFile, setLogoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -54,6 +55,10 @@ export default function Onboarding() {
 
   const handleFiles = (e) => {
     setFiles(Array.from(e.target.files || []));
+  };
+
+  const handleLogoFile = (e) => {
+    setLogoFile(e.target.files?.[0] || null);
   };
 
   const uploadSops = async () => {
@@ -68,6 +73,16 @@ export default function Onboarding() {
     return paths;
   };
 
+  const uploadLogo = async () => {
+    if (!logoFile) return "";
+    const ext = logoFile.name.split(".").pop();
+    const filename = `onboarding_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+    const { error: upErr } = await supabase.storage.from("company-logos").upload(filename, logoFile, { contentType: logoFile.type, upsert: false });
+    if (upErr) throw new Error(`Couldn't upload logo: ${upErr.message}`);
+    const { data } = supabase.storage.from("company-logos").getPublicUrl(filename);
+    return data?.publicUrl || "";
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -80,7 +95,7 @@ export default function Onboarding() {
     setSubmitting(true);
     try {
       setUploading(true);
-      const sopFilePaths = await uploadSops();
+      const [sopFilePaths, logoUrl] = await Promise.all([uploadSops(), uploadLogo()]);
       setUploading(false);
 
       const res = await fetch("/api/login", {
@@ -98,6 +113,7 @@ export default function Onboarding() {
           usersList: form.usersList.trim(),
           customRequest: form.customRequest.trim(),
           sopFilePaths,
+          logoUrl,
         }),
       });
       const data = await res.json();
@@ -162,6 +178,11 @@ export default function Onboarding() {
             <input style={styles.input} value={form.address} onChange={set("address")} placeholder="Street, city, province" />
           </div>
         </div>
+
+        <div style={styles.label}>Company logo</div>
+        <div style={styles.hint}>Optional — shows on your login screen and generated PDFs.</div>
+        <input style={styles.input} type="file" onChange={handleLogoFile} accept=".png,.jpg,.jpeg,.svg" />
+        {logoFile && <div style={styles.fileList}>{logoFile.name}</div>}
 
         <div style={styles.label}>Sites</div>
         <div style={styles.hint}>One per line — job sites, yards, or locations your crew works out of.</div>

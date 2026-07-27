@@ -58,6 +58,26 @@ function hashPin(pin, salt) {
   return crypto.scryptSync(String(pin), salt, 64).toString('hex');
 }
 
+// Same shape as the manual "Onboard Company" flow's suggested code, for
+// when a company is created automatically from an onboarding request
+// instead of typed in by hand.
+function randomSuffix(len = 3) {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+function codePrefix(name) {
+  const clean = (name || '').trim().toUpperCase();
+  if (!clean) return 'CO';
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 3);
+  return words.map(w => w[0]).join('').slice(0, 3);
+}
+function genPin() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -153,6 +173,100 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin.from('onboarding_requests').update({ status }).eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't update status." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ── Onboarding intake — approve: create the company from the
+    // submission in one click. Sites (one per line) are created outright
+    // since they're a single plain field. Users are parsed as "Name —
+    // role" / "Name - role" and get a random 4-digit PIN each — any line
+    // that doesn't parse cleanly is skipped and reported back rather than
+    // guessed at. Equipment is deliberately NOT auto-created: its fields
+    // (year/make/model/unit number) are too easy to mis-parse from free
+    // text, so units_list stays visible on the request for a quick manual
+    // add instead. created_company_id is stamped on the request so this
+    // can't be run twice into duplicate companies.
+    if (action === 'approve_onboarding_request') {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing request id.' });
+
+      const { data: reqRows, error: reqErr } = await supabaseAdmin
+        .from('onboarding_requests')
+        .select('*')
+        .eq('id', id)
+        .limit(1);
+      if (reqErr || !reqRows || reqRows.length === 0) return res.status(404).json({ error: 'Request not found.' });
+      const request = reqRows[0];
+
+      if (request.created_company_id) {
+        return res.status(400).json({ error: 'Already approved — a company was already created from this request.' });
+      }
+      if (!request.company_name?.trim()) {
+        return res.status(400).json({ error: 'This request has no company name to onboard.' });
+      }
+
+      const prefix = codePrefix(request.company_name);
+      let companyCode = '';
+      for (let tries = 0; tries < 8; tries++) {
+        const candidate = `${prefix}${randomSuffix()}`;
+        const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('company_code', candidate).limit(1);
+        if (!clash || clash.length === 0) { companyCode = candidate; break; }
+      }
+      if (!companyCode) return res.status(500).json({ error: "Couldn't generate a unique company code. Try again." });
+
+      let acct = genAccountNumber();
+      for (let tries = 0; tries < 5; tries++) {
+        const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('account_number', acct).limit(1);
+        if (!clash || clash.length === 0) break;
+        acct = genAccountNumber();
+      }
+
+      const { data: companyRows, error: coErr } = await supabaseAdmin.from('companies').insert({
+        name: request.company_name.trim(),
+        company_code: companyCode,
+        account_number: acct,
+        contact_name: request.contact_name || null,
+        contact_email: request.contact_email || null,
+        contact_phone: request.contact_phone || null,
+        address: request.address || null,
+        logo_url: request.logo_url || null,
+      }).select('id').limit(1);
+      if (coErr) return res.status(500).json({ error: "Couldn't create company: " + coErr.message });
+      const companyId = companyRows[0].id;
+
+      const siteNames = (request.sites_list || '').split('\n').map(s => s.trim()).filter(Boolean);
+      if (siteNames.length > 0) {
+        await supabaseAdmin.from('sites').insert(siteNames.map(name => ({ company_id: companyId, name })));
+      }
+
+      const userLines = (request.users_list || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const roster = [];
+      const skippedUserLines = [];
+      for (const line of userLines) {
+        const m = line.match(/^(.+?)\s*[—-]\s*(worker|supervisor)$/i);
+        const name = m && m[1].trim();
+        if (!m || !name) { skippedUserLines.push(line); continue; }
+        const role = m[2].toLowerCase();
+        const pin = genPin();
+        const salt = genSalt();
+        roster.push({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt, active: true, pin });
+      }
+      if (roster.length > 0) {
+        const { error: rosterErr } = await supabaseAdmin.from('roster').insert(
+          roster.map(({ pin, ...r }) => r)
+        );
+        if (!rosterErr) await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
+      }
+
+      await supabaseAdmin.from('onboarding_requests').update({ status: 'in_progress', created_company_id: companyId }).eq('id', id);
+
+      return res.status(200).json({
+        ok: true,
+        companyId,
+        companyCode,
+        sitesCreated: siteNames.length,
+        roster: roster.map(({ name, role, pin }) => ({ name, role, pin })),
+        skippedUserLines,
+      });
     }
 
     // ── Onboard a new company ───────────────────────────────────────────

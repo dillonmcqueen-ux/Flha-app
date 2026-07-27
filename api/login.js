@@ -292,7 +292,7 @@ export default async function handler(req, res) {
   if (action === 'submit_onboarding_intake') {
     const {
       companyName, contactName, contactEmail, contactPhone, address,
-      sitesList, unitsList, usersList, customRequest, sopFilePaths,
+      sitesList, unitsList, usersList, customRequest, sopFilePaths, logoUrl,
     } = req.body;
 
     if (!companyName || !contactEmail) {
@@ -310,6 +310,7 @@ export default async function handler(req, res) {
       users_list: usersList || null,
       custom_request: customRequest || null,
       sop_file_paths: Array.isArray(sopFilePaths) ? sopFilePaths : [],
+      logo_url: logoUrl || null,
     };
 
     const { data, error } = await supabaseAdmin
