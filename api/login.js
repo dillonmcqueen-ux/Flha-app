@@ -13,6 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -131,6 +132,47 @@ async function verifyMasterCode(entered) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Best-effort notification for a new onboarding submission — silently
+// skipped until GMAIL_APP_PASSWORD is configured, and never allowed to
+// fail the submission itself (the row is already saved by the time this
+// runs).
+async function sendOnboardingNotification(record) {
+  if (!process.env.GMAIL_APP_PASSWORD) return;
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: 'forafieldsolutions@gmail.com',
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+
+  const text = [
+    `Company: ${record.company_name || '—'}`,
+    `Contact: ${record.contact_name || '—'} · ${record.contact_email || '—'} · ${record.contact_phone || '—'}`,
+    `Address: ${record.address || '—'}`,
+    '',
+    `Sites:\n${record.sites_list || '—'}`,
+    '',
+    `Units / Equipment:\n${record.units_list || '—'}`,
+    '',
+    `Users:\n${record.users_list || '—'}`,
+    '',
+    `Custom form / build request:\n${record.custom_request || '—'}`,
+    '',
+    `SOP files uploaded: ${record.sop_file_paths?.length || 0}`,
+    '',
+    'Review and mark status in the Admin Panel → Onboarding Requests tab.',
+  ].join('\n');
+
+  await transporter.sendMail({
+    from: 'FORA Onboarding <forafieldsolutions@gmail.com>',
+    to: 'forafieldsolutions@gmail.com',
+    subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
+    text,
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -242,6 +284,47 @@ export default async function handler(req, res) {
     };
     const token = signSession(payload);
     return res.status(200).json({ session: payload, token });
+  }
+
+  // ── Onboarding intake — public, no login required. A brand-new customer
+  // fills this in right after paying, before they have any credentials. ──
+  if (action === 'submit_onboarding_intake') {
+    const {
+      companyName, contactName, contactEmail, contactPhone, address,
+      sitesList, unitsList, usersList, customRequest, sopFilePaths,
+    } = req.body;
+
+    if (!companyName || !contactEmail) {
+      return res.status(400).json({ error: 'Company name and contact email are required.' });
+    }
+
+    const record = {
+      company_name: companyName,
+      contact_name: contactName || null,
+      contact_email: contactEmail,
+      contact_phone: contactPhone || null,
+      address: address || null,
+      sites_list: sitesList || null,
+      units_list: unitsList || null,
+      users_list: usersList || null,
+      custom_request: customRequest || null,
+      sop_file_paths: Array.isArray(sopFilePaths) ? sopFilePaths : [],
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('onboarding_requests')
+      .insert(record)
+      .select('id')
+      .limit(1);
+    if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
+
+    try {
+      await sendOnboardingNotification(record);
+    } catch (e) {
+      console.error('Onboarding notification email failed:', e.message);
+    }
+
+    return res.status(200).json({ ok: true, id: data?.[0]?.id || null });
   }
 
   // ── Step 1: admin code, or company code ─────────────────────────────────

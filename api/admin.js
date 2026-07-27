@@ -122,6 +122,39 @@ export default async function handler(req, res) {
       return res.status(200).json({ logs: enriched });
     }
 
+    // ── Onboarding intake — submissions from the public /onboarding form,
+    // newest first, with short-lived signed links for any uploaded SOP
+    // files (the storage bucket is private, so a plain public URL won't
+    // work) ──────────────────────────────────────────────────────────
+    if (action === 'list_onboarding_requests') {
+      const { data: requests, error: reqErr } = await supabaseAdmin
+        .from('onboarding_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (reqErr) return res.status(500).json({ error: 'Could not load onboarding requests.' });
+
+      const enriched = await Promise.all((requests || []).map(async (r) => {
+        if (!r.sop_file_paths || r.sop_file_paths.length === 0) return { ...r, sop_file_urls: [] };
+        const { data: signed } = await supabaseAdmin.storage
+          .from('onboarding-uploads')
+          .createSignedUrls(r.sop_file_paths, 60 * 60); // 1 hour
+        return { ...r, sop_file_urls: (signed || []).map(s => s.signedUrl).filter(Boolean) };
+      }));
+
+      return res.status(200).json({ requests: enriched });
+    }
+
+    // ── Onboarding intake — mark a submission new / in progress / done ──
+    if (action === 'update_onboarding_status') {
+      const { id, status } = req.body;
+      if (!id || !['new', 'in_progress', 'done'].includes(status)) {
+        return res.status(400).json({ error: 'Missing or invalid status.' });
+      }
+      const { error } = await supabaseAdmin.from('onboarding_requests').update({ status }).eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't update status." });
+      return res.status(200).json({ ok: true });
+    }
+
     // ── Onboard a new company ───────────────────────────────────────────
     // New companies get only the unified company_code — no legacy
     // worker_code/supervisor_code, since roster login is how they'll work

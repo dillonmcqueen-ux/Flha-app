@@ -234,6 +234,33 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { /* leave list as-is if the request fails */ }
   };
 
+  // ── Onboarding Requests: submissions from the public /onboarding form ──
+  const [onboardingRequests, setOnboardingRequests] = useState([]);
+  const [loadingOnboarding, setLoadingOnboarding] = useState(false);
+
+  const loadOnboardingRequests = async () => {
+    setLoadingOnboarding(true);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_onboarding_requests", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setOnboardingRequests(data.requests || []);
+    } catch (e) { /* leave list as-is if the request fails */ }
+    setLoadingOnboarding(false);
+  };
+
+  const updateOnboardingStatus = async (id, status) => {
+    setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    try {
+      await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_onboarding_status", token, id, status }),
+      });
+    } catch (e) { /* optimistic update already applied; next reload will reconcile */ }
+  };
+
   const saveMasterCode = async () => {
     setMsg("");
     if (!masterCodeInput.trim()) { setMsg("Enter a new code."); return; }
@@ -310,7 +337,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setCounts(c);
     setLoading(false);
   };
-  useEffect(() => { loadAll(); }, [token]);
+  useEffect(() => { loadAll(); loadOnboardingRequests(); }, [token]);
 
   const activeCompany = companies.find(c => c.id === activeId);
 
@@ -831,6 +858,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ display: "flex", gap: 8 }}>
               <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
               <button style={st.darkBtn} onClick={() => { setView("allCodes"); setMsg(""); loadAllCodesView(); }}>All Codes</button>
+              <button style={st.darkBtn} onClick={() => { setView("onboardingRequests"); setMsg(""); loadOnboardingRequests(); }}>
+                Onboarding Requests{onboardingRequests.filter(r => r.status === "new").length > 0 ? ` (${onboardingRequests.filter(r => r.status === "new").length})` : ""}
+              </button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
@@ -947,6 +977,87 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               </>
             )}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ ONBOARDING REQUESTS ═════════════════════════════════
+  if (view === "onboardingRequests") {
+    const STATUS_LABEL = { new: "New", in_progress: "In progress", done: "Done" };
+    const STATUS_COLOR = { new: C.amberDark, in_progress: "#2563EB", done: C.green };
+    return (
+      <div style={st.wrap}>
+        <div style={st.topbar}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: 20 }}>Onboarding Requests</div>
+            <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); }}>← Console</button>
+          </div>
+        </div>
+        <div style={st.body}>
+          {loadingOnboarding ? (
+            <div style={{ ...st.card, textAlign: "center", color: C.muted, padding: "30px 20px" }}>Loading…</div>
+          ) : onboardingRequests.length === 0 ? (
+            <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
+              <div style={{ fontSize: 42, marginBottom: 10 }}>📥</div>
+              <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No submissions yet</div>
+              <div style={{ fontSize: 14, color: C.inkSoft }}>New customers land here after filling out the onboarding form.</div>
+            </div>
+          ) : (
+            onboardingRequests.map(r => (
+              <div key={r.id} style={{ ...st.card, marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 16, color: C.ink }}>{r.company_name || "Unnamed company"}</div>
+                    <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
+                  </div>
+                  <select
+                    value={r.status}
+                    onChange={e => updateOnboardingStatus(r.id, e.target.value)}
+                    style={{
+                      padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
+                      color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer",
+                    }}
+                  >
+                    {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 10, lineHeight: 1.6 }}>
+                  <strong style={{ color: C.ink }}>{r.contact_name || "—"}</strong> · {r.contact_email || "—"} · {r.contact_phone || "—"}
+                  {r.address && <div>{r.address}</div>}
+                </div>
+
+                {[
+                  ["Sites", r.sites_list],
+                  ["Units / equipment", r.units_list],
+                  ["Users", r.users_list],
+                  ["Custom form / build request", r.custom_request],
+                ].filter(([, v]) => v && v.trim()).map(([label, value]) => (
+                  <div key={label} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.amberDark, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{label}</div>
+                    <div style={{ fontSize: 13, color: C.ink, whiteSpace: "pre-wrap" }}>{value}</div>
+                  </div>
+                ))}
+
+                {r.sop_file_urls && r.sop_file_urls.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.amberDark, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                      SOP files ({r.sop_file_urls.length})
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {r.sop_file_urls.map((url, i) => (
+                        <a key={i} href={url} target="_blank" rel="noreferrer" style={{ ...st.code, textDecoration: "none" }}>
+                          File {i + 1} ↗
+                        </a>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Links expire after 1 hour — reopen this page for fresh ones.</div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </div>
     );
