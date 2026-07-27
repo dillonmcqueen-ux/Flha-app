@@ -13,7 +13,6 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import nodemailer from 'nodemailer';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -133,19 +132,10 @@ async function verifyMasterCode(entered) {
 }
 
 // Best-effort notification for a new onboarding submission — silently
-// skipped until GMAIL_APP_PASSWORD is configured, and never allowed to
-// fail the submission itself (the row is already saved by the time this
-// runs).
+// skipped until RESEND_API_KEY is configured, and never allowed to fail
+// the submission itself (the row is already saved by the time this runs).
 async function sendOnboardingNotification(record) {
-  if (!process.env.GMAIL_APP_PASSWORD) return;
-
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: 'forafieldsolutions@gmail.com',
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
+  if (!process.env.RESEND_API_KEY) return;
 
   const text = [
     `Company: ${record.company_name || '—'}`,
@@ -165,12 +155,23 @@ async function sendOnboardingNotification(record) {
     'Review and mark status in the Admin Panel → Onboarding Requests tab.',
   ].join('\n');
 
-  await transporter.sendMail({
-    from: 'FORA Onboarding <forafieldsolutions@gmail.com>',
-    to: 'forafieldsolutions@gmail.com',
-    subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
-    text,
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: 'FORA Onboarding <onboarding@resend.dev>',
+      to: 'forafieldsolutions@gmail.com',
+      subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
+      text,
+    }),
   });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend API error: ${res.status} ${body}`);
+  }
 }
 
 export default async function handler(req, res) {
