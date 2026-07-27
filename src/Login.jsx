@@ -468,6 +468,12 @@ export default function Login() {
           </>
         )}
       </div>
+
+      <div style={{ position: "fixed", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 12, color: "#6B7280" }}>
+        <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: "#6B7280" }}>Privacy Policy</a>
+        <span style={{ margin: "0 8px" }}>·</span>
+        <a href="https://forafieldsolutions.com/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: "#6B7280" }}>Terms of Use</a>
+      </div>
     </div>
   );
 }
