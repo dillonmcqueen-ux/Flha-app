@@ -21,6 +21,9 @@ Point any static host (Vercel, Netlify, GitHub Pages, S3, etc.) at this
 environment variables. If deploying to Vercel, create it as its own project
 with this folder as the root directory, separate from the app's project.
 
+Deployed at the `fora-website` Vercel project, connected to this repo's
+`main` branch with Root Directory set to `website`.
+
 ## Editing
 
 Everything — HTML, CSS, and the small amount of JS (scroll-reveal, sticky
