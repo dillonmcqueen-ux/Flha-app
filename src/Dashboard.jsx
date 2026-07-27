@@ -903,6 +903,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [generatingTimeClockPdf, setGeneratingTimeClockPdf] = useState(false);
   const [timeClockPdfError, setTimeClockPdfError] = useState("");
   const [generatingNewTimeClockReport, setGeneratingNewTimeClockReport] = useState(false);
+
+  // ── Roster: view the company's roster and reset an individual PIN ─────
+  const [rosterList, setRosterList] = useState([]);
+  const [loadingRosterList, setLoadingRosterList] = useState(false);
+  const [rosterRevealedPin, setRosterRevealedPin] = useState(null); // { name, pin }
+  const [resettingRosterId, setResettingRosterId] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedFlha, setSelectedFlha] = useState(null);
@@ -1299,6 +1306,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     customdocs: hasActiveCustomForm,
     maintenance: isDocActive("maintenance"),
     timeclock: isDocActive("timeclock"),
+    roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     analytics: true,
     sops: true,
   };
@@ -1306,7 +1314,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const CATEGORIES = [
     { key: "submissions", label: "📋 Submissions", tabs: ["flhas", "inspections", "toolbox", "nearmiss", "incident", "daily", "monthly", "customdocs"] },
     { key: "equipment", label: "🔧 Equipment", tabs: ["equipment", "maintenance"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock"] },
+    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster"] },
     { key: "insights", label: "📊 Insights", tabs: ["analytics", "sops"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
@@ -1461,6 +1469,42 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     loadTimeClockEntries();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
+
+  // ── Roster: view the roster and reset an individual PIN ───────────────
+  const loadRosterList = async () => {
+    if (!selectedCompany) return;
+    setLoadingRosterList(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_roster", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setRosterList(data.members || []);
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingRosterList(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "roster" || !selectedCompany) return;
+    setRosterRevealedPin(null);
+    loadRosterList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedCompany, token]);
+
+  const resetRosterMemberPin = async (id, name) => {
+    setResettingRosterId(id);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_roster_pin", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Couldn't reset PIN."); setResettingRosterId(null); return; }
+      setRosterRevealedPin({ name, pin: data.pin });
+    } catch (e) { alert("Couldn't reset PIN. Try again."); }
+    setResettingRosterId(null);
+  };
 
   const saveEditEntry = async (entryId) => {
     if (!editEntryForm.clockIn) return;
@@ -2250,6 +2294,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           )}
           {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
             <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
+          )}
+          {TAB_VISIBLE.roster && activeCategory === "workforce" && (
+            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
           )}
           {activeCategory === "insights" && (
             <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
@@ -3373,6 +3420,55 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
                     </div>
                   </div>
                 ))
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab === "roster" && TAB_VISIBLE.roster && (
+          <>
+            {rosterRevealedPin && (
+              <div style={{ ...styles.card, background: "#FFFBEB", border: "1.5px solid #F59E0B" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E", marginBottom: 4 }}>PIN for {rosterRevealedPin.name} — shown once, write it down now</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 800, color: "#1E3A5F", background: "#fff", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "6px 14px" }}>{rosterRevealedPin.pin}</span>
+                  <button onClick={() => setRosterRevealedPin(null)} style={{ background: "transparent", border: "none", color: "#6B7280", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
+                </div>
+              </div>
+            )}
+
+            <div style={styles.card}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>{company?.name} — Roster</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>Reset a forgotten PIN below — it takes effect immediately and is shown once.</div>
+
+              {loadingRosterList ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+              ) : rosterList.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No one on the roster yet.</div>
+              ) : (
+                ["supervisor", "worker"].map(roleGroup => {
+                  const group = rosterList.filter(m => m.role === roleGroup && m.active);
+                  if (group.length === 0) return null;
+                  return (
+                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? "🦺" : "👷"} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
+                      {group.map((m, i) => (
+                        <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? "1px solid #F1F5F9" : "none" }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{m.name}</div>
+                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
+                          </div>
+                          <button
+                            onClick={() => resetRosterMemberPin(m.id, m.name)}
+                            disabled={resettingRosterId === m.id}
+                            style={{ background: "transparent", border: "1.5px solid #E2E8F0", color: "#334155", fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}
+                          >
+                            {resettingRosterId === m.id ? "Resetting…" : "Reset PIN"}
+                          </button>
+                        </div>
+                      ))}
+                    </CollapsibleGroup>
+                  );
+                })
               )}
             </div>
           </>

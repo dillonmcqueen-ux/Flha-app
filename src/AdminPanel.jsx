@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
+import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -121,6 +122,8 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [revealedPin, setRevealedPin] = useState(null); // { name, pin }
   const [rosterCounts, setRosterCounts] = useState({});
   const [cutoverSaving, setCutoverSaving] = useState(false);
+  const [regeneratingAll, setRegeneratingAll] = useState(false);
+  const [allPinsResult, setAllPinsResult] = useState(null); // { roster: [{name, role, pin}], companyName, companyCode }
 
   const loadRoster = async (companyId) => {
     setLoadingRoster(true);
@@ -195,6 +198,25 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       if (!res.ok) { setMsg(data.error || "Couldn't reset PIN."); return; }
       setRevealedPin({ name, pin: data.pin });
     } catch (e) { setMsg("Couldn't reset PIN. Try again."); }
+  };
+
+  const regenerateAllPins = async () => {
+    if (!window.confirm(`Regenerate PINs for all ${rosterActiveCount} active roster member(s)? Everyone's current PIN stops working immediately.`)) return;
+    setMsg("");
+    setRegeneratingAll(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "regenerate_all_pins", token, companyId: activeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't regenerate PINs."); setRegeneratingAll(false); return; }
+      setAllPinsResult({ roster: data.roster, companyName: activeCompany?.name || "", companyCode: activeCompany?.company_code || "" });
+      await loadRoster(activeId);
+    } catch (e) {
+      setMsg("Couldn't regenerate PINs. Try again.");
+    }
+    setRegeneratingAll(false);
   };
 
   const setCutover = async (enabled) => {
@@ -1181,7 +1203,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setManageTab(tab);
     setMsg("");
     if (tab === "forms") loadDocSettings(activeId);
-    if (tab === "roster") { setRevealedPin(null); loadRoster(activeId); }
+    if (tab === "roster") { setRevealedPin(null); setAllPinsResult(null); loadRoster(activeId); }
   };
 
   const cnt = counts[activeId] || { flhas: 0, sops: 0 };
@@ -1514,6 +1536,38 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 </div>
               </div>
             )}
+
+            {allPinsResult && (
+              <div style={{ ...st.card, background: "#FFFBEB", border: `1.5px solid ${C.amber}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 10 }}>
+                  All PINs regenerated — shown once, download or copy them now
+                </div>
+                {allPinsResult.roster.map((p, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: i < allPinsResult.roster.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                    <span style={{ fontSize: 13, color: C.ink }}>{p.name} <span style={{ color: C.muted, fontSize: 11, textTransform: "uppercase" }}>({p.role})</span></span>
+                    <span style={st.code} onClick={() => copyText(p.pin)}>{p.pin}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button style={{ ...st.darkBtn, flex: 1 }} onClick={() => generateRosterPinsPDF(allPinsResult)}>⬇ Download PDF</button>
+                  <button onClick={() => setAllPinsResult(null)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 13, cursor: "pointer", fontWeight: 600, borderRadius: 9, padding: "0 16px" }}>Done</button>
+                </div>
+              </div>
+            )}
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Regenerate all PINs</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                Replaces every active person's PIN at once — useful right after onboarding, or if you need a clean slate. Everyone's current PIN stops working immediately; the new list is shown once and downloadable as a PDF.
+              </div>
+              <button
+                style={{ ...st.darkBtn, width: "100%", opacity: (regeneratingAll || rosterActiveCount === 0) ? 0.6 : 1 }}
+                onClick={regenerateAllPins}
+                disabled={regeneratingAll || rosterActiveCount === 0}
+              >
+                {regeneratingAll ? "Regenerating…" : `Regenerate all ${rosterActiveCount} PIN(s)`}
+              </button>
+            </div>
 
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add to the roster</div>
