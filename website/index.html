@@ -121,36 +121,9 @@
   }
   .mock .dots{ display:flex; gap:6px; margin-bottom:18px; }
   .mock .dots span{ width:9px; height:9px; border-radius:50%; background:var(--line); }
-  .mock-input{
-    border:1px solid var(--orange-dim); background:#F9731608; border-radius:10px; padding:14px 16px;
-    font-size:13px; color:var(--text); margin-bottom:20px; display:flex; gap:10px; align-items:flex-start;
-  }
-  .mock-arrow{ text-align:center; color:var(--orange); font-size:12px; margin:14px 0; letter-spacing:.1em; }
-  .mock-out{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  .mock-chip{
-    border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:12px; color:var(--muted);
-  }
-  .mock-chip b{ display:block; color:var(--orange); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
 
-  /* supervisor dashboard mock */
-  .dash-mock-title{ font-size:12.5px; color:var(--muted); margin-bottom:18px; }
-  .dash-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
-  .dash-chip{ font-size:11.5px; padding:5px 12px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
-  .dash-chip.active{ border-color:var(--orange); color:var(--orange); background:#F9731612; }
-  .dash-row{ display:flex; align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--line); }
-  .dash-row:first-child{ border-top:none; }
-  .dash-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-  .dash-dot.flha{ background:var(--orange); }
-  .dash-dot.toolbox{ background:#60A5FA; }
-  .dash-dot.incident{ background:#F87171; }
-  .dash-dot.equipment{ background:#34D399; }
-  .dash-row-main{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-  .dash-row-title{ font-size:13px; color:var(--text); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .dash-row-sub{ font-size:11.5px; color:var(--muted); }
-  .dash-status{ font-size:11px; font-weight:600; padding:4px 10px; border-radius:6px; white-space:nowrap; }
-  .dash-status.ok{ background:#F9731614; color:var(--orange); }
-  .dash-status.pending{ background:#26262622; color:var(--muted); border:1px solid var(--line); }
-  .dash-status.flag{ background:#F8717120; color:#F87171; }
+  .shot{ width:100%; display:block; border-radius:10px; border:1px solid var(--line); }
+  .custom-card .shot{ margin-top:20px; }
 
   /* bento features */
   .bento{ display:grid; grid-template-columns:repeat(5, 1fr); gap:16px; }
@@ -318,14 +291,7 @@
       </div>
       <div class="mock" data-reveal>
         <div class="dots"><span></span><span></span><span></span></div>
-        <div class="mock-input">🎙️ <span>"Replacing a hydraulic hose on the loader, ground level, near active traffic."</span></div>
-        <div class="mock-arrow">↓ cross-referenced against your company's SOPs ↓</div>
-        <div class="mock-out">
-          <div class="mock-chip"><b>Hazard</b>Pressurized fluid release</div>
-          <div class="mock-chip"><b>Hazard</b>Struck-by / traffic exposure</div>
-          <div class="mock-chip"><b>Control</b>Lockout / bleed pressure</div>
-          <div class="mock-chip"><b>PPE</b>Face shield, gloves, hi-vis</div>
-        </div>
+        <img class="shot" src="images/screenshot-flha.jpg" alt="A FORA-generated Field Level Hazard Assessment showing SOP alerts triggered for an excavation task" loading="lazy" />
       </div>
     </div>
   </div>
@@ -385,6 +351,7 @@
           <li>Fuel logs</li>
           <li>Whatever else you already track</li>
         </ul>
+        <img class="shot" src="images/screenshot-customforms.jpg" alt="FORA's document picker showing a Fire Watch Checklist listed as a custom document alongside the standard forms" loading="lazy" />
         <p style="margin-top:16px; color:var(--orange); font-weight:600; font-size:14px;">$150 each, one-time</p>
       </div>
       <div class="custom-card">
@@ -396,6 +363,7 @@
           <li>Time clock</li>
           <li>Whatever you wish you could automate</li>
         </ul>
+        <img class="shot" src="images/screenshot-maintenance.jpg" alt="FORA's preventative maintenance tracker flagging equipment by usage hours since last service" loading="lazy" />
         <p style="margin-top:16px; color:var(--orange); font-weight:600; font-size:14px;">Priced based on scope of work</p>
       </div>
     </div>
@@ -414,48 +382,7 @@
       </div>
       <div class="mock">
         <div class="dots"><span></span><span></span><span></span></div>
-        <div class="dash-mock-title">Supervisor Dashboard — preview</div>
-        <div class="dash-filters">
-          <span class="dash-chip active">All</span>
-          <span class="dash-chip">FLHA</span>
-          <span class="dash-chip">Toolbox Talk</span>
-          <span class="dash-chip">Incident</span>
-          <span class="dash-chip">Equipment</span>
-        </div>
-        <div class="dash-rows">
-          <div class="dash-row">
-            <span class="dash-dot flha"></span>
-            <div class="dash-row-main">
-              <span class="dash-row-title">FLHA — Excavation, Site B</span>
-              <span class="dash-row-sub">M. Reyes · Today, 7:42 AM</span>
-            </div>
-            <span class="dash-status ok">Reviewed</span>
-          </div>
-          <div class="dash-row">
-            <span class="dash-dot toolbox"></span>
-            <div class="dash-row-main">
-              <span class="dash-row-title">Toolbox Talk — Confined Space Entry</span>
-              <span class="dash-row-sub">S. Kaur · Today, 7:15 AM</span>
-            </div>
-            <span class="dash-status pending">New</span>
-          </div>
-          <div class="dash-row">
-            <span class="dash-dot incident"></span>
-            <div class="dash-row-main">
-              <span class="dash-row-title">Near Miss — Struck-by, loading dock</span>
-              <span class="dash-row-sub">D. Okafor · Yesterday, 3:58 PM</span>
-            </div>
-            <span class="dash-status flag">Flagged</span>
-          </div>
-          <div class="dash-row">
-            <span class="dash-dot equipment"></span>
-            <div class="dash-row-main">
-              <span class="dash-row-title">Equipment Inspection — Skid Steer #4</span>
-              <span class="dash-row-sub">M. Reyes · Yesterday, 6:50 AM</span>
-            </div>
-            <span class="dash-status ok">Reviewed</span>
-          </div>
-        </div>
+        <img class="shot" src="images/screenshot-dashboard.jpg" alt="The FORA Supervisor Dashboard showing awaiting sign-off, needs review, open corrective actions, and docs this week, with Submissions, Equipment, Workforce, and Insights tabs" loading="lazy" />
       </div>
     </div>
     <p class="builtaround" data-reveal style="margin-top:56px;"><strong>How your data is protected:</strong> every request is checked against a signed, server-verified session before it ever reaches your data — nothing gets through unverified. Direct database access is refused by default: Row Level Security is switched on for every table with no bypass policies, so the access-controlled dashboard is the only door in. And it's scoped per company, so your dashboard only ever shows your data, walled off from every other company on FORA.</p>
