@@ -106,6 +106,8 @@ export default function Onboarding() {
       const [sopFilePaths, logoUrl] = await Promise.all([uploadSops(), uploadLogo()]);
       setUploading(false);
 
+      const stripeSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
+
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -122,6 +124,7 @@ export default function Onboarding() {
           customRequest: form.customRequest.trim(),
           sopFilePaths,
           logoUrl,
+          stripeSessionId,
         }),
       });
       const data = await res.json();

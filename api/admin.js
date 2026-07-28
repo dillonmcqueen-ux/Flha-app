@@ -5,11 +5,14 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import Stripe from 'stripe';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -229,9 +232,30 @@ export default async function handler(req, res) {
         contact_phone: request.contact_phone || null,
         address: request.address || null,
         logo_url: request.logo_url || null,
+        ...(['basic', 'advanced'].includes(request.plan_tier) ? { plan_tier: request.plan_tier } : {}),
+        stripe_customer_id: request.stripe_customer_id || null,
       }).select('id').limit(1);
       if (coErr) return res.status(500).json({ error: "Couldn't create company: " + coErr.message });
       const companyId = companyRows[0].id;
+
+      // Best-effort: this request came from a paid checkout, so pick up the
+      // subscription it created and stamp its status — lets the webhook
+      // (api/stripe-webhook.js) start syncing this company on the very next
+      // subscription event instead of only after one arrives from scratch.
+      if (stripe && request.stripe_customer_id) {
+        try {
+          const subs = await stripe.subscriptions.list({ customer: request.stripe_customer_id, limit: 1 });
+          const sub = subs.data[0];
+          if (sub) {
+            await supabaseAdmin.from('companies').update({
+              stripe_subscription_id: sub.id,
+              stripe_subscription_status: sub.status,
+            }).eq('id', companyId);
+          }
+        } catch (e) {
+          console.error('Could not look up Stripe subscription for approved company:', e.message);
+        }
+      }
 
       const siteNames = (request.sites_list || '').split('\n').map(s => s.trim()).filter(Boolean);
       if (siteNames.length > 0) {
