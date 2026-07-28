@@ -65,18 +65,23 @@ Set these on Vercel (Project Settings → Environment Variables):
 | `ANTHROPIC_API_KEY` | Yes | `/api/generate-flha` (AI hazard generation) |
 | `ADMIN_CODE` | No | A bootstrap admin login code, separate from the in-app admin-settable master code |
 | `CRON_SECRET` | No | Secures the weekly equipment-report cron job (`vercel.json`) |
-| `STRIPE_SECRET_KEY` | Yes (for billing) | `/api/stripe-webhook` (line-item/subscription lookups) and `/api/admin.js` (subscription lookup on onboarding approval) |
-| `STRIPE_WEBHOOK_SECRET` | Yes (for billing) | `/api/stripe-webhook` — verifies the `Stripe-Signature` header on incoming events |
+| `STRIPE_SECRET_KEY` | Yes (for billing) | `/api/cron-equipment-reports` (Stripe webhook handling) and `/api/admin.js` (subscription lookup on onboarding approval) |
+| `STRIPE_WEBHOOK_SECRET` | Yes (for billing) | `/api/cron-equipment-reports` — verifies the `Stripe-Signature` header on incoming Stripe events |
 
 ## Stripe billing
 
 The pricing page (`website/index.html`) links to two live Stripe Payment
 Links (Basic, Advanced), each bundling a recurring plan price + one-time
-setup fee. `api/stripe-webhook.js` listens for `checkout.session.completed`
-(stages the purchased plan tier + Stripe customer id, keyed by Checkout
-Session id) and `customer.subscription.updated`/`deleted` (keeps an existing
-company's `suspended` flag and `stripe_subscription_status` in sync — a
-canceled/unpaid subscription suspends access automatically).
+setup fee. The Stripe webhook is registered at `/api/cron-equipment-reports`
+— it shares that file (not a dedicated `/api/stripe-webhook`) to stay under
+Vercel's 12 serverless function cap on the Hobby plan, the same reason the
+time clock report logic lives in `companydata.js` instead of its own file.
+Requests are told apart by the `stripe-signature` header, which only Stripe
+sends. It listens for `checkout.session.completed` (stages the purchased
+plan tier + Stripe customer id, keyed by Checkout Session id) and
+`customer.subscription.updated`/`deleted` (keeps an existing company's
+`suspended` flag and `stripe_subscription_status` in sync — a canceled/
+unpaid subscription suspends access automatically).
 
 A checkout finishes before the customer has a company in the app: the
 Payment Link redirects to `/onboarding?session_id={CHECKOUT_SESSION_ID}`,
@@ -86,9 +91,10 @@ plan tier and customer id carry through to `approve_onboarding_request`
 created.
 
 In the Stripe Dashboard, register the webhook endpoint at
-`https://<your-domain>/api/stripe-webhook` for `checkout.session.completed`,
-`customer.subscription.updated`, and `customer.subscription.deleted`, and
-set the resulting signing secret as `STRIPE_WEBHOOK_SECRET` on Vercel.
+`https://<your-domain>/api/cron-equipment-reports` for
+`checkout.session.completed`, `customer.subscription.updated`, and
+`customer.subscription.deleted`, and set the resulting signing secret as
+`STRIPE_WEBHOOK_SECRET` on Vercel.
 
 `src/supabaseClient.js` separately hardcodes the Supabase project URL and
 **anon publishable key** — that's expected, not a leaked secret: it's a
