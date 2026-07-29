@@ -1,16 +1,59 @@
 import { expect } from '@playwright/test';
 
+// One superset "AI response" used for every form's generate-* call. Extra
+// keys are harmless — each form only reads the ones it knows about — so a
+// single fixture covers FLHA, Inspection, Near Miss, Incident, Toolbox
+// Talk, Daily Report, and Monthly Inspection instead of sniffing prompts.
+const AI_RESPONSE = {
+  // FLHA (App.jsx)
+  taskSummary: 'Worker will operate an excavator near an active roadway.',
+  hazards: [
+    { hazard: 'Struck-by hazard from moving equipment', risk: 'High', control: 'Maintain a spotter and exclusion zone', sopRef: null },
+    { hazard: 'Manual handling strain', risk: 'Medium', control: 'Use proper lifting technique', sopRef: null },
+  ],
+  sopAlerts: [],
+  ppeRequired: ['Hard hat', 'Safety vest'],
+  additionalNotes: null,
+  // Near Miss / Incident
+  severity: 'Medium',
+  severityReason: 'Could have caused a moderate injury.',
+  whatHappened: 'A worker nearly stepped into the path of moving equipment.',
+  contributingFactors: ['No spotter present', 'Limited visibility'],
+  potentialOutcome: 'Could have resulted in a struck-by injury.',
+  immediateActions: ['Work paused and area re-briefed'],
+  nextSteps: ['Assign a spotter for this task going forward'],
+  summary: 'A worker sustained a minor injury while carrying material.',
+  sequenceOfEvents: ['Worker began carrying material', 'Lost footing on uneven ground', 'Fell and struck forearm'],
+  rootCause: 'Uneven ground was not identified before work began.',
+  correctiveActions: ['Inspect walking surfaces before starting work'],
+  // Equipment Inspection
+  machineSummary: 'Mid-size excavator — pre-use hydraulic and structural check.',
+  items: [
+    { item: 'Check hydraulic hoses for leaks', category: 'Hydraulics' },
+    { item: 'Inspect tracks for wear or damage', category: 'Undercarriage' },
+  ],
+  // Toolbox Talk
+  sections: [
+    { heading: 'Excavation hazards', bullets: ['Watch for cave-in risk', 'Call before you dig'] },
+  ],
+  discussion: ['Has anyone had a close call while digging?'],
+  // Daily Report
+  workSummary: 'Crew completed footing excavation on the north side and poured two piers.',
+  delaysSummary: 'No delays or issues reported.',
+  tomorrowPlan: 'Strip forms and begin south footings.',
+};
+
 // Stubs every backend call a worker-facing form makes so these tests run
 // fully offline and deterministically, independent of Supabase/Anthropic
 // availability or real company data.
-export async function mockWorkerApis(page, { companyId = 'test-company-id', companyName = 'Test Co' } = {}) {
+export async function mockWorkerApis(page, { companyId = 'test-company-id', companyName = 'Test Co', userId = null } = {}) {
   await page.route('**/api/login', async route => {
     const body = route.request().postDataJSON();
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        session: { role: body.role, companyId, companyName, userName: '' },
+        session: { role: body.role, companyId, companyName, userName: '', userId },
         token: 'test-token',
       }),
     });
@@ -24,6 +67,7 @@ export async function mockWorkerApis(page, { companyId = 'test-company-id', comp
     });
   });
 
+  let clockOpenSince = null;
   await page.route('**/api/companydata', async route => {
     const body = route.request().postDataJSON();
     if (body.action === 'list_sites') {
@@ -32,37 +76,79 @@ export async function mockWorkerApis(page, { companyId = 'test-company-id', comp
         body: JSON.stringify({ sites: [{ id: 'site-1', name: 'Test Site' }] }),
       });
     }
+    if (body.action === 'list_equipment') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ equipment: [{ id: 'eq-1', year: '2019', make: 'Caterpillar', model: '320', type: 'Excavator', unit_number: '12' }] }),
+      });
+    }
     if (body.action === 'list_custom_fields') {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ fields: [] }) });
     }
-    // get_company_logo and anything else
+    if (body.action === 'list_sops') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ sops: [{ policy_text: 'All workers must conduct a hazard assessment before starting work.' }] }),
+      });
+    }
+    if (body.action === 'my_time_status') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ open: clockOpenSince ? { clock_in: clockOpenSince } : null, recent: [] }),
+      });
+    }
+    if (body.action === 'clock_in') {
+      clockOpenSince = new Date().toISOString();
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    }
+    if (body.action === 'clock_out') {
+      clockOpenSince = null;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    }
+    // get_company_logo, add_site, add_equipment, and anything else
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ logo_url: '' }) });
   });
 
-  // Covers both the Near Miss and Incident "structure my description"
-  // requests — the response includes every field either form reads.
+  // Covers every form's "structure my description" request.
   await page.route('**/api/generate-flha', async route => {
-    const report = {
-      severity: 'Medium',
-      severityReason: 'Could have caused a moderate injury.',
-      whatHappened: 'A worker nearly stepped into the path of moving equipment.',
-      contributingFactors: ['No spotter present', 'Limited visibility'],
-      potentialOutcome: 'Could have resulted in a struck-by injury.',
-      immediateActions: ['Work paused and area re-briefed'],
-      nextSteps: ['Assign a spotter for this task going forward'],
-      summary: 'A worker sustained a minor injury while carrying material.',
-      sequenceOfEvents: ['Worker began carrying material', 'Lost footing on uneven ground', 'Fell and struck forearm'],
-      rootCause: 'Uneven ground was not identified before work began.',
-      correctiveActions: ['Inspect walking surfaces before starting work'],
-    };
     await route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ content: [{ text: JSON.stringify(report) }] }),
+      body: JSON.stringify({ content: [{ text: JSON.stringify(AI_RESPONSE) }] }),
     });
   });
 
   await page.route('**/api/reports', async route => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'test-record-id' }) });
+  });
+
+  await page.route('**/api/flhas', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'test-flha-id' }) });
+  });
+
+  await page.route('**/api/logs', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'check_equipment') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ openPretrip: null, lastInspection: null }) });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'test-log-id' }) });
+  });
+
+  await page.route('**/api/monthly', async route => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'get_active_form') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          form: { id: 'form-1', title: 'Monthly Site Safety Inspection' },
+          questions: [
+            { id: 'q1', question_text: 'Are all fire extinguishers accessible and charged?' },
+            { id: 'q2', question_text: 'Are all emergency exits clear?' },
+          ],
+          existingRecord: null,
+        }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
   });
 }
 
