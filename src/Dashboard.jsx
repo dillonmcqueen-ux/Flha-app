@@ -391,8 +391,9 @@ function ReportRow({ rec, last, onClick, kind }) {
   );
 }
 
-function NearMissCard({ nm, onClose, onDelete, onReview }) {
+function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "" }) {
   const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewerName, setReviewerName] = useState(defaultReviewerName);
   const r = nm.report_json || {};
   const sevColors = {
     Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
@@ -468,8 +469,15 @@ function NearMissCard({ nm, onClose, onDelete, onReview }) {
         ) : onReview && (
           <div style={{ borderTop: "2px solid #B45309", marginTop: 8, paddingTop: 14 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#B45309", marginBottom: 8 }}>Mark as Reviewed</div>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Reviewer name</label>
+            <input
+              value={reviewerName} onChange={e => setReviewerName(e.target.value)} placeholder="Your full name"
+              readOnly={!!defaultReviewerName}
+              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 10, background: defaultReviewerName ? "#F3F4F6" : "#F8FAFC", color: defaultReviewerName ? "#6B7280" : "inherit" }}
+            />
             <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
-            <button onClick={() => onReview(nm.id, reviewNotes)} style={{ width: "100%", background: "#16A34A", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+            <button onClick={() => onReview(nm.id, reviewNotes, reviewerName.trim())} disabled={!reviewerName.trim()}
+              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
           </div>
         )}
       </div>
@@ -477,8 +485,9 @@ function NearMissCard({ nm, onClose, onDelete, onReview }) {
   );
 }
 
-function IncidentCard({ inc, onClose, onDelete, onReview }) {
+function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = "" }) {
   const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewerName, setReviewerName] = useState(defaultReviewerName);
   const r = inc.report_json || {};
   const sevColors = {
     Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
@@ -568,8 +577,15 @@ function IncidentCard({ inc, onClose, onDelete, onReview }) {
         ) : onReview && (
           <div style={{ borderTop: "2px solid #991B1B", marginTop: 8, paddingTop: 14 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 8 }}>Mark as Reviewed</div>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Reviewer name</label>
+            <input
+              value={reviewerName} onChange={e => setReviewerName(e.target.value)} placeholder="Your full name"
+              readOnly={!!defaultReviewerName}
+              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 10, background: defaultReviewerName ? "#F3F4F6" : "#F8FAFC", color: defaultReviewerName ? "#6B7280" : "inherit" }}
+            />
             <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
-            <button onClick={() => onReview(inc.id, reviewNotes)} style={{ width: "100%", background: "#16A34A", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+            <button onClick={() => onReview(inc.id, reviewNotes, reviewerName.trim())} disabled={!reviewerName.trim()}
+              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
           </div>
         )}
       </div>
@@ -1693,9 +1709,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
-  const reviewNearMiss = async (id, notes) => {
+  const reviewNearMiss = async (id, notes, reviewerName) => {
     const record = nearMisses.find(n => n.id === id);
-    const reviewedBy = userName || (isAdmin ? "Admin" : "Supervisor");
+    const reviewedBy = (reviewerName || "").trim() || userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
     let pdfUrl = record?.pdf_url || null;
     if (record) {
@@ -1709,7 +1725,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           report: record.report_json || {},
           companyName: co?.name || "",
           companyLogo: co?.logo_url || "",
-          signatureDataUrl: null,
+          signatureDataUrl: record.signature_url || null,
           customFields: record.report_json?.customFields || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
         }) || record.pdf_url || null;
@@ -1718,7 +1734,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     try {
       const res = await fetch("/api/reports", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "nearmiss", action: "review", token, id, notes, pdfUrl }),
+        body: JSON.stringify({ type: "nearmiss", action: "review", token, id, notes, pdfUrl, reviewedBy }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -1730,9 +1746,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     setSelectedNearMiss(null);
   };
 
-  const reviewIncident = async (id, notes) => {
+  const reviewIncident = async (id, notes, reviewerName) => {
     const record = incidents.find(n => n.id === id);
-    const reviewedBy = userName || (isAdmin ? "Admin" : "Supervisor");
+    const reviewedBy = (reviewerName || "").trim() || userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
     let pdfUrl = record?.pdf_url || null;
     if (record) {
@@ -1752,7 +1768,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           report: record.report_json || {},
           companyName: co?.name || "",
           companyLogo: co?.logo_url || "",
-          signatureDataUrl: null,
+          signatureDataUrl: record.signature_url || null,
           customFields: record.report_json?.customFields || [],
           photoUrls: record.photo_urls || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
@@ -1762,7 +1778,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     try {
       const res = await fetch("/api/reports", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "incident", action: "review", token, id, notes, pdfUrl }),
+        body: JSON.stringify({ type: "incident", action: "review", token, id, notes, pdfUrl, reviewedBy }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -2170,8 +2186,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} defaultSupName={userName} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
-      {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} />}
-      {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} />}
+      {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} defaultReviewerName={userName} />}
+      {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} defaultReviewerName={userName} />}
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
       {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} error={equipmentPdfError} />}

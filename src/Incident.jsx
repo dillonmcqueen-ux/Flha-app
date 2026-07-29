@@ -201,6 +201,20 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSigned(true);
     setSaving(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+
+    let signatureUrl = null;
+    if (sig) {
+      try {
+        const blob = await (await fetch(sig)).blob();
+        const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+        const { error } = await supabase.storage.from("signatures").upload(filename, blob, { contentType: "image/png", upsert: false });
+        if (!error) {
+          const { data } = supabase.storage.from("signatures").getPublicUrl(filename);
+          signatureUrl = data?.publicUrl || null;
+        }
+      } catch (e) { /* signature upload failure shouldn't block submission */ }
+    }
+
     const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
     const photoUrls = uploadedPhotoUrls();
     const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig, photoUrls });
@@ -221,6 +235,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             signed_by: reporter,
             pdf_url: pdfUrl || null,
             photo_urls: photoUrls,
+            signature_url: signatureUrl,
           },
         }),
       });

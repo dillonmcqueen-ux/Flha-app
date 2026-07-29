@@ -49,11 +49,11 @@ async function verifySession(token) {
 const TABLES = {
   incident: {
     name: 'incidents',
-    listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
   nearmiss: {
     name: 'near_misses',
-    listColumns: 'id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
 };
 
@@ -99,7 +99,7 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: mark a report reviewed ───────────────────
     if (action === 'review') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      const { id, notes, pdfUrl } = req.body;
+      const { id, notes, pdfUrl, reviewedBy: reviewedByInput } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
       if (session.role === 'supervisor') {
@@ -109,7 +109,9 @@ export default async function handler(req, res) {
         }
       }
       const now = new Date().toISOString();
-      const reviewedBy = session.role === 'admin' ? 'Admin' : 'Supervisor';
+      const reviewedBy = (typeof reviewedByInput === 'string' && reviewedByInput.trim())
+        ? reviewedByInput.trim()
+        : (session.role === 'admin' ? 'Admin' : 'Supervisor');
       const update = { reviewed: true, reviewed_by: reviewedBy, reviewed_at: now, review_notes: notes || null };
       if (pdfUrl) update.pdf_url = pdfUrl;
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);

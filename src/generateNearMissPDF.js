@@ -101,8 +101,13 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
     if (y + boxH > 280) { doc.addPage(); y = 20; }
     doc.setFillColor(240, 253, 244); doc.setDrawColor(134, 239, 172); doc.setLineWidth(0.4);
     doc.roundedRect(margin, y, contentW, boxH, 3, 3, "FD");
+    // Drawn checkmark, not a text glyph — jsPDF's base Helvetica font has no
+    // ✓ in its WinAnsi encoding, which renders it with broken spacing.
+    doc.setDrawColor(22, 163, 74); doc.setLineWidth(0.7);
+    doc.line(margin + 5, y + 5.3, margin + 6.4, y + 6.8);
+    doc.line(margin + 6.4, y + 6.8, margin + 9.2, y + 3.2);
     doc.setTextColor(22, 101, 52); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-    doc.text(`✓ REVIEWED BY ${reviewed.by.toUpperCase()}`, margin + 5, y + 7);
+    doc.text(`REVIEWED BY ${(reviewed.by || '').toUpperCase()}`, margin + 11, y + 7);
     doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(55, 65, 81);
     doc.text(reviewed.at || "", margin + 5, y + 12);
     if (reviewed.notes) {
@@ -117,7 +122,17 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   y += 2; doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(margin, y, W - margin, y); y += 8;
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "bold"); doc.setFontSize(9);
   doc.text("Reported By", margin, y); y += 4;
-  if (signatureDataUrl) { try { doc.addImage(signatureDataUrl, "PNG", margin, y, 60, 18); } catch (e) {} }
+  if (signatureDataUrl) {
+    try {
+      let sigSrc = signatureDataUrl;
+      if (!sigSrc.startsWith("data:")) {
+        const resp = await fetch(sigSrc, { mode: "cors" });
+        const blob = await resp.blob();
+        sigSrc = await new Promise((res, rej) => { const r = new FileReader(); r.onloadend = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+      }
+      doc.addImage(sigSrc, "PNG", margin, y, 60, 18);
+    } catch (e) {}
+  }
   doc.setDrawColor(150, 150, 150); doc.line(margin, y + 20, margin + 60, y + 20);
   doc.setTextColor(107, 114, 128); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
   doc.text(`${reporter}`, margin, y + 26);

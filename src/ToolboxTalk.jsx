@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
-const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly"];
+const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly", "After Incident"];
 
 export default function ToolboxTalk({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | topic | review | signoff | done

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { supabase } from "./supabaseClient";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
@@ -142,6 +143,20 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSigned(true);
     setSaving(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+
+    let signatureUrl = null;
+    if (sig) {
+      try {
+        const blob = await (await fetch(sig)).blob();
+        const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+        const { error } = await supabase.storage.from("signatures").upload(filename, blob, { contentType: "image/png", upsert: false });
+        if (!error) {
+          const { data } = supabase.storage.from("signatures").getPublicUrl(filename);
+          signatureUrl = data?.publicUrl || null;
+        }
+      } catch (e) { /* signature upload failure shouldn't block submission */ }
+    }
+
     const pdfUrl = await generateAndUploadNearMiss({
       reporter: reporterLabel(), site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields: cf.entries(),
     });
@@ -162,6 +177,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             report_json: { ...report, customFields: cf.entries() },
             signed_by: reporterLabel(),
             pdf_url: pdfUrl || null,
+            signature_url: signatureUrl,
           },
         }),
       });
