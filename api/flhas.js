@@ -47,6 +47,25 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
+// flha-reports is a private bucket — the DB still stores a "public"-shaped
+// URL (upload code never changed), but that string is never itself a
+// working link. Every value handed to a client is swapped for a
+// short-lived signed URL first.
+function pathFromStoredUrl(url, bucket) {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
+
+async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
+  const path = pathFromStoredUrl(url, bucket);
+  if (!path) return null;
+  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
+  return error ? null : data.signedUrl;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -117,7 +136,8 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      return res.status(200).json({ flhas: data || [] });
+      const flhas = await Promise.all((data || []).map(async f => ({ ...f, pdf_url: await signStoredUrl(f.pdf_url, 'flha-reports') })));
+      return res.status(200).json({ flhas });
     }
 
     // ── Supervisor / Admin: delete one or more FLHAs ────────────────────
@@ -157,7 +177,8 @@ export default async function handler(req, res) {
         pdf_url: pdfUrl || null,
       }).eq('id', id);
       if (error) return res.status(500).json({ error: 'Approval failed.' });
-      return res.status(200).json({ ok: true, supervisor_signed_at: now });
+      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, supervisor_signed_at: now, pdfUrl: signedPdfUrl });
     }
 
     // ── Admin: count FLHAs per company (used on the onboarding console) ─

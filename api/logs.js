@@ -46,6 +46,25 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
+// flha-reports is a private bucket — the DB still stores a "public"-shaped
+// URL (upload code never changed), but that string is never itself a
+// working link. Every value handed to a client is swapped for a
+// short-lived signed URL first.
+function pathFromStoredUrl(url, bucket) {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
+
+async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
+  const path = pathFromStoredUrl(url, bucket);
+  if (!path) return null;
+  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
+  return error ? null : data.signedUrl;
+}
+
 const TABLES = {
   inspection: {
     name: 'inspections',
@@ -130,7 +149,8 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      return res.status(200).json({ records: data || [] });
+      const records = await Promise.all((data || []).map(async r => ({ ...r, pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports') })));
+      return res.status(200).json({ records });
     }
 
     // ── Supervisor / Admin: delete a record ──────────────────────────

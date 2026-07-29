@@ -56,6 +56,25 @@ function resolveCompanyId(session, requestedCompanyId) {
   return session.companyId;
 }
 
+// flha-reports is a private bucket — the DB still stores a "public"-shaped
+// URL (upload code never changed), but that string is never itself a
+// working link. Every value handed to a client is swapped for a
+// short-lived signed URL first.
+function pathFromStoredUrl(url, bucket) {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
+
+async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
+  const path = pathFromStoredUrl(url, bucket);
+  if (!path) return null;
+  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
+  return error ? null : data.signedUrl;
+}
+
 // Total active roster seats a plan tier allows — workers and supervisors
 // combined, since both count as a "user" for billing.
 const SEAT_CAP_BY_TIER = { basic: 10, advanced: 50 };
@@ -731,7 +750,8 @@ export default async function handler(req, res) {
         .eq('company_id', companyId)
         .order('week_start', { ascending: false });
       if (error) return res.status(500).json({ error: 'Could not load reports.' });
-      return res.status(200).json({ reports: data || [] });
+      const reports = await Promise.all((data || []).map(async r => ({ ...r, pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports') })));
+      return res.status(200).json({ reports });
     }
 
     if (action === 'get_time_report') {
@@ -742,6 +762,7 @@ export default async function handler(req, res) {
       if (error || !data || data.length === 0) return res.status(404).json({ error: 'Report not found.' });
       const report = data[0];
       if (session.role === 'supervisor' && report.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      report.pdf_url = await signStoredUrl(report.pdf_url, 'flha-reports');
       const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, logo_url').eq('id', report.company_id).limit(1);
       return res.status(200).json({ report, company: coRows && coRows[0] });
     }

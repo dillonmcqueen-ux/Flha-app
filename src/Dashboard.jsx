@@ -1041,16 +1041,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       });
     } catch (e) { /* keep old pdf if regen fails */ }
 
+    let signedPdfUrl = record.pdf_url;
     try {
-      await fetch("/api/flhas", {
+      const res = await fetch("/api/flhas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "approve", token, id: record.id, supName, supSignature, pdfUrl: pdfUrl || record.pdf_url }),
       });
+      const data = await res.json();
+      if (res.ok) signedPdfUrl = data.pdfUrl || signedPdfUrl;
     } catch (e) { /* keep local state updated even if the request fails */ }
 
     setFlhas(prev => prev.map(f => f.id === record.id
-      ? { ...f, status: "complete", supervisor_signed_by: supName, supervisor_signed_at: now.toISOString(), pdf_url: pdfUrl || f.pdf_url }
+      ? { ...f, status: "complete", supervisor_signed_by: supName, supervisor_signed_at: now.toISOString(), pdf_url: signedPdfUrl }
       : f));
     setSelectedFlha(null);
   };
@@ -1739,7 +1742,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       const data = await res.json();
       if (res.ok) {
         setNearMisses(prev => prev.map(n => n.id === id
-          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null, pdf_url: pdfUrl || n.pdf_url }
+          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null, pdf_url: data.pdfUrl || n.pdf_url }
           : n));
       }
     } catch (e) { /* leave as-is if the request fails */ }
@@ -1783,7 +1786,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       const data = await res.json();
       if (res.ok) {
         setIncidents(prev => prev.map(n => n.id === id
-          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null, pdf_url: pdfUrl || n.pdf_url }
+          ? { ...n, reviewed: true, reviewed_by: data.reviewed_by, reviewed_at: data.reviewed_at, review_notes: notes || null, pdf_url: data.pdfUrl || n.pdf_url }
           : n));
       }
     } catch (e) { /* leave as-is if the request fails */ }

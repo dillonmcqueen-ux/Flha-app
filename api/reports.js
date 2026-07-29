@@ -46,6 +46,30 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
+// flha-reports/signatures/incident-photos are private buckets — the DB
+// still stores a "public"-shaped URL (upload code never changed), but that
+// string is never itself a working link. Every value handed to a client is
+// swapped for a short-lived signed URL first.
+function pathFromStoredUrl(url, bucket) {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
+
+async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
+  const path = pathFromStoredUrl(url, bucket);
+  if (!path) return null;
+  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
+  return error ? null : data.signedUrl;
+}
+
+async function signStoredUrls(urls, bucket, ttlSeconds = 3600) {
+  if (!urls || urls.length === 0) return urls || [];
+  return Promise.all(urls.map(u => signStoredUrl(u, bucket, ttlSeconds)));
+}
+
 const TABLES = {
   incident: {
     name: 'incidents',
@@ -93,7 +117,13 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      return res.status(200).json({ records: data || [] });
+      const records = await Promise.all((data || []).map(async r => ({
+        ...r,
+        pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports'),
+        signature_url: r.signature_url ? await signStoredUrl(r.signature_url, 'signatures') : r.signature_url,
+        photo_urls: r.photo_urls ? await signStoredUrls(r.photo_urls, 'incident-photos') : r.photo_urls,
+      })));
+      return res.status(200).json({ records });
     }
 
     // ── Supervisor / Admin: mark a report reviewed ───────────────────
@@ -116,7 +146,8 @@ export default async function handler(req, res) {
       if (pdfUrl) update.pdf_url = pdfUrl;
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Review failed.' });
-      return res.status(200).json({ ok: true, reviewed_by: reviewedBy, reviewed_at: now });
+      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, reviewed_by: reviewedBy, reviewed_at: now, pdfUrl: signedPdfUrl });
     }
 
     // ── Supervisor / Admin: delete a report ──────────────────────────

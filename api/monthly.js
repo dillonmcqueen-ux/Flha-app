@@ -46,6 +46,25 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
+// flha-reports is a private bucket — the DB still stores a "public"-shaped
+// URL (upload code never changed), but that string is never itself a
+// working link. Every value handed to a client is swapped for a
+// short-lived signed URL first.
+function pathFromStoredUrl(url, bucket) {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
+}
+
+async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
+  const path = pathFromStoredUrl(url, bucket);
+  if (!path) return null;
+  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
+  return error ? null : data.signedUrl;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -294,14 +313,15 @@ export default async function handler(req, res) {
         else recordCounts[recId].open++;
       });
 
-      const enriched = (records || []).map(r => ({
+      const enriched = await Promise.all((records || []).map(async r => ({
         ...r,
+        pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports'),
         site_name: siteMap[r.site_id] || 'Unknown site',
         form_title: formMap[r.form_id]?.title || 'Unknown form',
         company_id: formMap[r.form_id]?.company_id,
         open_actions: recordCounts[r.id]?.open || 0,
         resolved_actions: recordCounts[r.id]?.resolved || 0,
-      }));
+      })));
 
       return res.status(200).json({ records: enriched });
     }
@@ -313,7 +333,7 @@ export default async function handler(req, res) {
 
       const { data: recordRows, error: recErr } = await supabaseAdmin.from('inspection_records').select('*').eq('id', recordId).limit(1);
       if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
-      const record = recordRows[0];
+      const record = { ...recordRows[0], pdf_url: await signStoredUrl(recordRows[0].pdf_url, 'flha-reports') };
 
       const { data: formRows } = await supabaseAdmin.from('inspection_forms').select('id, company_id, title').eq('id', record.form_id).limit(1);
       const form = formRows && formRows[0];
