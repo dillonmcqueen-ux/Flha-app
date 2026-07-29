@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
-import { generateAndUploadEquipmentReport } from "./generateEquipmentReportPDF";
-import { generateAndUploadTimeClockReport } from "./generateTimeClockReportPDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import AnalyticsPanel from "./Analytics";
@@ -757,7 +755,7 @@ function CorrectiveActionRow({ ca, onUpdate }) {
   );
 }
 
-function EquipmentReportCard({ data, onClose, onGeneratePdf, generating, error }) {
+function EquipmentReportCard({ data, onClose, error }) {
   if (!data) return null;
   const { report, company } = data;
   const rj = report.report_json || {};
@@ -774,9 +772,7 @@ function EquipmentReportCard({ data, onClose, onGeneratePdf, generating, error }
             {report.pdf_url ? (
               <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
             ) : (
-              <button onClick={() => onGeneratePdf(report)} disabled={generating} style={{ background: generating ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                {generating ? "Generating…" : "📄 Generate PDF"}
-              </button>
+              <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>PDF unavailable</span>
             )}
             <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
@@ -811,7 +807,7 @@ function EquipmentReportCard({ data, onClose, onGeneratePdf, generating, error }
 }
 
 
-function TimeClockReportCard({ data, onClose, onGeneratePdf, generating, error }) {
+function TimeClockReportCard({ data, onClose, error }) {
   if (!data) return null;
   const { report, company } = data;
   const rj = report.report_json || {};
@@ -829,9 +825,7 @@ function TimeClockReportCard({ data, onClose, onGeneratePdf, generating, error }
             {report.pdf_url ? (
               <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0891B2", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
             ) : (
-              <button onClick={() => onGeneratePdf(report)} disabled={generating} style={{ background: generating ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                {generating ? "Generating…" : "📄 Generate PDF"}
-              </button>
+              <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>PDF unavailable</span>
             )}
             <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
@@ -883,7 +877,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [equipmentReports, setEquipmentReports] = useState([]);
   const [loadingEquipmentReports, setLoadingEquipmentReports] = useState(false);
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
-  const [generatingReportPdf, setGeneratingReportPdf] = useState(false);
   const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
   const [docSettings, setDocSettings] = useState([]);
@@ -916,7 +909,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
   const [timeClockReports, setTimeClockReports] = useState([]);
   const [loadingTimeClockReports, setLoadingTimeClockReports] = useState(false);
   const [selectedTimeClockReport, setSelectedTimeClockReport] = useState(null);
-  const [generatingTimeClockPdf, setGeneratingTimeClockPdf] = useState(false);
   const [timeClockPdfError, setTimeClockPdfError] = useState("");
   const [generatingNewTimeClockReport, setGeneratingNewTimeClockReport] = useState(false);
 
@@ -1375,30 +1367,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         body: JSON.stringify({ action: "get_report", token, reportId: report.id }),
       });
       const data = await res.json();
-      if (res.ok) setSelectedEquipmentReport(data);
-    } catch (e) { /* ignore */ }
-  };
-
-  const generateReportPdf = async (report) => {
-    setEquipmentPdfError("");
-    setGeneratingReportPdf(true);
-    try {
-      const co = companies.find(c => c.id === report.company_id) || selectedEquipmentReport?.company;
-      const pdfUrl = await generateAndUploadEquipmentReport({
-        report, companyName: co?.name || "", companyLogo: co?.logo_url || "",
-      });
-      if (pdfUrl) {
-        await fetch("/api/equipmentreports", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "save_pdf_url", token, reportId: report.id, pdfUrl }),
-        });
-        setSelectedEquipmentReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
-        setEquipmentReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
+      if (res.ok) {
+        setSelectedEquipmentReport(data);
+        setEquipmentReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: data.report?.pdf_url ?? r.pdf_url } : r));
+      } else {
+        setEquipmentPdfError(data.error || "Couldn't load this report.");
       }
     } catch (e) {
-      setEquipmentPdfError(e.message || "Something went wrong generating the PDF.");
+      setEquipmentPdfError("Couldn't load this report.");
     }
-    setGeneratingReportPdf(false);
   };
 
   const generateThisWeeksReport = async () => {
@@ -1597,30 +1574,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
         body: JSON.stringify({ action: "get_time_report", token, reportId: report.id }),
       });
       const data = await res.json();
-      if (res.ok) setSelectedTimeClockReport(data);
-    } catch (e) { /* ignore */ }
-  };
-
-  const generateTimeClockReportPdf = async (report) => {
-    setTimeClockPdfError("");
-    setGeneratingTimeClockPdf(true);
-    try {
-      const co = companies.find(c => c.id === report.company_id) || selectedTimeClockReport?.company;
-      const pdfUrl = await generateAndUploadTimeClockReport({
-        report, companyName: co?.name || "", companyLogo: co?.logo_url || "",
-      });
-      if (pdfUrl) {
-        await fetch("/api/companydata", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "save_time_report_pdf_url", token, reportId: report.id, pdfUrl }),
-        });
-        setSelectedTimeClockReport(prev => prev ? { ...prev, report: { ...prev.report, pdf_url: pdfUrl } } : prev);
-        setTimeClockReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: pdfUrl } : r));
+      if (res.ok) {
+        setSelectedTimeClockReport(data);
+        setTimeClockReports(prev => prev.map(r => r.id === report.id ? { ...r, pdf_url: data.report?.pdf_url ?? r.pdf_url } : r));
+      } else {
+        setTimeClockPdfError(data.error || "Couldn't load this report.");
       }
     } catch (e) {
-      setTimeClockPdfError(e.message || "Something went wrong generating the PDF.");
+      setTimeClockPdfError("Couldn't load this report.");
     }
-    setGeneratingTimeClockPdf(false);
   };
 
   const generateThisWeeksTimeClockReport = async () => {
@@ -2193,8 +2155,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
       {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} defaultReviewerName={userName} />}
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
       {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
-      {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} onGeneratePdf={generateReportPdf} generating={generatingReportPdf} error={equipmentPdfError} />}
-      {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} onGeneratePdf={generateTimeClockReportPdf} generating={generatingTimeClockPdf} error={timeClockPdfError} />}
+      {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} error={equipmentPdfError} />}
+      {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} />}
 
       <div style={styles.header}>

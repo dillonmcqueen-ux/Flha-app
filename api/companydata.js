@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -73,6 +74,27 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
   if (!path) return null;
   const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
   return error ? null : data.signedUrl;
+}
+
+// Renders + uploads the PDF server-side (service role key, no anon-key
+// storage write involved at all) the first time a report is viewed, and
+// caches the resulting path on the row so later views skip straight to
+// signing it. Returns the stored ("public"-shaped, never handed to a
+// client as-is) URL, or null if rendering/upload failed.
+async function ensureTimeClockReportPdf(report, companyName, companyLogo) {
+  if (report.pdf_url) return report.pdf_url;
+  try {
+    const buffer = await renderTimeClockReportPdf({ report, companyName, companyLogo });
+    const filename = timeClockReportFilename({ companyName, report });
+    const { error } = await supabaseAdmin.storage.from('flha-reports').upload(filename, buffer, { contentType: 'application/pdf', upsert: true });
+    if (error) return null;
+    const { data: pub } = supabaseAdmin.storage.from('flha-reports').getPublicUrl(filename);
+    const url = pub?.publicUrl || null;
+    if (url) await supabaseAdmin.from('timeclock_reports').update({ pdf_url: url }).eq('id', report.id);
+    return url;
+  } catch (e) {
+    return null;
+  }
 }
 
 // Total active roster seats a plan tier allows — workers and supervisors
@@ -762,22 +784,11 @@ export default async function handler(req, res) {
       if (error || !data || data.length === 0) return res.status(404).json({ error: 'Report not found.' });
       const report = data[0];
       if (session.role === 'supervisor' && report.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
-      report.pdf_url = await signStoredUrl(report.pdf_url, 'flha-reports');
       const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, logo_url').eq('id', report.company_id).limit(1);
-      return res.status(200).json({ report, company: coRows && coRows[0] });
-    }
-
-    if (action === 'save_time_report_pdf_url') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      const { reportId, pdfUrl } = req.body;
-      if (!reportId || !pdfUrl) return res.status(400).json({ error: 'Missing details.' });
-      if (session.role === 'supervisor') {
-        const { data: existing } = await supabaseAdmin.from('timeclock_reports').select('company_id').eq('id', reportId).limit(1);
-        if (!existing || existing.length === 0 || existing[0].company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
-      }
-      const { error } = await supabaseAdmin.from('timeclock_reports').update({ pdf_url: pdfUrl }).eq('id', reportId);
-      if (error) return res.status(500).json({ error: "Couldn't save PDF link." });
-      return res.status(200).json({ ok: true });
+      const company = coRows && coRows[0];
+      const storedUrl = await ensureTimeClockReportPdf(report, company?.name || '', company?.logo_url || '');
+      report.pdf_url = await signStoredUrl(storedUrl, 'flha-reports');
+      return res.status(200).json({ report, company });
     }
 
     if (action === 'generate_time_report_now') {
@@ -801,6 +812,11 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (error) return res.status(500).json({ error: "Couldn't generate report: " + error.message });
+
+      const { data: coRows } = await supabaseAdmin.from('companies').select('name, logo_url').eq('id', companyId).limit(1);
+      const company = coRows && coRows[0];
+      const storedUrl = await ensureTimeClockReportPdf(data, company?.name || '', company?.logo_url || '');
+      data.pdf_url = await signStoredUrl(storedUrl, 'flha-reports');
       return res.status(200).json({ ok: true, report: data });
     }
 
