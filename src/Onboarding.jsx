@@ -35,6 +35,8 @@ const styles = {
     padding: "14px", fontWeight: 700, fontSize: 16, cursor: "pointer", marginTop: 28,
   },
   fileList: { fontSize: 13, color: "#9CA3AF", marginTop: 8 },
+  consentRow: { display: "flex", alignItems: "flex-start", gap: 10, marginTop: 24 },
+  consentText: { fontSize: 13, color: "#9CA3AF", lineHeight: 1.5 },
 };
 
 const emptyForm = {
@@ -50,6 +52,7 @@ export default function Onboarding() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [agreed, setAgreed] = useState(false);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -92,11 +95,18 @@ export default function Onboarding() {
       return;
     }
 
+    if (!agreed) {
+      setError("Please agree to the Privacy Policy and Terms of Use to continue.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       setUploading(true);
       const [sopFilePaths, logoUrl] = await Promise.all([uploadSops(), uploadLogo()]);
       setUploading(false);
+
+      const stripeSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
 
       const res = await fetch("/api/login", {
         method: "POST",
@@ -114,6 +124,7 @@ export default function Onboarding() {
           customRequest: form.customRequest.trim(),
           sopFilePaths,
           logoUrl,
+          stripeSessionId,
         }),
       });
       const data = await res.json();
@@ -207,13 +218,29 @@ export default function Onboarding() {
         <div style={styles.hint}>Optional — describe anything beyond the standard five you'd like built.</div>
         <textarea style={styles.textarea} value={form.customRequest} onChange={set("customRequest")} placeholder="e.g. a monthly fuel log, or a preventative maintenance tracker for our fleet" />
 
+        <label style={styles.consentRow}>
+          <input
+            type="checkbox"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+            style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0, accentColor: "#F97316" }}
+          />
+          <span style={styles.consentText}>
+            I agree to FORA's{" "}
+            <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: "#F97316" }}>Privacy Policy</a>
+            {" "}and{" "}
+            <a href="https://forafieldsolutions.com/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: "#F97316" }}>Terms of Use</a>
+            {" "}on behalf of my company.
+          </span>
+        </label>
+
         {error && (
           <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginTop: 16, fontSize: 13, color: "#FCA5A5" }}>
             {error}
           </div>
         )}
 
-        <button type="submit" style={{ ...styles.primaryBtn, opacity: submitting ? 0.7 : 1 }} disabled={submitting}>
+        <button type="submit" style={{ ...styles.primaryBtn, opacity: submitting || !agreed ? 0.7 : 1 }} disabled={submitting || !agreed}>
           {uploading ? "Uploading files…" : submitting ? "Submitting…" : "Submit"}
         </button>
       </form>

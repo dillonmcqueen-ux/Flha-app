@@ -171,7 +171,7 @@ export default async function handler(req, res) {
     // Dashboard.jsx doesn't need to branch on role.
     if (action === 'list_companies_brief') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      let query = supabaseAdmin.from('companies').select('id, name, logo_url, plan_tier').order('id');
+      let query = supabaseAdmin.from('companies').select('id, name, logo_url, plan_tier, roster_enabled').order('id');
       if (session.role === 'supervisor') query = query.eq('id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load companies.' });
@@ -316,6 +316,39 @@ export default async function handler(req, res) {
         .eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
       return res.status(200).json({ ok: true, pin });
+    }
+
+    // Admin-only: regenerate every active roster member's PIN in one shot
+    // (e.g. after onboarding, or a security concern) — same one-time-reveal
+    // rule as a single reset, just batched, with a plaintext PIN list handed
+    // back exactly once and never persisted anywhere.
+    if (action === 'regenerate_all_pins') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data: members, error: findErr } = await supabaseAdmin
+        .from('roster')
+        .select('id, name, role')
+        .eq('company_id', companyId)
+        .eq('active', true)
+        .order('role', { ascending: true })
+        .order('name', { ascending: true });
+      if (findErr) return res.status(500).json({ error: 'Could not load roster.' });
+      if (!members || members.length === 0) return res.status(400).json({ error: 'No active roster members to regenerate.' });
+
+      const roster = [];
+      for (const m of members) {
+        const salt = genSalt();
+        const pin = genPin();
+        const { error } = await supabaseAdmin
+          .from('roster')
+          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+          .eq('id', m.id);
+        if (error) return res.status(500).json({ error: `Couldn't regenerate the PIN for ${m.name}.` });
+        roster.push({ id: m.id, name: m.name, role: m.role, pin });
+      }
+      return res.status(200).json({ ok: true, roster });
     }
 
     // Flips a company between the legacy shared-code login and the roster/PIN

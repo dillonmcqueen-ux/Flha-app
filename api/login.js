@@ -293,6 +293,7 @@ export default async function handler(req, res) {
     const {
       companyName, contactName, contactEmail, contactPhone, address,
       sitesList, unitsList, usersList, customRequest, sopFilePaths, logoUrl,
+      stripeSessionId,
     } = req.body;
 
     if (!companyName || !contactEmail) {
@@ -312,6 +313,23 @@ export default async function handler(req, res) {
       sop_file_paths: Array.isArray(sopFilePaths) ? sopFilePaths : [],
       logo_url: logoUrl || null,
     };
+
+    // Claim what was purchased, staged by api/stripe-webhook.js when the
+    // Payment Link checkout completed — carries plan tier + customer id
+    // through to company creation without the admin retyping either.
+    if (stripeSessionId) {
+      const { data: checkoutRows } = await supabaseAdmin
+        .from('stripe_checkouts')
+        .select('customer_id, plan_tier')
+        .eq('session_id', stripeSessionId)
+        .limit(1);
+      const checkout = checkoutRows && checkoutRows[0];
+      if (checkout) {
+        record.stripe_checkout_session_id = stripeSessionId;
+        record.stripe_customer_id = checkout.customer_id;
+        record.plan_tier = checkout.plan_tier;
+      }
+    }
 
     const { data, error } = await supabaseAdmin
       .from('onboarding_requests')
