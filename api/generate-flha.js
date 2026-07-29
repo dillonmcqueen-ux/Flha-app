@@ -1,6 +1,7 @@
 // Vercel serverless function — calls Anthropic API securely server-side.
 // Set ANTHROPIC_API_KEY in Vercel: Project Settings -> Environment Variables
 
+import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 // Extend Vercel function timeout to 30 seconds (requires Pro on Vercel,
@@ -8,6 +9,11 @@ import crypto from 'crypto';
 export const config = {
   maxDuration: 30,
 };
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
