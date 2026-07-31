@@ -108,16 +108,20 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
   const colW = contentW / 2;
   let col = 0;
   (attendees || []).forEach((a) => {
-    if (y > 250) { doc.addPage(); y = 20; col = 0; }
+    if (y > 246) { doc.addPage(); y = 20; col = 0; }
     const x = margin + col * colW;
     if (a.signature) { try { doc.addImage(a.signature, "PNG", x, y, 45, 14); } catch (e) {} }
     doc.setDrawColor(150, 150, 150); doc.line(x, y + 15, x + 50, y + 15);
     doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
-    doc.text(a.name + (a.presenter ? "  (Presenter)" : ""), x, y + 19, { maxWidth: colW - 6 });
+    doc.text(a.name + (a.presenter ? "  (Presenter)" : "") + (a.signedLate ? "  (signed late)" : ""), x, y + 19, { maxWidth: colW - 6 });
+    if (a.signedAt) {
+      doc.setTextColor(148, 163, 184); doc.setFont("helvetica", "normal"); doc.setFontSize(7);
+      doc.text(`Signed ${new Date(a.signedAt).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" })}`, x, y + 23);
+    }
     col++;
-    if (col > 1) { col = 0; y += 24; }
+    if (col > 1) { col = 0; y += 28; }
   });
-  if (col === 1) y += 24;
+  if (col === 1) y += 28;
 
   // footer
   const H = 297; const pageCount = doc.internal.getNumberOfPages();

@@ -124,7 +124,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const addAttendee = () => {
     if (!attName.trim() || !attHasSig) return;
     const sig = canvasRef.current.toDataURL("image/png");
-    setAttendees(prev => [...prev, { name: attName.trim(), signature: sig }]);
+    setAttendees(prev => [...prev, { name: attName.trim(), signature: sig, signedAt: new Date().toISOString() }]);
     setAttName("");
     clearSig();
   };
@@ -169,7 +169,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSigningLate(true); setLateSignError("");
     const sig = canvasRef.current.toDataURL("image/png");
     const { record, company } = lateSignTarget;
-    const updatedAttendees = [...(record.attendees_json || []), { name: lateName.trim(), signature: sig, signedLate: true }];
+    const updatedAttendees = [...(record.attendees_json || []), { name: lateName.trim(), signature: sig, signedLate: true, signedAt: new Date().toISOString() }];
 
     // record.pdf_url here is already a signed URL (get_toolbox_detail signed
     // it) — never fall back to it as the value to persist, or a regen
@@ -403,7 +403,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {!presenterSigned ? (
               <button style={s.btn(attHasSig ? "#7C3AED" : "#94A3B8")} disabled={!attHasSig} onClick={() => {
                 const sig = canvasRef.current.toDataURL("image/png");
-                setAttendees([{ name: presenter, signature: sig, presenter: true }]);
+                setAttendees([{ name: presenter, signature: sig, presenter: true, signedAt: new Date().toISOString() }]);
                 setPresenterSigned(true);
                 clearSig();
               }}>✓ Presenter Sign</button>

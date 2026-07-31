@@ -372,7 +372,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.text(`Additional Crew Sign-Off (${crewSignatures.length})`, margin, y);
     y += 6;
 
-    const sigW = (contentW - 8) / 2, sigH = 26;
+    const sigW = (contentW - 8) / 2, sigH = 30;
     let col = 0;
     crewSignatures.forEach((c) => {
       if (col === 0 && y + sigH > 280) { doc.addPage(); y = 20; }
@@ -389,6 +389,11 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7.5);
       doc.text(c.name || "—", x + 3, y + 22, { maxWidth: sigW - 6 });
+      if (c.signedAt) {
+        doc.setTextColor(148, 163, 184);
+        doc.setFontSize(6.5);
+        doc.text(new Date(c.signedAt).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" }), x + 3, y + 26.5, { maxWidth: sigW - 6 });
+      }
       if (col === 1) { y += sigH + 6; col = 0; } else { col = 1; }
     });
     if (col === 1) y += sigH + 6;

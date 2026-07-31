@@ -229,7 +229,7 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const addCrewMember = () => {
     if (!crewName.trim() || !crewHasSig) return;
     const sig = crewCanvasRef.current.toDataURL("image/png");
-    setCrew(prev => [...prev, { name: crewName.trim(), signature: sig }]);
+    setCrew(prev => [...prev, { name: crewName.trim(), signature: sig, signedAt: new Date().toISOString() }]);
     setCrewName("");
     clearCrewSig();
   };
