@@ -5,7 +5,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly", "After Incident"];
 
 export default function ToolboxTalk({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("setup"); // setup | topic | review | signoff | done
+  const [step, setStep] = useState("choice"); // choice | setup | topic | review | signoff | findtalk | latesign | done
   const [presenter, setPresenter] = useState(loginUserName);
   const [meetingType, setMeetingType] = useState("Pre-Job");
   const [site, setSite] = useState("");
@@ -26,6 +26,14 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const drawingRef = useRef(false);
   const [presenterSigned, setPresenterSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Sign-later — for crew who missed the talk and are coming back to sign
+  const [openTalks, setOpenTalks] = useState([]);
+  const [loadingOpenTalks, setLoadingOpenTalks] = useState(false);
+  const [lateSignTarget, setLateSignTarget] = useState(null); // { record, company }
+  const [lateName, setLateName] = useState(loginUserName);
+  const [signingLate, setSigningLate] = useState(false);
+  const [lateSignError, setLateSignError] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -122,6 +130,73 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   };
   const removeAttendee = (i) => setAttendees(prev => prev.filter((_, idx) => idx !== i));
 
+  // ── Sign-later flow ─────────────────────────────────────────
+  const loadOpenTalks = async () => {
+    setLoadingOpenTalks(true);
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "toolbox", action: "list_open_toolbox", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setOpenTalks(data.talks || []);
+    } catch (e) { /* leave list empty if the request fails */ }
+    setLoadingOpenTalks(false);
+  };
+
+  const openTalkToSign = async (talkId) => {
+    setLateSignError("");
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "toolbox", action: "get_toolbox_detail", token, id: talkId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLateSignTarget(data);
+        clearSig();
+        setStep("latesign");
+      } else {
+        setLateSignError(data.error || "Couldn't load that toolbox talk.");
+      }
+    } catch (e) {
+      setLateSignError("Couldn't load that toolbox talk.");
+    }
+  };
+
+  const signLate = async () => {
+    if (!lateSignTarget) return;
+    setSigningLate(true); setLateSignError("");
+    const sig = canvasRef.current.toDataURL("image/png");
+    const { record, company } = lateSignTarget;
+    const updatedAttendees = [...(record.attendees_json || []), { name: lateName.trim(), signature: sig, signedLate: true }];
+
+    let pdfUrl = record.pdf_url;
+    try {
+      pdfUrl = await generateAndUploadToolbox({
+        presenter: record.presenter_name, meetingType: record.meeting_type, site: record.site, topic: record.topic,
+        companyName: company?.name || "", companyLogo: company?.logo_url || "",
+        points: record.talking_points_json || {}, attendees: updatedAttendees,
+        customFields: record.talking_points_json?.customFields || [],
+      }) || record.pdf_url;
+    } catch (e) { /* keep the existing pdf if regeneration fails */ }
+
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "toolbox", action: "sign_late_toolbox", token, id: record.id, name: lateName.trim(), signature: sig, pdfUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLateSignError(data.error || "Couldn't save your signature."); setSigningLate(false); return; }
+    } catch (e) {
+      setLateSignError("Couldn't save your signature. Try again.");
+      setSigningLate(false);
+      return;
+    }
+    setSigningLate(false);
+    setStep("done");
+  };
+
   const submit = async () => {
     setSaving(true);
     const pdfUrl = await generateAndUploadToolbox({
@@ -176,6 +251,16 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Menu</button>
       </div>
 
+      {/* CHOICE */}
+      {step === "choice" && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Toolbox Talk</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Running a new talk, or signing one you missed?</div>
+          <button style={s.btn("#7C3AED")} onClick={() => setStep("setup")}>Start a New Toolbox Talk</button>
+          <button style={s.ghost} onClick={() => { setLateSignError(""); setStep("findtalk"); loadOpenTalks(); }}>I Missed One — Sign It Now</button>
+        </div>
+      )}
+
       {/* SETUP */}
       {step === "setup" && (
         <div style={s.card}>
@@ -213,6 +298,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
             setStep("topic");
           }}>Continue →</button>
+          <button style={s.ghost} onClick={() => setStep("choice")}>← Back</button>
         </div>
       )}
 
@@ -328,13 +414,78 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         </>
       )}
 
+      {/* FIND TALK (sign-later) */}
+      {step === "findtalk" && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Recent Toolbox Talks</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Pick the one you need to sign — from the last two weeks.</div>
+          {lateSignError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>{lateSignError}</div>}
+          {loadingOpenTalks ? (
+            <div style={{ textAlign: "center", color: "#94A3B8", padding: "20px 0" }}>Loading…</div>
+          ) : openTalks.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#94A3B8", padding: "20px 0" }}>No toolbox talks found in the last two weeks. Ask your supervisor.</div>
+          ) : (
+            openTalks.map(t => (
+              <button key={t.id} onClick={() => openTalkToSign(t.id)} style={{ display: "block", width: "100%", textAlign: "left", background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8, cursor: "pointer" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{t.meeting_type} · {t.site}</div>
+                <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{t.presenter_name} · {new Date(t.created_at).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} · {t.signedCount} signed</div>
+              </button>
+            ))
+          )}
+          <button style={s.ghost} onClick={() => setStep("choice")}>← Back</button>
+        </div>
+      )}
+
+      {/* LATE SIGN */}
+      {step === "latesign" && lateSignTarget && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>{lateSignTarget.record.meeting_type} Toolbox Talk</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>
+            {lateSignTarget.record.site} · Presented by {lateSignTarget.record.presenter_name} · {new Date(lateSignTarget.record.created_at).toLocaleDateString("en-CA")}
+          </div>
+          {lateSignTarget.record.talking_points_json?.summary && (
+            <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "#334155" }}>{lateSignTarget.record.talking_points_json.summary}</div>
+          )}
+
+          <label style={s.label}>Your name</label>
+          <input
+            style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            placeholder="Your full name" value={lateName}
+            onChange={e => setLateName(e.target.value)}
+            readOnly={!!loginUserName}
+          />
+
+          <label style={s.label}>Signature</label>
+          <div style={{ position: "relative", marginBottom: 6 }}>
+            <canvas ref={canvasRef} width={600} height={160}
+              style={{ width: "100%", height: 130, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+              onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+              onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
+            {!attHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+          </div>
+          <div style={{ textAlign: "right", marginBottom: 10 }}>
+            <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+          </div>
+
+          {lateSignError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>{lateSignError}</div>}
+          <button style={s.btn((lateName.trim() && attHasSig && !signingLate) ? "#16A34A" : "#94A3B8")} disabled={!lateName.trim() || !attHasSig || signingLate} onClick={signLate}>
+            {signingLate ? "Saving…" : "Sign & Submit"}
+          </button>
+          <button style={s.ghost} onClick={() => setStep("findtalk")}>← Back</button>
+        </div>
+      )}
+
       {/* DONE */}
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
             <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Toolbox Talk Recorded</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>{lateSignTarget ? "Signature Recorded" : "Toolbox Talk Recorded"}</div>
+            {lateSignTarget ? (
+              <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{lateSignTarget.record.meeting_type} · {lateSignTarget.record.site} · Signed by {lateName}</div>
+            ) : (
+              <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
+            )}
             <button style={s.btn("#7C3AED")} onClick={onBack}>Back to menu</button>
           </div>
         </div>

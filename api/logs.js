@@ -99,7 +99,7 @@ export default async function handler(req, res) {
     //    machine, so we can flag if it had defects/monitor items
     if (action === 'check_equipment') {
       if (type !== 'inspection') return res.status(400).json({ error: 'Not applicable for this record type.' });
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { equipmentLabel } = req.body;
       if (!equipmentLabel) return res.status(400).json({ error: 'Missing equipment.' });
 
@@ -126,7 +126,7 @@ export default async function handler(req, res) {
 
     // ── Worker: submit a new record ─────────────────────────────────
     if (action === 'submit') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -167,6 +167,64 @@ export default async function handler(req, res) {
       }
       const { error } = await supabaseAdmin.from(table.name).delete().eq('id', id);
       if (error) return res.status(500).json({ error: 'Delete failed.' });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ── Toolbox Talk: list recent talks someone can still sign ──────
+    // Anyone who missed a talk (or a supervisor helping them find it) picks
+    // from the last two weeks for their own company — no pre-registered
+    // "expected attendees" list, so this works the same for shared-code and
+    // individually-identified companies alike.
+    if (action === 'list_open_toolbox') {
+      if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabaseAdmin
+        .from('toolbox_talks')
+        .select('id, presenter_name, meeting_type, site, topic, attendees_json, created_at')
+        .eq('company_id', session.companyId)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (error) return res.status(500).json({ error: 'Could not load recent toolbox talks.' });
+      const talks = (data || []).map(t => ({ ...t, signedCount: (t.attendees_json || []).length }));
+      return res.status(200).json({ talks });
+    }
+
+    // ── Toolbox Talk: full detail for the sign-later confirm screen ─
+    if (action === 'get_toolbox_detail') {
+      if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing record id.' });
+      const { data, error } = await supabaseAdmin.from('toolbox_talks').select('*').eq('id', id).limit(1);
+      if (error || !data || data.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
+      const record = data[0];
+      if (record.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      record.pdf_url = await signStoredUrl(record.pdf_url, 'flha-reports');
+      const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, logo_url').eq('id', record.company_id).limit(1);
+      return res.status(200).json({ record, company: coRows && coRows[0] });
+    }
+
+    // ── Toolbox Talk: add a late signature to an existing talk ──────
+    if (action === 'sign_late_toolbox') {
+      if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      const { id, name, signature, pdfUrl } = req.body;
+      if (!id || !name || !signature) return res.status(400).json({ error: 'Missing details.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('toolbox_talks').select('id, company_id, attendees_json').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
+      const existing = rows[0];
+      if (existing.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+
+      const attendees = [...(existing.attendees_json || []), {
+        name: name.trim(),
+        signature,
+        signedLate: true,
+        signedAt: new Date().toISOString(),
+      }];
+      const update = { attendees_json: attendees };
+      if (pdfUrl) update.pdf_url = pdfUrl;
+      const { error } = await supabaseAdmin.from('toolbox_talks').update(update).eq('id', id);
+      if (error) return res.status(500).json({ error: 'Could not save your signature. Try again.' });
       return res.status(200).json({ ok: true });
     }
 

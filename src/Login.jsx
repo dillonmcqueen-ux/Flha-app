@@ -206,6 +206,7 @@ export default function Login() {
           <Dashboard
             forcedCompanyId={adminDashCompany}
             isAdmin={false}
+            viewerRole="admin"
             onLogout={() => setAdminDashCompany(null)}
             backLabel="← Back to onboarding"
             token={session.token}
@@ -221,6 +222,7 @@ export default function Login() {
       <Dashboard
         forcedCompanyId={session.companyId}
         isAdmin={false}
+        viewerRole="supervisor"
         onLogout={logout}
         suspended={session.suspended}
         userName={session.userName || ""}

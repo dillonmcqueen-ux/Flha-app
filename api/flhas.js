@@ -76,7 +76,7 @@ export default async function handler(req, res) {
   try {
     // ── Worker: find today's FLHA to resume/amend ─────────────────────
     if (action === 'resume') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { workerName } = req.body;
       if (!workerName || !workerName.trim()) return res.status(400).json({ error: 'Enter your name.' });
 
@@ -97,7 +97,7 @@ export default async function handler(req, res) {
 
     // ── Worker: submit a new FLHA or save an amendment ─────────────────
     if (action === 'submit') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });

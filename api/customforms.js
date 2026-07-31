@@ -275,7 +275,7 @@ export default async function handler(req, res) {
 
     // Called by WorkerMenu to build the dynamic list of doc types.
     if (action === 'get_worker_documents') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
 
       const { data: settingsRows } = await supabaseAdmin
         .from('company_document_settings')
@@ -304,7 +304,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'get_active_form') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { siteId, formId } = req.body;
       if (!siteId || !formId) return res.status(400).json({ error: 'Missing details.' });
 
@@ -330,7 +330,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'submit_custom') {
-      if (session.role !== 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });

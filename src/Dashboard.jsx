@@ -4,6 +4,7 @@ import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import AnalyticsPanel from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
+import WorkerMenu from "./WorkerMenu";
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -856,7 +857,7 @@ function TimeClockReportCard({ data, onClose, error }) {
   );
 }
 
-export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onLogout = null, backLabel = "Exit", suspended = false, userName = "", userId = null, token = null }) {
+export default function Dashboard({ forcedCompanyId = null, isAdmin = false, viewerRole = "supervisor", onLogout = null, backLabel = "Exit", suspended = false, userName = "", userId = null, token = null }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
   const [inspections, setInspections] = useState([]);
@@ -920,6 +921,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
 
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const [showWorkerForms, setShowWorkerForms] = useState(false);
   const [selectedFlha, setSelectedFlha] = useState(null);
   const [activeTab, setActiveTab] = useState("flhas");
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -2146,6 +2148,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
     </div>
   );
 
+  if (showWorkerForms) {
+    const co = companies.find(c => c.id === selectedCompany);
+    return (
+      <WorkerMenu
+        companyId={selectedCompany}
+        companyName={co?.name || ""}
+        userName={userName}
+        userId={userId}
+        token={token}
+        backLabel="← Back to Dashboard"
+        onLogout={() => setShowWorkerForms(false)}
+      />
+    );
+  }
+
   return (
     <div style={styles.wrap}>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} defaultSupName={userName} />}
@@ -2164,11 +2181,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, onL
           <div style={{ fontWeight: 800, fontSize: 18 }}>FORA Dashboard</div>
           <div style={{ fontSize: 12, opacity: 0.8 }}>{isAdmin ? "Admin View — All Companies" : "Supervisor View"}</div>
         </div>
-        {onLogout && (
-          <button onClick={onLogout} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-            {backLabel}
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          {viewerRole === "supervisor" && (
+            <button onClick={() => setShowWorkerForms(true)} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+              📝 Fill Out a Form
+            </button>
+          )}
+          {onLogout && (
+            <button onClick={onLogout} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+              {backLabel}
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ padding: 16 }}>

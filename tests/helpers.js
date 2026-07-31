@@ -130,6 +130,34 @@ export async function mockWorkerApis(page, { companyId = 'test-company-id', comp
     if (body.action === 'check_equipment') {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ openPretrip: null, lastInspection: null }) });
     }
+    if (body.action === 'list_open_toolbox') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          talks: [{
+            id: 'talk-1', presenter_name: 'Jamie Presenter', meeting_type: 'Daily', site: 'Test Site',
+            topic: 'Fall protection', created_at: new Date().toISOString(), signedCount: 1,
+          }],
+        }),
+      });
+    }
+    if (body.action === 'get_toolbox_detail') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          record: {
+            id: 'talk-1', presenter_name: 'Jamie Presenter', meeting_type: 'Daily', site: 'Test Site',
+            topic: 'Fall protection', created_at: new Date().toISOString(), pdf_url: null,
+            talking_points_json: { summary: 'Covering fall protection basics for the crew.', sections: [], discussion: [], customFields: [] },
+            attendees_json: [{ name: 'Jamie Presenter', signature: 'data:image/png;base64,x', presenter: true }],
+          },
+          company: { name: 'Test Co', logo_url: '' },
+        }),
+      });
+    }
+    if (body.action === 'sign_late_toolbox') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'test-log-id' }) });
   });
 
