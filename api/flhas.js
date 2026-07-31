@@ -170,12 +170,9 @@ export default async function handler(req, res) {
         }
       }
       const now = new Date().toISOString();
-      const { error } = await supabaseAdmin.from('flhas').update({
-        status: 'complete',
-        supervisor_signed_by: supName,
-        supervisor_signed_at: now,
-        pdf_url: pdfUrl || null,
-      }).eq('id', id);
+      const update = { status: 'complete', supervisor_signed_by: supName, supervisor_signed_at: now };
+      if (pdfUrl) update.pdf_url = pdfUrl;
+      const { error } = await supabaseAdmin.from('flhas').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Approval failed.' });
       const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
       return res.status(200).json({ ok: true, supervisor_signed_at: now, pdfUrl: signedPdfUrl });

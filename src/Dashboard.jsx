@@ -1019,7 +1019,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const approveFLHA = async (record, supName, supSignature) => {
     const now = new Date();
     const co = companies.find(c => c.id === record.company_id);
-    let pdfUrl = record.pdf_url;
+    // record.pdf_url here is already a signed URL (the list load signed it) —
+    // never fall back to it as the value to persist, or a regen failure would
+    // overwrite the DB's real stored path with a URL that expires and can't
+    // be re-signed later. null means "leave pdf_url alone" server-side.
+    let pdfUrl = null;
     try {
       pdfUrl = await generateAndUploadFLHA({
         flha: record.hazards_json,
@@ -1040,7 +1044,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       const res = await fetch("/api/flhas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve", token, id: record.id, supName, supSignature, pdfUrl: pdfUrl || record.pdf_url }),
+        body: JSON.stringify({ action: "approve", token, id: record.id, supName, supSignature, pdfUrl }),
       });
       const data = await res.json();
       if (res.ok) signedPdfUrl = data.pdfUrl || signedPdfUrl;
@@ -1680,7 +1684,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     const record = nearMisses.find(n => n.id === id);
     const reviewedBy = (reviewerName || "").trim() || userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
-    let pdfUrl = record?.pdf_url || null;
+    // record.pdf_url is already a signed URL (the list load signed it) —
+    // never fall back to it as the value to persist, or a regen failure
+    // would overwrite the DB's real stored path with a URL that expires.
+    // null means "leave pdf_url alone" server-side.
+    let pdfUrl = null;
     if (record) {
       const co = companies.find(c => c.id === record.company_id);
       try {
@@ -1695,7 +1703,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           signatureDataUrl: record.signature_url || null,
           customFields: record.report_json?.customFields || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
-        }) || record.pdf_url || null;
+        });
       } catch (e) { /* keep old pdf if regen fails */ }
     }
     try {
@@ -1717,7 +1725,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     const record = incidents.find(n => n.id === id);
     const reviewedBy = (reviewerName || "").trim() || userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
-    let pdfUrl = record?.pdf_url || null;
+    // record.pdf_url is already a signed URL (the list load signed it) —
+    // never fall back to it as the value to persist, or a regen failure
+    // would overwrite the DB's real stored path with a URL that expires.
+    // null means "leave pdf_url alone" server-side.
+    let pdfUrl = null;
     if (record) {
       const co = companies.find(c => c.id === record.company_id);
       try {
@@ -1739,7 +1751,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           customFields: record.report_json?.customFields || [],
           photoUrls: record.photo_urls || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
-        }) || record.pdf_url || null;
+        });
       } catch (e) { /* keep old pdf if regen fails */ }
     }
     try {

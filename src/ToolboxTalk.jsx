@@ -171,14 +171,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const { record, company } = lateSignTarget;
     const updatedAttendees = [...(record.attendees_json || []), { name: lateName.trim(), signature: sig, signedLate: true }];
 
-    let pdfUrl = record.pdf_url;
+    // record.pdf_url here is already a signed URL (get_toolbox_detail signed
+    // it) — never fall back to it as the value to persist, or a regen
+    // failure would overwrite the DB's real stored path with a URL that
+    // expires and can't be re-signed later. null means "leave pdf_url
+    // alone" server-side, keeping whatever valid PDF already exists.
+    let pdfUrl = null;
     try {
       pdfUrl = await generateAndUploadToolbox({
         presenter: record.presenter_name, meetingType: record.meeting_type, site: record.site, topic: record.topic,
         companyName: company?.name || "", companyLogo: company?.logo_url || "",
         points: record.talking_points_json || {}, attendees: updatedAttendees,
         customFields: record.talking_points_json?.customFields || [],
-      }) || record.pdf_url;
+      });
     } catch (e) { /* keep the existing pdf if regeneration fails */ }
 
     try {
