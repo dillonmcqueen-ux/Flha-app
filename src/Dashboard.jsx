@@ -202,6 +202,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
               style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 12, background: defaultSupName ? "#F3F4F6" : "#F8FAFC", color: defaultSupName ? "#6B7280" : "inherit" }}
             />
             <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Signature</label>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
                 style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}

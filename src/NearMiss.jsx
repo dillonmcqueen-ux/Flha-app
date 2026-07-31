@@ -365,6 +365,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {!anonymous && (
             <>
               <label style={s.label}>Signature</label>
+              <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
               <div style={{ position: "relative", marginBottom: 6 }}>
                 <canvas ref={canvasRef} width={600} height={160}
                   style={{ width: "100%", height: 130, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}

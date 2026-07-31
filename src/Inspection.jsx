@@ -493,6 +493,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {/* signature */}
           <div style={s.card}>
             <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: "#1E293B" }}>Inspector signature</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
                 style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
@@ -557,6 +558,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           <div style={s.card}>
             <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: "#1E293B" }}>Signature</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
                 style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}

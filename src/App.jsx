@@ -946,6 +946,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
 
               <label style={styles.label}>Worker signature</label>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
               <div style={{ position: "relative", marginBottom: 6 }}>
                 <canvas
                   ref={canvasRef}
@@ -1004,6 +1005,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <label style={styles.label}>Crew member name</label>
             <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Full name" value={crewName} onChange={e => setCrewName(e.target.value)} />
             <label style={styles.label}>Signature</label>
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={crewCanvasRef} width={600} height={160}
                 style={{ width: "100%", height: 130, border: "1.5px solid #E5E7EB", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
