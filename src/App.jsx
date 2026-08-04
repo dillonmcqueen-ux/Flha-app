@@ -244,6 +244,8 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [flha, setFlha] = useState(null);
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [savingFLHA, setSavingFLHA] = useState(false);
   const [sopsOpen, setSopsOpen] = useState(false);
   const [signed, setSigned] = useState(false);
   const [signName, setSignName] = useState("");
@@ -509,7 +511,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
   };
 
   const saveFLHA = async () => {
-    if (!flha) return;
+    if (!flha) return false;
+    setSavingFLHA(true);
+    setSaveError(false);
 
     const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
     const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
@@ -538,49 +542,60 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     });
 
     try {
-      if (amendingId) {
-        await fetch("/api/flhas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "submit",
-            token,
-            amendingId,
-            record: {
-              job_site: jobSite,
-              task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
-              hazards_json: flhaWithCustom,
-              pdf_url: pdfUrl || null,
-              status: newStatus,
-              crew_signatures: crew,
-            },
-          }),
-        });
-      } else {
-        await fetch("/api/flhas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "submit",
-            token,
-            record: {
-              worker_name: workerName,
-              job_site: jobSite,
-              task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-              hazards_json: flhaWithCustom,
-              signed_by: workerName,
-              pdf_url: pdfUrl || null,
-              status: newStatus,
-              worker_signature: signatureDataUrl || null,
-              crew_signatures: crew,
-            },
-          }),
-        });
+      const res = amendingId
+        ? await fetch("/api/flhas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "submit",
+              token,
+              amendingId,
+              record: {
+                job_site: jobSite,
+                task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
+                hazards_json: flhaWithCustom,
+                pdf_url: pdfUrl || null,
+                status: newStatus,
+                crew_signatures: crew,
+              },
+            }),
+          })
+        : await fetch("/api/flhas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "submit",
+              token,
+              record: {
+                worker_name: workerName,
+                job_site: jobSite,
+                task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
+                hazards_json: flhaWithCustom,
+                signed_by: workerName,
+                pdf_url: pdfUrl || null,
+                status: newStatus,
+                worker_signature: signatureDataUrl || null,
+                crew_signatures: crew,
+              },
+            }),
+          });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        console.error("FLHA save failed:", res.status, errBody);
+        setSaveError(true);
+        setSavingFLHA(false);
+        return false;
       }
     } catch (e) {
       console.error("FLHA save failed:", e);
+      setSaveError(true);
+      setSavingFLHA(false);
+      return false;
     }
+    setSavingFLHA(false);
     setPendingApproval(newStatus === "pending_approval");
+    return true;
   };
 
   const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
@@ -1060,18 +1075,35 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
           </div>
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this FLHA — it has NOT reached your supervisor's dashboard. Check your connection and try again.
+            </div>
+          )}
+
           {amendingId ? (
             <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
-              disabled={signed}
-              onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-              {signed ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
+              disabled={signed && !saveError}
+              onClick={async () => {
+                setSigned(true);
+                const ok = await saveFLHA();
+                if (ok) setTimeout(() => setStep("done"), 600);
+                else setSigned(false);
+              }}>
+              {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
             </button>
           ) : (
             <>
               <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
-                disabled={!hasSignature || signed}
-                onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-                {signed ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
+                disabled={!hasSignature || (signed && !saveError)}
+                onClick={async () => {
+                  setSignName(workerName);
+                  setSigned(true);
+                  const ok = await saveFLHA();
+                  if (ok) setTimeout(() => setStep("done"), 600);
+                  else setSigned(false);
+                }}>
+                {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
               </button>
               <button style={styles.ghost} onClick={() => setStep("review")}>← Back to review</button>
             </>
