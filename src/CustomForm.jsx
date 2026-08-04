@@ -144,7 +144,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
     const pdfUrl = await generateAndUploadCustomForm({
       formTitle: form.title, accentColor: form.accent_color, siteName: siteName(), companyName, companyLogo,
-      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig,
+      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig, token,
     });
 
     try {

@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -18,7 +18,7 @@ function hexToRgb(hex) {
 }
 
 export async function generateAndUploadCustomForm({
-  formTitle, accentColor, siteName, companyName, companyLogo, submittedBy, aiSummary, items, signatureDataUrl,
+  formTitle, accentColor, siteName, companyName, companyLogo, submittedBy, aiSummary, items, signatureDataUrl, token,
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -116,8 +116,14 @@ export async function generateAndUploadCustomForm({
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `CUSTOM_${formTitle || "doc"}_${companyName || "co"}_${siteName || "site"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { console.error("custom form pdf upload failed", error.message); return null; }
-  const { data } = supabase.storage.from("flha-reports").getPublicUrl(filename);
-  return data?.publicUrl || null;
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/customforms", action: "create_upload_url", token,
+      bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (e) {
+    console.error("custom form pdf upload failed", e.message);
+    return null;
+  }
 }

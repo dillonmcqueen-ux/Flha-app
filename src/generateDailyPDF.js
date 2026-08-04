@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
@@ -19,7 +19,7 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
 }
 
 export async function generateAndUploadDaily(data) {
-  const { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report, companyName, companyLogo, customFields } = data;
+  const { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report, companyName, companyLogo, customFields, token } = data;
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -101,8 +101,14 @@ export async function generateAndUploadDaily(data) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `DAILY_${companyName || "co"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { console.error("daily pdf upload failed", error.message); return null; }
-  const { data: pub } = supabase.storage.from("flha-reports").getPublicUrl(filename);
-  return pub?.publicUrl || null;
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/logs", action: "create_upload_url", token,
+      bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (e) {
+    console.error("daily pdf upload failed", e.message);
+    return null;
+  }
 }

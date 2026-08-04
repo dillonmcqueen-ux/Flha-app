@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
@@ -18,7 +18,7 @@ function wrap(doc, text, x, y, maxW, lh, footerLimit = 276) {
   return y;
 }
 
-export async function generateAndUploadToolbox({ presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields }) {
+export async function generateAndUploadToolbox({ presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields, token }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -138,8 +138,14 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `TOOLBOX_${companyName || "co"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { console.error("toolbox pdf upload failed", error.message); return null; }
-  const { data } = supabase.storage.from("flha-reports").getPublicUrl(filename);
-  return data?.publicUrl || null;
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/logs", action: "create_upload_url", token,
+      bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (e) {
+    console.error("toolbox pdf upload failed", e.message);
+    return null;
+  }
 }

@@ -1704,6 +1704,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           signatureDataUrl: record.signature_url || null,
           customFields: record.report_json?.customFields || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
+          token,
         });
       } catch (e) { /* keep old pdf if regen fails */ }
     }
@@ -1752,6 +1753,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           customFields: record.report_json?.customFields || [],
           photoUrls: record.photo_urls || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
+          token,
         });
       } catch (e) { /* keep old pdf if regen fails */ }
     }
