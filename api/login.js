@@ -13,6 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -180,6 +181,19 @@ export default async function handler(req, res) {
   }
 
   const { action } = req.body || {};
+
+  // ── Onboarding intake file uploads — public, no login required (same
+  // reasoning as submit_onboarding_intake below). Restricted to the two
+  // buckets the onboarding form actually uses. ───────────────────────────
+  if (action === 'create_onboarding_upload_url') {
+    const { bucket, filename } = req.body;
+    if (bucket !== 'company-logos' && bucket !== 'onboarding-uploads') {
+      return res.status(400).json({ error: 'Invalid bucket.' });
+    }
+    const result = await createUploadUrl(supabaseAdmin, bucket, filename);
+    if (result.error) return res.status(500).json({ error: result.error });
+    return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+  }
 
   // ── Step 2: name picker (ticket only, no PIN yet) ───────────────────────
   if (action === 'list_roster_names') {

@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -85,13 +86,25 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { type, action, token } = req.body || {};
-  const table = TABLES[type];
-  if (!table) return res.status(400).json({ error: 'Unknown report type.' });
 
   const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Photo/signature/PDF uploads for incident + near-miss reports ────
+    if (action === 'create_upload_url') {
+      const { bucket, filename } = req.body;
+      if (!['incident-photos', 'signatures', 'flha-reports'].includes(bucket)) {
+        return res.status(400).json({ error: 'Invalid bucket.' });
+      }
+      const result = await createUploadUrl(supabaseAdmin, bucket, filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
+    const table = TABLES[type];
+    if (!table) return res.status(400).json({ error: 'Unknown report type.' });
+
     // ── Worker: submit a new report ─────────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });

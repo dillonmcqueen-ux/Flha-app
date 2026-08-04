@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
@@ -135,7 +135,7 @@ function drawInfoBox(doc, { margin, contentW, y, W, rows }) {
 
 export async function generateAndUploadInspection({
   equipmentLabel, workerName, companyName, companyLogo, results, signatureDataUrl,
-  tripType = "pretrip", startReading, endReading, readingUnit, hasChanges, changeCondition, changeNotes, linkedPretrip,
+  tripType = "pretrip", startReading, endReading, readingUnit, hasChanges, changeCondition, changeNotes, linkedPretrip, token,
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -274,8 +274,14 @@ export async function generateAndUploadInspection({
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `INSPECTION_${isPost ? "POST" : "PRE"}_${companyName || "co"}_${workerName || "w"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { console.error("inspection pdf upload failed", error.message); return null; }
-  const { data } = supabase.storage.from("flha-reports").getPublicUrl(filename);
-  return data?.publicUrl || null;
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/logs", action: "create_upload_url", token,
+      bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (e) {
+    console.error("inspection pdf upload failed", e.message);
+    return null;
+  }
 }

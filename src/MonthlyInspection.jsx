@@ -155,7 +155,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const pdfUrl = await generateAndUploadMonthlyInspection({
       formTitle: form.title, siteName: siteName(), companyName, companyLogo,
       monthLabel: new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long" }),
-      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig,
+      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig, token,
     });
 
     try {

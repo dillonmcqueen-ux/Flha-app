@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 
@@ -112,10 +112,11 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
       try {
         const ext = (entry.file.name.split(".").pop() || "jpg").toLowerCase();
         const filename = `incident_${companyId}_${entry.id}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { error } = await supabase.storage.from("incident-photos").upload(filename, entry.file, { contentType: entry.file.type, upsert: false });
-        if (error) throw error;
-        const { data } = supabase.storage.from("incident-photos").getPublicUrl(filename);
-        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: data?.publicUrl || null } : p));
+        const { publicUrl } = await uploadViaSignedUrl({
+          endpoint: "/api/reports", action: "create_upload_url", token,
+          bucket: "incident-photos", filename, file: entry.file, contentType: entry.file.type,
+        });
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: publicUrl || null } : p));
       } catch (e) {
         setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
       }
@@ -207,17 +208,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       try {
         const blob = await (await fetch(sig)).blob();
         const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { error } = await supabase.storage.from("signatures").upload(filename, blob, { contentType: "image/png", upsert: false });
-        if (!error) {
-          const { data } = supabase.storage.from("signatures").getPublicUrl(filename);
-          signatureUrl = data?.publicUrl || null;
-        }
+        const { publicUrl } = await uploadViaSignedUrl({
+          endpoint: "/api/reports", action: "create_upload_url", token,
+          bucket: "signatures", filename, file: blob, contentType: "image/png",
+        });
+        signatureUrl = publicUrl || null;
       } catch (e) { /* signature upload failure shouldn't block submission */ }
     }
 
     const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
     const photoUrls = uploadedPhotoUrls();
-    const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig, photoUrls });
+    const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig, photoUrls, token });
     try {
       await fetch("/api/reports", {
         method: "POST",

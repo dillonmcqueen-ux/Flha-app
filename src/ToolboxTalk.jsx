@@ -183,6 +183,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         companyName: company?.name || "", companyLogo: company?.logo_url || "",
         points: record.talking_points_json || {}, attendees: updatedAttendees,
         customFields: record.talking_points_json?.customFields || [],
+        token,
       });
     } catch (e) { /* keep the existing pdf if regeneration fails */ }
 
@@ -205,7 +206,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const submit = async () => {
     setSaving(true);
     const pdfUrl = await generateAndUploadToolbox({
-      presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields: cf.entries(),
+      presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields: cf.entries(), token,
     });
     try {
       await fetch("/api/logs", {

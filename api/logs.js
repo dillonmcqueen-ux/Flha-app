@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -84,13 +85,21 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { type, action, token } = req.body || {};
-  const table = TABLES[type];
-  if (!table) return res.status(400).json({ error: 'Unknown record type.' });
 
   const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Generated PDF uploads for inspections, toolbox talks, daily reports ─
+    if (action === 'create_upload_url') {
+      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
+    const table = TABLES[type];
+    if (!table) return res.status(400).json({ error: 'Unknown record type.' });
+
     // ── Worker: check a piece of equipment before starting an inspection ─
     // Only applies to inspections. Returns:
     //  - openPretrip: a pre-trip from TODAY on this machine with no matching

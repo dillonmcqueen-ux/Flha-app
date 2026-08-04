@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import Stripe from 'stripe';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -89,6 +90,14 @@ export default async function handler(req, res) {
   if (!session || session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
 
   try {
+    // ── Company logo upload (company setup) ─────────────────────────────
+    if (action === 'create_logo_upload_url') {
+      const { filename } = req.body;
+      const result = await createUploadUrl(supabaseAdmin, 'company-logos', filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
     // ── List all companies (includes codes + contact info) ─────────────
     if (action === 'list_companies') {
       const { data, error } = await supabaseAdmin

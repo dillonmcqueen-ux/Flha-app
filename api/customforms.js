@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -84,6 +85,13 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Generated PDF uploads for custom form reports ────────────────────
+    if (action === 'create_upload_url') {
+      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
     // ══ ADMIN: custom form builder ═══════════════════════════════════
 
     if (action === 'list_forms') {

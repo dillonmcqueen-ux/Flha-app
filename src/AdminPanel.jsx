@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
@@ -538,12 +539,17 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setUploadingLogo(true); setMsg("");
     const ext = file.name.split(".").pop();
     const filename = `logo_${activeId}_${Date.now()}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-    const { error } = await supabase.storage.from("company-logos").upload(filename, file, { contentType: file.type, upsert: true });
-    if (error) { setMsg("Logo upload failed: " + error.message); setUploadingLogo(false); return; }
-    const { data } = supabase.storage.from("company-logos").getPublicUrl(filename);
-    setProfile(p => ({ ...p, logo_url: data?.publicUrl || "" }));
+    try {
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/admin", action: "create_logo_upload_url", token,
+        bucket: "company-logos", filename, file, contentType: file.type,
+      });
+      setProfile(p => ({ ...p, logo_url: publicUrl }));
+      setMsg("Logo uploaded — tap Save profile to keep it");
+    } catch (e) {
+      setMsg("Logo upload failed: " + e.message);
+    }
     setUploadingLogo(false);
-    setMsg("Logo uploaded — tap Save profile to keep it");
   };
 
   const addSops = async () => {

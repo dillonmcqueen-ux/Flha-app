@@ -214,7 +214,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const pdfUrl = await generateAndUploadInspection({
       equipmentLabel: label, workerName, companyName, companyLogo,
       results: resultsJson, signatureDataUrl: sig,
-      tripType: "pretrip", startReading, readingUnit,
+      tripType: "pretrip", startReading, readingUnit, token,
     });
 
     try {
@@ -266,7 +266,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       tripType: "posttrip",
       startReading: openPretrip.start_reading, endReading, readingUnit,
       hasChanges: !!hasChanges, changeCondition, changeNotes,
-      linkedPretrip: openPretrip,
+      linkedPretrip: openPretrip, token,
     });
 
     try {

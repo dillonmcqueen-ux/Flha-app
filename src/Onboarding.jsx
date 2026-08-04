@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "./supabaseClient.js";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 
 // Public onboarding intake — no login required. A brand-new customer lands
 // here right after paying, before they have any credentials of their own.
@@ -68,10 +68,16 @@ export default function Onboarding() {
     const paths = [];
     for (const file of files) {
       const ext = file.name.split(".").pop();
-      const path = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-      const { error: upErr } = await supabase.storage.from("onboarding-uploads").upload(path, file, { contentType: file.type, upsert: false });
-      if (upErr) throw new Error(`Couldn't upload ${file.name}: ${upErr.message}`);
-      paths.push(path);
+      const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      try {
+        const { path } = await uploadViaSignedUrl({
+          endpoint: "/api/login", action: "create_onboarding_upload_url",
+          bucket: "onboarding-uploads", filename, file, contentType: file.type,
+        });
+        paths.push(path);
+      } catch (e) {
+        throw new Error(`Couldn't upload ${file.name}: ${e.message}`);
+      }
     }
     return paths;
   };
@@ -80,10 +86,15 @@ export default function Onboarding() {
     if (!logoFile) return "";
     const ext = logoFile.name.split(".").pop();
     const filename = `onboarding_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-    const { error: upErr } = await supabase.storage.from("company-logos").upload(filename, logoFile, { contentType: logoFile.type, upsert: false });
-    if (upErr) throw new Error(`Couldn't upload logo: ${upErr.message}`);
-    const { data } = supabase.storage.from("company-logos").getPublicUrl(filename);
-    return data?.publicUrl || "";
+    try {
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/login", action: "create_onboarding_upload_url",
+        bucket: "company-logos", filename, file: logoFile, contentType: logoFile.type,
+      });
+      return publicUrl;
+    } catch (e) {
+      throw new Error(`Couldn't upload logo: ${e.message}`);
+    }
   };
 
   const handleSubmit = async (e) => {

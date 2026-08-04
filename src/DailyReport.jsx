@@ -150,7 +150,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const equipment = equipmentSummary();
     const weatherStr = weatherSummary();
     const meta = { reporter, site, reportDate, weather: weatherStr, temperature, crew, equipment, visitors, customFields: cf.entries() };
-    const pdfUrl = await generateAndUploadDaily({ ...meta, report, companyName, companyLogo });
+    const pdfUrl = await generateAndUploadDaily({ ...meta, report, companyName, companyLogo, token });
     try {
       await fetch("/api/logs", {
         method: "POST",
