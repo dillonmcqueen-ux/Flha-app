@@ -20,10 +20,51 @@ const SOP_STOPWORDS = new Set([
   "from", "must", "when", "each", "such", "their", "has", "have",
 ]);
 
+// Common construction/safety word families that should count as the same
+// concept even when the exact word differs (e.g. a task that says "digging
+// a ditch" should match an SOP titled "Excavation Procedures").
+const SOP_SYNONYM_GROUPS = [
+  ["excavat", "trench", "dig", "ditch"],
+  ["fenc", "barricad", "barrier"],
+  ["fall", "height"],
+  ["lockout", "tagout", "loto", "isolat", "energiz", "energis"],
+  ["confined", "enclosed"],
+  ["electric", "power", "wire", "cable"],
+  ["traffic", "vehicle", "flagg", "roadway"],
+  ["crane", "lift", "rig", "hoist", "sling"],
+  ["manual", "handl", "ergonom"],
+  ["weather", "environment", "cold", "heat", "rain"],
+  ["scaffold", "ladder", "platform"],
+  ["chemical", "hazmat", "spill"],
+];
+const SOP_SYNONYM_MAP = new Map();
+SOP_SYNONYM_GROUPS.forEach((group, idx) => {
+  group.forEach(term => SOP_SYNONYM_MAP.set(term, `syn${idx}`));
+});
+
+// Light stemmer so "digging"/"dig", "fencing"/"fence" and
+// "excavation"/"excavating" line up without needing an exact word match.
+function stem(word) {
+  if (word.length > 6 && word.endsWith("ation")) return word.slice(0, -5);
+  if (word.length > 6 && word.endsWith("ing")) return word.slice(0, -3);
+  if (word.length > 5 && word.endsWith("ed")) return word.slice(0, -2);
+  if (word.length > 5 && word.endsWith("es")) return word.slice(0, -2);
+  if (word.length > 4 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+function canonicalize(word) {
+  const stemmed = stem(word);
+  for (const [term, tag] of SOP_SYNONYM_MAP) {
+    if (word.startsWith(term) || stemmed.startsWith(term)) return tag;
+  }
+  return stemmed;
+}
+
 function tokenize(text) {
-  return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
-    w => w.length > 2 && !SOP_STOPWORDS.has(w)
-  );
+  return (text.toLowerCase().match(/[a-z0-9]+/g) || [])
+    .filter(w => w.length > 2 && !SOP_STOPWORDS.has(w))
+    .map(canonicalize);
 }
 
 function scorePolicyRelevance(policy, taskWordsSet) {
