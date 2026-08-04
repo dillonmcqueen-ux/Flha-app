@@ -1,4 +1,5 @@
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+import { getForaLogoDataUrl } from "./foraLogo.js";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -102,14 +103,21 @@ export async function generateAndUploadCustomForm({
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
 
   // footer
+  const foraLogo = await getForaLogoDataUrl();
   const H = 297; const pageCount = doc.internal.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
     doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2); doc.line(margin, H - 12, W - margin, H - 12);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(...accent);
-    doc.text("FORA", margin, H - 7);
-    doc.setFont("helvetica", "normal"); doc.setTextColor(148, 163, 184);
-    doc.text("AI-powered field safety documentation", margin + 11, H - 7);
+    if (foraLogo) {
+      try { doc.addImage(foraLogo, "PNG", margin, H - 10, 16, 6.55); } catch (e) {}
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(148, 163, 184);
+      doc.text("AI-powered field safety documentation", margin + 19, H - 7);
+    } else {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(...accent);
+      doc.text("FORA", margin, H - 7);
+      doc.setFont("helvetica", "normal"); doc.setTextColor(148, 163, 184);
+      doc.text("AI-powered field safety documentation", margin + 11, H - 7);
+    }
     doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 7, { align: "right" });
   }
 

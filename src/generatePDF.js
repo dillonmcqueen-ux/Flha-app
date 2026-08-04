@@ -2,6 +2,7 @@
 // Uses jsPDF loaded from CDN via dynamic import (no build step needed)
 
 import { supabase } from "./supabaseClient";
+import { getForaLogoDataUrl } from "./foraLogo.js";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -426,17 +427,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   }
 
   // Load the FORA brand logo for the footer (once)
-  let foraLogo = null;
-  try {
-    const fResp = await fetch("https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0113.jpeg", { mode: "cors" });
-    const fBlob = await fResp.blob();
-    foraLogo = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onloadend = () => resolve(r.result);
-      r.onerror = reject;
-      r.readAsDataURL(fBlob);
-    });
-  } catch (e) { foraLogo = null; }
+  const foraLogo = await getForaLogoDataUrl();
 
   // ── FORA branding footer on every page ───────────────────
   const H = 297;
@@ -448,13 +439,12 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.line(margin, H - 12, W - margin, H - 12);
     if (foraLogo) {
       try {
-        const fmt = foraLogo.includes("image/png") ? "PNG" : "JPEG";
-        doc.addImage(foraLogo, fmt, margin, H - 10, 14, 5.5);
+        doc.addImage(foraLogo, "PNG", margin, H - 10, 16, 6.55);
       } catch (e) {}
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
       doc.setTextColor(148, 163, 184);
-      doc.text("AI-generated field safety documentation", margin + 17, H - 6.5);
+      doc.text("AI-generated field safety documentation", margin + 19, H - 6.5);
     } else {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7);
