@@ -298,7 +298,7 @@ export default function Login() {
             alt="FORA"
             style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
           />
-          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field safety documentation</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field documentation portal</div>
         </div>
 
         {!role ? (
