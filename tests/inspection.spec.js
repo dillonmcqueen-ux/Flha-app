@@ -111,6 +111,48 @@ test.describe('Equipment Inspection', () => {
     await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
   });
 
+  test('a "5x10 dump trailer" gets the dump trailer checklist, not a generic engine-equipped one', async ({ page }) => {
+    await expect(page.getByText('Select equipment')).toBeVisible();
+    await page.locator('select').selectOption('__other__');
+
+    await page.getByPlaceholder('e.g. 320').fill('5x10');
+    await page.getByPlaceholder('e.g. Excavator').fill('Dump Trailer');
+    await page.getByRole('button', { name: 'Continue →' }).click();
+
+    await expect(page.getByText('Inspector')).toBeVisible();
+    await page.getByPlaceholder('e.g. John Smith').fill('Jamie Inspector');
+    await page.getByPlaceholder('e.g. 1245.3').fill('900');
+    await page.getByRole('button', { name: 'Start Inspection' }).click();
+
+    // Trailer-specific items should be present...
+    await expect(page.getByText('Coupler/hitch — condition, locking pin/latch')).toBeVisible();
+    await expect(page.getByText('Dump mechanism (hoist cylinder or bottom-dump gate/apron) — condition and operation')).toBeVisible();
+    // ...and it must NOT get engine/fluids items — this is the exact bug
+    // report: a towed trailer with no engine got a checklist that included
+    // "engine oil".
+    await expect(page.getByText('Engine oil level')).not.toBeVisible();
+    await expect(page.getByText('Coolant level')).not.toBeVisible();
+  });
+
+  test('a Keith walking floor trailer gets its own checklist, distinct from a dump trailer', async ({ page }) => {
+    await expect(page.getByText('Select equipment')).toBeVisible();
+    await page.locator('select').selectOption('__other__');
+
+    await page.getByPlaceholder('e.g. Excavator').fill('Keith Walking Floor Trailer');
+    await page.getByRole('button', { name: 'Continue →' }).click();
+
+    await expect(page.getByText('Inspector')).toBeVisible();
+    await page.getByPlaceholder('e.g. John Smith').fill('Jamie Inspector');
+    await page.getByPlaceholder('e.g. 1245.3').fill('900');
+    await page.getByRole('button', { name: 'Start Inspection' }).click();
+
+    await expect(page.getByText('Hydraulic drive cylinders and slat drive mechanism — condition')).toBeVisible();
+    await expect(page.getByText('Floor slats — alignment, wear strips, and slide condition')).toBeVisible();
+    // Should not get the dump trailer's hoist/tailgate items or any engine items.
+    await expect(page.getByText('Dump mechanism (hoist cylinder or bottom-dump gate/apron) — condition and operation')).not.toBeVisible();
+    await expect(page.getByText('Engine oil level')).not.toBeVisible();
+  });
+
   async function routeAddEquipmentCapture(page, addedEquipment) {
     await page.route('**/api/companydata', async route => {
       const body = route.request().postDataJSON();

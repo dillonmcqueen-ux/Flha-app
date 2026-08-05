@@ -336,6 +336,123 @@ const EQUIPMENT_TEMPLATES = {
     ],
   },
 
+  // The three trailer templates below are all TOWED, unpowered equipment —
+  // no engine, no engine oil, no fuel system. Their "hydraulic system"
+  // items refer to a self-contained pump (battery or PTO-driven off the
+  // tow vehicle), not an onboard engine, which is the mistake that put
+  // engine-oil checks on a 5x10 dump trailer in the first place.
+  DUMP_TRAILER: {
+    label: "Dump Trailer",
+    items: [
+      ...items("Walkaround / Structure", [
+        "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
+        "Frame, box, and tailgate — cracks, damage, weld condition",
+        "Fenders, mud flaps, and steps",
+      ]),
+      ...items("Hitch & Running Gear", [
+        "Coupler/hitch — condition, locking pin/latch",
+        "Safety chains — condition and properly crossed",
+        "Breakaway cable and battery (if equipped)",
+        "Jack/landing gear (if equipped) — condition and function",
+        "Axles, springs/suspension, and brakes",
+      ]),
+      ...items("Dump / Hydraulic System", [
+        "Dump mechanism (hoist cylinder or bottom-dump gate/apron) — condition and operation",
+        "Hydraulic hoses and fittings — leaks or damage",
+        "Hydraulic pump / power unit (battery or PTO-driven) — condition",
+        "Hydraulic fluid level (if self-contained reservoir)",
+        "Tailgate — latch, chains, and swing/barn-door operation",
+      ]),
+      ...items("Electrical & Lighting", [
+        "Trailer lights, marker lights, and reflectors — function",
+        "Electrical connector/pigtail — condition, no exposed wires",
+        "Wiring harness — secured, no chafe points",
+      ]),
+      ...items("Brakes & Safety Devices", [
+        "Trailer brake function (electric or hydraulic surge, as equipped)",
+        "Breakaway brake test",
+        "Warning triangles/flares present",
+      ]),
+      ...items("Pre-Operation Function Test", [
+        "Test dump cycle (raise/lower) before loading",
+        "Confirm tailgate secures properly before travel",
+        "Confirm load rating not exceeded",
+      ]),
+    ],
+  },
+
+  WALKING_FLOOR_TRAILER: {
+    label: "Walking Floor / Live Floor Trailer",
+    items: [
+      ...items("Walkaround / Structure", [
+        "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
+        "Frame, side walls, and floor slats — cracks, damage, wear",
+        "Tarp system — condition and operation (if equipped)",
+        "Rear gate/door — condition and latch",
+      ]),
+      ...items("Hitch & Running Gear", [
+        "Coupler/hitch — condition, locking pin/latch",
+        "Safety chains — condition and properly crossed",
+        "Landing gear — condition and function",
+        "Axles, springs/suspension, and brakes",
+      ]),
+      ...items("Walking Floor Hydraulic System", [
+        "Hydraulic drive cylinders and slat drive mechanism — condition",
+        "Hydraulic hoses, fittings, and pump — leaks or damage",
+        "Hydraulic fluid level (trailer reservoir or tow vehicle, as applicable)",
+        "Floor slats — alignment, wear strips, and slide condition",
+      ]),
+      ...items("Electrical & Lighting", [
+        "Trailer lights, marker lights, and reflectors — function",
+        "Electrical connector/pigtail — condition, no exposed wires",
+      ]),
+      ...items("Brakes & Safety Devices", [
+        "Trailer brake function",
+        "Breakaway brake test",
+        "Warning triangles/flares present",
+      ]),
+      ...items("Pre-Operation Function Test", [
+        "Test walking floor unload cycle before loading",
+        "Confirm rear gate/door secures properly before travel",
+        "Confirm load rating not exceeded",
+      ]),
+    ],
+  },
+
+  EQUIPMENT_TRAILER: {
+    label: "Equipment / Flatdeck / Utility Trailer",
+    items: [
+      ...items("Walkaround / Structure", [
+        "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
+        "Deck, ramps, and frame — cracks, damage, wear",
+        "Fenders and mud flaps",
+      ]),
+      ...items("Hitch & Running Gear", [
+        "Coupler/hitch — condition, locking pin/latch",
+        "Safety chains — condition and properly crossed",
+        "Landing gear/jack — condition and function",
+        "Axles, springs/suspension, and brakes",
+      ]),
+      ...items("Load Securement", [
+        "Tie-down points, chains, and binders — condition",
+        "Ramps — condition, operation, and stowed/secured for travel",
+        "Load rating not exceeded, weight distributed properly",
+      ]),
+      ...items("Electrical & Lighting", [
+        "Trailer lights, marker lights, and reflectors — function",
+        "Electrical connector/pigtail — condition, no exposed wires",
+      ]),
+      ...items("Brakes & Safety Devices", [
+        "Trailer brake function",
+        "Breakaway brake test",
+        "Warning triangles/flares present",
+      ]),
+    ],
+  },
+
   WATER_TRUCK: {
     label: "Water Truck",
     items: [
@@ -627,7 +744,12 @@ const EQUIPMENT_TEMPLATES = {
 // (which exists to catch a bare "Truck" or "Pickup" entry, since most
 // workers will type it that plainly, and would otherwise swallow every
 // other "*truck" entry too — that's exactly how a semi ended up on the
-// pickup checklist before this rule existed). First match wins.
+// pickup checklist before this rule existed). Same reasoning for the
+// three towed-trailer templates: WALKING_FLOOR_TRAILER and DUMP_TRAILER
+// are checked before the generic EQUIPMENT_TRAILER "\btrailer\b" fallback,
+// which itself sits ahead of PICKUP_TRUCK/WHEEL_LOADER so an unqualified
+// "trailer" never falls all the way to GENERIC — GENERIC assumes an
+// engine and fluids, which no towed trailer has. First match wins.
 const MATCH_RULES = [
   ["SKID_STEER", /skid.?steer|bobcat|compact track loader|\bctl\b|multi.?terrain loader/i],
   ["BACKHOE", /backhoe/i],
@@ -638,11 +760,14 @@ const MATCH_RULES = [
   ["TRENCHER", /trencher/i],
   ["CRANE", /\bcrane\b|boom truck|picker truck/i],
   ["AERIAL_LIFT", /boom lift|man.?lift|scissor lift|aerial (platform|lift)|cherry picker/i],
-  ["DUMP_TRUCK", /dump truck|haul truck|articulated truck|rock truck|off.?road truck|belly dump/i],
+  ["WALKING_FLOOR_TRAILER", /walking floor|live floor|keith\s*(trailer|walking)?|moving floor/i],
+  ["DUMP_TRAILER", /dump trailer|dump.?box trailer|pintle dump|gooseneck dump|belly dump/i],
+  ["DUMP_TRUCK", /dump truck|haul truck|articulated truck|rock truck|off.?road truck/i],
   ["WATER_TRUCK", /water truck|water tank/i],
   ["SEMI_TRUCK", /\bsemi\b|tractor.?trailer|18.?wheeler|highway tractor|road tractor|fifth wheel|day cab|sleeper cab|kenworth|peterbilt|freightliner|western star|\bmack\b|volvo vnl/i],
   ["SERVICE_TRUCK", /service truck|mechanic truck|deck truck/i],
-  ["PICKUP_TRUCK", /pickup|crew cab|flatdeck|\btruck\b|f.?150|f.?250|f.?350|silverado|sierra|ram\s?(1500|2500|3500)|1.?ton|3\/4.?ton|half.?ton/i],
+  ["EQUIPMENT_TRAILER", /flatdeck|lowbo?y|lowbed|gooseneck trailer|utility trailer|equipment trailer|\btrailer\b/i],
+  ["PICKUP_TRUCK", /pickup|crew cab|\btruck\b|f.?150|f.?250|f.?350|silverado|sierra|ram\s?(1500|2500|3500)|1.?ton|3\/4.?ton|half.?ton/i],
   ["WHEEL_LOADER", /loader/i],
 ];
 
