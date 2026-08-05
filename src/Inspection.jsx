@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { getEquipmentTemplate } from "./equipmentInspectionTemplates";
 
 const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -16,7 +17,6 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const [selectedEqId, setSelectedEqId] = useState("");
   const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "" });
   const [workerName, setWorkerName] = useState(loginUserName);
-  const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [genError, setGenError] = useState(false);
   const [items, setItems] = useState([]);        // [{ item, condition, note }]
@@ -80,6 +80,16 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     return [year, make, model, type].filter(Boolean).join(" ");
   };
 
+  // { type, make, model } for whichever equipment is currently selected —
+  // feeds the keyword match that picks an inspection template.
+  const currentEquipmentFields = () => {
+    if (eqMode === "list") {
+      const eq = equipment.find(e => String(e.id) === String(selectedEqId));
+      return { type: eq?.type || "", make: eq?.make || "", model: eq?.model || "" };
+    }
+    return { type: freeEq.type, make: freeEq.make, model: freeEq.model };
+  };
+
   const lastHadIssues = (insp) => {
     if (!insp) return false;
     const r = insp.results_json || {};
@@ -134,46 +144,16 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     setStep("worker");
   };
 
-  const generateInspection = async () => {
-    setLoading(true); setGenError(false);
-    const label = equipmentLabel();
-    const prompt = `You are a heavy equipment safety inspector. Generate a pre-use inspection checklist specific to this machine.
-
-Machine: ${label}
-Company: ${companyName}
-
-INSTRUCTIONS:
-- Generate inspection items specific to THIS type of machine. A skid steer, excavator, boom lift, and pickup truck each have different critical inspection points.
-- Focus on safety-critical and function-critical items an operator checks before use.
-- Include the categories relevant to this machine (e.g. fluids, hydraulics, tires/tracks, controls, safety devices, structure, attachments).
-- 10-18 items. Each item should be a short, specific check an operator can assess as Good, Monitor, or Defective.
-
-Respond ONLY with valid JSON (no markdown, no backticks):
-{
-  "machineSummary": "one line describing the machine and inspection type",
-  "items": [
-    { "item": "specific thing to inspect", "category": "category name" }
-  ]
-}`;
-
-    try {
-      const res = await fetch("/api/generate-flha", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, token }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      const text = data.content?.map(b => b.text || "").join("") || "";
-      const a = text.indexOf("{"), b = text.lastIndexOf("}");
-      if (a === -1 || b === -1) throw new Error("bad response");
-      const parsed = JSON.parse(text.slice(a, b + 1));
-      setInspectionMeta({ machineSummary: parsed.machineSummary });
-      setItems((parsed.items || []).map(it => ({ item: it.item, category: it.category || "", condition: "Good", note: "" })));
-      setStep("inspect");
-    } catch (e) {
-      setGenError(true);
-    }
-    setLoading(false);
+  // Picks a fixed, real inspection checklist by matching the equipment's
+  // type/make/model against known keywords (see equipmentInspectionTemplates.js)
+  // instead of asking an LLM to improvise one — a truck and a grader should
+  // never get the same checklist, and shouldn't vary run to run either.
+  const generateInspection = () => {
+    const { type, make, model } = currentEquipmentFields();
+    const template = getEquipmentTemplate(type, make, model);
+    setInspectionMeta({ machineSummary: `${template.label} — pre-trip inspection` });
+    setItems(template.items.map(it => ({ item: it.item, category: it.category || "", condition: "Good", note: "" })));
+    setStep("inspect");
   };
 
   const setCondition = (i, cond) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, condition: cond } : it));
@@ -441,13 +421,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <input style={s.input} type="number" inputMode="decimal" placeholder={`e.g. 1245.3`} value={startReading} onChange={e => setStartReading(e.target.value)} />
 
             <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
-            {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the inspection. Check your connection and try again.</div>}
-            <button style={s.btn(loading ? "#94A3B8" : (workerName && startReading) ? "#0369A1" : "#94A3B8")} disabled={loading || !workerName || !startReading} onClick={() => {
+            <button style={s.btn((workerName && startReading) ? "#0369A1" : "#94A3B8")} disabled={!workerName || !startReading} onClick={() => {
               const missing = cf.missingRequired();
               if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
               generateInspection();
             }}>
-              {loading ? "⏳ Building inspection…" : "Generate Inspection"}
+              Start Inspection
             </button>
             <button style={s.ghost} onClick={() => setStep("equipment")}>← Back</button>
           </div>
@@ -470,13 +449,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {items.map((it, i) => {
             const cond = CONDITIONS.find(c => c.key === it.condition);
             return (
-              <div key={i} style={{ ...s.card, borderLeft: `4px solid ${cond.color}`, marginBottom: 10 }}>
+              <div key={i} style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
                 {it.category && <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 3 }}>{it.category}</div>}
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 10 }}>{it.item}</div>
-                <div style={{ display: "flex", gap: 6, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 10 : 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 8 }}>{it.item}</div>
+                <div style={{ display: "flex", gap: 5, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 8 : 0 }}>
                   {CONDITIONS.map(c => (
                     <button key={c.key} onClick={() => setCondition(i, c.key)} style={{
-                      flex: 1, padding: "9px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                      flex: 1, padding: "6px 4px", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer",
                       border: `1.5px solid ${it.condition === c.key ? c.color : "#E2E8F0"}`,
                       background: it.condition === c.key ? c.bg : "#fff",
                       color: it.condition === c.key ? c.color : "#94A3B8",
@@ -484,7 +463,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   ))}
                 </div>
                 {(it.condition === "Defective" || it.condition === "Monitor") && (
-                  <input style={{ ...s.input, marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
+                  <input style={{ ...s.input, padding: "8px 10px", marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
                 )}
               </div>
             );
