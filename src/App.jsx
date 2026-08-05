@@ -82,6 +82,49 @@ function selectRelevantPolicies(policies, taskText, maxCount = 25) {
   return scored.slice(0, maxCount).sort((a, b) => a.i - b.i).map(s => s.p);
 }
 
+// ── Deterministic safety net for boilerplate hazards ──────
+// The AI keeps re-adding certain SOP-driven hazard categories (working
+// alone, weather, overhead/underground utilities) even when the prompt
+// explicitly says not to, because those SOPs are sitting right there in
+// its context. Prompt wording alone hasn't reliably stopped this, so
+// strip these categories out after the fact unless the worker's own
+// words actually indicate the condition — this can't be talked out of
+// working by any amount of prompt tuning.
+const UNGROUNDED_HAZARD_RULES = [
+  {
+    textMatch: /\b(alone|isolat|remote location|unsupervised)\b/i,
+    taskMatch: /\b(alone|by myself|on my own|no one else|nobody else|unsupervised|remote site|remote location|no cell service|no signal|no radio)\b/i,
+  },
+  {
+    textMatch: /\b(weather|rain|wind|lightning|storm|snow|heat|cold|temperature|darkness affecting|low light)\b/i,
+    taskMatch: /\b(rain|raining|wind|windy|storm|lightning|snow|snowing|hot out|cold out|heat wave|freezing|humid|weather|dark out|nighttime|after dark)\b/i,
+  },
+  {
+    textMatch: /\boverhead (power |electrical )?line/i,
+    taskMatch: /\b(overhead|power line|hydro line|electrical line|wire|wires|pole|poles|aerial|transmission line)\b/i,
+  },
+  {
+    textMatch: /\b(underground utilit|buried (pipe|cable|line)|utility strike)\b/i,
+    taskMatch: /\b(underground|buried|utility|utilities|pipe|pipeline|cable|gas line|water line|conduit|call.?before.?you.?dig)\b/i,
+  },
+];
+
+function isUngroundedText(text, lowerTask) {
+  return UNGROUNDED_HAZARD_RULES.some(
+    rule => rule.textMatch.test(text || "") && !rule.taskMatch.test(lowerTask)
+  );
+}
+
+function stripUngroundedHazards(hazards, taskText) {
+  const lowerTask = (taskText || "").toLowerCase();
+  return (hazards || []).filter(h => !isUngroundedText(`${h.hazard || ""} ${h.control || ""}`, lowerTask));
+}
+
+function stripUngroundedAlerts(alerts, taskText) {
+  const lowerTask = (taskText || "").toLowerCase();
+  return (alerts || []).filter(a => !isUngroundedText(a, lowerTask));
+}
+
 function Badge({ text, color = "blue" }) {
   const colors = {
     blue: "background:#1D4ED820;color:#1D4ED8;border:1px solid #1D4ED840",
@@ -480,12 +523,14 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       }
       const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
-      const tagged = (parsed.hazards || []).map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+      const groundedHazards = stripUngroundedHazards(parsed.hazards, cleanTranscript);
+      const tagged = groundedHazards.map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+      const groundedAlerts = stripUngroundedAlerts(parsed.sopAlerts, cleanTranscript);
 
       if (addingTask && flha) {
         setFlha(prev => {
           const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...(parsed.ppeRequired || [])]));
-          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...(parsed.sopAlerts || [])]));
+          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...groundedAlerts]));
           const existingTagged = (prev.hazards || []).map(h => h.task ? h : { ...h, task: prev.taskSummary || "Task 1" });
           return {
             ...prev,
@@ -497,7 +542,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         });
         setAddingTask(false);
       } else {
-        setFlha({ ...parsed, hazards: tagged });
+        setFlha({ ...parsed, hazards: tagged, sopAlerts: groundedAlerts });
       }
       setStep("review");
       setTranscript("");
