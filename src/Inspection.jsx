@@ -19,6 +19,8 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const [workerName, setWorkerName] = useState(loginUserName);
   const [checking, setChecking] = useState(false);
   const [genError, setGenError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [savingInspection, setSavingInspection] = useState(false);
   const [items, setItems] = useState([]);        // [{ item, condition, note }]
   const [inspectionMeta, setInspectionMeta] = useState({});
   const [companyLogo, setCompanyLogo] = useState("");
@@ -165,6 +167,8 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   // ── Submit: Pre-Trip (full checklist) ───────────────────────
   const submitPretrip = async () => {
     setSigned(true);
+    setSaveError(false);
+    setSavingInspection(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
     const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries() };
@@ -191,14 +195,19 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       }
     }
 
-    const pdfUrl = await generateAndUploadInspection({
-      equipmentLabel: label, workerName, companyName, companyLogo,
-      results: resultsJson, signatureDataUrl: sig,
-      tripType: "pretrip", startReading, readingUnit, token,
-    });
-
     try {
-      await fetch("/api/logs", {
+      // PDF generation lives inside this try too — it used to run outside
+      // any try/catch, so an exception during PDF building left this
+      // function's promise permanently rejected with no error shown: the
+      // submit button would stay stuck disabled forever with no way to
+      // retry short of reloading and losing the completed checklist.
+      const pdfUrl = await generateAndUploadInspection({
+        equipmentLabel: label, workerName, companyName, companyLogo,
+        results: resultsJson, signatureDataUrl: sig,
+        tripType: "pretrip", startReading, readingUnit, token,
+      });
+
+      const res = await fetch("/api/logs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -221,15 +230,29 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           },
         }),
       });
+      if (!res.ok) {
+        console.error("Inspection save failed:", res.status, await res.json().catch(() => ({})));
+        setSaveError(true);
+        setSavingInspection(false);
+        setSigned(false);
+        return;
+      }
     } catch (e) {
       console.error("Inspection save failed:", e);
+      setSaveError(true);
+      setSavingInspection(false);
+      setSigned(false);
+      return;
     }
+    setSavingInspection(false);
     setTimeout(() => setStep("done"), 500);
   };
 
   // ── Submit: Post-Trip (short flow) ──────────────────────────
   const submitPosttrip = async () => {
     setSigned(true);
+    setSaveError(false);
+    setSavingInspection(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
     const resultsJson = {
@@ -240,17 +263,17 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       monitorCount: hasChanges && changeCondition === "Monitor" ? 1 : 0,
     };
 
-    const pdfUrl = await generateAndUploadInspection({
-      equipmentLabel: label, workerName, companyName, companyLogo,
-      signatureDataUrl: sig,
-      tripType: "posttrip",
-      startReading: openPretrip.start_reading, endReading, readingUnit,
-      hasChanges: !!hasChanges, changeCondition, changeNotes,
-      linkedPretrip: openPretrip, token,
-    });
-
     try {
-      await fetch("/api/logs", {
+      const pdfUrl = await generateAndUploadInspection({
+        equipmentLabel: label, workerName, companyName, companyLogo,
+        signatureDataUrl: sig,
+        tripType: "posttrip",
+        startReading: openPretrip.start_reading, endReading, readingUnit,
+        hasChanges: !!hasChanges, changeCondition, changeNotes,
+        linkedPretrip: openPretrip, token,
+      });
+
+      const res = await fetch("/api/logs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -273,9 +296,21 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           },
         }),
       });
+      if (!res.ok) {
+        console.error("Post-trip save failed:", res.status, await res.json().catch(() => ({})));
+        setSaveError(true);
+        setSavingInspection(false);
+        setSigned(false);
+        return;
+      }
     } catch (e) {
       console.error("Post-trip save failed:", e);
+      setSaveError(true);
+      setSavingInspection(false);
+      setSigned(false);
+      return;
     }
+    setSavingInspection(false);
     setTimeout(() => setStep("done"), 500);
   };
 
@@ -484,8 +519,13 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
               <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
             </div>
-            <button style={s.btn(signed ? "#16A34A" : hasSignature ? "#0369A1" : "#94A3B8")} disabled={!hasSignature || signed} onClick={submitPretrip}>
-              {signed ? "✓ Submitting…" : "Sign & Submit Pre-Trip Inspection"}
+            {saveError && (
+              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+                Couldn't save this inspection. Check your connection and try again.
+              </div>
+            )}
+            <button style={s.btn(signed && !saveError ? "#16A34A" : hasSignature ? "#0369A1" : "#94A3B8")} disabled={!hasSignature || (signed && !saveError)} onClick={submitPretrip}>
+              {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Pre-Trip Inspection"}
             </button>
           </div>
         </>
@@ -549,11 +589,16 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
               <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
             </div>
+            {saveError && (
+              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+                Couldn't save this inspection. Check your connection and try again.
+              </div>
+            )}
             {(() => {
               const ready = hasSignature && workerName && endReading && hasChanges !== null && (!hasChanges || changeNotes.trim());
               return (
-                <button style={s.btn(signed ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || signed} onClick={submitPosttrip}>
-                  {signed ? "✓ Submitting…" : "Sign & Submit Post-Trip"}
+                <button style={s.btn(signed && !saveError ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
+                  {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Post-Trip"}
                 </button>
               );
             })()}

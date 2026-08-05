@@ -648,20 +648,26 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       ? { ...flha, customFields: customEntries }
       : (flha.customFields ? flha : { ...flha });
 
-    const pdfUrl = await generateAndUploadFLHA({
-      flha: flhaWithCustom,
-      workerName,
-      jobSite,
-      signName: workerName,
-      companyName,
-      signatureDataUrl,
-      companyLogo,
-      amendedNote,
-      pendingApproval: newStatus === "pending_approval",
-      crewSignatures: crew,
-    });
-
     try {
+      // PDF generation lives inside this try too — it used to run outside
+      // the try/catch entirely, so any exception during PDF building (a
+      // jsPDF quirk, a bad signature data URL, etc.) left saveFLHA's promise
+      // permanently rejected with no error shown: savingFLHA never reset,
+      // so the submit button stayed stuck on "Saving…" forever with no way
+      // to retry short of reloading and losing what the worker entered.
+      const pdfUrl = await generateAndUploadFLHA({
+        flha: flhaWithCustom,
+        workerName,
+        jobSite,
+        signName: workerName,
+        companyName,
+        signatureDataUrl,
+        companyLogo,
+        amendedNote,
+        pendingApproval: newStatus === "pending_approval",
+        crewSignatures: crew,
+      });
+
       const res = amendingId
         ? await fetch("/api/flhas", {
             method: "POST",
