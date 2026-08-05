@@ -81,6 +81,36 @@ test.describe('Equipment Inspection', () => {
     await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
   });
 
+  test('picks the semi/tractor-trailer checklist, not the pickup one, for a "Semi Truck" entry', async ({ page }) => {
+    await expect(page.getByText('Select equipment')).toBeVisible();
+    await page.locator('select').selectOption('__other__');
+
+    await page.getByPlaceholder('e.g. 2019').fill('2020');
+    await page.getByPlaceholder('e.g. Caterpillar').fill('Kenworth');
+    await page.getByPlaceholder('e.g. 320').fill('T800');
+    await page.getByPlaceholder('e.g. Excavator').fill('Semi Truck');
+    await page.getByRole('button', { name: 'Continue →' }).click();
+
+    await expect(page.getByText('Inspector')).toBeVisible();
+    await page.getByPlaceholder('e.g. John Smith').fill('Jamie Inspector');
+    await page.getByPlaceholder('e.g. 1245.3').fill('180000');
+    await page.getByRole('button', { name: 'Start Inspection' }).click();
+
+    // Semi-specific items should be present...
+    await expect(page.getByText('Fifth wheel — locking jaw, release arm, mounting, and lubrication')).toBeVisible();
+    await expect(page.getByText('Trailer coupling — kingpin engagement and locking pins')).toBeVisible();
+    await expect(page.getByText('Log book / ELD present and current')).toBeVisible();
+    // ...and pickup-only items should NOT be — this is the exact bug
+    // report: "Semi truck and Pickup truck are pulling the same inspection."
+    await expect(page.getByText('Spare tire, jack, and lug wrench present')).not.toBeVisible();
+    await expect(page.getByText('Truck bed / cargo area — tie-downs, load secured')).not.toBeVisible();
+
+    await signCanvas(page);
+    await page.getByRole('button', { name: 'Sign & Submit Pre-Trip Inspection' }).click();
+
+    await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
+  });
+
   async function routeAddEquipmentCapture(page, addedEquipment) {
     await page.route('**/api/companydata', async route => {
       const body = route.request().postDataJSON();

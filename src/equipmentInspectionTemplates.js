@@ -372,6 +372,53 @@ const EQUIPMENT_TEMPLATES = {
     ],
   },
 
+  SEMI_TRUCK: {
+    label: "Semi / Tractor-Trailer",
+    items: [
+      ...items("Walkaround / Tractor", [
+        "Tires — tread, pressure, damage, wheel nuts (all axles)",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
+        "Frame, fuel tanks, and mud flaps",
+        "Fifth wheel — locking jaw, release arm, mounting, and lubrication",
+        "Steps, grab handles, mirrors, and glass",
+        "Lights, reflectors, and marker lights (tractor)",
+      ]),
+      ...items("Trailer & Coupling", [
+        "Trailer coupling — kingpin engagement and locking pins",
+        "Air lines and electrical (glad hands/pigtail) connections — secure, no leaks",
+        "Landing gear — fully raised and secured",
+        "Trailer tires, wheels, and mud flaps",
+        "Trailer lights, reflectors, and marker lights",
+        "Load secured — straps, chains, or tarps as required",
+      ]),
+      ...items("Fluids & Engine Compartment", [
+        "Engine oil level",
+        "Coolant level",
+        "Windshield washer fluid",
+        "Belts and hoses — leaks or damage",
+        "Fuel and DEF levels",
+      ]),
+      ...items("Brakes & Air System", [
+        "Air system pressure build-up and low-air warning",
+        "Air lines and connections for leaks (tractor and trailer)",
+        "Service brake function/pedal feel",
+        "Parking/trailer brake function",
+        "ABS warning light function",
+      ]),
+      ...items("Cab & Safety Devices", [
+        "Seat belt condition and latch",
+        "Gauges and warning lights on start-up",
+        "Horn and wipers",
+        "Fire extinguisher, warning triangles/flares, and first aid kit present",
+      ]),
+      ...items("Documentation & Pre-Trip", [
+        "Log book / ELD present and current",
+        "Registration, insurance, and permits on board",
+        "Defects noted on the last trip's inspection report have been corrected",
+      ]),
+    ],
+  },
+
   PICKUP_TRUCK: {
     label: "Pickup Truck",
     items: [
@@ -575,10 +622,12 @@ const EQUIPMENT_TEMPLATES = {
 
 // Ordered most-specific-first so e.g. "Backhoe Loader" matches BACKHOE
 // before the generic "loader" pattern, "Skid Steer Loader" matches
-// SKID_STEER first, and "Service Truck" matches SERVICE_TRUCK before the
-// broad PICKUP_TRUCK fallback (which exists to catch a bare "Truck" or
-// "Pickup" entry, since most workers will type it that plainly). First
-// match wins.
+// SKID_STEER first, "Service Truck" matches SERVICE_TRUCK, and "Semi
+// Truck" matches SEMI_TRUCK, all before the broad PICKUP_TRUCK fallback
+// (which exists to catch a bare "Truck" or "Pickup" entry, since most
+// workers will type it that plainly, and would otherwise swallow every
+// other "*truck" entry too — that's exactly how a semi ended up on the
+// pickup checklist before this rule existed). First match wins.
 const MATCH_RULES = [
   ["SKID_STEER", /skid.?steer|bobcat|compact track loader|\bctl\b|multi.?terrain loader/i],
   ["BACKHOE", /backhoe/i],
@@ -591,6 +640,7 @@ const MATCH_RULES = [
   ["AERIAL_LIFT", /boom lift|man.?lift|scissor lift|aerial (platform|lift)|cherry picker/i],
   ["DUMP_TRUCK", /dump truck|haul truck|articulated truck|rock truck|off.?road truck|belly dump/i],
   ["WATER_TRUCK", /water truck|water tank/i],
+  ["SEMI_TRUCK", /\bsemi\b|tractor.?trailer|18.?wheeler|highway tractor|road tractor|fifth wheel|day cab|sleeper cab|kenworth|peterbilt|freightliner|western star|\bmack\b|volvo vnl/i],
   ["SERVICE_TRUCK", /service truck|mechanic truck|deck truck/i],
   ["PICKUP_TRUCK", /pickup|crew cab|flatdeck|\btruck\b|f.?150|f.?250|f.?350|silverado|sierra|ram\s?(1500|2500|3500)|1.?ton|3\/4.?ton|half.?ton/i],
   ["WHEEL_LOADER", /loader/i],
