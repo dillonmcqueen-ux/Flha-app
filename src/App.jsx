@@ -131,6 +131,51 @@ function stripUngroundedAlerts(alerts, taskText) {
   return (alerts || []).filter(a => !isUngroundedText(a, lowerTask));
 }
 
+// General backstop, independent of topic: a hedge is the model's own tell
+// that it isn't sure the condition applies, so the item shouldn't be in the
+// output at all (only optionally as a note) — this catches SOPs the four
+// named categories above don't, like "face shield if driving pins," without
+// needing a new named category every time a new company SOP triggers it.
+const HEDGE_PATTERN = /\(if [^)]*\)|\bif (present|any|applicable|performing|using|required|needed|it applies)\b|\bwhen (performing|using)\b|\bshould (it|they|this) (exist|apply|occur)\b/i;
+
+function stripHedged(items, getText) {
+  return (items || []).filter(item => !HEDGE_PATTERN.test(getText(item) || ""));
+}
+
+// The model doesn't reliably include these baseline items on its own even
+// when told to, so guarantee them here rather than relying on prompt
+// compliance — same reasoning as the exclusion filters above, just for
+// inclusion instead.
+const BASELINE_HAZARD_CHECKS = [
+  {
+    present: /\b(fit(ness)? for duty|fatigue|impair(ed|ment)?)\b/i,
+    hazard: {
+      hazard: "Fitness for duty",
+      risk: "Low",
+      control: "Confirm fitness for duty before starting — well-rested, not under the influence of drugs or alcohol, and free of any illness or medication that could affect safe performance of this task. Do not begin work if fatigued, ill, or impaired.",
+      sopRef: null,
+    },
+  },
+  {
+    present: /\b(muster point|emergency response|assembly point|evacuation (plan|route))\b/i,
+    hazard: {
+      hazard: "Muster point and emergency response plan awareness",
+      risk: "Low",
+      control: "Confirm the site's muster/assembly point and emergency response plan with the supervisor before starting work.",
+      sopRef: null,
+    },
+  },
+];
+
+function ensureBaselineHazards(hazards, taskLabel) {
+  const result = [...(hazards || [])];
+  BASELINE_HAZARD_CHECKS.forEach(({ present, hazard }) => {
+    const covered = result.some(h => present.test(`${h.hazard || ""} ${h.control || ""}`));
+    if (!covered) result.push({ ...hazard, task: taskLabel });
+  });
+  return result;
+}
+
 function Badge({ text, color = "blue" }) {
   const colors = {
     blue: "background:#1D4ED820;color:#1D4ED8;border:1px solid #1D4ED840",
@@ -481,9 +526,10 @@ INSTRUCTIONS:
 - Do NOT include generic hazards that have nothing to do with this task.
 - If the worker mentions excavation, flag excavation hazards. If they don't mention heights, don't flag fall hazards.
 - Do NOT confuse the "excavator" (a piece of equipment — same as a dozer, loader, or grader) with an "excavation" (a dug hole, trench, or pit with walls that could collapse). Operating an excavator to strip topsoil, grade, load material, or clean up spoil is SURFACE work, not excavation work, even though the machine's name contains "excavat-". Only cite excavation/trenching/shoring SOPs (cave-in, wall collapse, depth-based shoring requirements) when the task actually describes digging a hole, trench, or pit that a worker could fall into or that could collapse on someone — not merely because the machine operating is called an excavator.
-- Some SOPs are phrased as a verification step to rule a condition IN or OUT (e.g. "confirm no overhead power lines within 3 metres before installing fencing", "confirm no underground utilities before digging"). These do NOT automatically become a hazard row. Only add a hazard row for the condition being checked (overhead lines, buried utilities, etc.) if the task description gives an actual, concrete indication that the condition is present at THIS site — the worker names it directly (wires, poles, overhead lines, aerial services, buried pipe/cable, utility markings) or the location is obviously implicated (e.g. directly beneath a described power line). Working an excavation at a random ground-level site with zero mention of utilities is NOT such an indication, even though the SOP text itself mentions power lines — the SOP describes a check to perform, not a hazard that exists here.
-  - If there's no concrete indication: leave it off the hazards array entirely. Do not add a hedged/conditional version of it either (banned patterns: "(if present)", "if any", "if applicable", "should they exist" in a hazard name) — a hazard row with a hedge in the title is still a hazard row and still not allowed. At most, fold the required check into additionalNotes as one line (e.g. "Per SOP 5, confirm no overhead power lines within 3m before installing fencing.").
-  - Example: task = "installing fencing around an excavated hole" with no mention of power lines anywhere. WRONG: a hazard row titled "Contact with overhead power lines (if present near hole)". RIGHT: no overhead-power-line hazard row at all; optionally one line in additionalNotes noting the SOP 5 check.
+- MANY company SOPs are phrased as a conditional procedure: "when doing X, do Y", "before X, confirm Y", "if performing X, wear/use Y". This is a GENERAL pattern, not specific to any one topic — it applies just as much to a pin-driving/hammer SOP or a hot-work SOP as it does to an overhead-power-line or underground-utility SOP. The fact that a conditional SOP appears in the pre-filtered list above does NOT mean its condition (X) is happening on this task. Before citing ANY such SOP — in a hazard's sopRef, in sopAlerts, or in ppeRequired — check: does the task description actually describe doing X? If not, the SOP is not triggered, full stop. This applies regardless of topic: overhead lines, underground utilities, hammer/punch/pin-driving, hot work, confined space, working at height, chemical handling, etc. — the topic doesn't matter, only whether the task actually describes that specific activity or condition.
+  - If X isn't actually described in the task: do NOT add a hazard row for it, do NOT add it to sopAlerts, and do NOT add its associated gear to ppeRequired — not even in hedged/conditional form. Banned patterns anywhere in the output (hazard names, sopAlerts strings, ppeRequired items): "(if present)", "if any", "if applicable", "if performing", "if using", "when using", "should they exist" — a hedge is proof the condition isn't actually confirmed, which means it doesn't belong in the output at all, only optionally as one line in additionalNotes.
+  - Example 1: task = "installing fencing around an excavated hole" with no mention of power lines. WRONG: a hazard row titled "Contact with overhead power lines (if present near hole)". RIGHT: no overhead-power-line hazard row, no sopAlerts entry for it.
+  - Example 2: task = "operating an excavator to strip topsoil" with no mention of pins, hammers, punches, or repair work. WRONG: citing a "wear a face shield when driving pins with a hammer/punch" SOP in sopAlerts or adding "Face shield (if performing hydraulic pin-driving)" to ppeRequired. RIGHT: that SOP is not mentioned anywhere in the output, because nothing about pin-driving is happening on this task.
 - For sopAlerts and sopRef, only cite a policy if it is SPECIFICALLY and clearly triggered by a concrete detail in the task description (a named piece of equipment, a specific hazard type, or a specific procedure) — not because it's broadly applicable to almost any task. Do NOT default to citing general catch-all policies (e.g. a blanket "PPE is mandatory" or "conduct an FLHA before starting" policy) as the reason for a hazard's control unless the hazard specifically calls for PPE or a procedure beyond the baseline. Every citation should feel like it was picked FOR this task, not reused from the last one.
 - For ppeRequired, only list PPE actually needed for this specific task.
 - Identify all hazards genuinely relevant to this task — aim for a THOROUGH assessment, typically 10-15 hazards, not a minimal one. A short list is not a sign of quality here; a real FLHA covers the whole workday around the task, including the routine Low-risk items, not just the one or two most dramatic risks. Low-risk hazards are just as important to document as High ones — do not trim them for brevity. A hazard belongs on the list if ANY of these is true:
@@ -535,13 +581,15 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       }
       const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
-      const groundedHazards = stripUngroundedHazards(parsed.hazards, cleanTranscript);
+      const unhedgedHazards = stripHedged(parsed.hazards, h => `${h.hazard || ""} ${h.control || ""}`);
+      const groundedHazards = stripUngroundedHazards(unhedgedHazards, cleanTranscript);
       const tagged = groundedHazards.map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
-      const groundedAlerts = stripUngroundedAlerts(parsed.sopAlerts, cleanTranscript);
+      const groundedAlerts = stripUngroundedAlerts(stripHedged(parsed.sopAlerts, a => a), cleanTranscript);
+      const groundedPPE = stripHedged(parsed.ppeRequired, p => p);
 
       if (addingTask && flha) {
         setFlha(prev => {
-          const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...(parsed.ppeRequired || [])]));
+          const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...groundedPPE]));
           const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...groundedAlerts]));
           const existingTagged = (prev.hazards || []).map(h => h.task ? h : { ...h, task: prev.taskSummary || "Task 1" });
           return {
@@ -554,7 +602,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         });
         setAddingTask(false);
       } else {
-        setFlha({ ...parsed, hazards: tagged, sopAlerts: groundedAlerts });
+        const withBaseline = ensureBaselineHazards(tagged, parsed.taskSummary || taskLabel);
+        setFlha({ ...parsed, hazards: withBaseline, sopAlerts: groundedAlerts, ppeRequired: groundedPPE });
       }
       setStep("review");
       setTranscript("");
