@@ -20,10 +20,51 @@ const SOP_STOPWORDS = new Set([
   "from", "must", "when", "each", "such", "their", "has", "have",
 ]);
 
+// Common construction/safety word families that should count as the same
+// concept even when the exact word differs (e.g. a task that says "digging
+// a ditch" should match an SOP titled "Excavation Procedures").
+const SOP_SYNONYM_GROUPS = [
+  ["excavat", "trench", "dig", "ditch"],
+  ["fenc", "barricad", "barrier"],
+  ["fall", "height"],
+  ["lockout", "tagout", "loto", "isolat", "energiz", "energis"],
+  ["confined", "enclosed"],
+  ["electric", "power", "wire", "cable"],
+  ["traffic", "vehicle", "flagg", "roadway"],
+  ["crane", "lift", "rig", "hoist", "sling"],
+  ["manual", "handl", "ergonom"],
+  ["weather", "environment", "cold", "heat", "rain"],
+  ["scaffold", "ladder", "platform"],
+  ["chemical", "hazmat", "spill"],
+];
+const SOP_SYNONYM_MAP = new Map();
+SOP_SYNONYM_GROUPS.forEach((group, idx) => {
+  group.forEach(term => SOP_SYNONYM_MAP.set(term, `syn${idx}`));
+});
+
+// Light stemmer so "digging"/"dig", "fencing"/"fence" and
+// "excavation"/"excavating" line up without needing an exact word match.
+function stem(word) {
+  if (word.length > 6 && word.endsWith("ation")) return word.slice(0, -5);
+  if (word.length > 6 && word.endsWith("ing")) return word.slice(0, -3);
+  if (word.length > 5 && word.endsWith("ed")) return word.slice(0, -2);
+  if (word.length > 5 && word.endsWith("es")) return word.slice(0, -2);
+  if (word.length > 4 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+function canonicalize(word) {
+  const stemmed = stem(word);
+  for (const [term, tag] of SOP_SYNONYM_MAP) {
+    if (word.startsWith(term) || stemmed.startsWith(term)) return tag;
+  }
+  return stemmed;
+}
+
 function tokenize(text) {
-  return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
-    w => w.length > 2 && !SOP_STOPWORDS.has(w)
-  );
+  return (text.toLowerCase().match(/[a-z0-9]+/g) || [])
+    .filter(w => w.length > 2 && !SOP_STOPWORDS.has(w))
+    .map(canonicalize);
 }
 
 function scorePolicyRelevance(policy, taskWordsSet) {
@@ -39,6 +80,55 @@ function selectRelevantPolicies(policies, taskText, maxCount = 25) {
   const scored = policies.map((p, i) => ({ p, i, score: scorePolicyRelevance(p, taskWords) }));
   scored.sort((a, b) => b.score - a.score || a.i - b.i);
   return scored.slice(0, maxCount).sort((a, b) => a.i - b.i).map(s => s.p);
+}
+
+// ── Deterministic safety net for boilerplate hazards ──────
+// The AI keeps re-adding certain SOP-driven hazard categories (working
+// alone, weather, overhead/underground utilities) even when the prompt
+// explicitly says not to, because those SOPs are sitting right there in
+// its context. Prompt wording alone hasn't reliably stopped this, so
+// strip these categories out after the fact unless the worker's own
+// words actually indicate the condition — this can't be talked out of
+// working by any amount of prompt tuning.
+const UNGROUNDED_HAZARD_RULES = [
+  {
+    // \w* after a stem lets it match inflected forms ("isolation", "isolated")
+    // — a bare \b right after the stem would block those, since the next
+    // letter is still a word character and never counts as a boundary.
+    textMatch: /\b(alone|isolat\w*|remote location|unsupervised)\b/i,
+    taskMatch: /\b(alone|by myself|on my own|no one else|nobody else|unsupervised|remote site|remote location|no cell service|no signal|no radio)\b/i,
+  },
+  {
+    textMatch: /\b(weather|rain\w*|wind\w*|lightning|storm\w*|snow\w*|heat\w*|cold\w*|temperature|low light)\b/i,
+    taskMatch: /\b(rain\w*|wind\w*|storm\w*|lightning|snow\w*|hot out|cold\w*|heat wave|freezing|humid|weather|dark out|nighttime|after dark)\b/i,
+  },
+  {
+    textMatch: /\boverhead (power |electrical )?lines?\b/i,
+    taskMatch: /\b(overhead|power line|hydro line|electrical line|wire|wires|pole|poles|aerial|transmission line)\b/i,
+  },
+  {
+    textMatch: /\b(underground utilit\w*|buried (pipe|cable|line)\w*|utility strike\w*)\b/i,
+    taskMatch: /\b(underground|buried|utilit\w*|pipe\w*|cable\w*|gas line|water line|conduit|call.?before.?you.?dig)\b/i,
+  },
+];
+
+function isUngroundedText(text, lowerTask) {
+  return UNGROUNDED_HAZARD_RULES.some(
+    rule => rule.textMatch.test(text || "") && !rule.taskMatch.test(lowerTask)
+  );
+}
+
+function stripUngroundedHazards(hazards, taskText) {
+  const lowerTask = (taskText || "").toLowerCase();
+  // Check the cited SOP text too, not just the hazard's own wording — the
+  // model can reword a hazard to dodge these keywords while still citing
+  // the exact same working-alone/weather/utility SOP as its justification.
+  return (hazards || []).filter(h => !isUngroundedText(`${h.hazard || ""} ${h.control || ""} ${h.sopRef || ""}`, lowerTask));
+}
+
+function stripUngroundedAlerts(alerts, taskText) {
+  const lowerTask = (taskText || "").toLowerCase();
+  return (alerts || []).filter(a => !isUngroundedText(a, lowerTask));
 }
 
 function Badge({ text, color = "blue" }) {
@@ -203,6 +293,8 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [flha, setFlha] = useState(null);
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [savingFLHA, setSavingFLHA] = useState(false);
   const [sopsOpen, setSopsOpen] = useState(false);
   const [signed, setSigned] = useState(false);
   const [signName, setSignName] = useState("");
@@ -388,9 +480,16 @@ INSTRUCTIONS:
 - Read the task description carefully. Only flag hazards that are directly present or likely given what the worker described.
 - Do NOT include generic hazards that have nothing to do with this task.
 - If the worker mentions excavation, flag excavation hazards. If they don't mention heights, don't flag fall hazards.
+- Do NOT confuse the "excavator" (a piece of equipment — same as a dozer, loader, or grader) with an "excavation" (a dug hole, trench, or pit with walls that could collapse). Operating an excavator to strip topsoil, grade, load material, or clean up spoil is SURFACE work, not excavation work, even though the machine's name contains "excavat-". Only cite excavation/trenching/shoring SOPs (cave-in, wall collapse, depth-based shoring requirements) when the task actually describes digging a hole, trench, or pit that a worker could fall into or that could collapse on someone — not merely because the machine operating is called an excavator.
+- Some SOPs are phrased as a verification step to rule a condition IN or OUT (e.g. "confirm no overhead power lines within 3 metres before installing fencing", "confirm no underground utilities before digging"). These do NOT automatically become a hazard row. Only add a hazard row for the condition being checked (overhead lines, buried utilities, etc.) if the task description gives an actual, concrete indication that the condition is present at THIS site — the worker names it directly (wires, poles, overhead lines, aerial services, buried pipe/cable, utility markings) or the location is obviously implicated (e.g. directly beneath a described power line). Working an excavation at a random ground-level site with zero mention of utilities is NOT such an indication, even though the SOP text itself mentions power lines — the SOP describes a check to perform, not a hazard that exists here.
+  - If there's no concrete indication: leave it off the hazards array entirely. Do not add a hedged/conditional version of it either (banned patterns: "(if present)", "if any", "if applicable", "should they exist" in a hazard name) — a hazard row with a hedge in the title is still a hazard row and still not allowed. At most, fold the required check into additionalNotes as one line (e.g. "Per SOP 5, confirm no overhead power lines within 3m before installing fencing.").
+  - Example: task = "installing fencing around an excavated hole" with no mention of power lines anywhere. WRONG: a hazard row titled "Contact with overhead power lines (if present near hole)". RIGHT: no overhead-power-line hazard row at all; optionally one line in additionalNotes noting the SOP 5 check.
 - For sopAlerts and sopRef, only cite a policy if it is SPECIFICALLY and clearly triggered by a concrete detail in the task description (a named piece of equipment, a specific hazard type, or a specific procedure) — not because it's broadly applicable to almost any task. Do NOT default to citing general catch-all policies (e.g. a blanket "PPE is mandatory" or "conduct an FLHA before starting" policy) as the reason for a hazard's control unless the hazard specifically calls for PPE or a procedure beyond the baseline. Every citation should feel like it was picked FOR this task, not reused from the last one.
 - For ppeRequired, only list PPE actually needed for this specific task.
-- Identify all hazards genuinely relevant to this task — typically 4-8. Include the everyday ones that belong on a thorough FLHA even when they are Low risk, such as weather/environmental conditions, communication/coordination, housekeeping, manual handling, and site access — as long as they actually relate to this task. The strict rating rules above are about HOW you rate a hazard's severity, NOT about excluding lower-risk hazards. A good FLHA captures the full picture: a few higher-risk items plus the routine Low/Medium ones.
+- Identify all hazards genuinely relevant to this task — typically 4-8, sometimes fewer for a simple task. Do NOT pad the list to hit a number and do NOT add hazards because "a thorough FLHA usually includes X." Every hazard, including Low-risk ones, must be traceable to a specific word, phrase, or unambiguous detail in the task description — not to what's generically true of similar jobs elsewhere. If you can't point to what in the task justifies a hazard, leave it off. It's correct for a short, simple task to produce a short hazard list.
+  - Do NOT add a "working alone" / isolation / communication-check hazard unless the task explicitly says the worker is alone, unsupervised, or in a remote/no-signal location. The mere absence of any mention of coworkers is NOT evidence of solo work — do not default to assuming it.
+  - Do NOT add a weather/environmental hazard unless the task explicitly mentions a weather, temperature, precipitation, wind, or lighting/visibility condition. "End of day" or a location name alone does not imply weather or darkness.
+  - Do NOT infer a hazard purely from the type of site named (e.g. "gas station," "roadway," "warehouse") unless the worker also described the specific condition that creates the hazard (e.g. actually mentions fuel lines, live traffic, forklift activity). A location label by itself is not enough.
 - Risk levels — rate the RESIDUAL risk (the risk that REMAINS after accounting for the safeguards and controls the worker has already described). Apply STRICTLY:
   - CRITICAL RULE: If the worker has described a control that properly manages a hazard (e.g. "using a trench box" for excavation collapse, "locked out the equipment" for energized machinery, "using a fall arrest harness" for heights), then the residual risk is REDUCED — usually to High or Medium — NOT Extreme. A well-controlled hazard is not Extreme.
   - "Extreme" = even WITH normal controls in place, a single mistake or equipment failure could realistically be CATASTROPHIC or FATAL, with almost no margin for error. Reserve ONLY for inherently life-threatening work where the danger persists despite safeguards: working on an energized high-voltage source, entry into a confined space with a hazardous atmosphere, work on a LIVE (un-isolated) pressurized water/gas main, a critical/complex crane lift over people, or hot work in a confirmed explosive atmosphere. Extreme is rare. If a proper safeguard is described, it is almost never Extreme.
@@ -431,12 +530,14 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       }
       const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
-      const tagged = (parsed.hazards || []).map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+      const groundedHazards = stripUngroundedHazards(parsed.hazards, cleanTranscript);
+      const tagged = groundedHazards.map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+      const groundedAlerts = stripUngroundedAlerts(parsed.sopAlerts, cleanTranscript);
 
       if (addingTask && flha) {
         setFlha(prev => {
           const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...(parsed.ppeRequired || [])]));
-          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...(parsed.sopAlerts || [])]));
+          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...groundedAlerts]));
           const existingTagged = (prev.hazards || []).map(h => h.task ? h : { ...h, task: prev.taskSummary || "Task 1" });
           return {
             ...prev,
@@ -448,7 +549,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         });
         setAddingTask(false);
       } else {
-        setFlha({ ...parsed, hazards: tagged });
+        setFlha({ ...parsed, hazards: tagged, sopAlerts: groundedAlerts });
       }
       setStep("review");
       setTranscript("");
@@ -468,7 +569,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
   };
 
   const saveFLHA = async () => {
-    if (!flha) return;
+    if (!flha) return false;
+    setSavingFLHA(true);
+    setSaveError(false);
 
     const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
     const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
@@ -497,49 +600,60 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     });
 
     try {
-      if (amendingId) {
-        await fetch("/api/flhas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "submit",
-            token,
-            amendingId,
-            record: {
-              job_site: jobSite,
-              task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
-              hazards_json: flhaWithCustom,
-              pdf_url: pdfUrl || null,
-              status: newStatus,
-              crew_signatures: crew,
-            },
-          }),
-        });
-      } else {
-        await fetch("/api/flhas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "submit",
-            token,
-            record: {
-              worker_name: workerName,
-              job_site: jobSite,
-              task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-              hazards_json: flhaWithCustom,
-              signed_by: workerName,
-              pdf_url: pdfUrl || null,
-              status: newStatus,
-              worker_signature: signatureDataUrl || null,
-              crew_signatures: crew,
-            },
-          }),
-        });
+      const res = amendingId
+        ? await fetch("/api/flhas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "submit",
+              token,
+              amendingId,
+              record: {
+                job_site: jobSite,
+                task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
+                hazards_json: flhaWithCustom,
+                pdf_url: pdfUrl || null,
+                status: newStatus,
+                crew_signatures: crew,
+              },
+            }),
+          })
+        : await fetch("/api/flhas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "submit",
+              token,
+              record: {
+                worker_name: workerName,
+                job_site: jobSite,
+                task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
+                hazards_json: flhaWithCustom,
+                signed_by: workerName,
+                pdf_url: pdfUrl || null,
+                status: newStatus,
+                worker_signature: signatureDataUrl || null,
+                crew_signatures: crew,
+              },
+            }),
+          });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        console.error("FLHA save failed:", res.status, errBody);
+        setSaveError(true);
+        setSavingFLHA(false);
+        return false;
       }
     } catch (e) {
       console.error("FLHA save failed:", e);
+      setSaveError(true);
+      setSavingFLHA(false);
+      return false;
     }
+    setSavingFLHA(false);
     setPendingApproval(newStatus === "pending_approval");
+    return true;
   };
 
   const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
@@ -1019,18 +1133,35 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
           </div>
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this FLHA — it has NOT reached your supervisor's dashboard. Check your connection and try again.
+            </div>
+          )}
+
           {amendingId ? (
             <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
-              disabled={signed}
-              onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-              {signed ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
+              disabled={signed && !saveError}
+              onClick={async () => {
+                setSigned(true);
+                const ok = await saveFLHA();
+                if (ok) setTimeout(() => setStep("done"), 600);
+                else setSigned(false);
+              }}>
+              {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
             </button>
           ) : (
             <>
               <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
-                disabled={!hasSignature || signed}
-                onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-                {signed ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
+                disabled={!hasSignature || (signed && !saveError)}
+                onClick={async () => {
+                  setSignName(workerName);
+                  setSigned(true);
+                  const ok = await saveFLHA();
+                  if (ok) setTimeout(() => setStep("done"), 600);
+                  else setSigned(false);
+                }}>
+                {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
               </button>
               <button style={styles.ghost} onClick={() => setStep("review")}>← Back to review</button>
             </>
