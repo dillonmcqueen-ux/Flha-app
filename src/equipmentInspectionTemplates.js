@@ -786,3 +786,22 @@ export function getEquipmentTemplate(typeText, makeText, modelText) {
   const key = matchEquipmentTemplate(typeText, makeText, modelText);
   return EQUIPMENT_TEMPLATES[key];
 }
+
+// Towed equipment has no engine and no odometer/hour meter of its own, so
+// the pre/post-trip reading step doesn't apply to it.
+const TRAILER_KEYS = new Set(["DUMP_TRAILER", "WALKING_FLOOR_TRAILER", "EQUIPMENT_TRAILER"]);
+
+export function isTrailerTemplate(typeText, makeText, modelText) {
+  return TRAILER_KEYS.has(matchEquipmentTemplate(typeText, makeText, modelText));
+}
+
+// Vehicles that realistically pull a trailer on this kind of jobsite —
+// offered the "attach a trailer" option on their own pre-trip so the two
+// stay linked for the trip (used by the weekly usage report to credit a
+// trailer's distance to whatever towed it, since the trailer has none of
+// its own to report).
+const TOW_CAPABLE_KEYS = new Set(["PICKUP_TRUCK", "SERVICE_TRUCK", "SEMI_TRUCK", "DUMP_TRUCK", "WATER_TRUCK"]);
+
+export function isTowCapableTemplate(typeText, makeText, modelText) {
+  return TOW_CAPABLE_KEYS.has(matchEquipmentTemplate(typeText, makeText, modelText));
+}

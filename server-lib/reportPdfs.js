@@ -82,7 +82,25 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
         ? eq.issues.map(iss => `${iss.type}: ${iss.note}`)
         : (eq.noPostTripCount > 0 ? ['Currently checked out (no post-trip logged)'] : ['None']);
       const wrappedIssues = issueLines.flatMap(line => doc.splitTextToSize(line, cIssuesW - 4));
-      const rowH = Math.max(9, wrappedIssues.length * 4.2 + 3);
+
+      // Trailers report no reading of their own — their usage is whatever
+      // towed them. Group this week's trips by tow unit rather than listing
+      // every individual trip, so a trailer moved several times by the same
+      // truck gets one summed line instead of one per trip.
+      let usageLines;
+      if (eq.attachments && eq.attachments.length > 0) {
+        const byTow = {};
+        eq.attachments.forEach(a => {
+          if (!byTow[a.towUnit]) byTow[a.towUnit] = { distance: 0, unit: a.unit };
+          byTow[a.towUnit].distance += a.distance;
+        });
+        const rawLines = Object.entries(byTow).map(([towUnit, v]) => `Attached to ${towUnit} for ${v.distance.toFixed(1)} ${v.unit}`);
+        usageLines = rawLines.flatMap(line => doc.splitTextToSize(line, cUsageW - 4));
+      } else {
+        usageLines = [eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ''}` : '—'];
+      }
+
+      const rowH = Math.max(9, Math.max(wrappedIssues.length, usageLines.length) * 4.2 + 3);
 
       if (y + rowH > 280) { doc.addPage(); y = 20; drawHeader(); }
 
@@ -98,7 +116,7 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
       labelLines.forEach((line, li) => doc.text(line, cLabelX + 2, textY + li * 4.2));
 
       doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 65, 81);
-      doc.text(eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ''}` : '—', cUsageX + 2, textY);
+      usageLines.forEach((line, li) => doc.text(line, cUsageX + 2, textY + li * 4.2));
       doc.text(eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ''}` : '—', cEndX + 2, textY);
 
       const hasIssues = eq.issues.length > 0;

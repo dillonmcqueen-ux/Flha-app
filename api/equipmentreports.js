@@ -128,7 +128,7 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   const byEquipment = {};
   const ensure = (label) => {
     if (!byEquipment[label]) {
-      byEquipment[label] = { equipmentLabel: label, unit: null, usage: 0, endingReading: null, endingReadingDate: null, issues: [], noPostTripCount: 0 };
+      byEquipment[label] = { equipmentLabel: label, unit: null, usage: 0, endingReading: null, endingReadingDate: null, issues: [], noPostTripCount: 0, attachments: [] };
     }
     return byEquipment[label];
   };
@@ -173,6 +173,30 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
       const hasPosttrip = (records || []).some(p => p.trip_type === 'posttrip' && p.linked_inspection_id === r.id);
       if (!hasPosttrip) entry.noPostTripCount += 1;
     }
+  });
+
+  // Trailers have no engine and no reading of their own (see
+  // Inspection.jsx's isTrailerTemplate), so their usage for the week comes
+  // entirely from whatever towed them: a pretrip on a tow-capable unit can
+  // carry results_json.attachedTrailer = { id, label }, and the distance
+  // credited to the trailer is the SAME distance the towing unit logged on
+  // its own linked posttrip for that trip.
+  (records || []).forEach(r => {
+    if (r.trip_type !== 'pretrip') return;
+    const attached = r.results_json?.attachedTrailer;
+    if (!attached || !attached.label) return;
+    const posttrip = (records || []).find(p => p.trip_type === 'posttrip' && p.linked_inspection_id === r.id);
+    if (!posttrip) return; // only credit completed trips
+    const start = parseFloat(r.start_reading);
+    const end = parseFloat(posttrip.end_reading);
+    if (isNaN(start) || isNaN(end) || end < start) return;
+    const trailerEntry = ensure(attached.label);
+    trailerEntry.attachments.push({
+      towUnit: r.equipment_label || 'Unknown equipment',
+      distance: end - start,
+      unit: r.reading_unit || 'km',
+      date: posttrip.created_at,
+    });
   });
 
   const equipment = Object.values(byEquipment).sort((a, b) => a.equipmentLabel.localeCompare(b.equipmentLabel));

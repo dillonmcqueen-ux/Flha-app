@@ -785,13 +785,33 @@ function EquipmentReportCard({ data, onClose, error }) {
         {equipment.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No equipment activity recorded this week.</div>
         ) : (
-          equipment.map((eq, i) => (
+          equipment.map((eq, i) => {
+            // Trailers have no reading of their own — their usage for the
+            // week is whatever towed them, summed per tow unit.
+            let attachmentLines = [];
+            if (eq.attachments && eq.attachments.length > 0) {
+              const byTow = {};
+              eq.attachments.forEach(a => {
+                if (!byTow[a.towUnit]) byTow[a.towUnit] = { distance: 0, unit: a.unit };
+                byTow[a.towUnit].distance += a.distance;
+              });
+              attachmentLines = Object.entries(byTow).map(([towUnit, v]) => `Attached to ${towUnit} for ${v.distance.toFixed(1)} ${v.unit}`);
+            }
+            return (
             <div key={i} style={{ border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 6 }}>{eq.equipmentLabel}</div>
-              <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
-                <div style={{ fontSize: 13, color: "#374151" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
-                <div style={{ fontSize: 13, color: "#374151" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
-              </div>
+              {attachmentLines.length > 0 ? (
+                <div style={{ marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
+                  {attachmentLines.map((line, li) => (
+                    <div key={li} style={{ fontSize: 13, color: "#374151" }}>{line}</div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
+                  <div style={{ fontSize: 13, color: "#374151" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
+                  <div style={{ fontSize: 13, color: "#374151" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
+                </div>
+              )}
               {eq.noPostTripCount > 0 && (
                 <div style={{ fontSize: 12, color: "#D97706", fontWeight: 700, marginBottom: 4 }}>⚠ Currently checked out — no post-trip logged</div>
               )}
@@ -801,7 +821,8 @@ function EquipmentReportCard({ data, onClose, error }) {
                 </div>
               ))}
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

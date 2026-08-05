@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
-import { getEquipmentTemplate } from "./equipmentInspectionTemplates";
+import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
 
 const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -41,6 +41,10 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const [hasChanges, setHasChanges] = useState(null); // null until chosen
   const [changeCondition, setChangeCondition] = useState("Monitor");
   const [changeNotes, setChangeNotes] = useState("");
+
+  // ── trailer attachment (tow-capable units only) ────────────
+  const [attachedTrailerId, setAttachedTrailerId] = useState("");
+  const [attachedTrailerText, setAttachedTrailerText] = useState("");
 
   // Load equipment registry + logo
   useEffect(() => {
@@ -100,6 +104,22 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       return { type: eq?.type || "", make: eq?.make || "", model: eq?.model || "" };
     }
     return { type: freeEq.type, make: freeEq.make, model: freeEq.model };
+  };
+
+  const { type: currentType, make: currentMake, model: currentModel } = currentEquipmentFields();
+  const isTrailer = isTrailerTemplate(currentType, currentMake, currentModel);
+  const isTowCapable = isTowCapableTemplate(currentType, currentMake, currentModel);
+  const trailerFleet = equipment.filter(eq => isTrailerTemplate(eq.type, eq.make, eq.model));
+
+  // { id, label } for whatever trailer (if any) was selected to go with
+  // this trip, or null if none — fleet selection wins over free text.
+  const selectedAttachedTrailer = () => {
+    if (attachedTrailerId) {
+      const eq = trailerFleet.find(e => String(e.id) === String(attachedTrailerId));
+      return eq ? { id: eq.id, label: menuLabelFor(eq) } : null;
+    }
+    if (attachedTrailerText.trim()) return { id: null, label: attachedTrailerText.trim() };
+    return null;
   };
 
   const lastHadIssues = (insp) => {
@@ -181,7 +201,10 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     setSavingInspection(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
-    const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries() };
+    const resultsJson = {
+      machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries(),
+      attachedTrailer: isTowCapable ? selectedAttachedTrailer() : null,
+    };
 
     // Auto-save a free-typed rental to the fleet, via the protected
     // endpoint — only when a unit number was given. Matching by
@@ -218,7 +241,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       const pdfUrl = await generateAndUploadInspection({
         equipmentLabel: label, workerName, companyName, companyLogo,
         results: resultsJson, signatureDataUrl: sig,
-        tripType: "pretrip", startReading, readingUnit, token,
+        tripType: "pretrip", startReading: isTrailer ? null : startReading, readingUnit: isTrailer ? null : readingUnit, token,
       });
 
       const res = await fetch("/api/logs", {
@@ -237,9 +260,9 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             pdf_url: pdfUrl || null,
             trip_type: "pretrip",
             linked_inspection_id: null,
-            start_reading: startReading,
+            start_reading: isTrailer ? null : startReading,
             end_reading: null,
-            reading_unit: readingUnit,
+            reading_unit: isTrailer ? null : readingUnit,
             has_changes: null,
           },
         }),
@@ -282,7 +305,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
         equipmentLabel: label, workerName, companyName, companyLogo,
         signatureDataUrl: sig,
         tripType: "posttrip",
-        startReading: openPretrip.start_reading, endReading, readingUnit,
+        startReading: isTrailer ? null : openPretrip.start_reading, endReading: isTrailer ? null : endReading, readingUnit: isTrailer ? null : readingUnit,
         hasChanges: !!hasChanges, changeCondition, changeNotes,
         linkedPretrip: openPretrip, token,
       });
@@ -303,9 +326,9 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             pdf_url: pdfUrl || null,
             trip_type: "posttrip",
             linked_inspection_id: openPretrip.id,
-            start_reading: openPretrip.start_reading,
-            end_reading: endReading,
-            reading_unit: openPretrip.reading_unit || readingUnit,
+            start_reading: isTrailer ? null : openPretrip.start_reading,
+            end_reading: isTrailer ? null : endReading,
+            reading_unit: isTrailer ? null : (openPretrip.reading_unit || readingUnit),
             has_changes: !!hasChanges,
           },
         }),
@@ -462,18 +485,44 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               readOnly={!!loginUserName}
             />
 
-            <label style={s.label}>Reading type</label>
-            <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
-              {["Hours", "KM"].map(u => (
-                <button key={u} onClick={() => setReadingUnit(u)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${readingUnit === u ? "#0369A1" : "#E2E8F0"}`, background: readingUnit === u ? "#F0F9FF" : "#fff", color: readingUnit === u ? "#0369A1" : "#94A3B8" }}>{u}</button>
-              ))}
-            </div>
+            {!isTrailer && (
+              <>
+                <label style={s.label}>Reading type</label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
+                  {["Hours", "KM"].map(u => (
+                    <button key={u} onClick={() => setReadingUnit(u)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${readingUnit === u ? "#0369A1" : "#E2E8F0"}`, background: readingUnit === u ? "#F0F9FF" : "#fff", color: readingUnit === u ? "#0369A1" : "#94A3B8" }}>{u}</button>
+                  ))}
+                </div>
 
-            <label style={s.label}>Starting reading</label>
-            <input style={s.input} type="number" inputMode="decimal" placeholder={`e.g. 1245.3`} value={startReading} onChange={e => setStartReading(e.target.value)} />
+                <label style={s.label}>Starting reading</label>
+                <input style={s.input} type="number" inputMode="decimal" placeholder={`e.g. 1245.3`} value={startReading} onChange={e => setStartReading(e.target.value)} />
+              </>
+            )}
+
+            {isTowCapable && (
+              <>
+                <label style={s.label}>Attach a trailer? (optional)</label>
+                {trailerFleet.length > 0 && (
+                  <select style={s.input} value={attachedTrailerId} onChange={e => { setAttachedTrailerId(e.target.value); setAttachedTrailerText(""); }}>
+                    <option value="">No trailer attached</option>
+                    {trailerFleet.map(eq => (
+                      <option key={eq.id} value={eq.id}>{menuLabelFor(eq)}</option>
+                    ))}
+                  </select>
+                )}
+                {!attachedTrailerId && (
+                  <input
+                    style={{ ...s.input, marginTop: trailerFleet.length > 0 ? -3 : 0 }}
+                    placeholder={trailerFleet.length > 0 ? "Or type a trailer not in your fleet" : "e.g. 5x10 Dump Trailer (Unit 7)"}
+                    value={attachedTrailerText}
+                    onChange={e => setAttachedTrailerText(e.target.value)}
+                  />
+                )}
+              </>
+            )}
 
             <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
-            <button style={s.btn((workerName && startReading) ? "#0369A1" : "#94A3B8")} disabled={!workerName || !startReading} onClick={() => {
+            <button style={s.btn((workerName && (isTrailer || startReading)) ? "#0369A1" : "#94A3B8")} disabled={!workerName || (!isTrailer && !startReading)} onClick={() => {
               const missing = cf.missingRequired();
               if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
               generateInspection();
@@ -491,7 +540,8 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           <div style={s.card}>
             <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{equipmentLabel()}</div>
             {inspectionMeta.machineSummary && <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{inspectionMeta.machineSummary}</div>}
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>
+            {!isTrailer && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>}
+            {isTowCapable && selectedAttachedTrailer() && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Trailer attached: {selectedAttachedTrailer().label}</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               {defectiveCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "4px 10px", borderRadius: 20 }}>{defectiveCount} defective</span>}
               {monitorCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "4px 10px", borderRadius: 20 }}>{monitorCount} monitor</span>}
@@ -556,7 +606,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>
               Linked to Pre-Trip by {openPretrip.worker_name} · {new Date(openPretrip.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
             </div>
-            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>
+            {!isTrailer && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
           </div>
 
           <div style={s.card}>
@@ -588,8 +638,12 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
             />
-            <label style={s.label}>Ending reading ({openPretrip.reading_unit || readingUnit})</label>
-            <input style={{ ...s.input, marginBottom: 0 }} type="number" inputMode="decimal" placeholder="e.g. 1251.8" value={endReading} onChange={e => setEndReading(e.target.value)} />
+            {!isTrailer && (
+              <>
+                <label style={s.label}>Ending reading ({openPretrip.reading_unit || readingUnit})</label>
+                <input style={{ ...s.input, marginBottom: 0 }} type="number" inputMode="decimal" placeholder="e.g. 1251.8" value={endReading} onChange={e => setEndReading(e.target.value)} />
+              </>
+            )}
           </div>
 
           <div style={s.card}>
@@ -612,7 +666,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               </div>
             )}
             {(() => {
-              const ready = hasSignature && workerName && endReading && hasChanges !== null && (!hasChanges || changeNotes.trim());
+              const ready = hasSignature && workerName && (isTrailer || endReading) && hasChanges !== null && (!hasChanges || changeNotes.trim());
               return (
                 <button style={s.btn(signed && !saveError ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
                   {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Post-Trip"}
