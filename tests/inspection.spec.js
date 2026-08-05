@@ -11,7 +11,9 @@ test.describe('Equipment Inspection', () => {
 
   test('picks the excavator checklist for a fleet machine and completes a signed submission', async ({ page }) => {
     await expect(page.getByText('Select equipment')).toBeVisible();
-    await page.locator('select').selectOption({ label: '2019 Caterpillar 320 Excavator (Unit 12)' });
+    // Fleet machine has a unit number — the picker should show the concise
+    // "UNIT n, Type" form, not the full year/make/model text.
+    await page.locator('select').selectOption({ label: 'UNIT 12, Excavator' });
     await page.getByRole('button', { name: 'Continue →' }).click();
 
     await expect(page.getByText('Inspector')).toBeVisible();
@@ -25,12 +27,22 @@ test.describe('Equipment Inspection', () => {
     await expect(page.getByText('Hydraulic cut-out / lockout lever function')).toBeVisible();
     // A truck-only item should NOT be on the excavator's checklist.
     await expect(page.getByText('Load box / deck')).not.toBeVisible();
+    // "Wire wrap" phrasing is gone in favor of standard track-cleanliness wording.
+    await expect(page.getByText(/wire wrap/i)).not.toBeVisible();
+    await expect(page.getByText('Tracks (or wheels, if wheeled) clean, free of debris, nothing wrapped around them')).toBeVisible();
 
     // Flag one item as Defective and confirm the counter updates.
     const boomCard = page.getByText('Boom cylinders, hoses, and pins', { exact: true }).locator('..');
     await boomCard.getByRole('button', { name: 'Defective' }).click();
     await expect(page.getByText('1 defective')).toBeVisible();
     await page.getByPlaceholder("Add a note (what's wrong?)").fill('Small leak near the fitting.');
+
+    // N/A is available as a fourth condition and doesn't count toward the
+    // defective/monitor totals.
+    const swingCard = page.getByText('Swing drive, swing motor, and swing gear fluid', { exact: true }).locator('..');
+    await swingCard.getByRole('button', { name: 'N/A' }).click();
+    await expect(page.getByText('1 defective')).toBeVisible();
+    await expect(page.getByText(/\d+ monitor\b/)).not.toBeVisible();
 
     await signCanvas(page);
     await page.getByRole('button', { name: 'Sign & Submit Pre-Trip Inspection' }).click();
@@ -39,7 +51,7 @@ test.describe('Equipment Inspection', () => {
     await expect(page.getByText('1 defective item flagged')).toBeVisible();
   });
 
-  test('picks the pickup/service truck checklist for a free-text rental entry', async ({ page }) => {
+  test('picks the leaner pickup checklist (not the service/deck truck one) for a free-text rental entry', async ({ page }) => {
     await expect(page.getByText('Select equipment')).toBeVisible();
     await page.locator('select').selectOption('__other__');
 
@@ -54,16 +66,71 @@ test.describe('Equipment Inspection', () => {
     await page.getByPlaceholder('e.g. 1245.3').fill('42000');
     await page.getByRole('button', { name: 'Start Inspection' }).click();
 
-    // Truck-specific items — should not appear on the excavator's checklist.
-    await expect(page.getByText('Load box / deck — tie-downs, secured equipment')).toBeVisible();
+    // Pickup-specific items — leaner than the deck/crane service truck template.
+    await expect(page.getByText('Truck bed / cargo area — tie-downs, load secured')).toBeVisible();
+    await expect(page.getByText('Spare tire, jack, and lug wrench present')).toBeVisible();
     await expect(page.getByText('Service brake function/pedal feel')).toBeVisible();
     await expect(page.getByText('Seat belts — all positions')).toBeVisible();
-    // An excavator-only item should NOT be on the truck's checklist.
+    // Deck/crane-truck-only and excavator-only items should NOT be here.
+    await expect(page.getByText('Crane/hoist, compressor, or welder mounting and function')).not.toBeVisible();
     await expect(page.getByText('Swing drive, swing motor, and swing gear fluid')).not.toBeVisible();
 
     await signCanvas(page);
     await page.getByRole('button', { name: 'Sign & Submit Pre-Trip Inspection' }).click();
 
     await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
+  });
+
+  async function routeAddEquipmentCapture(page, addedEquipment) {
+    await page.route('**/api/companydata', async route => {
+      const body = route.request().postDataJSON();
+      if (body.action === 'add_equipment') {
+        addedEquipment.push(body);
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      }
+      if (body.action === 'list_sites') {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sites: [{ id: 'site-1', name: 'Test Site' }] }) });
+      }
+      if (body.action === 'list_equipment') {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ equipment: [{ id: 'eq-1', year: '2019', make: 'Caterpillar', model: '320', type: 'Excavator', unit_number: '12' }] }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ logo_url: '' }) });
+    });
+  }
+
+  async function submitRentalInspection(page, { year, make, model, type, unit }) {
+    await page.locator('select').selectOption('__other__');
+    await page.getByPlaceholder('e.g. 2019').fill(year);
+    await page.getByPlaceholder('e.g. Caterpillar').fill(make);
+    await page.getByPlaceholder('e.g. 320').fill(model);
+    await page.getByPlaceholder('e.g. Excavator').fill(type);
+    if (unit) await page.getByPlaceholder('e.g. 56').fill(unit);
+    await page.getByRole('button', { name: 'Continue →' }).click();
+
+    await page.getByPlaceholder('e.g. John Smith').fill('Jamie Inspector');
+    await page.getByPlaceholder('e.g. 1245.3').fill('500');
+    await page.getByRole('button', { name: 'Start Inspection' }).click();
+    await signCanvas(page);
+    await page.getByRole('button', { name: 'Sign & Submit Pre-Trip Inspection' }).click();
+    await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
+  }
+
+  test('registering a unit number on a rental adds it to the fleet', async ({ page }) => {
+    const addedEquipment = [];
+    await routeAddEquipmentCapture(page, addedEquipment);
+
+    await submitRentalInspection(page, { year: '2023', make: 'John Deere', model: '310', type: 'Backhoe', unit: '99' });
+
+    expect(addedEquipment).toHaveLength(1);
+    expect(addedEquipment[0].unitNumber).toBe('99');
+  });
+
+  test('a plain rental with no unit number is NOT auto-added to the fleet', async ({ page }) => {
+    const addedEquipment = [];
+    await routeAddEquipmentCapture(page, addedEquipment);
+
+    await submitRentalInspection(page, { year: '2023', make: 'John Deere', model: '310', type: 'Backhoe', unit: '' });
+
+    expect(addedEquipment).toHaveLength(0);
   });
 });

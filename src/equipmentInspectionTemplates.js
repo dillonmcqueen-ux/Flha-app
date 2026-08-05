@@ -17,7 +17,8 @@ const EQUIPMENT_TEMPLATES = {
         "Counterweight and body — damage, cracks",
         "Compartment doors, coolant, batteries, and disconnect switch",
         "Radiators, coolers, and condensers",
-        "Undercarriage: track adjustment, cleanliness, tires (if wheeled)",
+        "Undercarriage: track adjustment and wear, tires (if wheeled)",
+        "Tracks (or wheels, if wheeled) clean, free of debris, nothing wrapped around them",
         "Pads, rollers, idlers, sprockets — bolts/bushings, final drives",
       ]),
       ...items("Fluids & Engine Compartment", [
@@ -59,6 +60,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires, wheels, lug nuts, and locks",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Hand rails, steps, sheet metal, door latches, fenders, frame",
         "Radiator grill guard, fan, motor, hoses, lights",
         "Underneath machine: belly pans and differential",
@@ -92,7 +94,6 @@ const EQUIPMENT_TEMPLATES = {
       ...items("Pre-Operation Function Test", [
         "Start engine, warm up (approx. 10 minutes)",
         "Test brakes and system operation",
-        "Wheels cleaned, free of debris and wire wrap",
         "Grease points serviced per schedule",
       ]),
     ],
@@ -103,6 +104,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Undercarriage", [
         "Tracks: tension, wear, cracked links",
+        "Tracks clean, free of debris, nothing wrapped around them",
         "Track pads, rollers, idlers, sprockets — bolts/bushings",
         "Final drives — leaks, damage",
         "Blade, cutting edge, and end bits — wear, cracks",
@@ -143,6 +145,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires, wheels, lug nuts, and locks",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Frame, articulation joint, and hinge pins",
         "Steps, hand rails, sheet metal, fenders",
         "Circle, drawbar, and moldboard — wear, cracks, mounting",
@@ -184,6 +187,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Undercarriage", [
         "Tires or tracks — wear, damage, pressure/tension",
+        "Tracks/wheels clean, free of debris, nothing wrapped around them",
         "Lift arms, cylinders, and pivot pins",
         "Attachment plate / quick-coupler and locking pins",
         "Chassis, frame, and cab cage for damage",
@@ -220,6 +224,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires, wheels, lug nuts, and locks",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Stabilizer legs/pads — condition and pin wear",
         "Frame, hand rails, steps, fenders",
       ]),
@@ -257,6 +262,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Drum(s) — dents, cracks, weld condition",
+        "Drum/wheels clean, free of debris, nothing wrapped around them",
         "Scraper bars and drum cleanliness",
         "Tires (if pneumatic/combination) — wear and pressure",
         "Frame and articulation joint",
@@ -292,6 +298,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Box/bed — cracks, damage, tailgate latch",
         "Frame, suspension, and mud flaps",
         "Mirrors, lights, and reflectors",
@@ -334,6 +341,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Tank — leaks, mounting, baffles",
         "Frame, suspension, and mud flaps",
         "Mirrors, lights, and reflectors",
@@ -364,14 +372,16 @@ const EQUIPMENT_TEMPLATES = {
     ],
   },
 
-  SERVICE_TRUCK: {
-    label: "Pickup / Service Truck",
+  PICKUP_TRUCK: {
+    label: "Pickup Truck",
     items: [
       ...items("Walkaround / Structure", [
         "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Body damage, mirrors, glass, wipers",
         "Lights, signals, and reflectors",
-        "Load box / deck — tie-downs, secured equipment",
+        "Spare tire, jack, and lug wrench present",
+        "Trailer hitch, wiring, and safety chains (if towing)",
       ]),
       ...items("Fluids & Engine Compartment", [
         "Engine oil level",
@@ -390,8 +400,43 @@ const EQUIPMENT_TEMPLATES = {
         "Horn and wipers",
         "Fire extinguisher and first aid kit present",
       ]),
-      ...items("Deck / Service Equipment (if equipped)", [
+      ...items("Cargo & Load", [
+        "Truck bed / cargo area — tie-downs, load secured",
+        "Tailgate latch function",
+      ]),
+    ],
+  },
+
+  SERVICE_TRUCK: {
+    label: "Service / Deck Truck",
+    items: [
+      ...items("Walkaround / Structure", [
+        "Tires — tread, pressure, damage, wheel nuts",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
+        "Body damage, mirrors, glass, wipers",
+        "Lights, signals, and reflectors",
+        "Deck / service box — condition, tie-downs, secured equipment",
+      ]),
+      ...items("Fluids & Engine Compartment", [
+        "Engine oil level",
+        "Coolant level",
+        "Windshield washer fluid",
+        "Belts and hoses — leaks or damage",
+      ]),
+      ...items("Brakes & Steering", [
+        "Service brake function/pedal feel",
+        "Parking brake function",
+        "Steering response, no excess play",
+      ]),
+      ...items("Cab & Safety Devices", [
+        "Seat belts — all positions",
+        "Gauges and warning lights on start-up",
+        "Horn and wipers",
+        "Fire extinguisher and first aid kit present",
+      ]),
+      ...items("Deck / Service Equipment", [
         "Crane/hoist, compressor, or welder mounting and function",
+        "Outrigger/stabilizer function (if crane-equipped)",
         "Fuel/oil transfer tank and hoses — leaks, cap condition",
       ]),
     ],
@@ -402,6 +447,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires (if mobile) — tread, pressure, damage",
+        "Wheels/tracks clean, free of debris, nothing wrapped around them",
         "Outriggers / stabilizers — pads, cylinders, pins",
         "Frame and carrier body condition",
         "Boom sections — dents, cracks, wear pads",
@@ -437,6 +483,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires/wheels — condition and pressure",
+        "Wheels/tires clean, free of debris, nothing wrapped around them",
         "Base frame, outriggers/stabilizers — condition",
         "Platform/basket — gate or chain, guardrails, floor",
         "Boom or scissor structure — welds, pins, cracks",
@@ -465,6 +512,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires or tracks — wear, damage, pressure/tension",
+        "Tracks/wheels clean, free of debris, nothing wrapped around them",
         "Digging chain / wheel — wear, tension, teeth condition",
         "Spoil auger/conveyor condition and guards",
         "Frame and boom condition",
@@ -494,6 +542,7 @@ const EQUIPMENT_TEMPLATES = {
     items: [
       ...items("Walkaround / Structure", [
         "Tires or tracks — wear, damage, pressure/tension",
+        "Tracks/wheels clean, free of debris, nothing wrapped around them",
         "Frame, body panels, and structure for damage",
         "Mirrors, lights, and reflectors",
       ]),
@@ -525,8 +574,11 @@ const EQUIPMENT_TEMPLATES = {
 };
 
 // Ordered most-specific-first so e.g. "Backhoe Loader" matches BACKHOE
-// before the generic "loader" pattern, and "Skid Steer Loader" matches
-// SKID_STEER first. First match wins.
+// before the generic "loader" pattern, "Skid Steer Loader" matches
+// SKID_STEER first, and "Service Truck" matches SERVICE_TRUCK before the
+// broad PICKUP_TRUCK fallback (which exists to catch a bare "Truck" or
+// "Pickup" entry, since most workers will type it that plainly). First
+// match wins.
 const MATCH_RULES = [
   ["SKID_STEER", /skid.?steer|bobcat|compact track loader|\bctl\b|multi.?terrain loader/i],
   ["BACKHOE", /backhoe/i],
@@ -539,7 +591,8 @@ const MATCH_RULES = [
   ["AERIAL_LIFT", /boom lift|man.?lift|scissor lift|aerial (platform|lift)|cherry picker/i],
   ["DUMP_TRUCK", /dump truck|haul truck|articulated truck|rock truck|off.?road truck|belly dump/i],
   ["WATER_TRUCK", /water truck|water tank/i],
-  ["SERVICE_TRUCK", /\btruck\b|pickup|crew cab|flatdeck|f.?150|f.?250|f.?350|1.?ton|3\/4.?ton|half.?ton/i],
+  ["SERVICE_TRUCK", /service truck|mechanic truck|deck truck/i],
+  ["PICKUP_TRUCK", /pickup|crew cab|flatdeck|\btruck\b|f.?150|f.?250|f.?350|silverado|sierra|ram\s?(1500|2500|3500)|1.?ton|3\/4.?ton|half.?ton/i],
   ["WHEEL_LOADER", /loader/i],
 ];
 

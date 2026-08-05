@@ -529,6 +529,26 @@ export default async function handler(req, res) {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      // inspections.equipment_id is a real FK to this table (see the note
+      // in api/maintenance.js). Deleting the equipment row out from under
+      // it would either fail outright (FK violation, blocking the delete
+      // entirely) or cascade-delete every inspection ever recorded against
+      // this unit, depending on how the constraint is set up — neither is
+      // acceptable, since a submitted inspection is a signed safety record
+      // that must stay retrievable regardless of whether the equipment is
+      // still in the fleet. Detach it explicitly first: each inspection
+      // already carries its own equipment_label text snapshot (set at
+      // submission time), so nulling the FK loses nothing the worker or
+      // supervisor would see on that record, PDF, or in weekly reports.
+      const { error: detachErr } = await supabaseAdmin.from('inspections').update({ equipment_id: null }).eq('equipment_id', id);
+      if (detachErr) return res.status(500).json({ error: "Couldn't remove equipment." });
+
+      // Maintenance log entries are meaningless without the equipment they
+      // were serviced against and carry no equivalent label snapshot, so
+      // remove them along with the unit rather than leave them stranded.
+      await supabaseAdmin.from('equipment_maintenance_log').delete().eq('equipment_id', id);
+
       const { error } = await supabaseAdmin.from('equipment').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove equipment." });
       return res.status(200).json({ ok: true });

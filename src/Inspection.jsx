@@ -7,6 +7,7 @@ const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
   { key: "Monitor", color: "#D97706", bg: "#FFFBEB", border: "#FCD34D" },
   { key: "Defective", color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5" },
+  { key: "N/A", color: "#64748B", bg: "#F1F5F9", border: "#CBD5E1" },
 ];
 
 export default function Inspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
@@ -15,7 +16,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const [eqMode, setEqMode] = useState("list"); // list | other
   const [selectedEq, setSelectedEq] = useState("");
   const [selectedEqId, setSelectedEqId] = useState("");
-  const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "" });
+  const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
   const [workerName, setWorkerName] = useState(loginUserName);
   const [checking, setChecking] = useState(false);
   const [genError, setGenError] = useState(false);
@@ -76,10 +77,19 @@ export default function Inspection({ companyId, companyName, userName: loginUser
 
   const labelFor = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
+  // Concise text for the equipment picker's dropdown options — a worker who
+  // knows their unit number shouldn't have to scan full year/make/model
+  // text to find it. Falls back to the full descriptive label when there's
+  // no unit number to key off of.
+  const menuLabelFor = (eq) => {
+    if (eq.unit_number) return `UNIT ${eq.unit_number}${eq.type ? `, ${eq.type}` : ""}`;
+    return labelFor(eq);
+  };
+
   const equipmentLabel = () => {
     if (eqMode === "list" && selectedEq) return selectedEq;
-    const { year, make, model, type } = freeEq;
-    return [year, make, model, type].filter(Boolean).join(" ");
+    const { year, make, model, type, unit_number } = freeEq;
+    return [year, make, model, type].filter(Boolean).join(" ") + (unit_number ? ` (Unit ${unit_number})` : "");
   };
 
   // { type, make, model } for whichever equipment is currently selected —
@@ -173,20 +183,24 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     const label = equipmentLabel();
     const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries() };
 
-    // Auto-save a free-typed rental to the fleet, via the protected endpoint.
-    const typedSomething = (freeEq.make || freeEq.model || freeEq.type || freeEq.year).trim();
-    if (typedSomething) {
-      const typedLabel = [freeEq.year, freeEq.make, freeEq.model, freeEq.type].filter(v => v && v.trim()).join(" ").trim().toLowerCase();
-      const alreadyInFleet = equipment.some(eq =>
-        [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ").trim().toLowerCase() === typedLabel
-      );
+    // Auto-save a free-typed rental to the fleet, via the protected
+    // endpoint — only when a unit number was given. Matching by
+    // year/make/model/type TEXT used to silently create a duplicate "unit"
+    // every time it was typed even slightly differently (extra word,
+    // different capitalization/order, abbreviation) — exactly the problem a
+    // unit number exists to solve, so use that as the dedup key instead,
+    // and skip auto-adding entirely when there's no reliable identifier to
+    // key off of (a genuine one-off rental with no company asset tag).
+    const typedUnit = freeEq.unit_number.trim();
+    if (typedUnit) {
+      const alreadyInFleet = equipment.some(eq => (eq.unit_number || "").trim().toLowerCase() === typedUnit.toLowerCase());
       if (!alreadyInFleet) {
         try {
           await fetch("/api/companydata", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "add_equipment", token, companyId,
-              year: freeEq.year, make: freeEq.make, model: freeEq.model, type: freeEq.type, unitNumber: "",
+              year: freeEq.year, make: freeEq.make, model: freeEq.model, type: freeEq.type, unitNumber: typedUnit,
             }),
           });
         } catch (e) {
@@ -378,7 +392,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               }}>
                 <option value="">Select a machine…</option>
                 {equipment.map(eq => (
-                  <option key={eq.id} value={eq.id}>{labelFor(eq)}</option>
+                  <option key={eq.id} value={eq.id}>{menuLabelFor(eq)}</option>
                 ))}
                 <option value="__other__">＋ Other / rental (enter details)</option>
               </select>
@@ -393,8 +407,11 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               <input style={s.input} placeholder="e.g. 320" value={freeEq.model} onChange={e => setFreeEq(p => ({ ...p, model: e.target.value }))} />
               <label style={s.label}>Type</label>
               <input style={s.input} placeholder="e.g. Excavator" value={freeEq.type} onChange={e => setFreeEq(p => ({ ...p, type: e.target.value }))} />
+              <label style={s.label}>Unit / asset number (optional)</label>
+              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: -6, marginBottom: 6, lineHeight: 1.4 }}>If your company tags this machine with a unit number, enter it here — it's what lets this get added to the fleet correctly instead of as a duplicate.</div>
+              <input style={s.input} placeholder="e.g. 56" value={freeEq.unit_number} onChange={e => setFreeEq(p => ({ ...p, unit_number: e.target.value }))} />
               {equipment.length > 0 && (
-                <button onClick={() => { setEqMode("list"); setFreeEq({ year: "", make: "", model: "", type: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}>← Choose from fleet</button>
+                <button onClick={() => { setEqMode("list"); setFreeEq({ year: "", make: "", model: "", type: "", unit_number: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}>← Choose from fleet</button>
               )}
             </>
           )}
