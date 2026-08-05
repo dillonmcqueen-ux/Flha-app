@@ -92,20 +92,23 @@ function selectRelevantPolicies(policies, taskText, maxCount = 25) {
 // working by any amount of prompt tuning.
 const UNGROUNDED_HAZARD_RULES = [
   {
-    textMatch: /\b(alone|isolat|remote location|unsupervised)\b/i,
+    // \w* after a stem lets it match inflected forms ("isolation", "isolated")
+    // — a bare \b right after the stem would block those, since the next
+    // letter is still a word character and never counts as a boundary.
+    textMatch: /\b(alone|isolat\w*|remote location|unsupervised)\b/i,
     taskMatch: /\b(alone|by myself|on my own|no one else|nobody else|unsupervised|remote site|remote location|no cell service|no signal|no radio)\b/i,
   },
   {
-    textMatch: /\b(weather|rain|wind|lightning|storm|snow|heat|cold|temperature|darkness affecting|low light)\b/i,
-    taskMatch: /\b(rain|raining|wind|windy|storm|lightning|snow|snowing|hot out|cold out|heat wave|freezing|humid|weather|dark out|nighttime|after dark)\b/i,
+    textMatch: /\b(weather|rain\w*|wind\w*|lightning|storm\w*|snow\w*|heat\w*|cold\w*|temperature|low light)\b/i,
+    taskMatch: /\b(rain\w*|wind\w*|storm\w*|lightning|snow\w*|hot out|cold\w*|heat wave|freezing|humid|weather|dark out|nighttime|after dark)\b/i,
   },
   {
-    textMatch: /\boverhead (power |electrical )?line/i,
+    textMatch: /\boverhead (power |electrical )?lines?\b/i,
     taskMatch: /\b(overhead|power line|hydro line|electrical line|wire|wires|pole|poles|aerial|transmission line)\b/i,
   },
   {
-    textMatch: /\b(underground utilit|buried (pipe|cable|line)|utility strike)\b/i,
-    taskMatch: /\b(underground|buried|utility|utilities|pipe|pipeline|cable|gas line|water line|conduit|call.?before.?you.?dig)\b/i,
+    textMatch: /\b(underground utilit\w*|buried (pipe|cable|line)\w*|utility strike\w*)\b/i,
+    taskMatch: /\b(underground|buried|utilit\w*|pipe\w*|cable\w*|gas line|water line|conduit|call.?before.?you.?dig)\b/i,
   },
 ];
 
@@ -117,7 +120,10 @@ function isUngroundedText(text, lowerTask) {
 
 function stripUngroundedHazards(hazards, taskText) {
   const lowerTask = (taskText || "").toLowerCase();
-  return (hazards || []).filter(h => !isUngroundedText(`${h.hazard || ""} ${h.control || ""}`, lowerTask));
+  // Check the cited SOP text too, not just the hazard's own wording — the
+  // model can reword a hazard to dodge these keywords while still citing
+  // the exact same working-alone/weather/utility SOP as its justification.
+  return (hazards || []).filter(h => !isUngroundedText(`${h.hazard || ""} ${h.control || ""} ${h.sopRef || ""}`, lowerTask));
 }
 
 function stripUngroundedAlerts(alerts, taskText) {
