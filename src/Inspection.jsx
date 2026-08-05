@@ -183,8 +183,31 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const generateInspection = () => {
     const { type, make, model } = currentEquipmentFields();
     const template = getEquipmentTemplate(type, make, model);
-    setInspectionMeta({ machineSummary: `${template.label} — pre-trip inspection` });
-    setItems(template.items.map(it => ({ item: it.item, category: it.category || "", condition: "Good", note: "" })));
+    const truckLabel = equipmentLabel();
+    const truckItems = template.items.map(it => ({ item: it.item, category: it.category || "", unit: "truck", unitLabel: truckLabel, condition: "Good", note: "" }));
+
+    // A trailer attached to a tow-capable unit gets its OWN checklist
+    // appended, tagged by unit — the trailer is a completely different
+    // machine with different failure points, and a defect on it must never
+    // read as a defect on the tow vehicle (or vice versa) on this record,
+    // in the PDF, or in the weekly report's issue list.
+    const trailer = isTowCapable ? selectedAttachedTrailer() : null;
+    let trailerTemplateLabel = null;
+    let allItems = truckItems;
+    if (trailer) {
+      const trailerEq = attachedTrailerId ? trailerFleet.find(e => String(e.id) === String(attachedTrailerId)) : null;
+      const trailerTemplate = trailerEq
+        ? getEquipmentTemplate(trailerEq.type, trailerEq.make, trailerEq.model)
+        : getEquipmentTemplate(trailer.label, "", "");
+      trailerTemplateLabel = trailerTemplate.label;
+      const trailerItems = trailerTemplate.items.map(it => ({ item: it.item, category: it.category || "", unit: "trailer", unitLabel: trailer.label, condition: "Good", note: "" }));
+      allItems = [...truckItems, ...trailerItems];
+    }
+
+    setInspectionMeta({
+      machineSummary: trailer ? `${template.label} + ${trailerTemplateLabel} (trailer attached)` : `${template.label} — pre-trip inspection`,
+    });
+    setItems(allItems);
     setStep("inspect");
   };
 
@@ -550,8 +573,19 @@ export default function Inspection({ companyId, companyName, userName: loginUser
 
           {items.map((it, i) => {
             const cond = CONDITIONS.find(c => c.key === it.condition);
+            const isNewUnit = it.unit && it.unit !== items[i - 1]?.unit;
             return (
-              <div key={i} style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
+              <div key={i}>
+                {isNewUnit && (
+                  <div style={{
+                    background: it.unit === "trailer" ? "#EDE9FE" : "#DBEAFE", borderRadius: 9,
+                    padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
+                    color: it.unit === "trailer" ? "#5B21B6" : "#1E40AF",
+                  }}>
+                    {it.unit === "trailer" ? "🚛 TRAILER" : "🚚 TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
+                  </div>
+                )}
+              <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
                 {it.category && <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 3 }}>{it.category}</div>}
                 <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 8 }}>{it.item}</div>
                 <div style={{ display: "flex", gap: 5, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 8 : 0 }}>
@@ -567,6 +601,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
                 {(it.condition === "Defective" || it.condition === "Monitor") && (
                   <input style={{ ...s.input, padding: "8px 10px", marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
                 )}
+              </div>
               </div>
             );
           })}

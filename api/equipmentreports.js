@@ -161,8 +161,16 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
     } else {
       // pretrip
       const items = (r.results_json?.items) || [];
+      const attached = r.results_json?.attachedTrailer;
       items.filter(it => it.condition === 'Defective' || it.condition === 'Monitor').forEach(it => {
-        entry.issues.push({
+        // A tow unit's pretrip can carry a combined checklist (its own
+        // items plus an attached trailer's, tagged by `unit` — see
+        // Inspection.jsx's generateInspection). A trailer defect must land
+        // on the TRAILER's own report entry, never the tow vehicle's, and
+        // vice versa — otherwise a bad trailer tire reads as a defect on
+        // the truck that happened to be pulling it that day.
+        const targetEntry = (it.unit === 'trailer' && attached?.label) ? ensure(attached.label) : entry;
+        targetEntry.issues.push({
           date: r.created_at,
           worker: r.worker_name,
           type: it.condition,

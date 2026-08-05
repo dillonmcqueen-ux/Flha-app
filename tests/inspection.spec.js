@@ -263,10 +263,31 @@ test.describe('Equipment Inspection', () => {
 
     await expect(page.getByText('Trailer attached: 5x10 Dump Trailer (Unit 7)')).toBeVisible();
 
+    // The checklist must EXPAND to cover the trailer too, clearly separated
+    // from the truck's own items — not just recorded as metadata.
+    await expect(page.getByText('🚚 TRUCK / TOW VEHICLE')).toBeVisible();
+    await expect(page.getByText('🚛 TRAILER — 5x10 Dump Trailer (Unit 7)')).toBeVisible();
+    await expect(page.getByText('Service brake function/pedal feel')).toBeVisible(); // pickup item
+    await expect(page.getByText('Coupler/hitch — condition, locking pin/latch')).toBeVisible(); // trailer item
+
+    // Flag a TRAILER item as Defective — it must not appear as a truck issue.
+    const hitchCard = page.getByText('Coupler/hitch — condition, locking pin/latch', { exact: true }).locator('..');
+    await hitchCard.getByRole('button', { name: 'Defective' }).click();
+    await page.getByPlaceholder("Add a note (what's wrong?)").fill('Latch is loose.');
+
     await signCanvas(page);
     await page.getByRole('button', { name: 'Sign & Submit Pre-Trip Inspection' }).click();
     await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
 
     expect(submittedRecord.results_json.attachedTrailer).toEqual({ id: null, label: '5x10 Dump Trailer (Unit 7)' });
+    const items = submittedRecord.results_json.items;
+    const truckItems = items.filter(it => it.unit === 'truck');
+    const trailerItems = items.filter(it => it.unit === 'trailer');
+    expect(truckItems.length).toBeGreaterThan(0);
+    expect(trailerItems.length).toBeGreaterThan(0);
+    // The flagged defect must be tagged to the trailer, not the truck.
+    const flaggedItem = items.find(it => it.condition === 'Defective');
+    expect(flaggedItem.unit).toBe('trailer');
+    expect(truckItems.every(it => it.condition !== 'Defective')).toBe(true);
   });
 });
