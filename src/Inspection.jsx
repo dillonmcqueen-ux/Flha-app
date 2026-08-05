@@ -582,7 +582,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
                     padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
                     color: it.unit === "trailer" ? "#5B21B6" : "#1E40AF",
                   }}>
-                    {it.unit === "trailer" ? "🚛 TRAILER" : "🚚 TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
+                    {it.unit === "trailer" ? "TRAILER" : "TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
                   </div>
                 )}
               <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>

@@ -767,7 +767,7 @@ const MATCH_RULES = [
   ["SEMI_TRUCK", /\bsemi\b|tractor.?trailer|18.?wheeler|highway tractor|road tractor|fifth wheel|day cab|sleeper cab|kenworth|peterbilt|freightliner|western star|\bmack\b|volvo vnl/i],
   ["SERVICE_TRUCK", /service truck|mechanic truck|deck truck/i],
   ["EQUIPMENT_TRAILER", /flatdeck|lowbo?y|lowbed|gooseneck trailer|utility trailer|equipment trailer|\btrailer\b/i],
-  ["PICKUP_TRUCK", /pickup|crew cab|\btruck\b|f.?150|f.?250|f.?350|silverado|sierra|ram\s?(1500|2500|3500)|1.?ton|3\/4.?ton|half.?ton/i],
+  ["PICKUP_TRUCK", /pick.?up|crew cab|\btruck\b|f.?150|f.?250|f.?350|silverado|sierra|ram\s?(1500|2500|3500)|1.?ton|3\/4.?ton|half.?ton/i],
   ["WHEEL_LOADER", /loader/i],
 ];
 

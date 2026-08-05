@@ -265,8 +265,8 @@ test.describe('Equipment Inspection', () => {
 
     // The checklist must EXPAND to cover the trailer too, clearly separated
     // from the truck's own items — not just recorded as metadata.
-    await expect(page.getByText('🚚 TRUCK / TOW VEHICLE')).toBeVisible();
-    await expect(page.getByText('🚛 TRAILER — 5x10 Dump Trailer (Unit 7)')).toBeVisible();
+    await expect(page.getByText('TRUCK / TOW VEHICLE')).toBeVisible();
+    await expect(page.getByText('TRAILER — 5x10 Dump Trailer (Unit 7)')).toBeVisible();
     await expect(page.getByText('Service brake function/pedal feel')).toBeVisible(); // pickup item
     await expect(page.getByText('Coupler/hitch — condition, locking pin/latch')).toBeVisible(); // trailer item
 
@@ -289,5 +289,23 @@ test.describe('Equipment Inspection', () => {
     const flaggedItem = items.find(it => it.condition === 'Defective');
     expect(flaggedItem.unit).toBe('trailer');
     expect(truckItems.every(it => it.condition !== 'Defective')).toBe(true);
+  });
+
+  test('a hyphenated "Pick-up" entry still gets the pickup checklist, not the generic hydraulics/tracks one', async ({ page }) => {
+    await page.locator('select').selectOption('__other__');
+    await page.getByPlaceholder('e.g. Excavator').fill('Pick-up');
+    await page.getByRole('button', { name: 'Continue →' }).click();
+
+    await expect(page.getByText('Inspector')).toBeVisible();
+    await page.getByPlaceholder('e.g. John Smith').fill('Jamie Inspector');
+    await page.getByPlaceholder('e.g. 1245.3').fill('42000');
+    await page.getByRole('button', { name: 'Start Inspection' }).click();
+
+    // Pickup-specific item should be present...
+    await expect(page.getByText('Spare tire, jack, and lug wrench present')).toBeVisible();
+    // ...and it must NOT fall through to the generic template's hydraulics/
+    // tracks items, which don't apply to a pickup.
+    await expect(page.getByText('Hydraulic fluid level (if equipped)')).not.toBeVisible();
+    await expect(page.getByText('Tires or tracks — wear, damage, pressure/tension')).not.toBeVisible();
   });
 });
