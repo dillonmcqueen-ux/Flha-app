@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -400,14 +401,14 @@ export default async function handler(req, res) {
       const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
       const formMap = {}; (forms || []).forEach(f => { formMap[f.id] = f; });
 
-      const enriched = await Promise.all((records || []).map(async r => ({
+      const signedRecords = await signRows(supabaseAdmin, records, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const enriched = signedRecords.map(r => ({
         ...r,
-        pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports'),
         site_name: siteMap[r.site_id] || 'Unknown site',
         form_title: formMap[r.form_id]?.title || 'Unknown document',
         form_icon: formMap[r.form_id]?.icon || '📄',
         company_id: formMap[r.form_id]?.company_id,
-      })));
+      }));
 
       return res.status(200).json({ records: enriched });
     }

@@ -1073,16 +1073,40 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   useEffect(() => {
-    async function loadAll() {
-      let cos = [];
+    // Each fetch below used to run one after another — total load time was
+    // the SUM of every request's latency. None of these 10 lists actually
+    // depend on each other (the server scopes each by the caller's session,
+    // not by anything the client computed), so they can all fire at once;
+    // only the SOPs call genuinely depends on knowing which companies are
+    // visible, so it's the one call that has to wait. safeFetch never
+    // rejects — same "fall back to empty array on any error" behavior as
+    // before, just safe to use inside Promise.all.
+    async function safeFetch(url, body, extract, fallback) {
       try {
-        const cosRes = await fetch("/api/companydata", {
+        const res = await fetch(url, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_companies_brief", token }),
+          body: JSON.stringify(body),
         });
-        const cosData = await cosRes.json();
-        if (cosRes.ok) cos = cosData.companies || [];
-      } catch (e) { /* leave companies empty if the request fails */ }
+        const data = await res.json();
+        return res.ok ? extract(data) : fallback;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    async function loadAll() {
+      const [cos, fs, nm, inc, insp, tbt, dr, mr, ma, cd] = await Promise.all([
+        safeFetch("/api/companydata", { action: "list_companies_brief", token }, d => d.companies || [], []),
+        safeFetch("/api/flhas", { action: "list", token }, d => d.flhas || [], []),
+        safeFetch("/api/reports", { type: "nearmiss", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/reports", { type: "incident", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/logs", { type: "inspection", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/logs", { type: "toolbox", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/logs", { type: "daily", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/monthly", { action: "list_records", token }, d => d.records || [], []),
+        safeFetch("/api/monthly", { action: "list_corrective_actions", token }, d => d.actions || [], []),
+        safeFetch("/api/customforms", { action: "list_records", token }, d => d.records || [], []),
+      ]);
 
       const visibleCompaniesRaw = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)
@@ -1105,96 +1129,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         }));
         ss = sopResults.flat();
       } catch (e) { /* leave ss empty if the request fails */ }
-
-      let fs = [];
-      try {
-        const flhaRes = await fetch("/api/flhas", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list", token }),
-        });
-        const flhaData = await flhaRes.json();
-        if (flhaRes.ok) fs = flhaData.flhas || [];
-      } catch (e) { /* leave fs empty if the request fails */ }
-
-      let nm = [];
-      try {
-        const nmRes = await fetch("/api/reports", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "nearmiss", action: "list", token }),
-        });
-        const nmData = await nmRes.json();
-        if (nmRes.ok) nm = nmData.records || [];
-      } catch (e) { /* leave nm empty if the request fails */ }
-
-      let inc = [];
-      try {
-        const incRes = await fetch("/api/reports", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "incident", action: "list", token }),
-        });
-        const incData = await incRes.json();
-        if (incRes.ok) inc = incData.records || [];
-      } catch (e) { /* leave inc empty if the request fails */ }
-
-      let insp = [];
-      try {
-        const inspRes = await fetch("/api/logs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "inspection", action: "list", token }),
-        });
-        const inspData = await inspRes.json();
-        if (inspRes.ok) insp = inspData.records || [];
-      } catch (e) { /* leave insp empty if the request fails */ }
-
-      let tbt = [];
-      try {
-        const tbtRes = await fetch("/api/logs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "toolbox", action: "list", token }),
-        });
-        const tbtData = await tbtRes.json();
-        if (tbtRes.ok) tbt = tbtData.records || [];
-      } catch (e) { /* leave tbt empty if the request fails */ }
-
-      let dr = [];
-      try {
-        const drRes = await fetch("/api/logs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "daily", action: "list", token }),
-        });
-        const drData = await drRes.json();
-        if (drRes.ok) dr = drData.records || [];
-      } catch (e) { /* leave dr empty if the request fails */ }
-
-      let mr = [];
-      try {
-        const mrRes = await fetch("/api/monthly", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_records", token }),
-        });
-        const mrData = await mrRes.json();
-        if (mrRes.ok) mr = mrData.records || [];
-      } catch (e) { /* leave mr empty if the request fails */ }
-
-      let ma = [];
-      try {
-        const maRes = await fetch("/api/monthly", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_corrective_actions", token }),
-        });
-        const maData = await maRes.json();
-        if (maRes.ok) ma = maData.actions || [];
-      } catch (e) { /* leave ma empty if the request fails */ }
-
-      let cd = [];
-      try {
-        const cdRes = await fetch("/api/customforms", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_records", token }),
-        });
-        const cdData = await cdRes.json();
-        if (cdRes.ok) cd = cdData.records || [];
-      } catch (e) { /* leave cd empty if the request fails */ }
 
       setCompanies(visibleCompaniesRaw);
       setFlhas(fs);

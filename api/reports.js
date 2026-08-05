@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -64,11 +65,6 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
   if (!path) return null;
   const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
   return error ? null : data.signedUrl;
-}
-
-async function signStoredUrls(urls, bucket, ttlSeconds = 3600) {
-  if (!urls || urls.length === 0) return urls || [];
-  return Promise.all(urls.map(u => signStoredUrl(u, bucket, ttlSeconds)));
 }
 
 const TABLES = {
@@ -130,12 +126,11 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      const records = await Promise.all((data || []).map(async r => ({
-        ...r,
-        pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports'),
-        signature_url: r.signature_url ? await signStoredUrl(r.signature_url, 'signatures') : r.signature_url,
-        photo_urls: r.photo_urls ? await signStoredUrls(r.photo_urls, 'incident-photos') : r.photo_urls,
-      })));
+      const records = await signRows(supabaseAdmin, data, [
+        { key: 'pdf_url', bucket: 'flha-reports' },
+        { key: 'signature_url', bucket: 'signatures' },
+        { key: 'photo_urls', bucket: 'incident-photos' },
+      ]);
       return res.status(200).json({ records });
     }
 

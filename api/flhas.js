@@ -6,6 +6,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -136,7 +137,7 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      const flhas = await Promise.all((data || []).map(async f => ({ ...f, pdf_url: await signStoredUrl(f.pdf_url, 'flha-reports') })));
+      const flhas = await signRows(supabaseAdmin, data, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
       return res.status(200).json({ flhas });
     }
 
