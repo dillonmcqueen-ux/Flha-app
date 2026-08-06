@@ -197,6 +197,13 @@ section{ position:relative; padding:120px 0; border-top:1px solid var(--line); }
 }
 .builtaround a{ color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim); }
 
+/* condensed reasons row (homepage intro) */
+.reasons{ display:grid; grid-template-columns:repeat(3, 1fr); gap:32px; margin-top:48px; }
+.reason .r-num{ font-family:'Space Grotesk',sans-serif; color:var(--orange); font-weight:700; font-size:20px; margin-bottom:10px; }
+.reason h3{ font-size:17px; font-weight:600; margin-bottom:8px; }
+.reason p{ font-size:14px; color:var(--muted); line-height:1.55; }
+@media (max-width:860px){ .reasons{ grid-template-columns:1fr; gap:28px; } }
+
 /* example cards (Custom Builds page) */
 .example-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
 .example-card{
