@@ -811,17 +811,31 @@ export default async function handler(req, res) {
       return res.status(200).json({ report, company });
     }
 
+    // Optional `pullUntil`: a "request a manual pull" cutoff — see the
+    // matching comment on equipmentreports.js's generate_now. Same rules:
+    // must fall inside the resolved week, and the standard automated
+    // Sunday-11:59pm pull (cron-equipment-reports.js) still overwrites this
+    // once the week actually closes (same company_id+week_start upsert key).
     if (action === 'generate_time_report_now') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { weekStart } = req.body;
+      const { weekStart, pullUntil } = req.body;
 
       const anchor = weekStart ? new Date(weekStart) : new Date();
       const monday = weekStart ? mondayOf(anchor) : mondayOf(new Date(anchor.getTime() - 7 * 86400000));
       const nextMonday = new Date(monday); nextMonday.setDate(nextMonday.getDate() + 7);
 
-      const reportJson = await buildTimeClockReportForCompanyWeek(companyId, monday.toISOString(), nextMonday.toISOString());
+      let weekEndExclusiveISO = nextMonday.toISOString();
+      if (pullUntil) {
+        const until = new Date(pullUntil);
+        if (isNaN(until.getTime())) return res.status(400).json({ error: 'Invalid pull-until time.' });
+        if (until < monday || until > nextMonday) return res.status(400).json({ error: "Requested time must fall within that report's week." });
+        weekEndExclusiveISO = until.toISOString();
+      }
+
+      const reportJson = await buildTimeClockReportForCompanyWeek(companyId, monday.toISOString(), weekEndExclusiveISO);
+      reportJson.pulledUntil = pullUntil ? weekEndExclusiveISO : null;
 
       const { data, error } = await supabaseAdmin
         .from('timeclock_reports')

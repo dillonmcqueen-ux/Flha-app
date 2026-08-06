@@ -5,6 +5,8 @@ import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import AnalyticsPanel from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
+import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
+import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -893,6 +895,11 @@ function TimeClockReportCard({ data, onClose, error }) {
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#0891B2" }}>Weekly Time Clock Report</div>
             <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name} · {grandTotal.toFixed(1)} hrs total</div>
+            {rj.pulledUntil && (
+              <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
+                ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {report.pdf_url ? (
@@ -952,6 +959,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
   const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
+  const [generatingSafetyAnalyticsPdf, setGeneratingSafetyAnalyticsPdf] = useState(false);
+  const [generatingEquipmentAnalyticsPdf, setGeneratingEquipmentAnalyticsPdf] = useState(false);
+  const [analyticsPdfError, setAnalyticsPdfError] = useState("");
   const [showManualPull, setShowManualPull] = useState(false);
   const [manualPullUntil, setManualPullUntil] = useState("");
   const [requestingManualPull, setRequestingManualPull] = useState(false);
@@ -988,6 +998,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedTimeClockReport, setSelectedTimeClockReport] = useState(null);
   const [timeClockPdfError, setTimeClockPdfError] = useState("");
   const [generatingNewTimeClockReport, setGeneratingNewTimeClockReport] = useState(false);
+  const [showTimeClockManualPull, setShowTimeClockManualPull] = useState(false);
+  const [timeClockPullUntil, setTimeClockPullUntil] = useState("");
+  const [requestingTimeClockPull, setRequestingTimeClockPull] = useState(false);
+  const [timeClockPullError, setTimeClockPullError] = useState("");
 
   // ── Roster: view the company's roster and reset an individual PIN ─────
   const [rosterList, setRosterList] = useState([]);
@@ -1005,37 +1019,37 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [sortBy, setSortBy] = useState("newest");
   const [dateFilter, setDateFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [groupBy, setGroupBy] = useState("none");
+  const [groupBy, setGroupBy] = useState("site");
 
   // ── Inspections tab: search/sort/group state ──────────────
   const [inspSearch, setInspSearch] = useState("");
   const [inspSortBy, setInspSortBy] = useState("newest");
-  const [inspGroupBy, setInspGroupBy] = useState("none");
+  const [inspGroupBy, setInspGroupBy] = useState("equipment");
 
   // ── Toolbox tab: search/sort/group state ──────────────────
   const [tbtSearch, setTbtSearch] = useState("");
   const [tbtSortBy, setTbtSortBy] = useState("newest");
-  const [tbtGroupBy, setTbtGroupBy] = useState("none");
+  const [tbtGroupBy, setTbtGroupBy] = useState("site");
 
   // ── Near Miss tab: search/sort/group state ─────────────────
   const [nmSearch, setNmSearch] = useState("");
   const [nmSortBy, setNmSortBy] = useState("newest");
-  const [nmGroupBy, setNmGroupBy] = useState("none");
+  const [nmGroupBy, setNmGroupBy] = useState("site");
 
   // ── Incidents tab: search/sort/group state ─────────────────
   const [incSearch, setIncSearch] = useState("");
   const [incSortBy, setIncSortBy] = useState("newest");
-  const [incGroupBy, setIncGroupBy] = useState("none");
+  const [incGroupBy, setIncGroupBy] = useState("site");
 
   // ── Daily tab: search/sort/group state ─────────────────────
   const [dailySearch, setDailySearch] = useState("");
   const [dailySortBy, setDailySortBy] = useState("newest");
-  const [dailyGroupBy, setDailyGroupBy] = useState("none");
+  const [dailyGroupBy, setDailyGroupBy] = useState("site");
 
   // ── Monthly Submissions tab: search/sort/group state ────────
   const [moSearch, setMoSearch] = useState("");
   const [moSortBy, setMoSortBy] = useState("newest");
-  const [moGroupBy, setMoGroupBy] = useState("none");
+  const [moGroupBy, setMoGroupBy] = useState("site");
 
   // ── Monthly Corrective Actions tab: search state ────────────
   const [moaSearch, setMoaSearch] = useState("");
@@ -1043,7 +1057,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // ── Custom Documents tab: search/sort/group state ───────────
   const [cdSearch, setCdSearch] = useState("");
   const [cdSortBy, setCdSortBy] = useState("newest");
-  const [cdGroupBy, setCdGroupBy] = useState("none");
+  const [cdGroupBy, setCdGroupBy] = useState("site");
 
   // ── Collapsible group-by sections: which groups (per tab) are expanded ──
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
@@ -1657,6 +1671,68 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       }
     } catch (e) { /* ignore */ }
     setGeneratingNewTimeClockReport(false);
+  };
+
+  // Same "pull the week containing this cutoff, up to this moment" flow as
+  // requestManualPull for equipment reports — see that function's comment.
+  const requestTimeClockManualPull = async () => {
+    if (!selectedCompany) return;
+    const until = timeClockPullUntil ? new Date(timeClockPullUntil) : new Date();
+    if (isNaN(until.getTime())) { setTimeClockPullError("Pick a valid date and time."); return; }
+    setTimeClockPullError("");
+    setRequestingTimeClockPull(true);
+    try {
+      const untilISO = until.toISOString();
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_time_report_now", token, companyId: selectedCompany, weekStart: untilISO, pullUntil: untilISO }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTimeClockReports(prev => {
+          const filtered = prev.filter(r => r.week_start !== data.report.week_start);
+          return [{ id: data.report.id, week_start: data.report.week_start, week_end: data.report.week_end, pdf_url: data.report.pdf_url, generated_by: data.report.generated_by, created_at: data.report.created_at }, ...filtered]
+            .sort((a, b) => new Date(b.week_start) - new Date(a.week_start));
+        });
+        setShowTimeClockManualPull(false);
+        setTimeClockPullUntil("");
+      } else {
+        setTimeClockPullError(data.error || "Couldn't pull that report.");
+      }
+    } catch (e) {
+      setTimeClockPullError("Couldn't pull that report.");
+    }
+    setRequestingTimeClockPull(false);
+  };
+
+  const downloadSafetyAnalyticsPdf = async () => {
+    setAnalyticsPdfError("");
+    setGeneratingSafetyAnalyticsPdf(true);
+    try {
+      await generateSafetyAnalyticsPDF({
+        companyName: company?.name, companyLogo: company?.logo_url,
+        flhas: companyFlhas, toolbox: companyToolbox, nearMisses: companyNearMisses, incidents: companyIncidents,
+        daily: companyDaily, monthlyActions: companyMonthlyActions,
+      });
+    } catch (e) {
+      setAnalyticsPdfError("Couldn't generate the safety analytics PDF.");
+    }
+    setGeneratingSafetyAnalyticsPdf(false);
+  };
+
+  const downloadEquipmentAnalyticsPdf = async () => {
+    setAnalyticsPdfError("");
+    setGeneratingEquipmentAnalyticsPdf(true);
+    try {
+      await generateEquipmentAnalyticsPDF({
+        companyName: company?.name, companyLogo: company?.logo_url,
+        inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
+        monthlyRecords: companyMonthlyRecords, monthlyActions: companyMonthlyActions, customDocs: companyCustomDocs,
+      });
+    } catch (e) {
+      setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
+    }
+    setGeneratingEquipmentAnalyticsPdf(false);
   };
 
   const company = companies.find(c => c.id === selectedCompany);
@@ -3182,6 +3258,25 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         )}
 
         {activeTab === "analytics" && (
+          <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+            <button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
+              background: generatingSafetyAnalyticsPdf ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 8,
+              padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+            }}>
+              {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
+            </button>
+            <button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
+              background: generatingEquipmentAnalyticsPdf ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+              padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+            }}>
+              {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
+            </button>
+            {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+          </div>
+        )}
+
+        {activeTab === "analytics" && (
           <AnalyticsPanel
             tier={company?.plan_tier || "basic"}
             companyName={company?.name}
@@ -3517,18 +3612,48 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             <div style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
                   {company?.name} — Weekly Time Clock Reports
                 </div>
-                <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
-                  background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
-                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0
-                }}>
-                  {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
-                </button>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => { setShowTimeClockManualPull(s => !s); setTimeClockPullError(""); }} style={{
+                    background: "#fff", color: "#0891B2", border: "1.5px solid #0891B2", borderRadius: 8,
+                    padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    🕐 Request Manual Pull
+                  </button>
+                  <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
+                    background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
+                  </button>
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+
+              {showTimeClockManualPull && (
+                <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>Pull this week's data up to:</div>
+                  <input
+                    type="datetime-local"
+                    value={timeClockPullUntil}
+                    onChange={e => setTimeClockPullUntil(e.target.value)}
+                    style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #E2E8F0", fontSize: 13 }}
+                  />
+                  <button onClick={requestTimeClockManualPull} disabled={requestingTimeClockPull} style={{
+                    background: requestingTimeClockPull ? "#94A3B8" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    {requestingTimeClockPull ? "Pulling…" : "Pull Now"}
+                  </button>
+                  <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
+                    Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
+                  </div>
+                  {timeClockPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {timeClockPullError}</div>}
+                </div>
+              )}
 
               {loadingTimeClockReports ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
