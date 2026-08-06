@@ -720,6 +720,51 @@ function CustomDocCard({ data, onClose }) {
   );
 }
 
+function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>📄 This Week's Documents</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
+          </div>
+          <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+        </div>
+
+        {docs.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+            No documents submitted yet this week.
+          </div>
+        ) : (
+          docs.map(({ type, doc }, i) => {
+            const m = meta[type];
+            return (
+              <div
+                key={`${type}-${doc.id}`}
+                onClick={() => onOpen(type, doc)}
+                style={{ padding: "12px 4px", borderBottom: i < docs.length - 1 ? "1px solid #F3F4F680" : "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "#EEF2FF", padding: "2px 8px", borderRadius: 20 }}>{m.icon} {m.label}</span>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{m.primary(doc)}</div>
+                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{m.secondary(doc)}</div>
+                </div>
+                <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0, textAlign: "right" }}>
+                  {new Date(doc.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })} →
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CorrectiveActionRow({ ca, onUpdate }) {
   const [responsibleName, setResponsibleName] = useState(ca.responsible_name || "");
   const [targetDate, setTargetDate] = useState(ca.target_date || "");
@@ -769,6 +814,11 @@ function EquipmentReportCard({ data, onClose, error }) {
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#0369A1" }}>Weekly Equipment Usage</div>
             <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name}</div>
+            {rj.pulledUntil && (
+              <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
+                ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {report.pdf_url ? (
@@ -902,6 +952,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
   const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
+  const [showManualPull, setShowManualPull] = useState(false);
+  const [manualPullUntil, setManualPullUntil] = useState("");
+  const [requestingManualPull, setRequestingManualPull] = useState(false);
+  const [manualPullError, setManualPullError] = useState("");
   const [docSettings, setDocSettings] = useState([]);
   const [equipmentSortBy, setEquipmentSortBy] = useState("newest");
   const [customDocRecords, setCustomDocRecords] = useState([]);
@@ -945,6 +999,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [showWorkerForms, setShowWorkerForms] = useState(false);
   const [selectedFlha, setSelectedFlha] = useState(null);
+  const [showThisWeekModal, setShowThisWeekModal] = useState(false);
   const [activeTab, setActiveTab] = useState("flhas");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState("newest");
@@ -1284,11 +1339,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     sops: true,
   };
 
+  // Split by who's actually looking for it — a mechanic isn't hunting for
+  // an FLHA, a supervisor reviewing safety compliance isn't hunting for a
+  // maintenance log. Toolbox talks live in Safety, inspections in
+  // Operations, and everything else sorted into whichever group it serves.
   const CATEGORIES = [
-    { key: "submissions", label: "📋 Submissions", tabs: ["flhas", "inspections", "toolbox", "nearmiss", "incident", "daily", "monthly", "customdocs"] },
-    { key: "equipment", label: "🔧 Equipment", tabs: ["equipment", "maintenance"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster"] },
-    { key: "insights", label: "📊 Insights", tabs: ["analytics", "sops"] },
+    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "sops"] },
+    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "monthly", "equipment", "maintenance", "customdocs", "timeclock", "roster", "analytics"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -1358,6 +1415,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       }
     } catch (e) { /* ignore */ }
     setGeneratingNewReport(false);
+  };
+
+  // Pulls the week CONTAINING the requested cutoff time (not last week —
+  // that's what "Generate This Week" is for), with data limited to up to
+  // that moment. Does not touch the standard automated Sunday 11:59pm pull;
+  // that cron job runs regardless and its full-week result overwrites this
+  // once the week actually closes.
+  const requestManualPull = async () => {
+    if (!selectedCompany) return;
+    const until = manualPullUntil ? new Date(manualPullUntil) : new Date();
+    if (isNaN(until.getTime())) { setManualPullError("Pick a valid date and time."); return; }
+    setManualPullError("");
+    setRequestingManualPull(true);
+    try {
+      const untilISO = until.toISOString();
+      const res = await fetch("/api/equipmentreports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_now", token, companyId: selectedCompany, weekStart: untilISO, pullUntil: untilISO }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEquipmentReports(prev => {
+          const filtered = prev.filter(r => r.week_start !== data.report.week_start);
+          return [{ id: data.report.id, week_start: data.report.week_start, week_end: data.report.week_end, pdf_url: data.report.pdf_url, generated_by: data.report.generated_by, created_at: data.report.created_at }, ...filtered]
+            .sort((a, b) => new Date(b.week_start) - new Date(a.week_start));
+        });
+        setShowManualPull(false);
+        setManualPullUntil("");
+      } else {
+        setManualPullError(data.error || "Couldn't pull that report.");
+      }
+    } catch (e) {
+      setManualPullError("Couldn't pull that report.");
+    }
+    setRequestingManualPull(false);
   };
 
   // ── Time Clock: my own status ────────────────────────────────────────
@@ -1631,9 +1723,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
-  const docsThisWeek = [
-    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily, ...companyMonthlyRecords,
-  ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
+  const docsThisWeekList = [
+    ...companyFlhas.map(doc => ({ type: "flha", doc })),
+    ...companyInspections.map(doc => ({ type: "inspection", doc })),
+    ...companyToolbox.map(doc => ({ type: "toolbox", doc })),
+    ...companyNearMisses.map(doc => ({ type: "nearmiss", doc })),
+    ...companyIncidents.map(doc => ({ type: "incident", doc })),
+    ...companyDaily.map(doc => ({ type: "daily", doc })),
+    ...companyMonthlyRecords.map(doc => ({ type: "monthly", doc })),
+    ...companyCustomDocs.map(doc => ({ type: "customdoc", doc })),
+  ].filter(x => x.doc.created_at && new Date(x.doc.created_at) >= startOfWeek)
+   .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at));
+  const docsThisWeek = docsThisWeekList.length;
+
+  const DOC_TYPE_META = {
+    flha: { icon: "📋", label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
+    inspection: { icon: "🚜", label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
+    toolbox: { icon: "🧰", label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
+    nearmiss: { icon: "⚠️", label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    incident: { icon: "🚑", label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    daily: { icon: "📋", label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    monthly: { icon: "🗓️", label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
+    customdoc: { icon: "🗂️", label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
+  };
+
+  const openWeekDoc = (type, doc) => {
+    setShowThisWeekModal(false);
+    if (type === "flha") setSelectedFlha(doc);
+    else if (type === "inspection") setSelectedInspection(doc);
+    else if (type === "toolbox") setSelectedToolbox(doc);
+    else if (type === "nearmiss") setSelectedNearMiss(doc);
+    else if (type === "incident") setSelectedIncident(doc);
+    else if (type === "daily") setSelectedDaily(doc);
+    else if (type === "monthly") openMonthlyRecord(doc);
+    else if (type === "customdoc") openCustomDocRecord(doc);
+  };
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
   const reviewNearMiss = async (id, notes, reviewerName) => {
@@ -2145,6 +2269,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} error={equipmentPdfError} />}
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} />}
+      {showThisWeekModal && (
+        <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
+      )}
 
       <div style={styles.header}>
         <div>
@@ -2209,7 +2336,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
           </div>
-          <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
+          <div onClick={() => setShowThisWeekModal(true)} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>📄 Docs This Week</div>
           </div>
@@ -2229,55 +2356,55 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         </div>
 
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && activeCategory === "submissions" && (
+          {TAB_VISIBLE.flhas && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           )}
-          {TAB_VISIBLE.inspections && activeCategory === "submissions" && (
-            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
-          )}
-          {TAB_VISIBLE.toolbox && activeCategory === "submissions" && (
+          {TAB_VISIBLE.toolbox && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
           )}
-          {TAB_VISIBLE.nearmiss && activeCategory === "submissions" && (
+          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
               ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.incident && activeCategory === "submissions" && (
+          {TAB_VISIBLE.incident && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
               🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.daily && activeCategory === "submissions" && (
+          {activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
+          )}
+          {TAB_VISIBLE.inspections && activeCategory === "operations" && (
+            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
+          )}
+          {TAB_VISIBLE.daily && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
           )}
-          {TAB_VISIBLE.monthly && activeCategory === "submissions" && (
+          {TAB_VISIBLE.monthly && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
               🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.customdocs && activeCategory === "submissions" && (
-            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
-          )}
-          {TAB_VISIBLE.equipment && activeCategory === "equipment" && (
+          {TAB_VISIBLE.equipment && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
-          {TAB_VISIBLE.maintenance && activeCategory === "equipment" && (
+          {TAB_VISIBLE.maintenance && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
               🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
+          {TAB_VISIBLE.customdocs && activeCategory === "operations" && (
+            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          )}
+          {TAB_VISIBLE.timeclock && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
           )}
-          {TAB_VISIBLE.roster && activeCategory === "workforce" && (
+          {TAB_VISIBLE.roster && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
           )}
-          {activeCategory === "insights" && (
+          {activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
-          )}
-          {activeCategory === "insights" && (
-            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
           )}
         </div>
 
@@ -3073,18 +3200,48 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "equipment" && equipmentReportsEnabled && (
           <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
                 {company?.name} — Weekly Equipment Usage
               </div>
-              <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
-                background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
-                padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0
-              }}>
-                {generatingNewReport ? "Generating…" : "+ Generate This Week"}
-              </button>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => { setShowManualPull(s => !s); setManualPullError(""); }} style={{
+                  background: "#fff", color: "#0369A1", border: "1.5px solid #0369A1", borderRadius: 8,
+                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                }}>
+                  🕐 Request Manual Pull
+                </button>
+                <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
+                  background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                }}>
+                  {generatingNewReport ? "Generating…" : "+ Generate This Week"}
+                </button>
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+
+            {showManualPull && (
+              <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>Pull this week's data up to:</div>
+                <input
+                  type="datetime-local"
+                  value={manualPullUntil}
+                  onChange={e => setManualPullUntil(e.target.value)}
+                  style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #E2E8F0", fontSize: 13 }}
+                />
+                <button onClick={requestManualPull} disabled={requestingManualPull} style={{
+                  background: requestingManualPull ? "#94A3B8" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                }}>
+                  {requestingManualPull ? "Pulling…" : "Pull Now"}
+                </button>
+                <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
+                  Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
+                </div>
+                {manualPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {manualPullError}</div>}
+              </div>
+            )}
 
             {equipmentReports.length > 1 && (
               <div style={{ marginBottom: 14 }}>

@@ -255,18 +255,36 @@ export default async function handler(req, res) {
     // Manual on-demand generation for a specific company + week (defaults to
     // last completed week if no dates given). Overwrites any existing report
     // for that company+week (upsert), clearing a stale pdf_url so it regenerates.
+    //
+    // Optional `pullUntil`: a "request a manual pull" cutoff — instead of the
+    // full Monday-to-Monday week, pull everything from that week's Monday up
+    // to this exact timestamp (e.g. mid-week, or partway through the current
+    // week). Must fall inside the resolved week or it's rejected — this
+    // action pulls ONE week's worth of data, not an arbitrary range. The
+    // standard automated Sunday-11:59pm pull (cron-equipment-reports.js)
+    // upserts on the same company_id+week_start key, so once the week
+    // actually closes, the automatic full-week pull overwrites any earlier
+    // manual partial pull for that week.
     if (action === 'generate_now') {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { weekStart } = req.body;
+      const { weekStart, pullUntil } = req.body;
 
       const anchor = weekStart ? new Date(weekStart) : new Date();
       const monday = weekStart ? mondayOf(anchor) : mondayOf(new Date(anchor.getTime() - 7 * 86400000));
       const weekStartISO = toISODate(monday);
       const nextMonday = new Date(monday); nextMonday.setDate(nextMonday.getDate() + 7);
-      const weekEndExclusiveISO = nextMonday.toISOString();
+
+      let weekEndExclusiveISO = nextMonday.toISOString();
+      if (pullUntil) {
+        const until = new Date(pullUntil);
+        if (isNaN(until.getTime())) return res.status(400).json({ error: 'Invalid pull-until time.' });
+        if (until < monday || until > nextMonday) return res.status(400).json({ error: "Requested time must fall within that report's week." });
+        weekEndExclusiveISO = until.toISOString();
+      }
 
       const reportJson = await buildReportForCompanyWeek(companyId, monday.toISOString(), weekEndExclusiveISO);
+      reportJson.pulledUntil = pullUntil ? weekEndExclusiveISO : null;
 
       const { data, error } = await supabaseAdmin
         .from('equipment_reports')

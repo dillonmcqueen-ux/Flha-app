@@ -1,6 +1,7 @@
 // api/cron-equipment-reports.js
-// Hit automatically by Vercel Cron every Monday morning. Generates last
-// week's equipment usage report AND time clock report for every company
+// Hit automatically by Vercel Cron every Sunday at 11:59pm UTC. Generates
+// the week-just-finished's equipment usage report AND time clock report
+// for every company
 // (the latter only for companies on individual roster logins). Both jobs
 // live in one file/function to stay under Vercel's serverless function
 // count limit. Protected by CRON_SECRET so it can't be triggered by
@@ -124,11 +125,15 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Runs Sunday 11:59pm UTC (see vercel.json), right at the close of the
+    // week — `mondayOf(now)` on a Sunday resolves to the Monday that
+    // started that same week, so this is already "the week that just
+    // finished," not one further back.
     const now = new Date();
-    const thisMonday = mondayOf(now);
-    const lastMonday = new Date(thisMonday); lastMonday.setDate(lastMonday.getDate() - 7);
-    const weekStartISO = toISODate(lastMonday);
-    const weekEndExclusiveISO = thisMonday.toISOString();
+    const currentMonday = mondayOf(now);
+    const nextMonday = new Date(currentMonday); nextMonday.setDate(nextMonday.getDate() + 7);
+    const weekStartISO = toISODate(currentMonday);
+    const weekEndExclusiveISO = nextMonday.toISOString();
 
     const { data: companies, error: coErr } = await supabaseAdmin.from('companies').select('id, roster_enabled');
     if (coErr) return res.status(500).json({ error: 'Could not load companies.' });
@@ -142,7 +147,7 @@ export default async function handler(req, res) {
         const isActive = await isDocKeyActive(c.id, 'equipment_reports');
         if (!isActive) { equipmentResults.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); }
         else {
-          const reportJson = await buildReportForCompanyWeek(c.id, lastMonday.toISOString(), weekEndExclusiveISO);
+          const reportJson = await buildReportForCompanyWeek(c.id, currentMonday.toISOString(), weekEndExclusiveISO);
           if (!reportJson.equipment || reportJson.equipment.length === 0) {
             equipmentResults.push({ companyId: c.id, skipped: true });
           } else {
@@ -165,7 +170,7 @@ export default async function handler(req, res) {
         const isActive = await isDocKeyActive(c.id, 'timeclock');
         if (!isActive) { timeClockResults.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); continue; }
 
-        const reportJson = await buildTimeClockReportForCompanyWeek(c.id, lastMonday.toISOString(), weekEndExclusiveISO);
+        const reportJson = await buildTimeClockReportForCompanyWeek(c.id, currentMonday.toISOString(), weekEndExclusiveISO);
         if (!reportJson.entries || reportJson.entries.length === 0) {
           timeClockResults.push({ companyId: c.id, skipped: true, reason: 'no_entries' });
           continue;
