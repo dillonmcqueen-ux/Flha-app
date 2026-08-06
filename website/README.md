@@ -1,12 +1,23 @@
 # FORA marketing site
 
-A standalone, static marketing page for FORA — completely separate from the
-app in this repo (`src/`, `api/`). No build step, no dependencies, no shared
-routing: it's a single self-contained `index.html`.
+A standalone, static marketing site for FORA — completely separate from the
+app in this repo (`src/`, `api/`). No build step, no dependencies.
+
+## Pages
+
+- `index.html` — Home. Introduces FORA and presents the Big 5 and Custom
+  Builds as equally weighted offerings, plus onboarding, "why FORA," and an
+  About section.
+- `big-five.html` — The Big 5 in full: all five standard documents, how each
+  one works, and the Get Started / pricing section.
+- `custom-builds.html` — Custom Builds in full: example builds, how the
+  process works, affordability messaging, and a quote CTA.
+- `privacy.html` / `terms.html` — Legal pages.
+- `style.css` — Shared styles for every page above.
 
 ## Preview locally
 
-Just open the file, or serve it:
+Just open `index.html`, or serve the folder:
 
 ```bash
 cd website
@@ -26,6 +37,7 @@ Deployed at the `fora-website` Vercel project, connected to this repo's
 
 ## Editing
 
-Everything — HTML, CSS, and the small amount of JS (scroll-reveal, sticky
-nav) — lives in `index.html`. Brand colors match the app: black `#0A0A0A`
+Shared styles — colors, layout, components — live in `style.css`. Each page
+is its own self-contained HTML file with a small amount of inline JS
+(scroll-reveal, sticky nav). Brand colors match the app: black `#0A0A0A`
 background, orange `#F97316` accent.
