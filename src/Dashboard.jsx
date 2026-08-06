@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
-import AnalyticsPanel from "./Analytics";
+import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
@@ -1349,6 +1349,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     maintenance: isDocActive("maintenance"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    safetyanalytics: true,
     analytics: true,
     sops: true,
   };
@@ -1358,9 +1359,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // maintenance log. Toolbox talks and site/monthly inspections live in
   // Safety, equipment inspections in Operations, roster/time clock get
   // their own Workforce group, and everything else sorted into whichever
-  // group it serves.
+  // group it serves. Analytics is split the same way — two separate
+  // dashboards, not one page mixing both audiences' numbers together.
   const CATEGORIES = [
-    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops"] },
+    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetyanalytics"] },
     { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
     { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster"] },
   ];
@@ -2459,6 +2461,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           {activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
           )}
+          {activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}>📊 Safety Analytics</button>
+          )}
           {TAB_VISIBLE.inspections && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
           )}
@@ -2477,7 +2482,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
           )}
           {activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
+            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Equipment Analytics</button>
           )}
           {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
             <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
@@ -3260,40 +3265,55 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {activeTab === "analytics" && (
-          <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
-            <button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
-              background: generatingSafetyAnalyticsPdf ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 8,
-              padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-            }}>
-              {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
-            </button>
-            <button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
-              background: generatingEquipmentAnalyticsPdf ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
-              padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-            }}>
-              {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
-            </button>
-            {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
-          </div>
+        {activeTab === "safetyanalytics" && (
+          <>
+            <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+              <button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
+                background: generatingSafetyAnalyticsPdf ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 8,
+                padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+              }}>
+                {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
+              </button>
+              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+            </div>
+
+            <SafetyAnalyticsPanel
+              tier={company?.plan_tier || "basic"}
+              companyName={company?.name}
+              flhas={companyFlhas}
+              toolbox={companyToolbox}
+              nearMisses={companyNearMisses}
+              incidents={companyIncidents}
+              daily={companyDaily}
+              monthlyRecords={companyMonthlyRecords}
+              monthlyActions={companyMonthlyActions}
+              customDocs={companyCustomDocs}
+            />
+          </>
         )}
 
         {activeTab === "analytics" && (
-          <AnalyticsPanel
-            tier={company?.plan_tier || "basic"}
-            companyName={company?.name}
-            flhas={companyFlhas}
-            inspections={companyInspections}
-            toolbox={companyToolbox}
-            nearMisses={companyNearMisses}
-            incidents={companyIncidents}
-            daily={companyDaily}
-            monthlyRecords={companyMonthlyRecords}
-            monthlyActions={companyMonthlyActions}
-            customDocs={companyCustomDocs}
-            maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
-          />
+          <>
+            <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+              <button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
+                background: generatingEquipmentAnalyticsPdf ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+              }}>
+                {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
+              </button>
+              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+            </div>
+
+            <EquipmentAnalyticsPanel
+              tier={company?.plan_tier || "basic"}
+              companyName={company?.name}
+              inspections={companyInspections}
+              daily={companyDaily}
+              maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
+            />
+          </>
         )}
 
         {activeTab === "equipment" && equipmentReportsEnabled && (
