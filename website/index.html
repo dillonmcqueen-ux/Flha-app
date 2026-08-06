@@ -4,247 +4,12 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>FORA — Field Operations Record Automation</title>
-<meta name="description" content="FORA comes standard with five AI-assisted, company-specific documents — plus custom forms and custom builds for everything else. Built around your company." />
+<meta name="description" content="FORA comes standard with the Big 5 — five AI-assisted, company-specific safety documents — plus Custom Builds for everything else. Built around your company, run by a real person in Central Alberta." />
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --black:#0A0A0A;
-    --panel:#141414;
-    --panel-2:#161616;
-    --line:#242424;
-    --orange:#F97316;
-    --orange-dim:#F9731640;
-    --muted:#9CA3AF;
-    --text:#F5F5F4;
-  }
-  *{box-sizing:border-box; margin:0; padding:0;}
-  html{scroll-behavior:smooth;}
-  body{
-    background:var(--black);
-    color:var(--text);
-    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    line-height:1.5;
-    overflow-x:hidden;
-  }
-  h1,h2,h3, .word{
-    font-family:'Space Grotesk', 'Inter', sans-serif;
-    letter-spacing:-0.02em;
-  }
-  a{color:inherit; text-decoration:none;}
-  img{display:block; max-width:100%;}
-  .wrap{max-width:1120px; margin:0 auto; padding:0 24px;}
-  ::selection{background:var(--orange); color:#0A0A0A;}
-
-  /* texture */
-  .grain{
-    position:fixed; inset:0; pointer-events:none; z-index:1; opacity:.035; mix-blend-mode:overlay;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-
-  /* nav */
-  header{
-    position:fixed; top:0; left:0; right:0; z-index:50;
-    border-bottom:1px solid transparent;
-    transition:background .3s ease, border-color .3s ease;
-  }
-  header.solid{ background:#0A0A0Ade; backdrop-filter:blur(10px); border-color:var(--line); }
-  nav{ display:flex; align-items:center; justify-content:space-between; padding:18px 24px; }
-  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:20px; }
-  .logo .dot{ width:9px; height:9px; border-radius:50%; background:var(--orange); box-shadow:0 0 14px 2px var(--orange); }
-  .navlinks{ display:flex; gap:28px; font-size:14px; color:var(--muted); }
-  .navlinks a{ transition:color .2s ease; white-space:nowrap; }
-  .navlinks a:hover{ color:var(--text); }
-  .cta-btn{
-    background:var(--orange); color:#0A0A0A; font-weight:600; font-size:14px;
-    padding:10px 20px; border-radius:8px; border:1px solid var(--orange);
-    transition:transform .15s ease, box-shadow .15s ease;
-    display:inline-block;
-  }
-  .cta-btn:hover{ transform:translateY(-1px); box-shadow:0 6px 24px -6px var(--orange-dim); }
-  .cta-ghost{
-    background:transparent; color:var(--text); font-weight:600; font-size:14px;
-    padding:10px 20px; border-radius:8px; border:1px solid var(--line);
-    transition:border-color .2s ease, background .2s ease;
-    display:inline-block;
-  }
-  .cta-ghost:hover{ border-color:var(--orange); background:#F9731612; }
-
-  /* hero */
-  .hero{
-    position:relative; min-height:100vh; display:flex; flex-direction:column;
-    justify-content:center; padding:140px 0 100px;
-    overflow:hidden;
-  }
-  .glow{
-    position:absolute; width:800px; height:800px; border-radius:50%;
-    background:radial-gradient(circle, #F9731633 0%, transparent 65%);
-    top:-280px; right:-200px; filter:blur(20px); z-index:0;
-    animation:float 12s ease-in-out infinite;
-  }
-  @keyframes float{ 0%,100%{ transform:translate(0,0);} 50%{ transform:translate(-30px,40px);} }
-  .eyebrow{
-    display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--orange);
-    border:1px solid var(--orange-dim); background:#F9731610; padding:6px 14px; border-radius:999px;
-    margin-bottom:28px; font-weight:500;
-  }
-  .hero h1{
-    font-size:clamp(38px, 5.8vw, 72px); font-weight:700; line-height:1.06; max-width:920px;
-    position:relative; z-index:1;
-  }
-  .hero h1 .out{ -webkit-text-stroke:1.5px var(--orange); color:transparent; }
-  .hero p.sub{
-    font-size:clamp(16px,2vw,20px); color:var(--muted); max-width:600px; margin-top:28px; position:relative; z-index:1;
-  }
-  .hero-cta{ display:flex; gap:16px; margin-top:40px; position:relative; z-index:1; flex-wrap:wrap; }
-  .hero-cta .cta-btn, .hero-cta .cta-ghost{ padding:14px 26px; font-size:15px; }
-
-  .scrollcue{ position:absolute; bottom:36px; left:24px; font-size:12px; color:var(--muted); display:flex; align-items:center; gap:10px; }
-  .scrollcue .bar{ width:1px; height:36px; background:linear-gradient(var(--orange), transparent); }
-
-  section{ position:relative; padding:120px 0; border-top:1px solid var(--line); }
-  .kicker{ color:var(--orange); font-size:13px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; margin-bottom:16px; }
-  .section-head{ max-width:680px; margin-bottom:64px; }
-  .section-head h2{ font-size:clamp(28px,4vw,44px); font-weight:700; line-height:1.1; }
-  .section-head p{ color:var(--muted); font-size:17px; margin-top:18px; }
-
-  /* what is fora */
-  .split{ display:grid; grid-template-columns:1fr 1fr; gap:64px; align-items:center; }
-  .split p{ color:var(--muted); font-size:17px; margin-bottom:18px; }
-  .split strong{ color:var(--text); font-weight:600; }
-
-  .mock{
-    background:var(--panel-2); border:1px solid var(--line); border-radius:16px; padding:24px;
-    box-shadow:0 30px 60px -30px #000;
-  }
-  .mock .dots{ display:flex; gap:6px; margin-bottom:18px; }
-  .mock .dots span{ width:9px; height:9px; border-radius:50%; background:var(--line); }
-
-  .shot{ width:100%; display:block; border-radius:10px; border:1px solid var(--line); }
-  .custom-card .shot{ margin-top:20px; }
-
-  /* bento features */
-  .bento{ display:grid; grid-template-columns:repeat(5, 1fr); gap:16px; }
-  .card{
-    background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px;
-    transition:border-color .25s ease, transform .25s ease, background .25s ease;
-  }
-  .card:hover{ border-color:var(--orange-dim); transform:translateY(-3px); background:#161311; }
-  .card .icon{
-    width:38px; height:38px; border-radius:9px; background:#F9731614; border:1px solid var(--orange-dim);
-    display:flex; align-items:center; justify-content:center; font-size:18px; margin-bottom:18px;
-  }
-  .card h3{ font-size:16px; font-weight:600; margin-bottom:8px; }
-  .card p{ font-size:13.5px; color:var(--muted); }
-
-  .bento-sm{ display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; }
-
-  /* custom forms & builds */
-  .custom-grid{ display:grid; grid-template-columns:1fr 1fr; gap:24px; }
-  .custom-card{
-    background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:36px;
-    transition:border-color .25s ease, transform .25s ease;
-  }
-  .custom-card:hover{ border-color:var(--orange-dim); transform:translateY(-3px); }
-  .custom-card .icon{
-    width:46px; height:46px; border-radius:11px; background:#F9731614; border:1px solid var(--orange-dim);
-    display:flex; align-items:center; justify-content:center; font-size:22px; margin-bottom:22px;
-  }
-  .custom-card h3{ font-size:22px; font-weight:600; margin-bottom:12px; }
-  .custom-card p{ font-size:15px; color:var(--muted); margin-bottom:14px; }
-  .custom-card ul{ list-style:none; margin-top:14px; }
-  .custom-card li{ font-size:13.5px; color:var(--muted); padding:6px 0; padding-left:18px; position:relative; }
-  .custom-card li:before{ content:"—"; color:var(--orange); position:absolute; left:0; }
-
-  .builtaround{
-    border-left:3px solid var(--orange); padding:22px 28px; margin-top:40px; font-size:17px;
-    color:var(--text); background:#F9731608; border-radius:0 14px 14px 0; line-height:1.6;
-  }
-  .builtaround a{ color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim); }
-
-  /* why different */
-  .diffs{ display:flex; flex-direction:column; }
-  .diff-row{
-    display:grid; grid-template-columns:80px 1fr 1fr; gap:32px; padding:36px 0; border-top:1px solid var(--line);
-    align-items:center;
-  }
-  .diff-row:last-child{ border-bottom:1px solid var(--line); }
-  .diff-num{ font-family:'Space Grotesk',sans-serif; font-size:32px; color:var(--orange); font-weight:700; opacity:.85; }
-  .diff-row h3{ font-size:20px; font-weight:600; margin-bottom:8px; }
-  .diff-row p{ color:var(--muted); font-size:15px; }
-
-  /* pricing */
-  .pricing-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:20px; align-items:stretch; }
-  .price-card{
-    background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:32px;
-    display:flex; flex-direction:column; position:relative;
-    transition:border-color .25s ease, transform .25s ease;
-  }
-  .price-card:hover{ transform:translateY(-3px); }
-  .price-card.featured{ border-color:var(--orange); background:#161311; box-shadow:0 20px 60px -20px var(--orange-dim); }
-  .price-card .tag{
-    position:absolute; top:-13px; left:28px; background:var(--orange); color:#0A0A0A; font-size:11px;
-    font-weight:700; padding:4px 10px; border-radius:6px; text-transform:uppercase; letter-spacing:.05em;
-  }
-  .price-card h3{ font-size:20px; font-weight:600; margin-bottom:6px; }
-  .price-card .desc{ font-size:13.5px; color:var(--muted); margin-bottom:22px; min-height:36px; }
-  .price-card .price{ font-family:'Space Grotesk',sans-serif; font-size:38px; font-weight:700; margin-bottom:2px; }
-  .price-card .price span{ font-size:15px; color:var(--muted); font-weight:500; font-family:'Inter',sans-serif; }
-  .price-card .setup{ font-size:12.5px; color:var(--muted); margin-bottom:24px; }
-  .price-card ul{ list-style:none; margin:0 0 28px; padding:0; flex:1; }
-  .price-card li{ font-size:14px; color:var(--text); padding:10px 0; border-top:1px solid var(--line); display:flex; gap:10px; }
-  .price-card li:first-child{ border-top:none; }
-  .price-card li:before{ content:"—"; color:var(--orange); flex-shrink:0; }
-  .price-card .cta-btn, .price-card .cta-ghost{ text-align:center; width:100%; }
-  .price-note{ text-align:center; color:var(--muted); font-size:15px; max-width:680px; margin:44px auto 0; line-height:1.6; }
-  .price-note strong{ color:var(--text); }
-
-  /* doc chips (used inline in copy, not a standalone section anymore) */
-  .chips{ display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
-  .chip{
-    border:1px solid var(--line); padding:9px 16px; border-radius:999px; font-size:13.5px; color:var(--text);
-    background:var(--panel);
-  }
-  .chip .n{ color:var(--orange); margin-right:6px; }
-
-  /* cta band */
-  .band{
-    border-top:1px solid var(--line);
-    padding:120px 0; text-align:center; position:relative; overflow:hidden;
-  }
-  .band .glow{ top:auto; bottom:-320px; left:50%; transform:translateX(-50%); right:auto; width:900px; height:900px; }
-  .band h2{ font-size:clamp(32px,5vw,56px); font-weight:700; max-width:720px; margin:0 auto 20px; position:relative; z-index:1; }
-  .band p{ color:var(--muted); font-size:17px; max-width:520px; margin:0 auto 40px; position:relative; z-index:1; }
-  .band .btnrow{ display:flex; gap:16px; justify-content:center; flex-wrap:wrap; position:relative; z-index:1; }
-
-  footer{ border-top:1px solid var(--line); padding:48px 0; }
-  .foot-row{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:20px; }
-  .foot-links{ display:flex; gap:28px; font-size:13.5px; color:var(--muted); }
-  .foot-links a:hover{ color:var(--orange); }
-  .foot-copy{ font-size:13px; color:#555; }
-
-  [data-reveal]{ opacity:0; transform:translateY(24px); transition:opacity .7s ease, transform .7s ease; }
-  [data-reveal].show{ opacity:1; transform:translateY(0); }
-
-  @media (max-width: 960px){
-    .bento{ grid-template-columns:repeat(2,1fr); }
-    .bento-sm{ grid-template-columns:repeat(2,1fr); }
-    .pricing-grid{ grid-template-columns:1fr; max-width:440px; margin:0 auto; }
-  }
-  @media (max-width: 860px){
-    .navlinks{ display:none; }
-    .split{ grid-template-columns:1fr; }
-    .custom-grid{ grid-template-columns:1fr; }
-    .diff-row{ grid-template-columns:1fr; gap:10px; }
-    .diff-num{ font-size:24px; }
-  }
-  @media (max-width: 520px){
-    .bento{ grid-template-columns:1fr; }
-    .bento-sm{ grid-template-columns:1fr; }
-  }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -252,16 +17,16 @@
 
 <header id="siteHeader">
   <nav class="wrap">
-    <div class="logo"><span class="dot"></span>FORA</div>
+    <a href="index.html" class="logo"><span class="dot"></span>FORA</a>
     <div class="navlinks">
       <a href="#what">What is FORA</a>
-      <a href="#capabilities">The Five</a>
-      <a href="#custom">Custom Builds</a>
-      <a href="#onboarding">Onboarding</a>
+      <a href="big-five.html">The Big 5</a>
+      <a href="custom-builds.html">Custom Builds</a>
+      <a href="pricing.html">Pricing</a>
       <a href="#different">Why FORA</a>
-      <a href="#pricing">Pricing</a>
+      <a href="#about">About</a>
     </div>
-    <a href="#pricing" class="cta-btn">Get started</a>
+    <a href="pricing.html" class="cta-btn">Get started</a>
   </nav>
 </header>
 
@@ -270,10 +35,10 @@
   <div class="wrap">
     <div class="eyebrow">● Built around your company, not a template</div>
     <h1>FORA — Field Operations <span class="out">Record Automation.</span></h1>
-    <p class="sub">Five standard documents, fully AI-assisted and shaped around your company's own procedures — plus custom forms and custom builds for everything else you wish you could automate.</p>
+    <p class="sub">The Big 5 — five standard safety documents, fully AI-assisted and shaped around your company's own procedures. And when the standard five aren't enough, Custom Builds — software built for exactly how your company runs, priced by scope, not by guesswork.</p>
     <div class="hero-cta">
-      <a href="#pricing" class="cta-btn">Get started</a>
-      <a href="#what" class="cta-ghost">See how it works ↓</a>
+      <a href="big-five.html" class="cta-btn">Explore the Big 5</a>
+      <a href="custom-builds.html" class="cta-ghost">Explore Custom Builds</a>
     </div>
   </div>
   <div class="scrollcue"><div class="bar"></div>SCROLL</div>
@@ -285,89 +50,79 @@
       <div data-reveal>
         <div class="kicker">What is FORA</div>
         <h2 style="font-size:36px; font-weight:700; margin-bottom:22px; line-height:1.15;">Paperwork that already knows your company.</h2>
-        <p>FORA comes standard with five document types — <strong>Field Level Hazard Assessments, Toolbox Talks, Incident Reports, Near Miss Reports, and Equipment Inspections</strong>. Every one is generated with AI, and every one is shaped around your company, not a generic template.</p>
+        <p>FORA comes standard with <strong>the Big 5</strong> — Field Level Hazard Assessments, Toolbox Talks, Incident Reports, Near Miss Reports, and Equipment Inspections. Every one is generated with AI, and every one is shaped around your company, not a generic template.</p>
         <p>Describe what happened, or what you're about to do, by voice or text. FORA cross-references it against your own SOPs, your own equipment, and your own site — then hands back a complete, compliant document in seconds.</p>
-        <p>Need something the standard five don't cover? That's what <strong>Custom Forms</strong> and <strong>Custom Builds</strong> are for. FORA is built around your company — not the other way around.</p>
+        <p>Need something the Big 5 doesn't cover? That's what <strong>Custom Builds</strong> are for — a real piece of software, built around your process, living right inside your FORA account.</p>
       </div>
       <div class="mock" data-reveal>
-        <div class="dots"><span></span><span></span><span></span></div>
-        <img class="shot" src="images/screenshot-flha.jpg" alt="A FORA-generated Field Level Hazard Assessment showing SOP alerts triggered for an excavation task" loading="lazy" />
+        <div class="flow-title">How it works</div>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-icon">🗣️</div>
+            <div class="flow-label">Describe the task</div>
+            <div class="flow-sub">By voice or text, in plain language</div>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-icon">🔍</div>
+            <div class="flow-label">FORA checks your SOPs</div>
+            <div class="flow-sub">Cross-referenced against your company's own procedures</div>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-icon">📄</div>
+            <div class="flow-label">Get your document</div>
+            <div class="flow-sub">Complete, compliant, ready to sign</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<section id="capabilities">
+<section id="offerings">
   <div class="wrap">
     <div class="section-head" data-reveal>
-      <div class="kicker">Standard, included with every plan</div>
-      <h2>Five documents. One AI, tuned to your company.</h2>
-      <p>Each of the five works differently, because each one asks something different of the person filling it out. Here's how AI handles each one.</p>
-    </div>
-    <div class="bento" data-reveal>
-      <div class="card">
-        <div class="icon">🦺</div>
-        <h3>FLHA</h3>
-        <p>Describe the task by voice or text. FORA cross-references it against your company's own SOPs and hands back hazards, controls, required PPE, and compliance alerts.</p>
-      </div>
-      <div class="card">
-        <div class="icon">🗣️</div>
-        <h3>Toolbox Talk</h3>
-        <p>Pick a topic and FORA drafts a complete 5–10 minute talk — ready for a supervisor to walk the crew through, tailored to your company and the work at hand.</p>
-      </div>
-      <div class="card">
-        <div class="icon">🚨</div>
-        <h3>Incident Report</h3>
-        <p>Give it the raw details of what happened. FORA turns it into a formal, professional incident report — structured, complete, and ready to file.</p>
-      </div>
-      <div class="card">
-        <div class="icon">👀</div>
-        <h3>Near Miss Report</h3>
-        <p>A quick description of what almost happened becomes a clean, professional near-miss report — nothing gets skipped because it felt too small to write up.</p>
-      </div>
-      <div class="card">
-        <div class="icon">🔧</div>
-        <h3>Equipment Inspection</h3>
-        <p>Pick the machine. FORA generates a pre-use inspection checklist built for that exact type of equipment — a skid steer and a boom lift don't get the same checklist.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="custom">
-  <div class="wrap">
-    <div class="section-head" data-reveal>
-      <div class="kicker">Beyond the standard five</div>
-      <h2>Custom Forms. Custom Builds. Your company, your way.</h2>
-      <p>The five standard documents cover most of what a field team files day to day. For everything else, there are two paths.</p>
+      <div class="kicker">Two ways to work with FORA</div>
+      <h2>The Big 5. Or something nobody's built yet.</h2>
+      <p>Every plan starts with five standard documents your crew already needs to file. Past that, if it's a process your company runs — on paper, in a spreadsheet, or only in someone's head — there's a good chance it can be built directly into your account.</p>
     </div>
     <div class="custom-grid" data-reveal>
       <div class="custom-card">
-        <div class="icon">📝</div>
-        <h3>Custom Forms</h3>
-        <p>Its own thing, built for your company. Monthly site inspections, fuel logs, pre-trip vehicle checks — anything you already track on paper or in a spreadsheet, built as a proper form and added right into your account.</p>
+        <div class="icon">🦺</div>
+        <h3>The Big 5</h3>
+        <p>Field Level Hazard Assessments, Toolbox Talks, Incident Reports, Near Miss Reports, and Equipment Inspections — AI-assisted, shaped around your company's own SOPs, included with every plan.</p>
         <ul>
-          <li>Monthly inspections</li>
-          <li>Fuel logs</li>
-          <li>Whatever else you already track</li>
+          <li>Standard with every FORA plan</li>
+          <li>Voice or text entry, built for the field</li>
+          <li>Generated in seconds, filed automatically</li>
         </ul>
-        <img class="shot" src="images/screenshot-customforms.jpg" alt="FORA's document picker showing a Fire Watch Checklist listed as a custom document alongside the standard forms" loading="lazy" />
-        <p style="margin-top:16px; color:var(--orange); font-weight:600; font-size:14px;">$150 each, one-time</p>
+        <div class="mini-flow">
+          <div class="mf-item"><div class="mf-icons">🦺🗣️🚨👀🔧</div><span>The Big 5</span></div>
+          <div class="mf-arrow">→</div>
+          <div class="mf-item"><div class="mf-icons">📄</div><span>Your document</span></div>
+        </div>
+        <a href="big-five.html" class="more">See the full breakdown →</a>
       </div>
       <div class="custom-card">
         <div class="icon">⚙️</div>
         <h3>Custom Builds</h3>
-        <p>Bigger than a form. Preventative maintenance tracking, a full time clock system, or something nobody else has thought to build — a custom build is basically your own company app, living inside FORA.</p>
+        <p>Bigger than a form — a whole process built into FORA, priced for the size of the job, not a blank page.</p>
         <ul>
-          <li>Preventative maintenance</li>
-          <li>Time clock</li>
-          <li>Whatever you wish you could automate</li>
+          <li>Preventative maintenance, time clock, and more</li>
+          <li>Priced based on scope of work</li>
+          <li>Lives right inside your FORA account</li>
         </ul>
-        <img class="shot" src="images/screenshot-maintenance.jpg" alt="FORA's preventative maintenance tracker flagging equipment by usage hours since last service" loading="lazy" />
-        <p style="margin-top:16px; color:var(--orange); font-weight:600; font-size:14px;">Priced based on scope of work</p>
+        <div class="mini-flow">
+          <div class="mf-item"><div class="mf-icons">📋</div><span>Your process</span></div>
+          <div class="mf-arrow">→</div>
+          <div class="mf-item"><div class="mf-icons">⚙️</div><span>Built for you</span></div>
+          <div class="mf-arrow">→</div>
+          <div class="mf-item"><div class="mf-icons">💻</div><span>Lives in FORA</span></div>
+        </div>
+        <a href="custom-builds.html" class="more">See what's possible →</a>
       </div>
     </div>
-    <p class="builtaround" data-reveal>Custom Forms are <strong>$150 each</strong>, one-time. Custom Builds are <strong>priced based on scope of work</strong> — because FORA is built around your company, not the other way around. <a href="#pricing">See pricing →</a></p>
   </div>
 </section>
 
@@ -378,11 +133,19 @@
         <div class="kicker">Supervisor Dashboard</div>
         <h2 style="font-size:36px; font-weight:700; margin-bottom:22px; line-height:1.15;">Everything your crew files, in one screen.</h2>
         <p>Every FLHA, toolbox talk, incident, near miss, and equipment inspection your crew submits lands in the same place — grouped, filterable, and built for a supervisor scanning a busy week, not hunting through folders or a group chat.</p>
-        <p>Group by document type, site, or crew. Collapse what's already been reviewed. Flag anything that needs a second look. It's the same dashboard whether you're running a 6-person crew or a 40-person operation.</p>
+        <p>Group by document type, site, or crew. Collapse what's already been reviewed. Flag anything that needs a second look. It's the same dashboard whether you're running a 6-person crew or a 40-person operation — and it's the same place any Custom Build shows up, too.</p>
       </div>
-      <div class="mock">
-        <div class="dots"><span></span><span></span><span></span></div>
-        <img class="shot" src="images/screenshot-dashboard.jpg" alt="The FORA Supervisor Dashboard showing awaiting sign-off, needs review, open corrective actions, and docs this week, with Submissions, Equipment, Workforce, and Insights tabs" loading="lazy" />
+      <div class="mock hub-diagram">
+        <div class="hub-sources">
+          <div class="hub-chip">🦺 FLHA</div>
+          <div class="hub-chip">🗣️ Toolbox Talk</div>
+          <div class="hub-chip">🚨 Incident</div>
+          <div class="hub-chip">👀 Near Miss</div>
+          <div class="hub-chip">🔧 Inspection</div>
+          <div class="hub-chip">⚙️ Custom Build</div>
+        </div>
+        <div class="hub-down">↓</div>
+        <div class="hub-box">📊 One Supervisor Dashboard</div>
       </div>
     </div>
     <p class="builtaround" data-reveal style="margin-top:56px;"><strong>How your data is protected:</strong> every request is checked against a signed, server-verified session before it ever reaches your data — nothing gets through unverified. Direct database access is refused by default: Row Level Security is switched on for every table with no bypass policies, so the access-controlled dashboard is the only door in. And it's scoped per company, so your dashboard only ever shows your data, walled off from every other company on FORA.</p>
@@ -396,8 +159,7 @@
       <h2>Send your SOPs. Be live in a day.</h2>
       <p>Onboarding isn't a project — it's a form. Send your SOPs however you have them, messy or not, and your company is live and generating documents within one business day.</p>
     </div>
-    <p class="builtaround" data-reveal>However messy your SOPs are today, send them as-is — cleaning them up is our job, not yours. <strong>One business day</strong> and you're generating real documents.</p>
-    <p class="builtaround" data-reveal>Don't have solid SOPs — or any at all? Even half-finished is fine. We'll still get you set up and OHS compliant fast. Ask us about our referral program with <a href="https://evexsafety.ca" target="_blank" rel="noopener noreferrer">Evex Safety →</a></p>
+    <p class="builtaround" data-reveal>However messy your SOPs are today, send them as-is — cleaning them up is our job, not yours. <a href="pricing.html#start">See exactly how to get started →</a></p>
   </div>
 </section>
 
@@ -421,7 +183,7 @@
       <div class="diff-row" data-reveal>
         <div class="diff-num">03</div>
         <h3>One tool, five forms — and anything else you need</h3>
-        <p>No stack of disconnected apps for inspections, toolbox talks, and incident reports. Everything a crew files lives in the same place — and when you need something more, Custom Forms and Custom Builds extend it.</p>
+        <p>No stack of disconnected apps for inspections, toolbox talks, and incident reports. Everything a crew files lives in the same place — and when you need something more, Custom Builds extend it, on equal footing with the Big 5.</p>
       </div>
       <div class="diff-row" data-reveal>
         <div class="diff-num">04</div>
@@ -431,65 +193,22 @@
       <div class="diff-row" data-reveal>
         <div class="diff-num">05</div>
         <h3>Built around your company</h3>
-        <p>The standard five are just the start. Custom forms and custom builds mean FORA can end up looking nothing like anyone else's setup — because it's built around how your company actually works.</p>
+        <p>The Big 5 are just the start. Custom Builds mean FORA can end up looking nothing like anyone else's setup — because it's built around how your company actually works.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section id="pricing">
+<section id="about">
   <div class="wrap">
     <div class="section-head" data-reveal>
-      <div class="kicker">Pricing</div>
-      <h2>Straightforward plans. Custom work priced for the work.</h2>
-      <p>Every plan includes all five standard documents, AI-assisted and shaped around your company. Custom Forms and Custom Builds are scoped and priced individually — because no two companies need the same thing built.</p>
+      <div class="kicker">Who's behind FORA</div>
+      <h2>AI-assisted software. A real person behind it.</h2>
     </div>
-    <div class="pricing-grid" data-reveal>
-      <div class="price-card">
-        <h3>Basic</h3>
-        <div class="desc">For crews and small sites, up to 10 people.</div>
-        <div class="price">$150<span>/mo</span></div>
-        <div class="setup">+ $350 one-time setup fee</div>
-        <ul>
-          <li>Up to 10 active users</li>
-          <li>All five standard documents</li>
-          <li>Basic analytics</li>
-          <li>Supervisor dashboard</li>
-          <li>Unlimited PDF exports</li>
-        </ul>
-        <a href="https://buy.stripe.com/eVq3cw2kR6m163S878es003" class="cta-ghost">Get started</a>
-      </div>
-      <div class="price-card featured">
-        <div class="tag">11–50 users</div>
-        <h3>Advanced</h3>
-        <div class="desc">For growing teams and multi-crew sites.</div>
-        <div class="price">$350<span>/mo</span></div>
-        <div class="setup">+ $500 one-time setup fee</div>
-        <ul>
-          <li>11–50 active users</li>
-          <li>All five standard documents</li>
-          <li>Advanced analytics</li>
-          <li>One free custom document included</li>
-          <li>Supervisor dashboard</li>
-          <li>Unlimited PDF exports</li>
-        </ul>
-        <a href="https://buy.stripe.com/fZu14o6B725L63S0EGes004" class="cta-btn">Get started</a>
-      </div>
-      <div class="price-card">
-        <h3>Custom Forms &amp; Builds</h3>
-        <div class="desc">Anything beyond the standard five — another form, or a whole new process.</div>
-        <div class="price" style="font-size:30px;">$150<span> / form</span></div>
-        <div class="setup">One-time, per custom form. Custom builds priced by scope.</div>
-        <ul>
-          <li>Custom Forms — $150 each, one-time</li>
-          <li>Custom Builds — priced based on scope of work</li>
-          <li>Built around your company's actual process</li>
-        </ul>
-        <a href="mailto:forafieldsolutions@gmail.com?subject=Custom%20Forms%20%2F%20Custom%20Build%20inquiry" class="cta-ghost">Talk to us</a>
-      </div>
+    <div class="about-box" data-reveal>
+      <p>Every document FORA generates is AI-assisted — that's not a secret, and it's not something to hide. But FORA itself isn't a venture-backed platform run by a support queue somewhere overseas.</p>
+      <p><strong>It's built and supported by one real person, based in Central Alberta</strong> — the same part of the world as a lot of the crews using it. When you email <a href="mailto:forafieldsolutions@gmail.com">forafieldsolutions@gmail.com</a>, or ask about a Custom Build, you're talking directly to the person who actually builds it — not a support queue, not a chatbot.</p>
     </div>
-    <p class="price-note" data-reveal>Every company is different, so past the standard five, <strong>FORA is built around your company</strong>. Custom Forms are $150 each, one-time. Custom Builds are priced based on scope of work — tell us what you need and we'll quote it.</p>
-    <p class="price-note" data-reveal style="font-size:13px; margin-top:12px;">Credit card purchases are subject to a 3% processing fee, applied at checkout. Prefer to pay by wire transfer? <a href="mailto:forafieldsolutions@gmail.com" style="color:var(--orange);">Contact us</a> for an invoice at the listed price.</p>
   </div>
 </section>
 
@@ -497,10 +216,10 @@
   <div class="glow"></div>
   <div class="wrap">
     <h2 data-reveal>Give your crew paperwork that works as hard as they do.</h2>
-    <p data-reveal>Set up your company, and generate your first document in minutes.</p>
+    <p data-reveal>Set up your company and generate your first document in minutes — or tell us what you wish existed, and get a quote to build it.</p>
     <div class="btnrow" data-reveal>
-      <a href="#pricing" class="cta-btn">Get started</a>
-      <a href="mailto:forafieldsolutions@gmail.com?subject=Question%20about%20FORA" class="cta-ghost">Talk to us</a>
+      <a href="pricing.html" class="cta-btn">See pricing</a>
+      <a href="custom-builds.html#quote" class="cta-ghost">Get a Custom Build quote</a>
     </div>
   </div>
 </section>
@@ -510,10 +229,10 @@
     <div class="logo"><span class="dot"></span>FORA</div>
     <div class="foot-links">
       <a href="#what">What is FORA</a>
-      <a href="#capabilities">The Five</a>
-      <a href="#custom">Custom Builds</a>
-      <a href="#onboarding">Onboarding</a>
-      <a href="#pricing">Pricing</a>
+      <a href="big-five.html">The Big 5</a>
+      <a href="custom-builds.html">Custom Builds</a>
+      <a href="pricing.html">Pricing</a>
+      <a href="#about">About</a>
       <a href="privacy.html">Privacy Policy</a>
       <a href="terms.html">Terms of Use</a>
     </div>
