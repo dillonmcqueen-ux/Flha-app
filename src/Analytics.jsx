@@ -150,6 +150,7 @@ export function SafetyAnalyticsPanel({
           <StatTile label="Open Corrective Actions" value={openActionsCount} tone={openActionsCount > 0 ? "warn" : "good"} />
           <StatTile label="Toolbox Talks" value={toolbox.length} sub={attendance.count > 0 ? `avg ${attendance.avg} attendees` : null} />
           <StatTile label="Monthly Site Inspections" value={monthlyRecords.length} />
+          <StatTile label="Custom Safety Docs" value={customDocs.length} />
         </div>
       </SectionCard>
 
@@ -290,7 +291,7 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
 // ── Equipment Analytics — pretrip/posttrip inspection issues and
 // preventative maintenance. Mirrors the Operations menu group and
 // generateEquipmentAnalyticsPDF.js's section split.
-export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [] }) {
+export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [], customDocs = [] }) {
   const isAdvanced = tier === "advanced";
 
   const equipStats = equipmentIssueStats(inspections);
@@ -307,6 +308,7 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
           <StatTile label="Equipment Tracked (Maintenance)" value={maintenance.total} />
           <StatTile label="Overdue Maintenance" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
           <StatTile label="Maintenance Due Soon" value={maintenance.dueSoon} tone={maintenance.dueSoon > 0 ? "warn" : "good"} />
+          <StatTile label="Custom Operations Docs" value={customDocs.length} />
         </div>
       </SectionCard>
 

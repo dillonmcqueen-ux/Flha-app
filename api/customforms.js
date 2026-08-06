@@ -78,6 +78,13 @@ function resolveCompanyId(session, requestedCompanyId) {
 // of the non-custom types to show alongside custom ones.
 const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports', 'maintenance', 'timeclock'];
 
+// Which top-level Dashboard menu group (Safety / Operations / Workforce) a
+// custom form's submissions and analytics show up under.
+const CATEGORIES = ['safety', 'operations', 'workforce'];
+function normalizeCategory(category) {
+  return CATEGORIES.includes(category) ? category : 'operations';
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -110,7 +117,7 @@ export default async function handler(req, res) {
 
     if (action === 'create_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId, title, icon, accentColor } = req.body;
+      const { companyId, title, icon, accentColor, category } = req.body;
       if (!companyId || !title?.trim()) return res.status(400).json({ error: 'Missing details.' });
       const { data, error } = await supabaseAdmin
         .from('custom_forms')
@@ -119,6 +126,7 @@ export default async function handler(req, res) {
           title: title.trim(),
           icon: icon || '📄',
           accent_color: accentColor || '#4338CA',
+          category: normalizeCategory(category),
           is_active: true,
         })
         .select()
@@ -136,12 +144,13 @@ export default async function handler(req, res) {
 
     if (action === 'update_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId, title, icon, accentColor } = req.body;
+      const { formId, title, icon, accentColor, category } = req.body;
       if (!formId) return res.status(400).json({ error: 'Missing form id.' });
       const updates = {};
       if (title !== undefined) updates.title = title.trim();
       if (icon !== undefined) updates.icon = icon;
       if (accentColor !== undefined) updates.accent_color = accentColor;
+      if (category !== undefined) updates.category = normalizeCategory(category);
       const { error } = await supabaseAdmin.from('custom_forms').update(updates).eq('id', formId);
       if (error) return res.status(500).json({ error: "Couldn't update form." });
       return res.status(200).json({ ok: true });
@@ -244,7 +253,7 @@ export default async function handler(req, res) {
 
       const { data: customForms, error: cfErr } = await supabaseAdmin
         .from('custom_forms')
-        .select('id, title, icon, accent_color')
+        .select('id, title, icon, accent_color, category')
         .eq('company_id', companyId)
         .order('created_at', { ascending: true });
       if (cfErr) return res.status(500).json({ error: 'Could not load custom forms.' });
@@ -262,6 +271,7 @@ export default async function handler(req, res) {
         icon: f.icon,
         isCustom: true,
         formId: f.id,
+        category: normalizeCategory(f.category),
         isActive: settingsMap[`custom_${f.id}`] !== undefined ? settingsMap[`custom_${f.id}`] : true,
       }));
 
@@ -382,7 +392,7 @@ export default async function handler(req, res) {
     if (action === 'list_records') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
 
-      let formsQuery = supabaseAdmin.from('custom_forms').select('id, company_id, title, icon, accent_color');
+      let formsQuery = supabaseAdmin.from('custom_forms').select('id, company_id, title, icon, accent_color, category');
       if (session.role === 'supervisor') formsQuery = formsQuery.eq('company_id', session.companyId);
       const { data: forms, error: formsErr } = await formsQuery;
       if (formsErr) return res.status(500).json({ error: 'Could not load forms.' });
@@ -407,6 +417,7 @@ export default async function handler(req, res) {
         site_name: siteMap[r.site_id] || 'Unknown site',
         form_title: formMap[r.form_id]?.title || 'Unknown document',
         form_icon: formMap[r.form_id]?.icon || '📄',
+        form_category: normalizeCategory(formMap[r.form_id]?.category),
         company_id: formMap[r.form_id]?.company_id,
       }));
 

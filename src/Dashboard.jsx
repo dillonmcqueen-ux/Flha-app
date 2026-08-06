@@ -1334,7 +1334,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     return entry ? entry.isActive : true; // not loaded yet / unknown key → default to shown
   };
   const equipmentReportsEnabled = isDocActive("equipment_reports");
-  const hasActiveCustomForm = docSettings.some(d => d.isCustom && d.isActive);
+  // Each custom form now carries a `category` (safety/operations/workforce,
+  // set by the admin when creating it) — a separate "Custom Docs" tab per
+  // category, only shown when that company has at least one active custom
+  // form assigned there.
+  const hasActiveCustomFormIn = (category) => docSettings.some(d => d.isCustom && d.isActive && (d.category || "operations") === category);
 
   const TAB_VISIBLE = {
     flhas: isDocActive("flha"),
@@ -1345,7 +1349,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     daily: isDocActive("daily"),
     monthly: isDocActive("monthly"),
     equipment: equipmentReportsEnabled,
-    customdocs: hasActiveCustomForm,
+    customdocs: hasActiveCustomFormIn("operations"),
+    safetycustomdocs: hasActiveCustomFormIn("safety"),
+    workforcecustomdocs: hasActiveCustomFormIn("workforce"),
     maintenance: isDocActive("maintenance"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
@@ -1361,10 +1367,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // their own Workforce group, and everything else sorted into whichever
   // group it serves. Analytics is split the same way — two separate
   // dashboards, not one page mixing both audiences' numbers together.
+  // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
-    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetyanalytics"] },
+    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
     { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster"] },
+    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -1718,7 +1725,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         companyName: company?.name, companyLogo: company?.logo_url,
         flhas: companyFlhas, toolbox: companyToolbox, nearMisses: companyNearMisses, incidents: companyIncidents,
         daily: companyDaily, monthlyActions: companyMonthlyActions,
-        monthlyRecords: companyMonthlyRecords, customDocs: companyCustomDocs,
+        monthlyRecords: companyMonthlyRecords, customDocs: companySafetyCustomDocs,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the safety analytics PDF.");
@@ -1733,6 +1740,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       await generateEquipmentAnalyticsPDF({
         companyName: company?.name, companyLogo: company?.logo_url,
         inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
+        customDocs: companyOperationsCustomDocs,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
@@ -1750,6 +1758,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const companyMonthlyRecords = monthlyRecords.filter(r => r.company_id === selectedCompany);
   const companyMonthlyActions = monthlyActions.filter(a => a.company_id === selectedCompany);
   const companyCustomDocs = customDocRecords.filter(r => r.company_id === selectedCompany);
+  const companySafetyCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "safety");
+  const companyOperationsCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "operations");
+  const companyWorkforceCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "workforce");
 
   const deleteDaily = async (id) => {
     if (!window.confirm("Delete this daily report? This cannot be undone.")) return;
@@ -2243,7 +2254,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     });
   }
 
-  // ── Custom Documents: search/sort/group processing ──
+  // ── Custom Documents: search/sort/group processing ── shared across the
+  // three category-scoped Custom Docs tabs (Safety/Operations/Workforce) —
+  // only one is ever visible at a time, so one set of search/sort/group
+  // controls is plenty.
   const cdMatchesSearch = (r) => {
     if (!cdSearch.trim()) return true;
     const q = cdSearch.toLowerCase();
@@ -2252,29 +2266,113 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
            (r.form_title || "").toLowerCase().includes(q);
   };
 
-  let processedCustomDocs = companyCustomDocs.filter(cdMatchesSearch);
-
-  processedCustomDocs = [...processedCustomDocs].sort((a, b) => {
-    switch (cdSortBy) {
-      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
-      case "site": return (a.site_name || "").localeCompare(b.site_name || "");
-      case "submitter": return (a.submitted_by || "").localeCompare(b.submitted_by || "");
-      case "form": return (a.form_title || "").localeCompare(b.form_title || "");
-      case "newest":
-      default: return new Date(b.created_at) - new Date(a.created_at);
-    }
-  });
-
-  const groupedCustomDocs = {};
-  if (cdGroupBy === "none") {
-    groupedCustomDocs["All Submissions"] = processedCustomDocs;
-  } else {
-    processedCustomDocs.forEach(r => {
-      const key = cdGroupBy === "site" ? (r.site_name || "Unknown site") : (r.form_title || "Unknown form");
-      if (!groupedCustomDocs[key]) groupedCustomDocs[key] = [];
-      groupedCustomDocs[key].push(r);
+  const buildCustomDocsView = (docs) => {
+    let processed = docs.filter(cdMatchesSearch);
+    processed = [...processed].sort((a, b) => {
+      switch (cdSortBy) {
+        case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+        case "site": return (a.site_name || "").localeCompare(b.site_name || "");
+        case "submitter": return (a.submitted_by || "").localeCompare(b.submitted_by || "");
+        case "form": return (a.form_title || "").localeCompare(b.form_title || "");
+        case "newest":
+        default: return new Date(b.created_at) - new Date(a.created_at);
+      }
     });
-  }
+    const grouped = {};
+    if (cdGroupBy === "none") {
+      grouped["All Submissions"] = processed;
+    } else {
+      processed.forEach(r => {
+        const key = cdGroupBy === "site" ? (r.site_name || "Unknown site") : (r.form_title || "Unknown form");
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(r);
+      });
+    }
+    return { processed, grouped };
+  };
+
+  // Same list UI for all three category-scoped Custom Docs tabs — only the
+  // underlying doc subset and the group-key prefix (so CollapsibleGroup's
+  // expand/collapse state doesn't collide across tabs) differ.
+  const renderCustomDocsTab = (docs, groupPrefix) => {
+    const { processed, grouped } = buildCustomDocsView(docs);
+    return (
+      <div style={styles.card}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+          {company?.name} — Custom Document Submissions
+        </div>
+        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+          {processed.length} of {docs.length} shown — tap any submission to view.
+        </div>
+
+        <input
+          style={styles.searchInput}
+          placeholder="🔍 Search document, site, or submitted by…"
+          value={cdSearch}
+          onChange={e => setCdSearch(e.target.value)}
+        />
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="form">Document (A–Z)</option>
+            <option value="site">Site (A–Z)</option>
+            <option value="submitter">Submitted by (A–Z)</option>
+          </select>
+          <select value={cdGroupBy} onChange={e => setCdGroupBy(e.target.value)} style={styles.select}>
+            <option value="none">No grouping</option>
+            <option value="site">Group by site</option>
+            <option value="form">Group by document</option>
+          </select>
+        </div>
+
+        {processed.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+            {docs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
+          </div>
+        ) : (
+          Object.entries(grouped).map(([groupName, groupItems]) => {
+            const renderRows = () => groupItems.map((r, i) => (
+              <div key={r.id} style={{
+                padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                cursor: "pointer"
+              }} onClick={() => openCustomDocRecord(r)}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, paddingRight: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
+                    {r.pdf_url ? "📄 PDF" : ""} →
+                  </div>
+                </div>
+              </div>
+            ));
+            if (cdGroupBy === "none") {
+              return <div key={groupName}>{renderRows()}</div>;
+            }
+            const key = `${groupPrefix}:${groupName}`;
+            return (
+              <CollapsibleGroup
+                key={groupName}
+                icon={cdGroupBy === "site" ? "📍" : "🗂️"}
+                label={groupName}
+                count={groupItems.length}
+                colorPreset="indigo"
+                open={expandedGroups.has(key)}
+                onToggle={() => toggleGroup(key)}
+              >
+                {renderRows()}
+              </CollapsibleGroup>
+            );
+          })
+        )}
+      </div>
+    );
+  };
 
   // ── Monthly Corrective Actions: search processing ──
   const moaMatchesSearch = (a) => {
@@ -2461,6 +2559,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           {activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
           )}
+          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "safetycustomdocs")} onClick={() => setActiveTab("safetycustomdocs")}>🗂️ Custom Docs</button>
+          )}
           {activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}>📊 Safety Analytics</button>
           )}
@@ -2489,6 +2590,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           )}
           {TAB_VISIBLE.roster && activeCategory === "workforce" && (
             <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
+          )}
+          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && (
+            <button style={styles.tab(activeTab === "workforcecustomdocs")} onClick={() => setActiveTab("workforcecustomdocs")}>🗂️ Custom Docs</button>
           )}
         </div>
 
@@ -3188,82 +3292,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </>
         )}
 
-        {activeTab === "customdocs" && TAB_VISIBLE.customdocs && (
-          <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
-              {company?.name} — Custom Document Submissions
-            </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
-              {processedCustomDocs.length} of {companyCustomDocs.length} shown — tap any submission to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search document, site, or submitted by…"
-              value={cdSearch}
-              onChange={e => setCdSearch(e.target.value)}
-            />
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-              <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="form">Document (A–Z)</option>
-                <option value="site">Site (A–Z)</option>
-                <option value="submitter">Submitted by (A–Z)</option>
-              </select>
-              <select value={cdGroupBy} onChange={e => setCdGroupBy(e.target.value)} style={styles.select}>
-                <option value="none">No grouping</option>
-                <option value="site">Group by site</option>
-                <option value="form">Group by document</option>
-              </select>
-            </div>
-
-            {processedCustomDocs.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
-                {companyCustomDocs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
-              </div>
-            ) : (
-              Object.entries(groupedCustomDocs).map(([groupName, groupItems]) => {
-                const renderRows = () => groupItems.map((r, i) => (
-                  <div key={r.id} style={{
-                    padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer"
-                  }} onClick={() => openCustomDocRecord(r)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, paddingRight: 10 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
-                      </div>
-                      <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
-                        {r.pdf_url ? "📄 PDF" : ""} →
-                      </div>
-                    </div>
-                  </div>
-                ));
-                if (cdGroupBy === "none") {
-                  return <div key={groupName}>{renderRows()}</div>;
-                }
-                const key = `customdocs:${groupName}`;
-                return (
-                  <CollapsibleGroup
-                    key={groupName}
-                    icon={cdGroupBy === "site" ? "📍" : "🗂️"}
-                    label={groupName}
-                    count={groupItems.length}
-                    colorPreset="indigo"
-                    open={expandedGroups.has(key)}
-                    onToggle={() => toggleGroup(key)}
-                  >
-                    {renderRows()}
-                  </CollapsibleGroup>
-                );
-              })
-            )}
-          </div>
-        )}
+        {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
+        {activeTab === "safetycustomdocs" && TAB_VISIBLE.safetycustomdocs && renderCustomDocsTab(companySafetyCustomDocs, "safetycustomdocs")}
+        {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
 
         {activeTab === "safetyanalytics" && (
           <>
@@ -3288,7 +3319,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               daily={companyDaily}
               monthlyRecords={companyMonthlyRecords}
               monthlyActions={companyMonthlyActions}
-              customDocs={companyCustomDocs}
+              customDocs={companySafetyCustomDocs}
             />
           </>
         )}
@@ -3312,6 +3343,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               inspections={companyInspections}
               daily={companyDaily}
               maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
+              customDocs={companyOperationsCustomDocs}
             />
           </>
         )}

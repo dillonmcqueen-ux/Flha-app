@@ -2,6 +2,11 @@ import { useState, useEffect } from "react";
 
 const ICON_OPTIONS = ["📄", "🧯", "🦺", "🔧", "🏗️", "🧪", "🔥", "🚧", "📦", "🧰", "⚡", "🌡️", "🛠", "📋", "✅"];
 const COLOR_OPTIONS = ["#4338CA", "#0369A1", "#7C3AED", "#D97706", "#DC2626", "#16A34A", "#DB2777", "#0F766E"];
+const CATEGORY_OPTIONS = [
+  { key: "safety", label: "🦺 Safety", hint: "FLHAs, toolbox talks, incidents, site inspections" },
+  { key: "operations", label: "🔧 Operations", hint: "Equipment inspections, daily reports, maintenance" },
+  { key: "workforce", label: "👥 Workforce", hint: "Time clock, roster" },
+];
 
 export default function CustomFormBuilder({ companyId, companyName, onBack, token }) {
   const [forms, setForms] = useState([]);
@@ -38,7 +43,7 @@ export default function CustomFormBuilder({ companyId, companyName, onBack, toke
   };
 
   const startNew = () => {
-    setEditingForm({ id: null, title: "", icon: "📄", accent_color: "#4338CA", is_active: true });
+    setEditingForm({ id: null, title: "", icon: "📄", accent_color: "#4338CA", category: "operations", is_active: true });
     setQuestions([]);
   };
 
@@ -56,7 +61,7 @@ export default function CustomFormBuilder({ companyId, companyName, onBack, toke
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "update_form", token, formId: editingForm.id,
-            title: editingForm.title, icon: editingForm.icon, accentColor: editingForm.accent_color,
+            title: editingForm.title, icon: editingForm.icon, accentColor: editingForm.accent_color, category: editingForm.category,
           }),
         });
       } else {
@@ -64,7 +69,7 @@ export default function CustomFormBuilder({ companyId, companyName, onBack, toke
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "create_form", token, companyId,
-            title: editingForm.title, icon: editingForm.icon, accentColor: editingForm.accent_color,
+            title: editingForm.title, icon: editingForm.icon, accentColor: editingForm.accent_color, category: editingForm.category,
           }),
         });
         const data = await res.json();
@@ -175,8 +180,13 @@ export default function CustomFormBuilder({ companyId, companyName, onBack, toke
               <div style={{ width: 48, height: 48, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{f.icon}</div>
               <div style={{ flex: 1, minWidth: 0 }} onClick={() => startEdit(f)}>
                 <div style={{ fontWeight: 800, fontSize: 16, color: "#1E293B", cursor: "pointer" }}>{f.title}</div>
-                <div style={{ fontSize: 12, color: f.is_active ? "#16A34A" : "#9CA3AF", fontWeight: 700, marginTop: 2 }}>
-                  {f.is_active ? "● Active" : "○ Inactive"}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: f.is_active ? "#16A34A" : "#9CA3AF", fontWeight: 700 }}>
+                    {f.is_active ? "● Active" : "○ Inactive"}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 700, background: "#F1F5F9", padding: "2px 8px", borderRadius: 20 }}>
+                    {CATEGORY_OPTIONS.find(c => c.key === (f.category || "operations"))?.label || f.category}
+                  </div>
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
@@ -228,6 +238,24 @@ export default function CustomFormBuilder({ companyId, companyName, onBack, toke
                 border: editingForm.accent_color === color ? "3px solid #1E293B" : "3px solid transparent",
               }} />
           ))}
+        </div>
+
+        <label style={s.label}>Which tab does this belong under?</label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          {CATEGORY_OPTIONS.map(c => (
+            <button key={c.key} onClick={() => setEditingForm({ ...editingForm, category: c.key })}
+              style={{
+                textAlign: "left", padding: "10px 13px", borderRadius: 9, cursor: "pointer",
+                border: (editingForm.category || "operations") === c.key ? "2px solid #4338CA" : "1.5px solid #E2E8F0",
+                background: (editingForm.category || "operations") === c.key ? "#EEF2FF" : "#fff",
+              }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{c.label}</div>
+              <div style={{ fontSize: 12, color: "#64748B", marginTop: 1 }}>{c.hint}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: -8, marginBottom: 16 }}>
+          Submissions for this document will show up — and count toward the analytics — on whichever tab you pick.
         </div>
 
         <button style={s.btn(saving ? "#94A3B8" : "#4338CA")} disabled={saving || !editingForm.title.trim()} onClick={saveFormDetails}>

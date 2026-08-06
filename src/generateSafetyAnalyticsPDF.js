@@ -58,6 +58,7 @@ export async function generateSafetyAnalyticsPDF({
     { label: "Toolbox Talks", value: toolbox.length + (attendance.count > 0 ? ` (avg ${attendance.avg})` : "") },
     { label: "Monthly Site Inspections", value: monthlyRecords.length },
     { label: "Monthly Pass Rate", value: passRate.total > 0 ? `${passRate.pct}%` : "—", color: passRate.total === 0 ? undefined : (passRate.pct >= 90 ? [22, 163, 74] : passRate.pct >= 70 ? [217, 119, 6] : [220, 38, 38]) },
+    { label: "Custom Safety Docs", value: customDocs.length },
   ], NAVY);
 
   y = drawSectionTitle(doc, y, "Severity Mix", "Near misses + incidents combined, by potential/actual severity", NAVY);

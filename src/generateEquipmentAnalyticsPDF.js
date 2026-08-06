@@ -16,7 +16,7 @@ const BLUE = [3, 105, 161];
 
 export async function generateEquipmentAnalyticsPDF({
   companyName, companyLogo,
-  inspections = [], maintenanceStatus = [],
+  inspections = [], maintenanceStatus = [], customDocs = [],
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -38,6 +38,7 @@ export async function generateEquipmentAnalyticsPDF({
     { label: "Equipment Tracked (Maintenance)", value: maintenance.total },
     { label: "Overdue Maintenance", value: maintenance.overdue, color: maintenance.overdue > 0 ? [220, 38, 38] : [22, 163, 74] },
     { label: "Maintenance Due Soon", value: maintenance.dueSoon, color: maintenance.dueSoon > 0 ? [217, 119, 6] : [22, 163, 74] },
+    { label: "Custom Operations Docs", value: customDocs.length },
   ], BLUE);
 
   y = drawSectionTitle(doc, y, "Top Equipment Issues", "Pretrip inspections flagged Defective or Monitor", BLUE);
