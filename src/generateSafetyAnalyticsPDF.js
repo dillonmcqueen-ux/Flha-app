@@ -14,6 +14,7 @@ import {
 import {
   severityBreakdown, nearMissIncidentRatio, reviewBacklog, highRiskFlhaRate,
   fieldSiteActivity, monthlyTrend, correctiveActionAging, reporterLeaderboard, toolboxAvgAttendance,
+  monthlyPassRate, scheduledSiteActivity,
 } from "./analyticsUtils.js";
 
 const NAVY = [30, 58, 95];
@@ -22,6 +23,7 @@ const SEV_COLOR = { Critical: [127, 29, 29], High: [220, 38, 38], Medium: [217, 
 export async function generateSafetyAnalyticsPDF({
   companyName, companyLogo,
   flhas = [], toolbox = [], nearMisses = [], incidents = [], daily = [], monthlyActions = [],
+  monthlyRecords = [], customDocs = [],
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -44,6 +46,8 @@ export async function generateSafetyAnalyticsPDF({
   const leaderboard = reporterLeaderboard(flhas, [], toolbox);
   const attendance = toolboxAvgAttendance(toolbox);
   const openActionsCount = monthlyActions.filter(a => a.status !== "resolved").length;
+  const passRate = monthlyPassRate(monthlyRecords);
+  const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs);
 
   y = drawStatTiles(doc, y, [
     { label: "Total FLHAs", value: flhas.length },
@@ -52,6 +56,8 @@ export async function generateSafetyAnalyticsPDF({
     { label: "Near-Miss : Incident", value: ratio.ratioLabel },
     { label: "Open Corrective Actions", value: openActionsCount, color: openActionsCount > 0 ? [217, 119, 6] : [22, 163, 74] },
     { label: "Toolbox Talks", value: toolbox.length + (attendance.count > 0 ? ` (avg ${attendance.avg})` : "") },
+    { label: "Monthly Site Inspections", value: monthlyRecords.length },
+    { label: "Monthly Pass Rate", value: passRate.total > 0 ? `${passRate.pct}%` : "—", color: passRate.total === 0 ? undefined : (passRate.pct >= 90 ? [22, 163, 74] : passRate.pct >= 70 ? [217, 119, 6] : [220, 38, 38]) },
   ], NAVY);
 
   y = drawSectionTitle(doc, y, "Severity Mix", "Near misses + incidents combined, by potential/actual severity", NAVY);
@@ -130,6 +136,31 @@ export async function generateSafetyAnalyticsPDF({
   if (y > 230) { doc.addPage(); y = redrawHeader(); }
   y = drawSectionTitle(doc, y, "Most Active Safety Reporters", "FLHAs and toolbox talks by name", NAVY);
   y = drawBarList(doc, y, leaderboard, { emptyLabel: "No reports submitted yet.", barColor: [67, 56, 202] });
+
+  if (y > 230) { doc.addPage(); y = redrawHeader(); }
+  y = drawSectionTitle(doc, y, "Monthly Site Inspection Pass Rate", "Share of monthly site inspections with no items flagged", NAVY);
+  if (passRate.total === 0) {
+    doc.setTextColor(156, 163, 175); doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No monthly site inspections submitted yet.", PAGE.margin, y); y += 8;
+  } else {
+    doc.setTextColor(passRate.pct >= 90 ? 22 : passRate.pct >= 70 ? 217 : 220, passRate.pct >= 90 ? 163 : passRate.pct >= 70 ? 119 : 38, passRate.pct >= 90 ? 74 : passRate.pct >= 70 ? 6 : 38);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
+    doc.text(`${passRate.pct}% — ${passRate.passed} of ${passRate.total} inspections passed clean`, PAGE.margin, y);
+    y += 8;
+  }
+
+  if (y > 220) { doc.addPage(); y = redrawHeader(); }
+  y = drawSectionTitle(doc, y, "Scheduled Inspection Sites", "Monthly site inspections, open corrective actions, and custom document submissions by site", NAVY);
+  y = drawTable(doc, y, {
+    emptyLabel: "No monthly site inspections or custom documents submitted yet.",
+    columns: [
+      { key: "site", label: "Site", width: 70 },
+      { key: "monthly", label: "Monthly", align: "right", width: 36 },
+      { key: "openActions", label: "Open Actions", align: "right", width: 36 },
+      { key: "customDocs", label: "Custom Docs", align: "right", width: 36 },
+    ],
+    rows: scheduledSites,
+  }, redrawHeader);
 
   await drawFooter(doc, NAVY);
   doc.save(pdfFilename("SAFETY_ANALYTICS", companyName));

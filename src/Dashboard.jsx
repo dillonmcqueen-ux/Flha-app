@@ -1355,11 +1355,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   // Split by who's actually looking for it — a mechanic isn't hunting for
   // an FLHA, a supervisor reviewing safety compliance isn't hunting for a
-  // maintenance log. Toolbox talks live in Safety, inspections in
-  // Operations, and everything else sorted into whichever group it serves.
+  // maintenance log. Toolbox talks and site/monthly inspections live in
+  // Safety, equipment inspections in Operations, roster/time clock get
+  // their own Workforce group, and everything else sorted into whichever
+  // group it serves.
   const CATEGORIES = [
-    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "sops"] },
-    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "monthly", "equipment", "maintenance", "customdocs", "timeclock", "roster", "analytics"] },
+    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops"] },
+    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
+    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -1713,6 +1716,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         companyName: company?.name, companyLogo: company?.logo_url,
         flhas: companyFlhas, toolbox: companyToolbox, nearMisses: companyNearMisses, incidents: companyIncidents,
         daily: companyDaily, monthlyActions: companyMonthlyActions,
+        monthlyRecords: companyMonthlyRecords, customDocs: companyCustomDocs,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the safety analytics PDF.");
@@ -1727,7 +1731,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       await generateEquipmentAnalyticsPDF({
         companyName: company?.name, companyLogo: company?.logo_url,
         inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
-        monthlyRecords: companyMonthlyRecords, monthlyActions: companyMonthlyActions, customDocs: companyCustomDocs,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
@@ -2448,6 +2451,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
+          {TAB_VISIBLE.monthly && activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
+              🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
+            </button>
+          )}
           {activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
           )}
@@ -2456,11 +2464,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           )}
           {TAB_VISIBLE.daily && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
-          )}
-          {TAB_VISIBLE.monthly && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
-              🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
-            </button>
           )}
           {TAB_VISIBLE.equipment && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
@@ -2473,14 +2476,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           {TAB_VISIBLE.customdocs && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
           )}
-          {TAB_VISIBLE.timeclock && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
-          )}
-          {TAB_VISIBLE.roster && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
-          )}
           {activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
+          )}
+          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
+            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
+          )}
+          {TAB_VISIBLE.roster && activeCategory === "workforce" && (
+            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
           )}
         </div>
 
