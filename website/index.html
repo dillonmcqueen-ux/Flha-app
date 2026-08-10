@@ -20,6 +20,7 @@
     <a href="index.html" class="logo"><span class="dot"></span>FORA</a>
     <div class="navlinks">
       <a href="#what">What is FORA</a>
+      <a href="#demo">Try it live</a>
       <a href="big-five.html">The Big 5</a>
       <a href="custom-builds.html">Custom Builds</a>
       <a href="pricing.html">Pricing</a>
@@ -77,6 +78,24 @@
         </div>
       </div>
     </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">See it work</div>
+      <h2>Pick a task. Watch FORA build the FLHA.</h2>
+      <p>These are pre-built examples so you can see the format and depth of a real FLHA without an account — pick one below.</p>
+    </div>
+    <div class="demo-chips" id="demoChips" data-reveal>
+      <button class="demo-chip" data-id="trenching"><span>🚧</span>Trenching near utilities</button>
+      <button class="demo-chip" data-id="scaffolding"><span>🪜</span>Working at height on scaffolding</button>
+      <button class="demo-chip" data-id="forklift"><span>🏭</span>Forklift at a loading dock</button>
+      <button class="demo-chip" data-id="confined-space"><span>🛢️</span>Confined space tank entry</button>
+      <button class="demo-chip" data-id="hot-work"><span>🔥</span>Welding in a shop</button>
+    </div>
+    <div class="demo-panel" id="demoPanel" hidden data-reveal></div>
   </div>
 </section>
 
@@ -229,6 +248,7 @@
     <div class="logo"><span class="dot"></span>FORA</div>
     <div class="foot-links">
       <a href="#what">What is FORA</a>
+      <a href="#demo">Try it live</a>
       <a href="big-five.html">The Big 5</a>
       <a href="custom-builds.html">Custom Builds</a>
       <a href="pricing.html">Pricing</a>
@@ -253,6 +273,9 @@
   }, { threshold: 0.15 });
   document.querySelectorAll('[data-reveal]').forEach(el => io.observe(el));
 </script>
+
+<script src="demo-data.js"></script>
+<script src="demo.js"></script>
 
 </body>
 </html>

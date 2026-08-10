@@ -9,6 +9,10 @@
   --orange-dim:#F9731640;
   --muted:#9CA3AF;
   --text:#F5F5F4;
+  --risk-low:#22C55E;
+  --risk-medium:#EAB308;
+  --risk-high:#F97316;
+  --risk-extreme:#DC2626;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
 html{scroll-behavior:smooth;}
@@ -260,6 +264,68 @@ section{ position:relative; padding:120px 0; border-top:1px solid var(--line); }
 }
 .chip .n{ color:var(--orange); margin-right:6px; }
 
+/* interactive FLHA demo */
+.demo-chips{ display:flex; flex-wrap:wrap; gap:12px; margin-bottom:36px; }
+.demo-chip{
+  display:inline-flex; align-items:center; gap:9px; font-size:14px; font-weight:500; color:var(--text);
+  background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:11px 20px;
+  cursor:pointer; font-family:'Inter', sans-serif; transition:border-color .2s ease, background .2s ease, transform .2s ease;
+}
+.demo-chip span{ font-size:17px; }
+.demo-chip:hover{ border-color:var(--orange-dim); transform:translateY(-2px); }
+.demo-chip.active{ border-color:var(--orange); background:#F9731614; color:var(--text); }
+
+.demo-panel{ margin-top:8px; }
+
+.demo-loading{
+  background:var(--panel-2); border:1px solid var(--line); border-radius:16px; padding:52px 24px; text-align:center;
+}
+.demo-stopwatch{ font-family:'Space Grotesk', sans-serif; font-size:42px; font-weight:700; color:var(--orange); margin-bottom:14px; }
+.demo-stage{ color:var(--muted); font-size:15px; margin-bottom:22px; }
+.demo-bar{ height:6px; background:var(--line); border-radius:999px; overflow:hidden; max-width:320px; margin:0 auto; }
+.demo-bar-fill{ height:100%; width:0%; background:var(--orange); transition:width .3s ease; }
+
+.demo-result{ background:var(--panel-2); border:1px solid var(--line); border-radius:16px; padding:32px; }
+.demo-result-head{ margin-bottom:24px; }
+.demo-result-time{
+  display:inline-block; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--orange); background:#F9731614; border:1px solid var(--orange-dim); padding:4px 12px;
+  border-radius:999px; margin-bottom:14px;
+}
+.demo-summary{ font-size:16px; color:var(--text); line-height:1.55; }
+
+.demo-table-wrap{ overflow-x:auto; margin-bottom:24px; border:1px solid var(--line); border-radius:12px; }
+.demo-table{ width:100%; border-collapse:collapse; font-size:13.5px; }
+.demo-table th{
+  text-align:left; padding:12px 16px; background:var(--panel); color:var(--muted); font-size:11px;
+  text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid var(--line); white-space:nowrap;
+}
+.demo-table td{ padding:12px 16px; border-bottom:1px solid var(--line); color:var(--text); vertical-align:top; }
+.demo-table tr:last-child td{ border-bottom:none; }
+.demo-td-hazard{ font-weight:600; min-width:160px; }
+.demo-td-control{ color:var(--muted); min-width:200px; }
+.demo-td-risk{ white-space:nowrap; }
+
+.risk-badge{ display:inline-block; padding:4px 11px; border-radius:999px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
+.risk-badge-low{ background:#22C55E22; color:var(--risk-low); border:1px solid #22C55E55; }
+.risk-badge-medium{ background:#EAB30822; color:var(--risk-medium); border:1px solid #EAB30855; }
+.risk-badge-high{ background:#F9731622; color:var(--risk-high); border:1px solid #F9731655; }
+.risk-badge-extreme{ background:#DC262622; color:var(--risk-extreme); border:1px solid #DC262655; }
+
+.demo-ppe{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:22px; }
+.demo-ppe-label{ font-size:13px; color:var(--muted); font-weight:600; }
+
+.demo-disclaimer{
+  font-size:13px; color:var(--muted); line-height:1.6; padding:14px 18px; background:var(--panel);
+  border-left:3px solid var(--line); border-radius:0 8px 8px 0; margin-bottom:24px;
+}
+
+.demo-cta{
+  display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  padding-top:20px; border-top:1px solid var(--line);
+}
+.demo-cta p{ font-size:15px; font-weight:600; color:var(--text); }
+
 /* cta band */
 .band{
   border-top:1px solid var(--line);
@@ -297,4 +363,9 @@ footer{ border-top:1px solid var(--line); padding:48px 0; }
   .bento{ grid-template-columns:1fr; }
   .bento-sm{ grid-template-columns:1fr; }
   .example-grid{ grid-template-columns:1fr; }
+  .demo-chip{ padding:10px 16px; font-size:13px; }
+  .demo-loading{ padding:36px 18px; }
+  .demo-stopwatch{ font-size:34px; }
+  .demo-result{ padding:22px; }
+  .demo-cta{ flex-direction:column; align-items:flex-start; }
 }
