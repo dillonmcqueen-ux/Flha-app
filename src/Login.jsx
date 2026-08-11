@@ -587,7 +587,7 @@ export default function Login() {
               className="text-input"
               style={styles.input}
               type="text"
-              placeholder={role === "admin" ? "e.g. ADMIN-2024" : "e.g. FORA-1234"}
+              placeholder={role === "admin" ? "Admin code" : "e.g. FORA-1234"}
               value={code}
               onChange={e => setCode(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
