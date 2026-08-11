@@ -1,4 +1,8 @@
 import { useState, useEffect } from "react";
+import {
+  HardHat, ClipboardText, Key, Lock, ArrowLeft, ArrowRight,
+  MagnifyingGlass, WarningCircle, CircleNotch, CaretRight,
+} from "@phosphor-icons/react";
 import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
@@ -13,6 +17,72 @@ function loadSession() {
 }
 function clearSession() {
   try { window.name = ""; } catch (e) {}
+}
+
+// Scoped styles for interaction states (:hover / :focus-visible / :active /
+// prefers-reduced-motion) that plain inline style objects can't express.
+const CSS = `
+.flha-login { --accent: #F97316; --accent-dim: #F9731633; --accent-mid: #F9731660; }
+.flha-login *, .flha-login *::before, .flha-login *::after { box-sizing: border-box; }
+.flha-login button { font-family: inherit; touch-action: manipulation; }
+.flha-login .role-btn { cursor: pointer; }
+.flha-login .role-btn:hover { border-color: var(--accent-mid); background: #202020; transform: translateY(-1px); }
+.flha-login .role-btn:active { transform: translateY(0) scale(0.99); }
+.flha-login .admin-btn { cursor: pointer; }
+.flha-login .admin-btn:hover { border-color: var(--accent-mid); background: #202020; }
+.flha-login .name-btn { cursor: pointer; }
+.flha-login .name-btn:hover { border-color: var(--accent-mid); background: #232323; }
+.flha-login .primary-btn { cursor: pointer; }
+.flha-login .primary-btn:hover:not(:disabled) { background: #FB8332; }
+.flha-login .primary-btn:active:not(:disabled) { transform: scale(0.98); }
+.flha-login .primary-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.flha-login .back-btn { cursor: pointer; }
+.flha-login .back-btn:hover { background: #232323; }
+.flha-login .text-input { cursor: text; }
+.flha-login .text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.flha-login button:focus-visible,
+.flha-login a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.flha-login .pin-dot { transition: transform 150ms ease, background 150ms ease; }
+.flha-login .pin-dot.filled { transform: scale(1.1); }
+.flha-login .step-enter { animation: flha-fade-in 220ms ease-out both; }
+.flha-login .error-banner { animation: flha-fade-in 180ms ease-out both; }
+.flha-login .spin { animation: flha-spin 800ms linear infinite; }
+@keyframes flha-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes flha-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flha-login .role-btn, .flha-login .primary-btn, .flha-login .step-enter,
+  .flha-login .error-banner, .flha-login .pin-dot, .flha-login .spin {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+`;
+
+function ErrorBanner({ children }) {
+  if (!children) return null;
+  return (
+    <div
+      className="error-banner"
+      role="alert"
+      style={{
+        background: "#2A1212", border: "1px solid #DC262660", borderRadius: 10,
+        padding: "10px 12px", marginBottom: 12, fontSize: 13.5, color: "#FCA5A5",
+        display: "flex", alignItems: "flex-start", gap: 8,
+      }}
+    >
+      <WarningCircle size={18} weight="fill" style={{ flexShrink: 0, marginTop: 1, color: "#F87171" }} />
+      <span>{children}</span>
+    </div>
+  );
 }
 
 export default function Login() {
@@ -236,176 +306,225 @@ export default function Login() {
   const styles = {
     wrap: {
       fontFamily: "'Segoe UI', system-ui, sans-serif",
-      background: "#0A0A0A", minHeight: "100vh",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 16
+      background: "radial-gradient(circle at 18% 12%, #1E140A 0%, #0A0A0A 42%), #0A0A0A",
+      minHeight: "100dvh",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
     },
     card: {
-      background: "#161616", borderRadius: 16, padding: 28, width: "100%", maxWidth: 420,
-      border: "1px solid #F9731640", boxShadow: "0 4px 30px #F9731622"
+      background: "#161616", borderRadius: 18, padding: 28, width: "100%", maxWidth: 420,
+      border: "1px solid #F9731640", boxShadow: "0 24px 60px -20px #000000CC, 0 4px 30px #F9731622",
     },
-    roleBtn: (accent) => ({
-      width: "100%", padding: "16px 18px", borderRadius: 12, border: "1.5px solid #2A2A2A",
-      background: "#1E1E1E", cursor: "pointer", marginBottom: 12, textAlign: "left",
-      display: "flex", alignItems: "center", gap: 14, transition: "all 0.15s"
-    }),
-    adminBtn: (accent) => ({
-      width: "auto", padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2A2A2A",
-      background: "#1E1E1E", cursor: "pointer", margin: "4px auto 0", textAlign: "left",
-      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s"
-    }),
+    label: {
+      display: "block", fontSize: 12.5, fontWeight: 600, color: "#B5BAC4", marginBottom: 6,
+    },
     input: {
-      width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #F9731660",
+      width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #2E2E2E",
       background: "#1E1E1E", color: "#fff",
-      fontSize: 16, boxSizing: "border-box", outline: "none", marginBottom: 12
+      fontSize: 16, boxSizing: "border-box", outline: "none", marginBottom: 8,
+      minHeight: 46, transition: "border-color 150ms ease, box-shadow 150ms ease",
     },
     primaryBtn: {
       width: "100%", background: "#F97316", color: "#fff", border: "none", borderRadius: 10,
-      padding: "13px", fontWeight: 700, fontSize: 16, cursor: "pointer"
+      padding: "13px", fontWeight: 700, fontSize: 16, minHeight: 48,
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+      transition: "background 150ms ease, transform 100ms ease",
     },
     backBtn: {
       width: "100%", background: "#1E1E1E", color: "#F97316", border: "1.5px solid #F9731660", borderRadius: 10,
-      padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", marginTop: 10
+      padding: "11px", fontWeight: 600, fontSize: 14, marginTop: 10, minHeight: 44,
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+      transition: "background 150ms ease",
     },
     nameBtn: (active) => ({
       width: "100%", padding: "13px 14px", borderRadius: 10, border: `1.5px solid ${active ? "#F97316" : "#2A2A2A"}`,
-      background: active ? "#2A1A0F" : "#1E1E1E", color: "#fff", cursor: "pointer", marginBottom: 8,
-      textAlign: "left", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center"
+      background: active ? "#2A1A0F" : "#1E1E1E", color: "#fff", marginBottom: 8, minHeight: 44,
+      textAlign: "left", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center",
+      transition: "border-color 150ms ease, background 150ms ease",
     }),
     pinDots: {
-      display: "flex", justifyContent: "center", gap: 14, margin: "20px 0"
+      display: "flex", justifyContent: "center", gap: 14, margin: "20px 0",
     },
     pinDot: (filled) => ({
       width: 18, height: 18, borderRadius: "50%",
-      border: "1.5px solid #F97316", background: filled ? "#F97316" : "transparent"
+      border: "1.5px solid #F97316", background: filled ? "#F97316" : "transparent",
     }),
   };
 
   const roleMeta = {
-    worker: { icon: "🦺", title: "Worker", desc: "Complete a hazard assessment", accent: "#F97316" },
-    supervisor: { icon: "📋", title: "Supervisor / Safety", desc: "View your company dashboard", accent: "#1E3A5F" },
-    admin: { icon: "🔑", title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
+    worker: { Icon: HardHat, title: "Worker", desc: "Complete a hazard assessment", accent: "#F97316" },
+    supervisor: { Icon: ClipboardText, title: "Supervisor / Safety", desc: "View your company dashboard", accent: "#5B9BD5" },
+    admin: { Icon: Key, title: "Admin", desc: "Access all companies", accent: "#A78BFA" },
   };
 
   const filteredNames = rosterNames.filter(m => m.name.toLowerCase().includes(nameFilter.trim().toLowerCase()));
   const filteredMasterCompanies = masterCompanies.filter(c => c.name.toLowerCase().includes(companyFilter.trim().toLowerCase()));
 
   return (
-    <div style={styles.wrap}>
+    <div className="flha-login" style={styles.wrap}>
+      <style>{CSS}</style>
       <div style={styles.card}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <div style={{ textAlign: "center", marginBottom: 26 }}>
           <img
             src="/fora-logo.png"
             alt="FORA"
-            style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
+            style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 10 }}
           />
-          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field documentation portal</div>
+          <div style={{ fontSize: 13.5, color: "#A3A3AA", letterSpacing: 0.2 }}>AI-powered field documentation portal</div>
         </div>
 
         {!role ? (
-          <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#9CA3AF", marginBottom: 12, textAlign: "center" }}>
+          <div className="step-enter" key="role-pick">
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#A3A3AA", marginBottom: 12, textAlign: "center" }}>
               Select your role to continue
             </div>
             {["worker", "supervisor"].map(r => {
               const m = roleMeta[r];
+              const Icon = m.Icon;
               return (
-                <button key={r} style={styles.roleBtn(m.accent)} onClick={() => { setRole(r); setError(""); setCode(""); }}>
-                  <span style={{ fontSize: 26 }}>{m.icon}</span>
-                  <span>
-                    <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "#F97316" }}>{m.title}</span>
-                    <span style={{ display: "block", fontSize: 12, color: "#9CA3AF" }}>{m.desc}</span>
+                <button
+                  key={r}
+                  className="role-btn"
+                  style={{
+                    width: "100%", padding: "16px 18px", borderRadius: 12, border: "1.5px solid #2A2A2A",
+                    background: "#1E1E1E", marginBottom: 12, textAlign: "left",
+                    display: "flex", alignItems: "center", gap: 14, transition: "border-color 150ms ease, background 150ms ease, transform 100ms ease",
+                  }}
+                  onClick={() => { setRole(r); setError(""); setCode(""); }}
+                >
+                  <span style={{
+                    width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: `${m.accent}22`, color: m.accent,
+                  }}>
+                    <Icon size={24} weight="regular" />
                   </span>
+                  <span style={{ flex: 1 }}>
+                    <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "#F5F5F5" }}>{m.title}</span>
+                    <span style={{ display: "block", fontSize: 12.5, color: "#A3A3AA" }}>{m.desc}</span>
+                  </span>
+                  <CaretRight size={18} color="#6B7280" style={{ flexShrink: 0 }} />
                 </button>
               );
             })}
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
-              <button style={styles.adminBtn(roleMeta.admin.accent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>
-                <span style={{ fontSize: 15 }}>{roleMeta.admin.icon}</span>
-                <span style={{ fontWeight: 600, fontSize: 12, color: "#9CA3AF" }}>{roleMeta.admin.title}</span>
+              <button
+                className="admin-btn"
+                style={{
+                  width: "auto", padding: "9px 16px", borderRadius: 10, border: "1.5px solid #2A2A2A",
+                  background: "#1E1E1E", margin: "4px auto 0", minHeight: 40,
+                  display: "flex", alignItems: "center", gap: 8, transition: "border-color 150ms ease, background 150ms ease",
+                }}
+                onClick={() => { setRole("admin"); setError(""); setCode(""); }}
+              >
+                <Key size={15} color="#A3A3AA" />
+                <span style={{ fontWeight: 600, fontSize: 12.5, color: "#A3A3AA" }}>{roleMeta.admin.title}</span>
               </button>
             </div>
-          </>
+          </div>
         ) : masterTicket ? (
           // ── Master code: pick any company ──────────────────────────
-          <>
+          <div className="step-enter" key="master-pick">
             <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>Master login</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Pick a company to log into as {role}.</div>
+            <div style={{ fontSize: 12.5, color: "#A3A3AA", marginBottom: 16 }}>Pick a company to log into as {role}.</div>
 
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Type to filter…"
-              value={companyFilter}
-              onChange={e => setCompanyFilter(e.target.value)}
-              autoFocus
-            />
+            <label style={styles.label} htmlFor="company-filter">Filter companies</label>
+            <div style={{ position: "relative", marginBottom: 8 }}>
+              <MagnifyingGlass size={17} color="#6B7280" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                id="company-filter"
+                className="text-input"
+                style={{ ...styles.input, paddingLeft: 38 }}
+                type="text"
+                placeholder="Type to filter…"
+                value={companyFilter}
+                onChange={e => setCompanyFilter(e.target.value)}
+                autoFocus
+              />
+            </div>
 
-            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+            <div style={{ maxHeight: 320, overflowY: "auto", marginTop: 8 }}>
               {filteredMasterCompanies.length === 0 && (
-                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No companies match.</div>
+                <div style={{ fontSize: 13, color: "#A3A3AA", textAlign: "center", padding: "12px 0" }}>No companies match.</div>
               )}
               {filteredMasterCompanies.map(c => (
-                <button key={c.id} style={styles.nameBtn(false)} disabled={checking} onClick={() => pickMasterCompany(c.id)}>
+                <button key={c.id} className="name-btn" style={styles.nameBtn(false)} disabled={checking} onClick={() => pickMasterCompany(c.id)}>
                   <span>{c.name}</span>
+                  <CaretRight size={16} color="#6B7280" />
                 </button>
               ))}
             </div>
 
-            {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: "#FCA5A5" }}>
-                {error}
-              </div>
-            )}
+            <ErrorBanner>{error}</ErrorBanner>
 
-            <button style={styles.backBtn} onClick={resetToRolePick}>← Start over</button>
-          </>
+            <button className="back-btn" style={styles.backBtn} onClick={resetToRolePick}>
+              <ArrowLeft size={15} /> Start over
+            </button>
+          </div>
         ) : companyTicket && !selectedRoster ? (
           // ── Step 2: pick your name from this company's active roster ──
-          <>
+          <div className="step-enter" key="roster-pick">
             <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>{rosterCompanyName}</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Which of these is you?</div>
+            <div style={{ fontSize: 12.5, color: "#A3A3AA", marginBottom: 16 }}>Which of these is you?</div>
 
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Start typing your name…"
-              value={nameFilter}
-              onChange={e => setNameFilter(e.target.value)}
-              autoFocus
-            />
+            <label style={styles.label} htmlFor="name-filter">Your name</label>
+            <div style={{ position: "relative", marginBottom: 8 }}>
+              <MagnifyingGlass size={17} color="#6B7280" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                id="name-filter"
+                className="text-input"
+                style={{ ...styles.input, paddingLeft: 38 }}
+                type="text"
+                placeholder="Start typing your name…"
+                value={nameFilter}
+                onChange={e => setNameFilter(e.target.value)}
+                autoFocus
+              />
+            </div>
 
-            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+            <div style={{ maxHeight: 320, overflowY: "auto", marginTop: 8 }}>
               {nameFilter.trim().length === 0 ? (
-                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>Start typing to find your name.</div>
+                <div style={{ fontSize: 13, color: "#A3A3AA", textAlign: "center", padding: "12px 0" }}>Start typing to find your name.</div>
               ) : filteredNames.length === 0 ? (
-                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No names match.</div>
+                <div style={{ fontSize: 13, color: "#A3A3AA", textAlign: "center", padding: "12px 0" }}>No names match.</div>
               ) : (
                 filteredNames.map(m => (
-                  <button key={m.id} style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
+                  <button key={m.id} className="name-btn" style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
                     <span>{m.name}</span>
-                    <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase" }}>{m.role}</span>
+                    <span style={{ fontSize: 11, color: "#A3A3AA", textTransform: "uppercase", letterSpacing: 0.3 }}>{m.role}</span>
                   </button>
                 ))
               )}
             </div>
 
-            {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: "#FCA5A5" }}>
-                {error}
-              </div>
-            )}
+            <ErrorBanner>{error}</ErrorBanner>
 
-            <button style={styles.backBtn} onClick={resetToRolePick}>← Start over</button>
-          </>
+            <button className="back-btn" style={styles.backBtn} onClick={resetToRolePick}>
+              <ArrowLeft size={15} /> Start over
+            </button>
+          </div>
         ) : companyTicket && selectedRoster ? (
           // ── Step 3: PIN ──────────────────────────────────────────────
-          <>
-            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>{selectedRoster.name}</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>Enter your 4-digit PIN</div>
+          <div className="step-enter" key="pin-entry">
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <span style={{
+                width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "#F9731622", color: "#F97316",
+              }}>
+                <Lock size={20} weight="regular" />
+              </span>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#F5F5F5" }}>{selectedRoster.name}</div>
+                <div style={{ fontSize: 12.5, color: "#A3A3AA" }}>Enter your 4-digit PIN</div>
+              </div>
+            </div>
 
+            <label style={{ ...styles.label, textAlign: "center", marginTop: 12 }} htmlFor="pin-input">PIN</label>
             <input
-              style={{ ...styles.input, textAlign: "center", fontSize: 28, letterSpacing: 12, marginBottom: 0 }}
+              id="pin-input"
+              className="text-input"
+              style={{ ...styles.input, textAlign: "center", fontSize: 28, letterSpacing: 12, marginBottom: 0, fontVariantNumeric: "tabular-nums" }}
               type="tel"
               inputMode="numeric"
               pattern="[0-9]*"
@@ -414,67 +533,97 @@ export default function Login() {
               onChange={e => onPinChange(e.target.value)}
               autoFocus
               disabled={checking}
+              aria-label="4-digit PIN"
             />
             <div style={styles.pinDots}>
-              {[0, 1, 2, 3].map(i => <div key={i} style={styles.pinDot(i < pin.length)} />)}
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} className={`pin-dot${i < pin.length ? " filled" : ""}`} style={styles.pinDot(i < pin.length)} />
+              ))}
             </div>
 
-            {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
-                {error}
+            {checking && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "#A3A3AA", fontSize: 13, marginBottom: 12 }}>
+                <CircleNotch size={16} className="spin" />
+                Checking…
               </div>
             )}
 
-            <button style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); }}>
-              ← Not {selectedRoster.name}?
+            <ErrorBanner>{error}</ErrorBanner>
+
+            <button className="back-btn" style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); }}>
+              <ArrowLeft size={15} /> Not {selectedRoster.name}?
             </button>
-          </>
+          </div>
         ) : (
           // ── Step 1: admin code, or company code ─────────────────────
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <span style={{ fontSize: 26 }}>{roleMeta[role].icon}</span>
+          <div className="step-enter" key="code-entry">
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+              {(() => {
+                const m = roleMeta[role];
+                const Icon = m.Icon;
+                return (
+                  <span style={{
+                    width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: `${m.accent}22`, color: m.accent,
+                  }}>
+                    <Icon size={20} weight="regular" />
+                  </span>
+                );
+              })()}
               <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316" }}>{roleMeta[role].title}</div>
-                <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#F5F5F5" }}>{roleMeta[role].title}</div>
+                <div style={{ fontSize: 12.5, color: "#A3A3AA" }}>
                   {role === "admin" ? "Enter your admin code" : "Enter your company code"}
                 </div>
               </div>
             </div>
 
+            <label style={styles.label} htmlFor="access-code">
+              {role === "admin" ? "Admin code" : "Company code"}
+            </label>
             <input
+              id="access-code"
+              className="text-input"
               style={styles.input}
               type="text"
-              placeholder={role === "admin" ? "Admin code" : "Company code"}
+              placeholder={role === "admin" ? "e.g. ADMIN-2024" : "e.g. FORA-1234"}
               value={code}
               onChange={e => setCode(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
               autoFocus
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
             />
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "#8B8F99", marginBottom: 14 }}>
               Codes are case sensitive — enter it exactly as given.
             </div>
 
-            {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
-                {error}
-              </div>
-            )}
+            <ErrorBanner>{error}</ErrorBanner>
 
-            <button style={styles.primaryBtn} onClick={handleSubmit} disabled={checking}>
-              {checking ? "Checking…" : "Continue →"}
+            <button className="primary-btn" style={styles.primaryBtn} onClick={handleSubmit} disabled={checking}>
+              {checking ? (
+                <>
+                  <CircleNotch size={18} className="spin" /> Checking…
+                </>
+              ) : (
+                <>
+                  Continue <ArrowRight size={17} />
+                </>
+              )}
             </button>
-            <button style={styles.backBtn} onClick={resetToRolePick}>
-              ← Back
+            <button className="back-btn" style={styles.backBtn} onClick={resetToRolePick}>
+              <ArrowLeft size={15} /> Back
             </button>
-          </>
+          </div>
         )}
       </div>
 
-      <div style={{ position: "fixed", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 12, color: "#6B7280" }}>
-        <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: "#6B7280" }}>Privacy Policy</a>
+      <div style={{ position: "fixed", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 12, color: "#6B7280", padding: "0 16px" }}>
+        <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: "#8B8F99" }}>Privacy Policy</a>
         <span style={{ margin: "0 8px" }}>·</span>
-        <a href="https://forafieldsolutions.com/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: "#6B7280" }}>Terms of Use</a>
+        <a href="https://forafieldsolutions.com/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: "#8B8F99" }}>Terms of Use</a>
       </div>
     </div>
   );
