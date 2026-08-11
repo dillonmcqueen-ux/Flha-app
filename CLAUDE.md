@@ -70,3 +70,43 @@ producing reviewable PRs, not continuously deploying unreviewed changes.
 up to the admin's approve/reject decision on a new company, not remove
 that decision — see the agent file for why that boundary is deliberate,
 not a gap to be closed.
+
+## Recurring security audits
+
+Five more agents run a privacy/exposure sweep. The stated bar: **nothing
+but the `company-logos` Supabase Storage bucket should ever be public,
+anywhere** — no company's data, and nothing in this codebase or any
+connected service, should be reachable without authentication.
+
+| Agent | Scope |
+|---|---|
+| `storage-exposure-auditor` | Confirms only `company-logos` is a public Supabase Storage bucket; everything else must be private. |
+| `rls-coverage-auditor` | Confirms RLS is enabled (deny-by-default, no policies) on every table, per README's documented access-control model. |
+| `secret-hygiene-scanner` | Scans tracked files for hardcoded credentials and confirms `.gitignore` covers env files. |
+| `public-url-discipline-auditor` | Confirms code never builds an unsigned public URL for a private bucket — this exact bug class has recurred twice in this repo's history (commits `9553f19`, `378b826`). |
+| `external-surface-auditor` | Checks Vercel preview-deployment protection and Stripe webhook signature verification — exposure that lives in connected services, not source files. |
+
+**Each agent's file states exactly what it may fix itself vs. what needs a
+human.** The dividing line is whether the fix can only ever *tighten*
+access and is easily reversible (enabling RLS with no policies, flipping
+a bucket back to private after confirming no code depends on it being
+public, re-enabling Vercel preview protection) vs. anything that's a real
+access-control judgment call, touches production availability, or means a
+secret needs rotating — those get reported, not silently fixed.
+
+**Runs every 3 days** via a recurring trigger: a fresh session applies all
+five checklists (manually, per the Agent-tool limitation noted above),
+fixes what's safe to fix, and re-runs the checks once after fixing to
+confirm clean before stopping — it doesn't loop indefinitely. Code-level
+fixes still go through branch → draft PR, same as everywhere else in this
+repo; only live-infrastructure toggles that meet the "only tightens
+access, easily reversible" bar happen directly.
+
+**Verified clean as of this writing:** storage buckets (only
+`company-logos` public), RLS coverage (all 30 tables correctly enabled
+with no policies), no hardcoded secrets in tracked files. **Found and
+fixed as of this writing:** Vercel preview-deployment protection was off
+on `flha-app`, meaning every PR's preview URL — posted openly in GitHub
+comments — was publicly reachable running the live app; enabled
+`ssoProtection` on preview deployments only (production left untouched,
+since that's the actual customer-facing app).
