@@ -130,3 +130,34 @@ automatically; both wait for an explicit go-ahead, since the upgrade is a
 recurring paid charge and needs fresh confirmation at the time (see the
 `buy_pro` tool's own confirmation requirement), not something to
 pre-authorize in advance.
+
+## Weekly competitive intelligence
+
+Two more agents form a market-research pipeline, distinct from the
+code-review and UI-build agents above — they don't touch product code at
+all, they produce a business-intelligence report:
+
+| Agent | Scope |
+|---|---|
+| `competitive-intel-researcher` | Searches Reddit, forums, review sites and news for competitor moves, mid-market buyer pain points, and new AI/tech worth adopting. Writes sourced findings to a scratch file. Read-only research (plus `Write` for its own scratch file) — never edits product code. |
+| `market-report-writer` | Turns that week's findings plus `docs/marketing/competitive-analysis.md` (the baseline landscape doc) into a short, Slack-ready weekly report. |
+
+Baseline reference: `docs/marketing/competitive-analysis.md` — a
+competitive analysis of the AI field-documentation / frontline-ops market
+(Mitti/SafetyCulture, SiteDocs, Xenia, MaintainX, Dashpivot/Sitemate,
+GoCanvas, Raken, HammerTech), FORA's positioning wedge against each, and
+the 20 recurring customer pain points in this space. Each week's research
+layers on top of this baseline rather than re-deriving it — don't rewrite
+the baseline doc from a routine run; that's a deliberate human edit if the
+strategic analysis itself needs updating.
+
+**Runs weekly** via a recurring trigger, fresh session each time (per the
+Agent-tool limitation above — the fired session reads and manually follows
+both `.md` files rather than invoking them as subagents), delivered as a
+Slack DM. Sundays 10:00am Mountain time (16:00 UTC during MDT / 17:00 UTC
+during MST — cron is UTC-fixed, so the actual delivery time drifts by an
+hour across the DST boundary; adjust the trigger's `cron_expression` twice
+a year, or accept the hour drift). This pipeline is research-only and
+never commits or pushes to the repo — it has no "safe to fix directly"
+tier the way the security audits do, since a business-intel report isn't
+an infrastructure toggle.
