@@ -1,7 +1,7 @@
 # Scope: offline capability
 
-Status: Phase 0, 1, 2, and 3 all built (see Progress below). **Partially
-verified end-to-end now, by the user on
+Status: Phase 0, 1, 2, and 3 all built; Phase 4 scoped in detail, not built
+(see Progress below). **Partially verified end-to-end now, by the user on
 their own phone against the PR #16 preview deploy** (this Claude Code
 session's own network egress policy 403s all `*.vercel.app` requests,
 confirmed via the agent proxy status log and a direct `curl`, so no
@@ -642,14 +642,103 @@ ships in the same pass or as an explicit fast-follow.
 
 ### Phase 4 — PWA shell
 
-- Add a minimal web app manifest and a hand-rolled service worker (skip
-  Workbox — this project has exactly 4 runtime dependencies today per
-  `package.json`; a small SW you can read end-to-end fits the "one person,
-  low overhead" constraint better than an added build-tool dependency).
-- Cache-first for the static app shell (JS/CSS bundle, fonts, logo) only —
-  never cache `api/*.js` responses. This is what lets the app actually open
-  with zero signal (not just survive a signal drop mid-session) so the
-  IndexedDB queue from Phase 1–3 has something to run inside.
+**Small correction:** the original bullet said "exactly 4 runtime
+dependencies" — it's actually **5** today (`@supabase/supabase-js`,
+`jspdf`, `react`, `react-dom`, `stripe` — `stripe` was added since that
+line was written, for the billing work). Doesn't change the recommendation
+(still genuinely small, still no reason to add Workbox as a build
+dependency), just correcting the number rather than repeating it.
+
+**Read the actual app shell before designing the service worker** — it's
+simpler than a typical PWA because there's no client-side router at all:
+`src/main.jsx` does one `pathname === '/onboarding'` check and renders
+either `Onboarding.jsx` or `Login.jsx`; every other "page" (worker menu,
+supervisor dashboard, admin panel, the `/dashboard` link on FLHA's done
+screen) is the *same* SPA shell, switched entirely by client-side state
+inside `Login.jsx` once a session is loaded from `localStorage` — never a
+second URL/route. `vercel.json` already rewrites every path to
+`/index.html` (`"source": "/(.*)", "destination": "/index.html"`). So a
+service worker here only ever needs to cache **one HTML shell** — no
+per-route caching logic, no route table to keep in sync with the React
+side. That's a meaningful simplification versus a typical multi-page PWA.
+
+**Design — deliberately runtime-caching, not a build-time precache
+manifest:** Vite content-hashes the built JS/CSS filenames
+(`index-XXXXXXXX.js`), which change every deploy. A hand-rolled SW with a
+precache list would need a build step to generate that list and inject it
+into `sw.js` — exactly the kind of build-tooling addition the "skip
+Workbox" reasoning already argues against. Simpler alternative: the SW's
+`fetch` handler caches same-origin static responses **opportunistically**
+(cache-first for anything already cached — safe, since a hashed filename's
+content never changes once published; network-first-then-cache for
+`index.html` itself, so a returning-online visit picks up a new deploy's
+updated script tag). Trade-off: the app has to be opened online *once*
+after each deploy to pick up the new bundle into the cache — acceptable
+for "install once with signal, then keep working," which is what this is
+actually for.
+
+**The one rule that matters most, unchanged from the original bullet but
+worth restating as the central constraint, not a footnote:** the SW must
+never intercept or cache anything under `/api/`. Every fetch to
+`/api/*.js` has to reach the real network and fail naturally when it
+can't — that's the exact signal Phases 0–3's `!navigator.onLine` /
+`isNetworkFailure` handling and IndexedDB queue already depend on. A
+service worker that got clever and tried to cache or short-circuit an API
+response would silently break every offline-detection path already built.
+Concretely: the `fetch` handler's first check should be "does this URL
+path start with `/api/`? If so, `return` immediately without touching the
+cache at all" — same instinct as `create_upload_url`'s bucket allowlist or
+`api/monthly.js`'s `periodMonth` bound, just applied to routing instead of
+data.
+
+**What gets cached:** `index.html`, the built JS/CSS bundle under
+`/assets/`, and `fora-logo.png` (the only static asset today — confirmed
+via `ls public/`). `manifest.json` and any new icon files (see below) join
+that same list once they exist.
+
+**Assets that don't exist yet and need real creation, not just code:**
+checked `index.html` and `public/` — there's currently no
+`<link rel="icon">` at all (no favicon), no `manifest.json`, and the only
+image asset is `fora-logo.png` at its source resolution (arbitrary
+dimensions, not sized for app icons). A real web app manifest needs
+properly sized icons (192×192 and 512×512 PNGs at minimum, ideally a
+maskable variant for Android's adaptive-icon masking) generated from the
+logo — asset work, not something to hand-wave as "add a manifest."
+`theme_color`/`background_color` should match the app's actual dark theme
+(`#0A0A0A` background, `#F97316` orange accent — confirmed from
+`Login.jsx`'s own style object). iOS needs its own meta tags separately
+(`apple-touch-icon`, `apple-mobile-web-app-capable`) since Safari doesn't
+fully follow the Web App Manifest spec for "Add to Home Screen."
+
+**Update-lifecycle risk, specific to how hard this app already leans on
+long-lived offline sessions:** the classic PWA foot-gun is a service
+worker that refuses to update, silently serving stale JS indefinitely —
+worth taking seriously here given how much of Phases 0–3 is designed
+around a worker staying on one page for a long stretch with no
+connectivity. Recommend `self.skipWaiting()` in `install` and
+`clients.claim()` in `activate`, so a new deploy's SW takes over on the
+next navigation rather than requiring every open tab to fully close first
+— simpler mental model for a one-person-maintained app, and safe here
+specifically because the SW only ever touches the *static shell*, never
+API calls or the IndexedDB queue/photo stores, so an update mid-session
+can't corrupt in-flight offline data. `activate` should also clear any
+cache not matching the current cache-name version, so stale cached bundles
+don't accumulate release over release.
+
+**Registration:** `src/main.jsx` registers `/sw.js`, gated to
+`import.meta.env.PROD` — registering against Vite's dev server would just
+create confusing caching behavior for no benefit during development.
+
+**Testing note:** a service worker can't be meaningfully exercised against
+`vite dev` (no real hashed production bundle to cache) — verification
+needs `vite build && vite preview` at minimum, ideally the actual preview
+deploy once one can be reached. Worth flagging alongside every other phase's
+same standing caveat about live verification in this doc.
+
+**Revised size: still ~2-3 days for the code**, matching the original
+estimate — the router-simplicity finding above roughly cancels out against
+the extra care the update-lifecycle risk deserves. The icon/asset creation
+is separate, real design work outside a pure code estimate.
 
 ## Open questions to settle before building
 
@@ -697,6 +786,11 @@ ships in the same pass or as an explicit fast-follow.
    It's the most delicate piece to get right (a wrong restore risks a
    broken thumbnail or an orphaned blob reference, not just a missing
    field) — worth deciding whether to derisk it separately.
+9. **Who produces the actual icon assets for Phase 4's manifest** (192×192,
+   512×512, a maskable variant) — resized/exported from the existing
+   `fora-logo.png`, or a fresh export from wherever the source logo file
+   actually lives? This is real design work, not something to generate as
+   a byproduct of writing the manifest JSON.
 
 ## Out of scope for this pass
 
@@ -732,11 +826,19 @@ ships in the same pass or as an explicit fast-follow.
   form), so this ended up much smaller than the original "medium-large,
   ~1-2 weeks" estimate. Includes the draft-restore extension in the same
   pass rather than as a deferred fast-follow.
-- **Phase 4 (PWA shell): small, ~2-3 days** once Phases 1–3 give it
-  something real to do.
+- **Phase 4 (PWA shell): ~2-3 days, scoped in detail this session, not
+  built** (see the Phase 4 section above) — smaller router-wise than a
+  typical PWA (the app has no client-side router at all, just one SPA
+  shell), but the update-lifecycle risk deserves real care given how much
+  of Phases 0–3 depends on long-lived offline sessions. Icon-asset creation
+  (open question 9) is separate, real design work outside the code
+  estimate.
 
-Recommended order for a solo dev: **0 → 1 → 4 → 2 → 3.** Get the shell
-installable and the text-form queue working behind it before tackling the
-AI-assist fallback and the harder photo-storage problem — that way there's
-a genuinely useful "offline submit works" release milestone partway
-through, instead of one big all-or-nothing offline release.
+Actual build order ended up **0 → 1 → 2 → 3 → 4** rather than the
+originally-recommended **0 → 1 → 4 → 2 → 3** — Phase 4 got scoped last
+because live-testing feedback surfaced Phase 2's gap (the AI-assist dead
+end) organically while using the app, which made it the natural next thing
+to build rather than sticking to the original sequencing. The reasoning
+behind the original recommendation (ship the shell early for an
+installable milestone) still holds if useful going forward — this is just
+what actually happened, not a claim that the new order was planned.
