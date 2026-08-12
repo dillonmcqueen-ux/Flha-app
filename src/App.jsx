@@ -698,12 +698,13 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             ppeRequired: mergedPPE,
             sopAlerts: mergedAlerts,
             additionalNotes: prev.additionalNotes,
+            ai_assisted: true,
           };
         });
         setAddingTask(false);
       } else {
         const withBaseline = ensureBaselineHazards(tagged, parsed.taskSummary || taskLabel);
-        setFlha({ ...parsed, hazards: withBaseline, sopAlerts: groundedAlerts, ppeRequired: groundedPPE });
+        setFlha({ ...parsed, hazards: withBaseline, sopAlerts: groundedAlerts, ppeRequired: groundedPPE, ai_assisted: true });
       }
       setStep("review");
       setTranscript("");
@@ -713,6 +714,29 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — the review
+  // step already lets a worker add/edit/remove hazards by hand ("+ Add
+  // hazard"), so the fallback just needs to get them there without an AI
+  // call. Adding a task to an existing FLHA (addingTask) needs no new
+  // state — the worker adds it manually via the same UI. A fresh FLHA gets
+  // an empty skeleton to fill in. Either way ai_assisted flips to false so
+  // a supervisor knows to double-check this one — even when only the most
+  // recent added task skipped AI, since the flag covers the whole record.
+  const continueWithoutAI = () => {
+    if (addingTask && flha) {
+      setFlha(prev => ({ ...prev, ai_assisted: false }));
+      setAddingTask(false);
+    } else {
+      const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
+      setFlha({ taskSummary: cleanTranscript, hazards: [], sopAlerts: [], ppeRequired: [], additionalNotes: null, ai_assisted: false });
+    }
+    setGenError(false);
+    setStep("review");
+    setTranscript("");
+    setTaskDesc("");
   };
 
   const startAddTask = () => {
@@ -1074,7 +1098,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
           {genError && (
             <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Something went wrong generating the assessment. Please check your connection and try again.
+              Something went wrong generating the assessment. Please check your connection and try again, or continue and add hazards yourself.
             </div>
           )}
 
@@ -1085,6 +1109,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             {loading ? "⏳ Analyzing against SOPs…" : addingTask ? "✅ Add this task" : "✅ Generate FLHA"}
           </button>
 
+          {genError && (
+            <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={continueWithoutAI}>
+              Continue without AI — I'll add hazards myself
+            </button>
+          )}
+
           <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={() => setStep("company")}>
             ← Back
           </button>
@@ -1093,6 +1123,11 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
       {step === "review" && flha && (
         <>
+          {flha.ai_assisted === false && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-reviewed — this hazard list was not cross-referenced against your company's SOPs. Check it carefully before submitting.
+            </div>
+          )}
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>

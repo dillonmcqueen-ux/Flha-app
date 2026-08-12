@@ -1,9 +1,9 @@
 # Scope: offline capability
 
-Status: Phase 0 built, Phase 1 mostly built (see Progress below), Phase 2
-scoped in detail but not built. **Partially verified end-to-end now, by the
-user on their own phone against the PR #16 preview deploy** (this Claude
-Code session's own network egress policy 403s all `*.vercel.app` requests,
+Status: Phase 0 built, Phase 1 mostly built, Phase 2 built (see Progress
+below for all three). **Partially verified end-to-end now, by the user on
+their own phone against the PR #16 preview deploy** (this Claude Code
+session's own network egress policy 403s all `*.vercel.app` requests,
 confirmed via the agent proxy status log and a direct `curl`, so no
 in-session browser could do this — a human had to). Confirmed so far:
 
@@ -17,17 +17,19 @@ in-session browser could do this — a human had to). Confirmed so far:
   error — confirmed live by the user.
 - Along the way, confirmed a real *scope* gap, not a bug: the AI-generation
   step mid-form (`/api/generate-flha`, e.g. ToolboxTalk's "what's the talk
-  about" step) still hard-requires connectivity and has no fallback yet —
-  this is exactly what Phase 2 (scoped below) now addresses. The user hit
-  this live ("couldn't generate the talk, check connection") while testing
-  offline before Phase 2 existed even as a plan.
+  about" step) still hard-requires connectivity and had no fallback at the
+  time — this is exactly what Phase 2 (built the same session, see Progress
+  below) now addresses. The user hit this live ("couldn't generate the
+  talk, check connection") while testing, which is what prompted scoping
+  and then building Phase 2 in the same sitting.
 
 **Not yet confirmed:** the other 5 forms' offline-submit-then-auto-send
 (NearMiss, Incident, DailyReport, FLHA, Inspection), the actual
 auto-send-on-reconnect landing in the database (only the offline-queue side
 was confirmed above, not the drain side), the full-tab-close-then-reopen
-session-persistence check specifically, and Inspection/MonthlyInspection's
-draft-restore-on-reload safety. Still worth working through the rest of the
+session-persistence check specifically, Inspection/MonthlyInspection's
+draft-restore-on-reload safety, and all of Phase 2 (the "Continue without
+AI" fallback on any form). Still worth working through the rest of the
 per-form checklist in Progress below.
 Picked from `TODO.md`'s "Offline capability or a backup plan" item — see
 `docs/competitive-notes.md` for why this is the highest-leverage gap to
@@ -254,6 +256,44 @@ bolted this on late).
     single most important thing to check on a preview deploy (from a
     network that can actually reach it) before trusting this in front of a
     real worker.
+
+- **Phase 2: built, on all 7 forms that call `/api/generate-flha`** (see the
+  Phase 2 section below for how each form was sized and why). Every form
+  now offers "Continue without AI" when generation fails, flags the record
+  `ai_assisted: false`, and shows a "not AI-reviewed" banner on the
+  worker-facing side so a supervisor knows to look closer:
+  - **DailyReport, MonthlyInspection, CustomForm** — trivial as scoped: the
+    fallback reuses data that already exists (raw notes, or a plain
+    client-built sentence from checklist answers) and drops straight into
+    the existing editable review screen.
+  - **FLHA, NearMiss, Incident** — small-medium as scoped: an empty
+    skeleton object into the same already-editable review screen (FLHA's
+    `+ Add hazard`, NearMiss/Incident's `updateList`/`addListItem`). FLHA's
+    `addingTask` (mid-assessment "add another task") case needed no new
+    state at all — the worker adds the task by hand via the same UI a
+    fresh FLHA uses.
+  - **ToolboxTalk — the one real exception, exactly as scoped.** Its review
+    step still can't edit generated content, so this got new UI: a
+    `manualtalk` step (added to `RESTORABLE_STEPS` for draft autosave) with
+    one plain textarea for the presenter's own notes, which skips the
+    structured `review` screen entirely and goes straight to `signoff` —
+    `points = { summary: <typed text>, sections: [], discussion: [],
+    ai_assisted: false }`.
+  - **`ai_assisted` flag storage:** rides for free in the existing jsonb
+    column on 5 tables (embedded directly in the `flha`/`report`/`points`
+    state object, same trick as `client_submission_id`). For
+    `inspection_records`/`custom_form_records` (no jsonb column), applied a
+    second additive migration this session
+    (`add_ai_assisted_monthly_customform` — `boolean not null default
+    true`), again with explicit user sign-off first.
+  - **Not built:** the "optional fast-follow" (background AI regeneration +
+    supervisor accept/discard UI) — deliberately deferred per open question
+    6, a materially bigger feature than the fallback itself.
+  - **Not verified end-to-end** — same standing caveat as Phase 0/1. Passed
+    `npm run build` and the vite dev-transform round-trip on all 7 touched
+    forms plus both API files; the actual "go offline before the AI step,
+    tap Continue without AI, fill it in, submit" click-through has not been
+    done in a real browser.
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -499,13 +539,13 @@ The hardest piece, deliberately sequenced last:
   `resubmitX` + `enqueueSubmission` wiring — the last remaining piece of
   this phase. Not yet verified end-to-end against a real backend (blocked
   twice now for two different reasons — see Progress above).
-- **Phase 2 (AI-assist fallback): ~3-4 days, scoped in detail this session**
-  (see the Phase 2 section above) — no code written yet. 6 of 7 forms
-  (DailyReport, MonthlyInspection, CustomForm trivial; FLHA, NearMiss,
-  Incident small-medium) reuse an already-editable review step; ToolboxTalk
-  needs new UI since its review step is read-only today. The README's
-  claimed "falls back to demo hazard data" pattern this phase was
-  originally meant to "extend" doesn't actually exist in code — checked.
+- **Phase 2 (AI-assist fallback): done, on all 7 forms** (see Progress
+  above). 6 of 7 forms (DailyReport, MonthlyInspection, CustomForm trivial;
+  FLHA, NearMiss, Incident small-medium) reused an already-editable review
+  step; ToolboxTalk needed new UI (a `manualtalk` step) since its review
+  step is read-only. Background AI regeneration + supervisor accept/discard
+  (the original "optional fast-follow") deliberately not built — see open
+  question 6. Not yet verified end-to-end against a real backend.
 - **Phase 3 (offline photos): medium-large, ~1-2 weeks** — the IndexedDB
   blob handling and storage-budget logic is the fiddliest part of this
   whole plan.

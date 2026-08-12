@@ -18,6 +18,7 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
+  const [aiAssisted, setAiAssisted] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [signed, setSigned] = useState(false);
@@ -65,6 +66,7 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
       if (draft.workerName) setWorkerName(draft.workerName);
       if (draft.answers) setAnswers(draft.answers);
       if (draft.aiSummary) setAiSummary(draft.aiSummary);
+      if (typeof draft.aiAssisted === "boolean") setAiAssisted(draft.aiAssisted);
       setStep(draft.step);
     }
     setDraftRestored(true);
@@ -74,7 +76,7 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
   useDraftAutosave(
     "monthly",
     companyId,
-    { step, siteId, form, questions, workerName, answers, aiSummary },
+    { step, siteId, form, questions, workerName, answers, aiSummary, aiAssisted },
     draftRestored && !!companyId && RESTORABLE_STEPS.includes(step)
   );
 
@@ -153,11 +155,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
       setAiSummary(parsed.summary || "");
+      setAiAssisted(true);
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — the actual
+  // inspection data (answers/notes) already exists before the AI call ever
+  // runs, so the fallback just builds a plain, non-AI summary sentence
+  // client-side and drops into the same already-editable review textarea.
+  // ai_assisted:false flags the record so a supervisor knows it wasn't
+  // AI-summarized.
+  const continueWithoutAI = () => {
+    const flagged = questions.filter(q => answers[q.id]?.answer === false);
+    const summary = flagged.length === 0
+      ? `All ${questions.length} item${questions.length === 1 ? "" : "s"} passed.`
+      : `${questions.length - flagged.length} of ${questions.length} items passed. Flagged: ${flagged.map(q => q.question_text).join("; ")}.`;
+    setAiSummary(summary);
+    setAiAssisted(false);
+    setGenError(false);
+    setStep("review");
   };
 
   // ── signature pad ────────────────────────────────────────
@@ -205,7 +226,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "submit_monthly", token,
-          siteId, formId: form.id, submittedBy: workerName, aiSummary, pdfUrl,
+          siteId, formId: form.id, submittedBy: workerName, aiSummary, aiAssisted, pdfUrl,
           answers: questions.map(q => ({ questionId: q.id, answer: answers[q.id]?.answer, note: answers[q.id]?.note || "" })),
         }),
       });
@@ -333,10 +354,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             );
           })}
 
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the summary. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the summary. Check your connection and try again, or continue without one.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : (workerName && allAnswered && notesComplete) ? "#4338CA" : "#94A3B8")} disabled={loading || !workerName || !allAnswered || !notesComplete} onClick={generateSummary}>
             {loading ? "⏳ Writing summary…" : "Generate Summary"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI summary</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("site")}>← Back</button>
         </>
       )}
@@ -344,6 +372,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* STEP: review */}
       {step === "review" && (
         <>
+          {!aiAssisted && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-summarized — feel free to edit the summary below before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", textTransform: "uppercase", letterSpacing: 0.5 }}>{form.title}</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{siteName()} · By {workerName}</div>

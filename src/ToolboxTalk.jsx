@@ -56,7 +56,7 @@ export async function resubmitToolboxTalk(payload, clientSubmissionId, tokenForR
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly", "After Incident"];
 
 export default function ToolboxTalk({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("choice"); // choice | setup | topic | review | signoff | findtalk | latesign | done
+  const [step, setStep] = useState("choice"); // choice | setup | topic | manualtalk | review | signoff | findtalk | latesign | done
   const [presenter, setPresenter] = useState(loginUserName);
   const [meetingType, setMeetingType] = useState("Pre-Job");
   const [site, setSite] = useState("");
@@ -65,7 +65,8 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const [topic, setTopic] = useState("");
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
-  const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[] }
+  const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[], ai_assisted }
+  const [manualNotes, setManualNotes] = useState(""); // docs/scope-offline-capability.md Phase 2 — plain fallback notes when AI is unreachable
   const [companyLogo, setCompanyLogo] = useState("");
   const cf = useCustomFields(companyId, "toolbox", token);
 
@@ -123,7 +124,7 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   // Only the "new talk" flow (setup/topic/review/signoff) is restorable —
   // "Sign Late" depends on fetching a specific existing record live
   // (lateSignTarget), which isn't something to cache locally.
-  const RESTORABLE_STEPS = ["setup", "topic", "review", "signoff"];
+  const RESTORABLE_STEPS = ["setup", "topic", "manualtalk", "review", "signoff"];
   const [draftRestored, setDraftRestored] = useState(false);
   useEffect(() => {
     if (!companyId) return;
@@ -135,6 +136,7 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
       if (draft.siteMode) setSiteMode(draft.siteMode);
       if (draft.topic) setTopic(draft.topic);
       if (draft.points) setPoints(draft.points);
+      if (draft.manualNotes) setManualNotes(draft.manualNotes);
       if (draft.attendees) setAttendees(draft.attendees);
       if (draft.presenterSigned) setPresenterSigned(draft.presenterSigned);
       setStep(draft.step);
@@ -146,7 +148,7 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   useDraftAutosave(
     "toolbox",
     companyId,
-    { step, presenter, meetingType, site, siteMode, topic, points, attendees, presenterSigned },
+    { step, presenter, meetingType, site, siteMode, topic, points, manualNotes, attendees, presenterSigned },
     draftRestored && !!companyId && RESTORABLE_STEPS.includes(step)
   );
 
@@ -196,12 +198,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       const a = text.indexOf("{"), b = text.lastIndexOf("}");
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
-      setPoints(parsed);
+      setPoints({ ...parsed, ai_assisted: true });
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: unlike the other 6 forms,
+  // ToolboxTalk's review step renders generated content as plain text with
+  // no edit path at all — a presenter can't currently fix a single word of
+  // an AI talk, let alone build one from scratch by hand. Rather than
+  // retrofit that whole screen, the fallback is a single plain-text step:
+  // type your talking points/notes, presented from memory instead of a
+  // structured AI breakdown — which is how a real presenter runs a talk
+  // without AI help anyway.
+  const goManualTalk = () => {
+    setGenError(false);
+    setStep("manualtalk");
+  };
+
+  const confirmManualTalk = () => {
+    setPoints({ summary: manualNotes.trim(), sections: [], discussion: [], ai_assisted: false });
+    setStep("signoff");
   };
 
   const addAttendee = () => {
@@ -402,11 +422,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What's the talk about?</div>
           <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the task, job, or safety focus. The AI will generate talking points for a 5-10 minute talk.</div>
           <textarea style={{ ...s.input, minHeight: 120, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Today we're pouring concrete near the road — I want to cover traffic control, silica dust, and manual lifting" value={topic} onChange={e => setTopic(e.target.value)} />
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the talk. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the talk. Check your connection and try again, or run it from your own notes.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : topic.trim() ? "#7C3AED" : "#94A3B8")} disabled={loading || !topic.trim()} onClick={generateTalk}>
             {loading ? "⏳ Preparing talk…" : "Generate Talking Points"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={goManualTalk}>Continue without AI — I'll present from my own notes</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
+        </div>
+      )}
+
+      {/* MANUAL TALK — docs/scope-offline-capability.md Phase 2 fallback when AI is unreachable */}
+      {step === "manualtalk" && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Your talking points</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>No AI structuring this time — jot down what you plan to cover. This becomes the record of the talk.</div>
+          <textarea style={{ ...s.input, minHeight: 160, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Reviewed traffic control plan, flaggers positioned before any lane closure. Silica dust — wet-cutting only, respirators on hand. No manual lifting over 50 lbs without a second person." value={manualNotes} onChange={e => setManualNotes(e.target.value)} />
+          <button style={s.btn(manualNotes.trim() ? "#7C3AED" : "#94A3B8")} disabled={!manualNotes.trim()} onClick={confirmManualTalk}>Continue to Sign-Off →</button>
+          <button style={s.ghost} onClick={() => setStep("topic")}>← Back</button>
         </div>
       )}
 

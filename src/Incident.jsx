@@ -291,12 +291,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       const a = text.indexOf("{"), b = text.lastIndexOf("}");
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
-      setReport(parsed);
+      setReport({ ...parsed, ai_assisted: true });
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — review is
+  // already fully editable (add/edit/remove every list item via
+  // ListEditor), so the fallback just needs an empty skeleton to fill in by
+  // hand. ai_assisted:false flags the record so a supervisor knows it
+  // wasn't AI-structured.
+  const continueWithoutAI = () => {
+    setReport({
+      severity: "Medium", severityReason: "", summary: description,
+      sequenceOfEvents: [], contributingFactors: [], rootCause: "",
+      immediateActions: [], correctiveActions: [],
+      ai_assisted: false,
+    });
+    setGenError(false);
+    setStep("review");
   };
 
   const updateList = (field, idx, val) => setReport(prev => ({ ...prev, [field]: prev[field].map((x, i) => i === idx ? val : x) }));
@@ -478,10 +495,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What happened?</div>
           <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the incident in your own words — what led up to it, what happened, and what was done. The AI will structure it into a formal report.</div>
           <textarea style={{ ...s.input, minHeight: 150, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Worker was carrying a sheet of plywood when a gust of wind caught it. He lost his grip and the edge struck his forearm, causing a deep cut. We stopped work, applied first aid, and drove him to the clinic for stitches." value={description} onChange={e => setDescription(e.target.value)} />
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the report. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the report. Check your connection and try again, or continue and write it up yourself.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : description.trim() ? "#DC2626" : "#94A3B8")} disabled={loading || !description.trim()} onClick={generateReport}>
             {loading ? "⏳ Structuring report…" : "Generate Report"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — I'll fill this in myself</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("details")}>← Back</button>
         </div>
       )}
@@ -489,6 +513,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* REVIEW */}
       {step === "review" && report && (
         <>
+          {report.ai_assisted === false && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-structured — fill in the details below yourself before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5 }}>{incidentType} — Incident Report</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{reporter} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>

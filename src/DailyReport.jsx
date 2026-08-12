@@ -224,12 +224,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       const a = text.indexOf("{"), b = text.lastIndexOf("}");
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
-      setReport(parsed);
+      setReport({ ...parsed, ai_assisted: true });
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached (offline, flaky connection, or a real server-side failure), let
+  // the worker continue with their own raw notes instead of getting stuck —
+  // review is already fully editable, so there's nothing new to build here
+  // beyond skipping straight to it. ai_assisted:false flags the record so a
+  // supervisor knows this report wasn't AI-polished.
+  const continueWithoutAI = () => {
+    setReport({
+      workSummary: workDone.trim(),
+      delaysSummary: delays.trim() || "No delays or issues reported.",
+      tomorrowPlan: tomorrow.trim() || "Not specified.",
+      ai_assisted: false,
+    });
+    setGenError(false);
+    setStep("review");
   };
 
   const updateText = (field, val) => setReport(prev => ({ ...prev, [field]: val }));
@@ -400,10 +417,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <label style={s.label}>Plan for tomorrow</label>
             <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. strip forms, pour remaining piers, start south footings" value={tomorrow} onChange={e => setTomorrow(e.target.value)} />
 
-            {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the report. Check your connection and try again.</div>}
+            {genError && (
+              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+                Couldn't generate the report. Check your connection and try again, or continue with your own notes below.
+              </div>
+            )}
             <button style={s.btn(loading ? "#94A3B8" : workDone.trim() ? "#16A34A" : "#94A3B8")} disabled={loading || !workDone.trim()} onClick={generateReport}>
               {loading ? "⏳ Writing report…" : "Generate Report"}
             </button>
+            {genError && (
+              <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — use my notes as written</button>
+            )}
             <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
           </div>
         </>
@@ -412,6 +436,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* REVIEW */}
       {step === "review" && report && (
         <>
+          {report.ai_assisted === false && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-polished — these are your notes as written. Feel free to tidy the wording below before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#15803D", textTransform: "uppercase", letterSpacing: 0.5 }}>Daily Report</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{site} · {reportDate} · {weatherSummary()}{temperature ? `, ${temperature}` : ""}</div>

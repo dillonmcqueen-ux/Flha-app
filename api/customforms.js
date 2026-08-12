@@ -354,7 +354,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl, clientSubmissionId } = req.body;
+      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId } = req.body;
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -397,6 +397,11 @@ export default async function handler(req, res) {
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
           ai_summary: aiSummary || null, pdf_url: pdfUrl || null, status: 'complete',
           client_submission_id: clientSubmissionId || null,
+          // docs/scope-offline-capability.md Phase 2 — flags a record
+          // submitted without AI-generated content (worker filled it in by
+          // hand because /api/generate-flha was unreachable). Defaults true
+          // (column default) when the client doesn't send it at all.
+          ai_assisted: aiAssisted !== false,
         })
         .select()
         .single();
