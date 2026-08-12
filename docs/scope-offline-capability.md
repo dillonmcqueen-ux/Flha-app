@@ -372,12 +372,32 @@ bolted this on late).
     `error` tile (same-session-only UX fix flagged in the Phase 3 section
     below, not offline-resilience work, doesn't block anything above) —
     left for a follow-up if it turns out to matter.
-  - **Not verified end-to-end** — same standing caveat as every other
-    phase. Passed `npm run build` and the vite dev-transform round-trip on
-    both touched files (`offlineQueue.js`, `Incident.jsx`); no `api/*.js`
-    files touched, so no tenant-scope review was triggered this pass
-    (nothing here reads or writes a company-scoped table server-side — the
-    `photos` IndexedDB store is purely local to the device).
+  - **Verified via automated Playwright tests, not yet on a real phone.**
+    `npx playwright test` against the live preview deploy isn't possible
+    from this environment — the network policy that has blocked
+    `*.vercel.app` for every phase this session also blocks it here — so
+    instead of skipping verification entirely, three new tests were added
+    to the existing `tests/incident.spec.js` suite (which already runs
+    `vite dev` + real Supabase-shaped mocks via `tests/helpers.js`,
+    matching this repo's established convention rather than a one-off
+    script): (1) an immediate-upload failure falls back to a "📶 Queued"
+    tile and the blob survives a full page reload via IndexedDB + draft
+    restore, not just in-memory state; (2) `PHOTO_BUDGET_BYTES` genuinely
+    blocks a photo that would exceed the 28MB cap, with the "storage is
+    full" message and a `Failed` tile, not a silent no-op; (3) submitting
+    back online actually drains the pending photo through
+    `resubmitIncident`'s `uploadPendingPhoto` — the submitted record's
+    `photo_urls` includes the newly-uploaded Storage path, and the blob is
+    deleted from IndexedDB afterward, not leaked. All 25 tests in the suite
+    pass (`npx playwright test`). This covers the client-side logic
+    end-to-end against mocked APIs — it's real coverage, not a substitute
+    for confirming the actual flow (log in online → go offline → add a
+    photo on an Incident report → confirm "📶 Queued" → reconnect → submit
+    → confirm it syncs and the photo shows up on the record) on a phone
+    against the live preview, which is still open. No `api/*.js` files
+    touched, so no tenant-scope review was triggered this pass (nothing
+    here reads or writes a company-scoped table server-side — the `photos`
+    IndexedDB store is purely local to the device).
 
 - **Phase 4: built.** `public/sw.js` (hand-rolled, no Workbox, ~95 lines),
   `public/manifest.json`, a set of generated icons, and the corresponding
