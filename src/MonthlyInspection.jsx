@@ -1,9 +1,52 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (PDF generation + upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Exported so
+// WorkerMenu.jsx can drain this form's queue without the component
+// mounted. periodMonth is captured once at the original fill time (not
+// recomputed here) so a submission completed near a month boundary and
+// resynced later still attributes to the month it was actually done, not
+// whenever the retry happens to land.
+export async function resubmitMonthly(payload, clientSubmissionId, tokenForRequest) {
+  const { formTitle, siteId, formId, siteNameStr, companyName, companyLogo, monthLabel, periodMonth, submittedBy, aiSummary, aiAssisted, items, sig } = payload;
+
+  const pdfUrl = await generateAndUploadMonthlyInspection({
+    formTitle, siteName: siteNameStr, companyName, companyLogo, monthLabel,
+    submittedBy, aiSummary, items, signatureDataUrl: sig, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/monthly", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "submit_monthly", token: tokenForRequest, clientSubmissionId,
+        siteId, formId, submittedBy, aiSummary, aiAssisted, pdfUrl, periodMonth,
+        answers: items.map(it => ({ questionId: it.questionId, answer: it.answer, note: it.note || "" })),
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 export default function MonthlyInspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("site"); // site | duplicate | none | questions | review | sign | done
+  const [step, setStep] = useState("site"); // site | duplicate | none | questions | review | sign | queued | done
   const [sites, setSites] = useState([]);
   const [siteId, setSiteId] = useState("");
   const [checking, setChecking] = useState(false);
@@ -194,59 +237,59 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const endDraw = () => { drawingRef.current = false; };
   const clearSig = () => { if (canvasEl) canvasEl.getContext("2d").clearRect(0, 0, canvasEl.width, canvasEl.height); setHasSignature(false); };
 
-  // docs/scope-offline-capability.md Phase 1: this used to only log a
-  // failed submit to the console and still move on to the "done" screen —
-  // meaning a dropped connection right at Submit told the worker the
-  // inspection was in when it never reached the server. Now it shows a
-  // real error and lets the worker retry manually instead. Deliberately
-  // NOT auto-queued like NearMiss/Incident/ToolboxTalk/DailyReport — this
-  // endpoint does a record insert followed by a per-question answers
-  // insert (and a conditional corrective_actions insert), and that
-  // multi-step shape isn't idempotent yet, so a blind background retry
-  // could create a duplicate record. Fix that server-side first if this
-  // needs full auto-queueing later.
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the inspection; a real server-side rejection shows an error
+  // and lets the worker retry manually. Full auto-queue now that the
+  // server side is idempotent (client_submission_id + a unique index on
+  // inspection_records, added earlier this session) — a blind background
+  // retry can no longer create a duplicate record.
   const submit = async () => {
     setSigned(true); setSaving(true); setSaveError(false);
     const sig = hasSignature && canvasEl ? canvasEl.toDataURL("image/png") : null;
 
     const items = questions.map(q => ({
+      questionId: q.id,
       question: q.question_text,
       answer: answers[q.id]?.answer,
       note: answers[q.id]?.note || "",
     }));
 
-    const pdfUrl = await generateAndUploadMonthlyInspection({
-      formTitle: form.title, siteName: siteName(), companyName, companyLogo,
-      monthLabel: new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long" }),
-      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig, token,
-    });
+    const now = new Date();
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      formTitle: form.title, siteId, formId: form.id, siteNameStr: siteName(), companyName, companyLogo,
+      monthLabel: now.toLocaleDateString("en-CA", { year: "numeric", month: "long" }),
+      periodMonth: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
+      submittedBy: workerName, aiSummary, aiAssisted, items, sig,
+    };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("monthly", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("monthly", companyId);
+      setStep("queued");
+      return;
+    }
 
     try {
-      const res = await fetch("/api/monthly", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "submit_monthly", token,
-          siteId, formId: form.id, submittedBy: workerName, aiSummary, aiAssisted, pdfUrl,
-          answers: questions.map(q => ({ questionId: q.id, answer: answers[q.id]?.answer, note: answers[q.id]?.note || "" })),
-        }),
-      });
-      if (!res.ok) {
-        console.error("Monthly inspection save failed:", res.status, await res.json().catch(() => ({})));
+      await resubmitMonthly(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("monthly", companyId);
+      setStep("done");
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Monthly inspection save failed:", e.message);
         setSaveError(true);
         setSaving(false);
         setSigned(false);
-        return;
+      } else {
+        await enqueueSubmission("monthly", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("monthly", companyId);
+        setStep("queued");
       }
-    } catch (e) {
-      console.error("Monthly inspection save failed:", e);
-      setSaveError(true);
-      setSaving(false);
-      setSigned(false);
-      return;
     }
-    setSaving(false);
-    clearDraft("monthly", companyId);
-    setStep("done");
   };
 
   const s = {
@@ -430,6 +473,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {saving ? "Submitting…" : saveError ? "Try Again" : "Sign & Submit Inspection"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{siteName()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#4338CA")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

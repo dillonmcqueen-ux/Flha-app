@@ -1,6 +1,6 @@
 # Scope: offline capability
 
-Status: Phase 0 built, Phase 1 mostly built, Phase 2 built (see Progress
+Status: Phase 0, 1, and 2 all built (see Progress
 below for all three). **Partially verified end-to-end now, by the user on
 their own phone against the PR #16 preview deploy** (this Claude Code
 session's own network egress policy 403s all `*.vercel.app` requests,
@@ -153,10 +153,8 @@ bolted this on late).
     where a wrong restore could crash the render (see the excluded-steps
     list above for why those two are the most delicate).
 
-- **Phase 1: server-side idempotency done on all 6 forms with a suitable
-  table; full auto-queue done for 6 of 8 forms; MonthlyInspection and
-  CustomForm have idempotent endpoints now too but their frontends still
-  need clientSubmissionId + auto-queue wired in (mechanical, unblocked).**
+- **Phase 1: done — server-side idempotency and full auto-queue on all 8
+  worker-facing forms.**
   - **A real bug found and fixed along the way, not just scoped:**
     `NearMiss.jsx`, `Incident.jsx`, `ToolboxTalk.jsx`, `DailyReport.jsx`,
     `MonthlyInspection.jsx`, and `CustomForm.jsx` all previously caught a
@@ -235,11 +233,27 @@ bolted this on late).
     (Postgres error code `23505`) in case a race between the check and the
     insert ever lets two concurrent retries both get past the check — the
     unique index is the real backstop, the app-level check is just the fast
-    path. **The frontends (`MonthlyInspection.jsx`, `CustomForm.jsx`) don't
-    send a `clientSubmissionId` yet and still don't have auto-queue** — that
-    wiring is now unblocked and is the same mechanical `resubmitX` +
-    `enqueueSubmission` + "queued" step treatment as the other 6 forms, left
-    for a follow-up pass.
+    path.
+  - **`MonthlyInspection.jsx` and `CustomForm.jsx` now have full auto-queue
+    too, closing out Phase 1 on all 8 forms.** Same mechanical
+    `resubmitX` + `enqueueSubmission` + "queued" step treatment as the
+    other 6, exported as `resubmitMonthly`/`resubmitCustomForm` and wired
+    into `WorkerMenu.jsx`'s `RESUBMIT_HANDLERS` (keys `monthly`,
+    `customform` — `customform` is a single shared queue bucket covering
+    every custom document type a company runs; `formId` inside each queued
+    item's payload is what routes it back to the right one on drain).
+    **A real bug fixed along the way, not just mechanical wiring:**
+    `submit_monthly` computed `period_month` from the server's own `now()`
+    at insert time — correct for a live submission, but wrong for a queued
+    one resynced after a delay that crosses a month boundary (an inspection
+    actually completed on the last day of the month could land attributed
+    to the next month if it happened to sync a day late). Fixed by having
+    the client capture `periodMonth` once at the original fill time and
+    send it along; the server uses it when given (format-validated, not
+    blindly trusted) and falls back to its own `now()` for older clients or
+    a malformed value. A follow-up tenant-scope review specifically checked
+    this new client-controlled date value for a data-integrity angle (not
+    just cross-tenant) and came back clean.
   - **Still not verified end-to-end against a live backend**, for a
     different reason than Phase 0's original gap. This pass had real
     Supabase/Vercel API access (via MCP tools) — enough to find a ready test
@@ -252,10 +266,9 @@ bolted this on late).
     (enqueue/list/drain/ordering/failure-handling) were verified for real in
     a browser in an earlier pass; the full "go offline in devtools, submit,
     come back online, watch it actually land in the database" path — now
-    across 6 forms instead of 4 — still has not been, and remains the
-    single most important thing to check on a preview deploy (from a
-    network that can actually reach it) before trusting this in front of a
-    real worker.
+    across all 8 forms — still has not been, and remains the single most
+    important thing to check on a preview deploy (from a network that can
+    actually reach it) before trusting this in front of a real worker.
 
 - **Phase 2: built, on all 7 forms that call `/api/generate-flha`** (see the
   Phase 2 section below for how each form was sized and why). Every form
@@ -529,16 +542,13 @@ The hardest piece, deliberately sequenced last:
   above) — session persistence and draft autosave across all 8
   worker-facing forms. Still worth a real click-through on a preview
   deploy before treating it as fully verified, per the caveat above.
-- **Phase 1 (submission queue, text-only): mostly done** (see Progress
-  above) — server-side idempotency and the queue infrastructure are done on
-  all 8 forms' tables now (including a schema migration for
-  MonthlyInspection/CustomForm); 6 of 8 forms (NearMiss, Incident,
-  ToolboxTalk, DailyReport, FLHA, Inspection) have full auto-queue.
-  MonthlyInspection/CustomForm's endpoints are idempotent but their
-  frontends still need the same mechanical `clientSubmissionId` +
-  `resubmitX` + `enqueueSubmission` wiring — the last remaining piece of
-  this phase. Not yet verified end-to-end against a real backend (blocked
-  twice now for two different reasons — see Progress above).
+- **Phase 1 (submission queue, text-only): done** (see Progress above) —
+  server-side idempotency and full auto-queue on all 8 worker-facing forms,
+  including a schema migration for MonthlyInspection/CustomForm (the two
+  tables with no jsonb column) and a real correctness fix found along the
+  way (`period_month` attribution for a delayed offline resync). Not yet
+  verified end-to-end against a real backend (blocked twice now for two
+  different reasons — see Progress above).
 - **Phase 2 (AI-assist fallback): done, on all 7 forms** (see Progress
   above). 6 of 7 forms (DailyReport, MonthlyInspection, CustomForm trivial;
   FLHA, NearMiss, Incident small-medium) reused an already-editable review

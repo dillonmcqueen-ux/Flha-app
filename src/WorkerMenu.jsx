@@ -5,14 +5,13 @@ import ToolboxTalk, { resubmitToolboxTalk } from "./ToolboxTalk.jsx";
 import NearMiss, { resubmitNearMiss } from "./NearMiss.jsx";
 import Incident, { resubmitIncident } from "./Incident.jsx";
 import DailyReport, { resubmitDaily } from "./DailyReport.jsx";
-import MonthlyInspection from "./MonthlyInspection.jsx";
-import CustomForm from "./CustomForm.jsx";
+import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
+import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
 import { drainQueue } from "./offlineQueue.js";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
-// docs/scope-offline-capability.md Phase 1). MonthlyInspection and
-// CustomForm still need this — see the scope doc.
+// docs/scope-offline-capability.md Phase 1) — now all 8 worker-facing forms.
 const RESUBMIT_HANDLERS = {
   daily: resubmitDaily,
   nearmiss: resubmitNearMiss,
@@ -20,6 +19,8 @@ const RESUBMIT_HANDLERS = {
   toolbox: resubmitToolboxTalk,
   flha: resubmitFLHA,
   inspection: resubmitInspection,
+  monthly: resubmitMonthly,
+  customform: resubmitCustomForm,
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.

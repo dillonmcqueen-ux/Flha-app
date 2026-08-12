@@ -236,7 +236,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId } = req.body;
+      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId, periodMonth } = req.body;
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -275,8 +275,19 @@ export default async function handler(req, res) {
         }
       }
 
+      // docs/scope-offline-capability.md Phase 1: period_month used to
+      // always be computed from the server's now() at insert time, which
+      // is wrong for a queued-offline submission resynced after a delay
+      // that crosses a month boundary — an inspection actually done on the
+      // last day of the month could land attributed to the next month.
+      // periodMonth (YYYY-MM-01) is captured client-side once, at the
+      // original fill time, and used here if given; a validated format
+      // only, never trusted blindly — falls back to server-computed now()
+      // for older clients or if the value is malformed.
       const now = new Date();
-      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const periodStart = (typeof periodMonth === 'string' && /^\d{4}-\d{2}-01$/.test(periodMonth))
+        ? periodMonth
+        : new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 
       const { data: record, error: recErr } = await supabaseAdmin
         .from('inspection_records')
