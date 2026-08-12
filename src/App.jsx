@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 // Fallback used only if Supabase has no data yet (e.g. first run)
 const FALLBACK_SOPS = {
@@ -465,6 +466,40 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [resumeError, setResumeError] = useState("");
   const [resumeChoices, setResumeChoices] = useState([]);
 
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Restores an in-progress, not-yet-submitted FLHA on mount, then
+  // debounced-saves it to this device's localStorage as it changes — so a
+  // dropped connection, a crash, or an accidental navigation doesn't cost
+  // the worker their typed task description or AI-generated hazards.
+  // Deliberately excludes the signature canvas (hasSignature/signed) and
+  // the amend flow (amendingId) — see the scope doc for why.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!forcedCompanyId) return;
+    const draft = loadDraft("flha", forcedCompanyId);
+    if (draft && draft.step && draft.step !== "done" && draft.step !== "company") {
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.jobSite) setJobSite(draft.jobSite);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.taskDesc) setTaskDesc(draft.taskDesc);
+      if (draft.transcript) setTranscript(draft.transcript);
+      if (draft.customValues) setCustomValues(draft.customValues);
+      if (draft.flha) setFlha(draft.flha);
+      if (draft.crew) setCrew(draft.crew);
+      if (draft.signName) setSignName(draft.signName);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forcedCompanyId]);
+
+  useDraftAutosave(
+    "flha",
+    forcedCompanyId,
+    { step, workerName, jobSite, siteMode, taskDesc, transcript, customValues, flha, crew, signName },
+    draftRestored && !!forcedCompanyId && !amendingId
+  );
+
   const resumeTodaysFLHA = async () => {
     setResumeError("");
     setResumeChoices([]);
@@ -721,6 +756,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     }
     setSavingFLHA(false);
     setPendingApproval(newStatus === "pending_approval");
+    clearDraft("flha", forcedCompanyId);
     return true;
   };
 
@@ -1267,7 +1303,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>

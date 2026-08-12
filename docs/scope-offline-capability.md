@@ -13,15 +13,17 @@ Confirmed by reading the actual submission path, not assumed:
 - **No offline handling exists anywhere.** Zero references to service
   workers, IndexedDB, `navigator.onLine`, or a web app manifest in `src/`
   or `api/`. There's also no `manifest.json` or `sw.js`.
-- **The session token is not persisted client-side.** `src/Login.jsx` keeps
-  `session` (which carries `token`) in a plain `useState` — no
-  `localStorage`/`sessionStorage` write anywhere in `src/`. A hard refresh
-  or an OS-killed backgrounded tab currently logs the user all the way back
-  out to the login screen, and login itself requires a live network call
-  (`api/login.js`). This matters a lot for offline: the token itself is
-  valid for 7 days once issued (`SESSION_TTL_MS` in `api/flhas.js` and the
-  other `api/*.js` files), but nothing today keeps it around past a page
-  reload for the app to use it.
+- ~~The session token is not persisted client-side~~ **Correction: it is,
+  but fragile.** `src/Login.jsx` originally persisted `session` (which
+  carries `token`) in `window.name`, not a plain in-memory `useState` as
+  first written here — that survives a same-tab reload but not a fully
+  closed-and-reopened tab, which is exactly the case that matters most for
+  a worker relaunching the app from a home-screen icon on a jobsite with no
+  signal. Fixed in Phase 0 below by switching to `localStorage`, which
+  survives that. The token itself is valid for 7 days once issued
+  (`SESSION_TTL_MS` in `api/flhas.js` and the other `api/*.js` files); a
+  stale local copy past that just fails on the next API call, same as
+  before.
 - **Every write goes through a fetch() to an `api/*.js` action-dispatcher**
   (e.g. `src/NearMiss.jsx` → `fetch("/api/reports", { body: JSON.stringify({
   action: "submit", token, ... }) })`), never a direct Supabase call from
@@ -65,6 +67,40 @@ can be designed correctly the first time instead of retrofitted around
 existing assumptions, which is exactly the trap the incumbents are stuck
 in (their sync bugs are the #1 recurring complaint precisely because they
 bolted this on late).
+
+## Progress
+
+- **Phase 0: done for session persistence, and done for FLHA's draft
+  autosave — the other 7 form types still need it.**
+  - `src/Login.jsx` now persists `session` to `localStorage`
+    (`fora_session`) instead of `window.name`.
+  - `src/useDraftAutosave.js` is the reusable piece: `loadDraft`/
+    `clearDraft`/`useDraftAutosave(formType, scopeId, data, enabled)`,
+    debounced localStorage writes keyed by form type + scope id (currently
+    `companyId` — see the hook's own file comment on the shared-device
+    tradeoff of not scoping per worker).
+  - Wired into `src/App.jsx` (FLHA, the flagship form): restores an
+    in-progress, not-yet-submitted FLHA on mount (skips the signature
+    canvas and the amend flow on purpose — see Open Question 4 and the
+    reasoning in the hook's own comments), autosaves as the worker types,
+    clears the draft on successful submit and on the explicit "start a new
+    FLHA" reset.
+  - **Not yet done:** the same wiring for NearMiss, Incident, Inspection,
+    ToolboxTalk, DailyReport, MonthlyInspection, and CustomForm. This is
+    mechanical repetition of the exact FLHA pattern (import the hook,
+    restore on mount, pass the relevant text/data fields to
+    `useDraftAutosave`, clear on submit success) — `src/App.jsx`'s wiring
+    is the reference to copy from. No design decisions left to make, just
+    the remaining seven files.
+  - Verified: `npm run build` succeeds; a Playwright check confirmed the
+    localStorage session round-trips correctly (fresh load → role picker;
+    a session written to `localStorage` and reloaded → skips straight to
+    the authenticated view; clearing it → back to the role picker). The
+    FLHA draft-autosave logic itself could not be exercised end-to-end in
+    this environment — there's no Supabase/session credentials available
+    to actually log in and reach the authenticated form, so this was
+    verified by code review, not a live run. Worth a real click-through on
+    a preview deploy before calling Phase 0 fully done.
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -184,7 +220,9 @@ The hardest piece, deliberately sequenced last:
 
 - **Phase 0 (session persistence + draft autosave): small, ~1–2 days.**
   Ship this alone first — it's the best return on effort in the whole plan
-  and needs nothing else to be useful.
+  and needs nothing else to be useful. Session persistence and FLHA's
+  autosave are done (see Progress above); extending autosave to the
+  other 7 forms is maybe half a day given the pattern is proven.
 - **Phase 1 (submission queue, text-only): medium, ~1 week**, including the
   idempotency/schema change across the relevant tables.
 - **Phase 2 (offline AI-assist fallback): small-medium, ~2-3 days**, mostly
