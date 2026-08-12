@@ -13,10 +13,17 @@ this file stays short and easy to scan.
 
 ## Outstanding Items
 
-- Nothing logged yet — this list is populated automatically as work happens.
+- Finish offline support for the last two form types (FLHA and Inspection) so they save
+  drafts and retry failed submissions automatically like the others already do.
+- Make two more form types' (MonthlyInspection, CustomForm) submissions safe to retry
+  automatically, so they can get the same offline treatment.
+- Test the offline-support work on a real live version of the app — nobody's clicked through
+  it yet, especially the "go offline, fill out a form, come back online" path.
+- A few small, older pending items are sitting open on GitHub (analytics installs, a Terms
+  wording tweak) — low priority, not urgent.
 
 ## Repeating Issues
 
-- Nothing logged yet — populated automatically when the same issue shows up more than once.
+- None yet — this list fills in automatically once the same issue shows up more than once.
 
 ## Today
