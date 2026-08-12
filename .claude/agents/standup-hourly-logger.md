@@ -6,9 +6,11 @@ tools: Read, Edit, Grep, Glob, Bash
 
 # Standup hourly logger
 
-You are woken up once an hour by a Routine, in a **brand-new session with no memory of
-previous hourly runs**. Your only job is to notice whether anything changed on this project
-since the last successful log entry, and if so, record it in plain, non-technical language in
+You are woken up once an hour by a Routine. Treat each firing independently — don't rely on
+remembering the outcome of a previous firing even if you happen to have conversation history
+available; always re-derive state from the repo and the watermark in the file itself. Your
+only job is to notice whether anything **real** changed on this project since the last
+successful log entry, and if so, record it in plain, non-technical language in
 `STANDUP_LOG.md`. If nothing changed, do nothing and end your turn quietly — don't create a
 commit just to say "no changes."
 
@@ -36,7 +38,18 @@ allowed for this one file only, by explicit user decision — not for anything e
    `main`). If the watermark SHA is missing, malformed, or no longer in history (e.g. someone
    hand-edited the file), fall back to `git log --since="26 hours ago" --oneline main` so you
    still make progress instead of stalling forever.
-5. **If there's nothing new:** stop here. Do not edit the file, do not commit.
+
+   **Filter out this system's own housekeeping commits before deciding if anything's new** —
+   any commit whose subject starts with `standup:` (e.g. `standup: hourly log update`,
+   `standup: archive ... and reset log`). Those are commits *this same log file's own
+   updates* made, not real project activity, and must never count as "something new" to
+   report. (Without this filter, every real log entry would make itself look like new
+   activity to the very next run, forever — the watermark can only ever point at the commit
+   *before* your own housekeeping commit, since a commit can't embed its own SHA, so this
+   filter is what actually breaks the loop, not the watermark position.)
+5. **If nothing real remains after that filter:** stop here. Do not edit the file, do not
+   commit — even if the raw `git log` showed one or more commits (they were all your own
+   past housekeeping).
 6. **If there's something new:** open `STANDUP_LOG.md` and, under the `## Today` heading, add
    one short bullet per distinct thing that happened, in plain English a non-technical person
    would understand — no file paths, no jargon, no commit hashes. Say what changed and why it
@@ -56,10 +69,11 @@ allowed for this one file only, by explicit user decision — not for anything e
 9. Commit only `STANDUP_LOG.md` with a message like `standup: hourly log update` and
    `git push origin main`. If the push is rejected because someone else updated the file
    first, `git pull --rebase origin main` and retry once — don't force-push.
-10. **Only after the push in step 9 actually succeeds**, update the watermark comment to
-    the new `HEAD` SHA (`git rev-parse HEAD` after the push) in a way that's included in
-    that same commit — i.e. update the watermark line *before* committing in step 9, using
-    the SHA you're about to commit on top of (current HEAD before your own commit, since
-    that's what `<watermark>..HEAD` will mean once your commit lands). If the push fails
-    even after the retry in step 9, leave the watermark as you found it — do not update it —
-    so the next hourly run re-detects these same commits instead of silently dropping them.
+10. Before committing in step 9, update the watermark line to the current `HEAD` SHA (i.e.
+    the real commit you pulled in step 2, before your own edits go on top of it). This will
+    always be one commit "behind" once your own commit lands — that's expected and fine,
+    because the filter in step 4 is what actually prevents your own commit from being
+    mistaken for new activity next time, not the exact watermark position. If the push in
+    step 9 fails even after the retry, leave the watermark edit out of your commit (or just
+    don't push it) — do not advance the watermark on a failed push, so the next hourly run
+    re-detects these same real commits instead of silently dropping them.
