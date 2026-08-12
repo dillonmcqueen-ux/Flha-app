@@ -1,9 +1,9 @@
 // src/offlineQueue.js
 // Phase 1 of docs/scope-offline-capability.md: a small IndexedDB-backed
-// queue for worker form submissions made while offline. Deliberately
-// text-only — no photo/PDF blobs are ever stored here (see the file
-// comment on `enqueueSubmission` for why), which is what keeps this a
-// same-day build instead of Phase 3's harder blob-storage problem.
+// queue for worker form submissions made while offline. The `queue` store
+// is deliberately text-only — no photo/PDF blobs, see the file comment on
+// `enqueueSubmission` for why — which is what kept Phase 1 a same-day
+// build instead of Phase 3's harder blob-storage problem.
 //
 // A queued item stores the plain input data a form's submit function
 // needs to redo the ENTIRE submission later (PDF generation + upload +
@@ -12,10 +12,19 @@
 // step in uploadViaSignedUrl.js), so there's nothing useful to "replay"
 // while still offline. Draining a queued item means calling the same
 // resubmit function a live online submit would have called.
+//
+// Phase 3 adds a second store, `photos`, for exactly the blobs `queue`
+// deliberately excludes — a photo whose upload couldn't complete (offline,
+// or just a bad moment for the connection) gets its Blob persisted here
+// instead of silently dropped, keyed by a local id. Only Incident.jsx uses
+// this today — it's the only worker form that captures photos at all
+// (checked every form; NearMiss's signature upload is a data URL string,
+// no blob, already handled fine by the `queue` store alone).
 
 const DB_NAME = "fora_offline_queue";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "queue";
+const PHOTO_STORE = "photos";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -26,18 +35,21 @@ function openDb() {
         const store = db.createObjectStore(STORE, { keyPath: "id" });
         store.createIndex("formType", "formType", { unique: false });
       }
+      if (!db.objectStoreNames.contains(PHOTO_STORE)) {
+        db.createObjectStore(PHOTO_STORE, { keyPath: "id" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function withStore(mode, fn) {
+async function withStore(storeName, mode, fn) {
   const db = await openDb();
   try {
     return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, mode);
-      const store = tx.objectStore(STORE);
+      const tx = db.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
       const result = fn(store);
       tx.oncomplete = () => resolve(result);
       tx.onerror = () => reject(tx.error);
@@ -67,12 +79,12 @@ export async function enqueueSubmission(formType, clientSubmissionId, payload) {
     attempts: 0,
     lastError: null,
   };
-  await withStore("readwrite", (store) => store.put(item));
+  await withStore(STORE, "readwrite", (store) => store.put(item));
   return item.id;
 }
 
 export async function listQueued(formType) {
-  return withStore("readonly", (store) => {
+  return withStore(STORE, "readonly", (store) => {
     return new Promise((resolve, reject) => {
       const items = [];
       const index = store.index("formType");
@@ -93,11 +105,11 @@ export async function countQueued(formType) {
 }
 
 export async function removeQueued(id) {
-  await withStore("readwrite", (store) => store.delete(id));
+  await withStore(STORE, "readwrite", (store) => store.delete(id));
 }
 
 export async function markAttempt(id, error) {
-  await withStore("readwrite", (store) => {
+  await withStore(STORE, "readwrite", (store) => {
     return new Promise((resolve, reject) => {
       const req = store.get(id);
       req.onsuccess = () => {
@@ -111,6 +123,56 @@ export async function markAttempt(id, error) {
       req.onerror = () => reject(req.error);
     });
   });
+}
+
+// ── Phase 3: pending photo blobs ────────────────────────────────────────
+// Stores a photo Blob for later upload once back online. Returns the local
+// id a form uses to reference it — both from its own React state (for the
+// thumbnail/status) and, if the whole record ends up queued offline too,
+// from the submission payload (as e.g. `pendingPhotoIds`) so a resubmit
+// function can upload it for real once there's connectivity.
+export async function storePhoto(blob, contentType) {
+  const id = genId();
+  await withStore(PHOTO_STORE, "readwrite", (store) => store.put({ id, blob, contentType: contentType || blob.type, createdAt: Date.now() }));
+  return id;
+}
+
+export async function getPhoto(id) {
+  return withStore(PHOTO_STORE, "readonly", (store) => {
+    return new Promise((resolve, reject) => {
+      const req = store.get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+export async function deletePhoto(id) {
+  await withStore(PHOTO_STORE, "readwrite", (store) => store.delete(id));
+}
+
+export async function listPhotos() {
+  return withStore(PHOTO_STORE, "readonly", (store) => {
+    return new Promise((resolve, reject) => {
+      const items = [];
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (cursor) { items.push(cursor.value); cursor.continue(); }
+        else resolve(items);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+// Total bytes currently held across all pending photo blobs — used to warn/
+// block new offline photo capture past a fixed budget (see PHOTO_BUDGET_BYTES
+// in Incident.jsx) so a multi-day offline stretch can't silently exhaust
+// device storage.
+export async function totalPhotoBytes() {
+  const items = await listPhotos();
+  return items.reduce((sum, p) => sum + (p.blob?.size || 0), 0);
 }
 
 // Drains every queued item for `formType`, calling `resubmit(payload)` for

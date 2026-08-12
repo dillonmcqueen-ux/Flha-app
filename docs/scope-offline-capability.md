@@ -1,7 +1,7 @@
 # Scope: offline capability
 
-Status: Phase 0, 1, and 2 all built; Phase 3 scoped in detail, not built
-(see Progress below). **Partially verified end-to-end now, by the user on
+Status: Phase 0, 1, 2, and 3 all built (see Progress below). **Partially
+verified end-to-end now, by the user on
 their own phone against the PR #16 preview deploy** (this Claude Code
 session's own network egress policy 403s all `*.vercel.app` requests,
 confirmed via the agent proxy status log and a direct `curl`, so no
@@ -321,6 +321,60 @@ bolted this on late).
     forms plus both API files; the actual "go offline before the AI step,
     tap Continue without AI, fill it in, submit" click-through has not been
     done in a real browser.
+
+- **Phase 3: built, on `Incident.jsx` — the only worker form that captures
+  photos** (see the Phase 3 section below for the scoping that narrowed
+  this from "offline photos across the app" down to one form). No
+  `api/*.js` changes — everything is client-side.
+  - **`src/offlineQueue.js`** gains a second IndexedDB object store,
+    `photos` (bumped `DB_VERSION` to 2, `withStore` generalized to take a
+    store name), keeping the original `queue` store's plain-JSON-only
+    guarantee intact. New `storePhoto`/`getPhoto`/`deletePhoto`/
+    `listPhotos`/`totalPhotoBytes` functions, same style as the existing
+    queue functions.
+  - **`Incident.jsx`'s `handlePhotoSelect`**: an immediate-upload failure
+    (offline, or just a bad moment for the connection) no longer shows a
+    silent "Failed" badge and drops the photo — the blob is persisted via
+    `storePhoto` instead, and the tile shows a new "📶 Queued" state,
+    distinct from a hard `error` (only reachable now if IndexedDB itself is
+    unavailable — private browsing, quota). A fixed `PHOTO_BUDGET_BYTES`
+    (28MB) blocks new offline photo capture past that cap with a clear
+    message, rather than letting a multi-day offline stretch silently fill
+    device storage — deliberately a fixed number over
+    `navigator.storage.estimate()`, simpler to reason about and test (open
+    question 7).
+  - **`resubmitIncident`** (already exported for Phase 1's queue) gained a
+    new first step: upload every `pendingPhotoIds` entry now that there's
+    connectivity (via the same `uploadViaSignedUrl` call, just deferred),
+    merge the results into `photo_urls` alongside whatever was already
+    uploaded live, and delete each blob from the `photos` store once
+    confirmed-uploaded. A photo upload that still fails at resubmit time
+    throws, which — matching `resubmitX`'s existing contract — leaves the
+    whole item queued for the next drain attempt; no new queue-semantics
+    work was needed, `drainQueue` already handles this correctly.
+  - **Draft-restore extended to cover pending photos**, the piece flagged
+    as the most delicate to get right (open question 8) — and built in the
+    same pass rather than deferred. The draft now stores only
+    `{ id, uploadedUrl, pending, pendingPhotoId }` metadata per photo
+    (never the `File` object); on restore, an already-uploaded photo just
+    needs its remote URL back (works fine as an `<img src>`, no blob
+    needed), and a `pending` photo has its blob loaded back from the
+    `photos` store with a fresh `previewUrl` regenerated via
+    `URL.createObjectURL` — a blob missing from storage (cleared, etc.) is
+    skipped silently rather than crashing the restore. This closes a gap
+    Phase 0 explicitly couldn't: before Phase 3, an accidental reload
+    between "photo captured offline" and "incident submitted" would have
+    lost the photo even though the rest of the form's draft survived.
+  - **Not built:** the "adjacent, cheap" manual retry button for a hard
+    `error` tile (same-session-only UX fix flagged in the Phase 3 section
+    below, not offline-resilience work, doesn't block anything above) —
+    left for a follow-up if it turns out to matter.
+  - **Not verified end-to-end** — same standing caveat as every other
+    phase. Passed `npm run build` and the vite dev-transform round-trip on
+    both touched files (`offlineQueue.js`, `Incident.jsx`); no `api/*.js`
+    files touched, so no tenant-scope review was triggered this pass
+    (nothing here reads or writes a company-scoped table server-side — the
+    `photos` IndexedDB store is purely local to the device).
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -673,13 +727,11 @@ ships in the same pass or as an explicit fast-follow.
   step is read-only. Background AI regeneration + supervisor accept/discard
   (the original "optional fast-follow") deliberately not built — see open
   question 6. Not yet verified end-to-end against a real backend.
-- **Phase 3 (offline photos): ~2-3 days, scoped in detail this session, not
-  built** (see the Phase 3 section above) — smaller than the original
-  estimate once grounded in the actual code: only `Incident.jsx` captures
-  photos at all (checked every form), and the existing Phase 1
-  upload/queue/drain infrastructure already does most of the work. The
-  IndexedDB blob handling and the draft-restore extension are the fiddliest
-  parts of what's left.
+- **Phase 3 (offline photos): done, on `Incident.jsx`** (see Progress
+  above) — the only worker form that captures photos at all (checked every
+  form), so this ended up much smaller than the original "medium-large,
+  ~1-2 weeks" estimate. Includes the draft-restore extension in the same
+  pass rather than as a deferred fast-follow.
 - **Phase 4 (PWA shell): small, ~2-3 days** once Phases 1–3 give it
   something real to do.
 

@@ -3,21 +3,57 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes } from "./offlineQueue.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
+// docs/scope-offline-capability.md Phase 3: caps total pending offline
+// photo storage so a multi-day offline stretch on a remote site can't
+// silently exhaust device storage. ~25-30MB is roughly 15-20 phone photos —
+// a fixed number is simpler to reason about and test than querying actual
+// device storage via navigator.storage.estimate().
+const PHOTO_BUDGET_BYTES = 28 * 1024 * 1024;
+
+// Uploads a single pending (offline-stored) photo now that there's
+// connectivity, and cleans up its local blob once confirmed-uploaded.
+// Shared by the live component (when a "queued" photo gets its own retry)
+// and resubmitIncident (when the whole record was queued and is now being
+// drained). Throws on failure so the caller can tell success from failure —
+// deliberately doesn't delete the blob on failure, so it stays available
+// for the next attempt.
+async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
+  const stored = await getPhoto(pendingPhotoId);
+  if (!stored) return null; // already uploaded and cleaned up, or never existed — nothing to do
+  const ext = (stored.contentType || "").split("/")[1] || "jpg";
+  const filename = `incident_${companyId}_${pendingPhotoId}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+  const { publicUrl } = await uploadViaSignedUrl({
+    endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
+    bucket: "incident-photos", filename, file: stored.blob, contentType: stored.contentType,
+  });
+  await deletePhoto(pendingPhotoId);
+  return publicUrl || null;
+}
+
 // Redoes the entire submission (signature + PDF upload + the final POST)
 // from plain input data — used both by a live online submit() below and by
 // offlineQueue's drainQueue() to resend a queued one later. `photoUrls`
-// only ever contains already-uploaded photo URLs (strings) — an in-flight
-// photo upload that failed offline isn't retried here, that's Phase 3
-// (offline photo support), not this pass. `sig` is a data: URL string, not
-// a File/Blob, so it's plain JSON and safe to persist in the queue.
+// carries already-uploaded photo URLs (strings); `pendingPhotoIds` carries
+// local IDs of photos whose upload couldn't complete earlier (offline, or a
+// bad moment for the connection) — resubmitIncident uploads each of those
+// now that there's connectivity, before assembling the final photo list.
+// `sig` is a data: URL string, not a File/Blob, so it's plain JSON and safe
+// to persist in the queue.
 export async function resubmitIncident(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls } = payload;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, pendingPhotoIds } = payload;
+
+  const uploadedPending = [];
+  for (const id of (pendingPhotoIds || [])) {
+    const url = await uploadPendingPhoto(id, companyId, tokenForRequest);
+    if (url) uploadedPending.push(url);
+  }
+  const allPhotoUrls = [...(photoUrls || []), ...uploadedPending];
 
   let signatureUrl = null;
   if (sig) {
@@ -34,7 +70,7 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
 
   const pdfUrl = await generateAndUploadIncident({
     reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields,
-    report, companyName, companyLogo, signatureDataUrl: sig, photoUrls, token: tokenForRequest,
+    report, companyName, companyLogo, signatureDataUrl: sig, photoUrls: allPhotoUrls, token: tokenForRequest,
   });
 
   let res;
@@ -55,7 +91,7 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
           report_json: { ...report, customFields },
           signed_by: reporter,
           pdf_url: pdfUrl || null,
-          photo_urls: photoUrls,
+          photo_urls: allPhotoUrls,
           signature_url: signatureUrl,
         },
       }),
@@ -104,8 +140,9 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [witnesses, setWitnesses] = useState("");
   const [evidence, setEvidence] = useState("");
 
-  const [photos, setPhotos] = useState([]); // [{ file, previewUrl, uploading, uploadedUrl }]
+  const [photos, setPhotos] = useState([]); // [{ id, file, previewUrl, uploading, uploadedUrl, pending, pendingPhotoId, error }]
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [photoBudgetError, setPhotoBudgetError] = useState("");
 
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
@@ -153,39 +190,68 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
     load();
   }, [companyId, token]);
 
-  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
-  // Photos aren't included — a File object doesn't survive JSON.stringify
-  // and the local blob: preview URL doesn't survive a reload either.
-  // Restoring already-uploaded photo URLs is real Phase 3 (offline photo
-  // support) work, not this pass.
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0/3) ──
+  // Photos: only metadata is saved to the draft (never the File object —
+  // it doesn't survive JSON.stringify, and its blob: preview URL doesn't
+  // survive a reload either). A `pending` photo's actual blob lives
+  // separately in offlineQueue.js's IndexedDB `photos` store (Phase 3),
+  // keyed by pendingPhotoId — restoring one means loading that blob back
+  // and regenerating a fresh previewUrl via URL.createObjectURL. An
+  // already-`uploadedUrl` photo just needs its remote URL back — that
+  // already works fine as an <img> src, no blob needed. A hard `error`
+  // entry (upload failed AND storing the blob failed too — IndexedDB
+  // itself unavailable) has nothing left to restore and is dropped.
   const [draftRestored, setDraftRestored] = useState(false);
   useEffect(() => {
     if (!companyId) return;
-    const draft = loadDraft("incident", companyId);
-    if (draft && draft.step && draft.step !== "done") {
-      if (draft.reporter) setReporter(draft.reporter);
-      if (draft.site) setSite(draft.site);
-      if (draft.siteMode) setSiteMode(draft.siteMode);
-      if (draft.occurredAt) setOccurredAt(draft.occurredAt);
-      if (draft.incidentType) setIncidentType(draft.incidentType);
-      if (draft.injuredPerson) setInjuredPerson(draft.injuredPerson);
-      if (draft.bodyPart) setBodyPart(draft.bodyPart);
-      if (draft.treatment) setTreatment(draft.treatment);
-      if (draft.medicalAttention) setMedicalAttention(draft.medicalAttention);
-      if (draft.witnesses) setWitnesses(draft.witnesses);
-      if (draft.evidence) setEvidence(draft.evidence);
-      if (draft.description) setDescription(draft.description);
-      if (draft.report) setReport(draft.report);
-      setStep(draft.step);
+    let cancelled = false;
+    async function restore() {
+      const draft = loadDraft("incident", companyId);
+      if (draft && draft.step && draft.step !== "done") {
+        if (draft.reporter) setReporter(draft.reporter);
+        if (draft.site) setSite(draft.site);
+        if (draft.siteMode) setSiteMode(draft.siteMode);
+        if (draft.occurredAt) setOccurredAt(draft.occurredAt);
+        if (draft.incidentType) setIncidentType(draft.incidentType);
+        if (draft.injuredPerson) setInjuredPerson(draft.injuredPerson);
+        if (draft.bodyPart) setBodyPart(draft.bodyPart);
+        if (draft.treatment) setTreatment(draft.treatment);
+        if (draft.medicalAttention) setMedicalAttention(draft.medicalAttention);
+        if (draft.witnesses) setWitnesses(draft.witnesses);
+        if (draft.evidence) setEvidence(draft.evidence);
+        if (draft.description) setDescription(draft.description);
+        if (draft.report) setReport(draft.report);
+        if (draft.photosMeta && draft.photosMeta.length > 0) {
+          const restoredPhotos = [];
+          for (const meta of draft.photosMeta) {
+            if (meta.uploadedUrl) {
+              restoredPhotos.push({ id: meta.id, file: null, previewUrl: meta.uploadedUrl, uploading: false, uploadedUrl: meta.uploadedUrl, pending: false, pendingPhotoId: null, error: false });
+            } else if (meta.pending && meta.pendingPhotoId) {
+              const stored = await getPhoto(meta.pendingPhotoId);
+              if (stored) {
+                restoredPhotos.push({ id: meta.id, file: null, previewUrl: URL.createObjectURL(stored.blob), uploading: false, uploadedUrl: null, pending: true, pendingPhotoId: meta.pendingPhotoId, error: false });
+              }
+              // if the blob is missing (cleared storage, etc.) there's nothing to restore — skip silently
+            }
+          }
+          if (!cancelled && restoredPhotos.length > 0) setPhotos(restoredPhotos);
+        }
+        setStep(draft.step);
+      }
+      if (!cancelled) setDraftRestored(true);
     }
-    setDraftRestored(true);
+    restore();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
   useDraftAutosave(
     "incident",
     companyId,
-    { step, reporter, site, siteMode, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, description, report },
+    {
+      step, reporter, site, siteMode, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, description, report,
+      photosMeta: photos.map(p => ({ id: p.id, uploadedUrl: p.uploadedUrl, pending: p.pending, pendingPhotoId: p.pendingPhotoId })),
+    },
     draftRestored && !!companyId
   );
 
@@ -202,6 +268,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const handlePhotoSelect = async (fileList) => {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
+    setPhotoBudgetError("");
 
     const newEntries = files.map(file => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -209,6 +276,8 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
       previewUrl: URL.createObjectURL(file),
       uploading: true,
       uploadedUrl: null,
+      pending: false,
+      pendingPhotoId: null,
       error: false,
     }));
     setPhotos(prev => [...prev, ...newEntries]);
@@ -224,7 +293,26 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
         });
         setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: publicUrl || null } : p));
       } catch (e) {
-        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+        // docs/scope-offline-capability.md Phase 3: an immediate upload
+        // failure (offline, or just a bad moment for the connection) used
+        // to silently drop the photo entirely — nothing blocked the worker
+        // from submitting without it, and it was gone. Now the blob is
+        // persisted locally instead, so submit() -> resubmitIncident can
+        // upload it for real once the incident is actually submitted (or,
+        // if the whole record ends up queued too, once that gets drained).
+        const budgetUsed = await totalPhotoBytes();
+        if (budgetUsed + entry.file.size > PHOTO_BUDGET_BYTES) {
+          setPhotoBudgetError("Photo storage on this device is full from previously queued photos — reconnect to let them sync before adding more.");
+          setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+        } else {
+          try {
+            const pendingPhotoId = await storePhoto(entry.file, entry.file.type);
+            setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, pending: true, pendingPhotoId } : p));
+          } catch (storeErr) {
+            // IndexedDB itself unavailable (private browsing, quota) — genuinely nothing left to fall back to.
+            setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+          }
+        }
       }
       setUploadingCount(prev => Math.max(0, prev - 1));
     }
@@ -234,11 +322,13 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
     setPhotos(prev => {
       const target = prev.find(p => p.id === id);
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      if (target?.pendingPhotoId) deletePhoto(target.pendingPhotoId).catch(() => {});
       return prev.filter(p => p.id !== id);
     });
   };
 
   const uploadedPhotoUrls = () => photos.filter(p => p.uploadedUrl).map(p => p.uploadedUrl);
+  const pendingPhotoIds = () => photos.filter(p => p.pending && p.pendingPhotoId).map(p => p.pendingPhotoId);
 
   const generateReport = async () => {
     setLoading(true); setGenError(false);
@@ -330,8 +420,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const photoUrls = uploadedPhotoUrls();
+    const pendingIds = pendingPhotoIds();
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls };
+    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, pendingPhotoIds: pendingIds };
 
     if (!navigator.onLine) {
       await enqueueSubmission("incident", clientSubmissionId, payload);
@@ -462,6 +553,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   {p.uploading && (
                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#475569" }}>⏳</div>
                   )}
+                  {p.pending && (
+                    <div style={{ position: "absolute", inset: 0, background: "#FFFBEB99", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#92400E", textAlign: "center", padding: 4 }}>📶 Queued</div>
+                  )}
                   {p.error && (
                     <div style={{ position: "absolute", inset: 0, background: "#FEF2F2CC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#991B1B" }}>Failed</div>
                   )}
@@ -469,6 +563,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 </div>
               ))}
             </div>
+          )}
+
+          {photos.some(p => p.pending) && (
+            <div style={{ fontSize: 12, color: "#92400E", marginBottom: 10 }}>📶 Queued photos will upload automatically once you're back online — no need to redo them.</div>
+          )}
+          {photoBudgetError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>{photoBudgetError}</div>
           )}
 
           <label style={{ display: "block", background: "#F1F5F9", color: "#334155", border: "1.5px dashed #CBD5E1", borderRadius: 9, padding: "14px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center", marginBottom: 14 }}>
