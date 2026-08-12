@@ -111,3 +111,22 @@ on `flha-app`, meaning every PR's preview URL — posted openly in GitHub
 comments — was publicly reachable running the live app; enabled
 `ssoProtection` on preview deployments only (production left untouched,
 since that's the actual customer-facing app).
+
+## Post-upgrade cleanup (one-time, event-triggered)
+
+The project is deliberately staying on Vercel's **Hobby** plan for now to
+keep costs at zero pre-revenue — `api/` is at 12/12 of the Hobby function
+cap, and two files carry workarounds purely because of it (see
+`.claude/agents/vercel-function-budget-guardian.md`).
+
+**Trigger condition: the first paying customer.** At that point, the plan
+is: add a payment method, upgrade the Vercel team to Pro, then run
+`hobby-cap-unwinder` once to split those two workarounds back into their
+own clean files now that the function cap that forced them no longer
+applies. Do not run `hobby-cap-unwinder` before the Pro upgrade is
+confirmed — it would push `api/` over the still-active Hobby cap and break
+deployment. Neither the upgrade nor the agent run should happen
+automatically; both wait for an explicit go-ahead, since the upgrade is a
+recurring paid charge and needs fresh confirmation at the time (see the
+`buy_pro` tool's own confirmation requirement), not something to
+pre-authorize in advance.
