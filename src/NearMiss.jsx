@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 const SEVERITY = {
   Low: { color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -69,6 +70,33 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("nearmiss", companyId);
+    if (draft && draft.step && draft.step !== "done") {
+      if (draft.reporter) setReporter(draft.reporter);
+      if (draft.anonymous) setAnonymous(draft.anonymous);
+      if (draft.site) setSite(draft.site);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.occurredAt) setOccurredAt(draft.occurredAt);
+      if (draft.involved) setInvolved(draft.involved);
+      if (draft.description) setDescription(draft.description);
+      if (draft.report) setReport(draft.report);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "nearmiss",
+    companyId,
+    { step, reporter, anonymous, site, siteMode, occurredAt, involved, description, report },
+    draftRestored && !!companyId
+  );
 
   const reporterLabel = () => anonymous ? "Anonymous" : reporter;
 
@@ -185,6 +213,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       console.error("Near miss save failed:", e);
     }
     setSaving(false);
+    clearDraft("nearmiss", companyId);
     setStep("done");
   };
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadDaily } from "./generateDailyPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
@@ -72,6 +73,39 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("daily", companyId);
+    if (draft && draft.step && draft.step !== "done") {
+      if (draft.reporter) setReporter(draft.reporter);
+      if (draft.site) setSite(draft.site);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.reportDate) setReportDate(draft.reportDate);
+      if (draft.weather) setWeather(draft.weather);
+      if (draft.temperature) setTemperature(draft.temperature);
+      if (draft.crew) setCrew(draft.crew);
+      if (draft.pickedEquip) setPickedEquip(draft.pickedEquip);
+      if (draft.otherEquipment) setOtherEquipment(draft.otherEquipment);
+      if (draft.visitors) setVisitors(draft.visitors);
+      if (draft.workDone) setWorkDone(draft.workDone);
+      if (draft.delays) setDelays(draft.delays);
+      if (draft.tomorrow) setTomorrow(draft.tomorrow);
+      if (draft.report) setReport(draft.report);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "daily",
+    companyId,
+    { step, reporter, site, siteMode, reportDate, weather, temperature, crew, pickedEquip, otherEquipment, visitors, workDone, delays, tomorrow, report },
+    draftRestored && !!companyId
+  );
 
   const equipLabel = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
@@ -172,6 +206,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       console.error("Daily report save failed:", e);
     }
     setSaving(false);
+    clearDraft("daily", companyId);
     setStep("done");
   };
 

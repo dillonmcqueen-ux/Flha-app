@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -78,6 +79,45 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Equipment selection restores unconditionally, but the step only jumps
+  // back into "worker" or "inspect" — "choice" and "posttrip" depend on
+  // openPretrip/lastInspection, which are always re-fetched live rather
+  // than cached (a stale cached "open pre-trip today" could be actively
+  // wrong if it's since been closed out or superseded), so there's nothing
+  // safe to restore into those two steps. A worker mid-post-trip who loses
+  // connection just re-picks the equipment and re-checks it.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("inspection", companyId);
+    if (draft) {
+      if (draft.eqMode) setEqMode(draft.eqMode);
+      if (draft.selectedEq) setSelectedEq(draft.selectedEq);
+      if (draft.selectedEqId) setSelectedEqId(draft.selectedEqId);
+      if (draft.freeEq) setFreeEq(draft.freeEq);
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.attachedTrailerId) setAttachedTrailerId(draft.attachedTrailerId);
+      if (draft.attachedTrailerText) setAttachedTrailerText(draft.attachedTrailerText);
+      if (draft.step === "worker" || draft.step === "inspect") {
+        if (draft.readingUnit) setReadingUnit(draft.readingUnit);
+        if (draft.startReading) setStartReading(draft.startReading);
+        if (draft.items && draft.items.length > 0) setItems(draft.items);
+        if (draft.inspectionMeta) setInspectionMeta(draft.inspectionMeta);
+        setStep(draft.step);
+      }
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "inspection",
+    companyId,
+    { step, eqMode, selectedEq, selectedEqId, freeEq, workerName, attachedTrailerId, attachedTrailerText, readingUnit, startReading, items, inspectionMeta },
+    draftRestored && !!companyId
+  );
 
   const labelFor = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
@@ -305,6 +345,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       return;
     }
     setSavingInspection(false);
+    clearDraft("inspection", companyId);
     setTimeout(() => setStep("done"), 500);
   };
 
@@ -371,6 +412,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       return;
     }
     setSavingInspection(false);
+    clearDraft("inspection", companyId);
     setTimeout(() => setStep("done"), 500);
   };
 

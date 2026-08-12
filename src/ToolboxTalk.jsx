@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly", "After Incident"];
 
@@ -66,6 +67,37 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Only the "new talk" flow (setup/topic/review/signoff) is restorable —
+  // "Sign Late" depends on fetching a specific existing record live
+  // (lateSignTarget), which isn't something to cache locally.
+  const RESTORABLE_STEPS = ["setup", "topic", "review", "signoff"];
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("toolbox", companyId);
+    if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
+      if (draft.presenter) setPresenter(draft.presenter);
+      if (draft.meetingType) setMeetingType(draft.meetingType);
+      if (draft.site) setSite(draft.site);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.topic) setTopic(draft.topic);
+      if (draft.points) setPoints(draft.points);
+      if (draft.attendees) setAttendees(draft.attendees);
+      if (draft.presenterSigned) setPresenterSigned(draft.presenterSigned);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "toolbox",
+    companyId,
+    { step, presenter, meetingType, site, siteMode, topic, points, attendees, presenterSigned },
+    draftRestored && !!companyId && RESTORABLE_STEPS.includes(step)
+  );
 
   // ── signature pad ────────────────────────────────────────
   const getPos = (e) => {
@@ -231,6 +263,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       console.error("Toolbox talk save failed:", e);
     }
     setSaving(false);
+    clearDraft("toolbox", companyId);
     setStep("done");
   };
 

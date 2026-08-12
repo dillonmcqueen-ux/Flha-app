@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 const INCIDENT_TYPES = [
   "Injury / Illness",
@@ -82,6 +83,42 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Photos aren't included — a File object doesn't survive JSON.stringify
+  // and the local blob: preview URL doesn't survive a reload either.
+  // Restoring already-uploaded photo URLs is real Phase 3 (offline photo
+  // support) work, not this pass.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("incident", companyId);
+    if (draft && draft.step && draft.step !== "done") {
+      if (draft.reporter) setReporter(draft.reporter);
+      if (draft.site) setSite(draft.site);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.occurredAt) setOccurredAt(draft.occurredAt);
+      if (draft.incidentType) setIncidentType(draft.incidentType);
+      if (draft.injuredPerson) setInjuredPerson(draft.injuredPerson);
+      if (draft.bodyPart) setBodyPart(draft.bodyPart);
+      if (draft.treatment) setTreatment(draft.treatment);
+      if (draft.medicalAttention) setMedicalAttention(draft.medicalAttention);
+      if (draft.witnesses) setWitnesses(draft.witnesses);
+      if (draft.evidence) setEvidence(draft.evidence);
+      if (draft.description) setDescription(draft.description);
+      if (draft.report) setReport(draft.report);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "incident",
+    companyId,
+    { step, reporter, site, siteMode, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, description, report },
+    draftRestored && !!companyId
+  );
 
   const getPos = (e) => {
     const c = canvasRef.current, r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
@@ -244,6 +281,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       console.error("Incident save failed:", e);
     }
     setSaving(false);
+    clearDraft("incident", companyId);
     setStep("done");
   };
 

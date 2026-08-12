@@ -70,37 +70,57 @@ bolted this on late).
 
 ## Progress
 
-- **Phase 0: done for session persistence, and done for FLHA's draft
-  autosave — the other 7 form types still need it.**
+- **Phase 0: done — session persistence and draft autosave across all 8
+  worker-facing forms.**
   - `src/Login.jsx` now persists `session` to `localStorage`
     (`fora_session`) instead of `window.name`.
   - `src/useDraftAutosave.js` is the reusable piece: `loadDraft`/
     `clearDraft`/`useDraftAutosave(formType, scopeId, data, enabled)`,
-    debounced localStorage writes keyed by form type + scope id (currently
-    `companyId` — see the hook's own file comment on the shared-device
-    tradeoff of not scoping per worker).
-  - Wired into `src/App.jsx` (FLHA, the flagship form): restores an
-    in-progress, not-yet-submitted FLHA on mount (skips the signature
-    canvas and the amend flow on purpose — see Open Question 4 and the
-    reasoning in the hook's own comments), autosaves as the worker types,
-    clears the draft on successful submit and on the explicit "start a new
-    FLHA" reset.
-  - **Not yet done:** the same wiring for NearMiss, Incident, Inspection,
-    ToolboxTalk, DailyReport, MonthlyInspection, and CustomForm. This is
-    mechanical repetition of the exact FLHA pattern (import the hook,
-    restore on mount, pass the relevant text/data fields to
-    `useDraftAutosave`, clear on submit success) — `src/App.jsx`'s wiring
-    is the reference to copy from. No design decisions left to make, just
-    the remaining seven files.
-  - Verified: `npm run build` succeeds; a Playwright check confirmed the
-    localStorage session round-trips correctly (fresh load → role picker;
+    debounced localStorage writes keyed by form type + scope id (usually
+    `companyId`; `CustomForm.jsx` additionally scopes by `formId` since a
+    company can run several custom document types at once — see the
+    hook's own file comment on the shared-device tradeoff of not scoping
+    per worker).
+  - Wired into all 8 worker-facing forms — `src/App.jsx` (FLHA) first as
+    the reference implementation, then `NearMiss.jsx`, `Incident.jsx`,
+    `Inspection.jsx`, `ToolboxTalk.jsx`, `DailyReport.jsx`,
+    `MonthlyInspection.jsx`, and `CustomForm.jsx`. Each restores an
+    in-progress, not-yet-submitted document on mount and debounce-saves it
+    as the worker types; each clears its draft on successful submit.
+    Deliberately excluded per form, and why:
+    - The signature canvas everywhere — redrawing pixels back onto a
+      `<canvas>` from a data URL is solvable but out of scope for this
+      pass, and re-signing takes seconds anyway.
+    - FLHA's amend flow (`amendingId`) and ToolboxTalk's "sign a talk you
+      missed" flow (`lateSignTarget`) — both operate on an existing
+      server record fetched live, not a fresh draft.
+    - Inspection's `openPretrip`/`lastInspection` and MonthlyInspection's
+      `existingRecord` — each is a live "does one already exist for
+      today/this month" check; restoring a stale cached answer could be
+      actively wrong (closed out or superseded since caching), so those
+      steps (`choice`/`posttrip` for Inspection, `duplicate` for
+      MonthlyInspection) are excluded from restore and always re-fetched.
+    - Incident's in-flight photo uploads — a `File` object doesn't survive
+      `JSON.stringify` and a `blob:` preview URL doesn't survive a reload;
+      restoring already-uploaded photo URLs is real Phase 3 work, not this
+      pass.
+  - Verified: `npm run build` succeeds after each batch; every touched
+    file was also individually round-tripped through Vite's dev transform
+    (`GET /src/<File>.jsx` against a running `vite` dev server) to catch
+    any import/syntax error that a production build might not surface the
+    same way. A Playwright check confirmed the localStorage session
+    round-trips correctly (fresh load → role picker;
     a session written to `localStorage` and reloaded → skips straight to
     the authenticated view; clearing it → back to the role picker). The
-    FLHA draft-autosave logic itself could not be exercised end-to-end in
-    this environment — there's no Supabase/session credentials available
-    to actually log in and reach the authenticated form, so this was
-    verified by code review, not a live run. Worth a real click-through on
-    a preview deploy before calling Phase 0 fully done.
+    draft-autosave logic itself could not be exercised end-to-end for any
+    of the 8 forms in this environment — there's no Supabase/session
+    credentials available to actually log in and reach an authenticated
+    form, so all 8 were verified by code review and the dev-transform
+    check above, not a live click-through. Worth a real run-through of
+    each document type on a preview deploy before calling Phase 0 fully
+    done — pay closest attention to Inspection and MonthlyInspection,
+    where a wrong restore could crash the render (see the excluded-steps
+    list above for why those two are the most delicate).
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -218,11 +238,10 @@ The hardest piece, deliberately sequenced last:
 
 ## Rough size and recommended sequencing
 
-- **Phase 0 (session persistence + draft autosave): small, ~1–2 days.**
-  Ship this alone first — it's the best return on effort in the whole plan
-  and needs nothing else to be useful. Session persistence and FLHA's
-  autosave are done (see Progress above); extending autosave to the
-  other 7 forms is maybe half a day given the pattern is proven.
+- **Phase 0 (session persistence + draft autosave): done** (see Progress
+  above) — session persistence and draft autosave across all 8
+  worker-facing forms. Still worth a real click-through on a preview
+  deploy before treating it as fully verified, per the caveat above.
 - **Phase 1 (submission queue, text-only): medium, ~1 week**, including the
   idempotency/schema change across the relevant tables.
 - **Phase 2 (offline AI-assist fallback): small-medium, ~2-3 days**, mostly

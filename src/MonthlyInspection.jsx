@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 export default function MonthlyInspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("site"); // site | duplicate | none | questions | review | sign | done
@@ -46,6 +47,35 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Restores into "questions"/"review"/"sign" only — "duplicate" depends on
+  // existingRecord, a live "was this already submitted this month" check
+  // that shouldn't be trusted stale, so that's excluded and not restored.
+  const RESTORABLE_STEPS = ["questions", "review", "sign"];
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("monthly", companyId);
+    if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
+      if (draft.siteId) setSiteId(draft.siteId);
+      if (draft.form) setForm(draft.form);
+      if (draft.questions) setQuestions(draft.questions);
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.answers) setAnswers(draft.answers);
+      if (draft.aiSummary) setAiSummary(draft.aiSummary);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "monthly",
+    companyId,
+    { step, siteId, form, questions, workerName, answers, aiSummary },
+    draftRestored && !!companyId && RESTORABLE_STEPS.includes(step)
+  );
 
   const siteName = () => sites.find(s => String(s.id) === String(siteId))?.name || "";
 
@@ -171,6 +201,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       console.error("Monthly inspection save failed:", e);
     }
     setSaving(false);
+    clearDraft("monthly", companyId);
     setStep("done");
   };
 

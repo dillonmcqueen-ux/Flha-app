@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 
 export default function CustomForm({ companyId, companyName, userName: loginUserName = "", formId, onBack, onLogout, token = null }) {
   const [step, setStep] = useState("site"); // site | questions | review | sign | done
@@ -44,6 +45,35 @@ export default function CustomForm({ companyId, companyName, userName: loginUser
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Scoped by companyId + formId, not just companyId — a company can have
+  // several custom document types active at once, each needs its own slot.
+  const draftScope = companyId && formId ? `${companyId}::${formId}` : null;
+  const RESTORABLE_STEPS = ["questions", "review", "sign"];
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!draftScope) return;
+    const draft = loadDraft("customform", draftScope);
+    if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
+      if (draft.siteId) setSiteId(draft.siteId);
+      if (draft.form) setForm(draft.form);
+      if (draft.questions) setQuestions(draft.questions);
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.answers) setAnswers(draft.answers);
+      if (draft.aiSummary) setAiSummary(draft.aiSummary);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftScope]);
+
+  useDraftAutosave(
+    "customform",
+    draftScope,
+    { step, siteId, form, questions, workerName, answers, aiSummary },
+    draftRestored && !!draftScope && RESTORABLE_STEPS.includes(step)
+  );
 
   const siteName = () => sites.find(s => String(s.id) === String(siteId))?.name || "";
 
@@ -160,6 +190,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       console.error("Custom form save failed:", e);
     }
     setSaving(false);
+    clearDraft("customform", draftScope);
     setStep("done");
   };
 
