@@ -1,8 +1,52 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (PDF generation + upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Exported so
+// WorkerMenu.jsx can drain this form's queue without the component
+// mounted. periodMonth is captured once at the original fill time (not
+// recomputed here) so a submission completed near a month boundary and
+// resynced later still attributes to the month it was actually done, not
+// whenever the retry happens to land.
+export async function resubmitMonthly(payload, clientSubmissionId, tokenForRequest) {
+  const { formTitle, siteId, formId, siteNameStr, companyName, companyLogo, monthLabel, periodMonth, submittedBy, aiSummary, aiAssisted, items, sig } = payload;
+
+  const pdfUrl = await generateAndUploadMonthlyInspection({
+    formTitle, siteName: siteNameStr, companyName, companyLogo, monthLabel,
+    submittedBy, aiSummary, items, signatureDataUrl: sig, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/monthly", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "submit_monthly", token: tokenForRequest, clientSubmissionId,
+        siteId, formId, submittedBy, aiSummary, aiAssisted, pdfUrl, periodMonth,
+        answers: items.map(it => ({ questionId: it.questionId, answer: it.answer, note: it.note || "" })),
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 export default function MonthlyInspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("site"); // site | duplicate | none | questions | review | sign | done
+  const [step, setStep] = useState("site"); // site | duplicate | none | questions | review | sign | queued | done
   const [sites, setSites] = useState([]);
   const [siteId, setSiteId] = useState("");
   const [checking, setChecking] = useState(false);
@@ -17,7 +61,9 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
+  const [aiAssisted, setAiAssisted] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [signed, setSigned] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
 
@@ -46,6 +92,36 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Restores into "questions"/"review"/"sign" only — "duplicate" depends on
+  // existingRecord, a live "was this already submitted this month" check
+  // that shouldn't be trusted stale, so that's excluded and not restored.
+  const RESTORABLE_STEPS = ["questions", "review", "sign"];
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("monthly", companyId);
+    if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
+      if (draft.siteId) setSiteId(draft.siteId);
+      if (draft.form) setForm(draft.form);
+      if (draft.questions) setQuestions(draft.questions);
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.answers) setAnswers(draft.answers);
+      if (draft.aiSummary) setAiSummary(draft.aiSummary);
+      if (typeof draft.aiAssisted === "boolean") setAiAssisted(draft.aiAssisted);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "monthly",
+    companyId,
+    { step, siteId, form, questions, workerName, answers, aiSummary, aiAssisted },
+    draftRestored && !!companyId && RESTORABLE_STEPS.includes(step)
+  );
 
   const siteName = () => sites.find(s => String(s.id) === String(siteId))?.name || "";
 
@@ -122,11 +198,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
       setAiSummary(parsed.summary || "");
+      setAiAssisted(true);
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — the actual
+  // inspection data (answers/notes) already exists before the AI call ever
+  // runs, so the fallback just builds a plain, non-AI summary sentence
+  // client-side and drops into the same already-editable review textarea.
+  // ai_assisted:false flags the record so a supervisor knows it wasn't
+  // AI-summarized.
+  const continueWithoutAI = () => {
+    const flagged = questions.filter(q => answers[q.id]?.answer === false);
+    const summary = flagged.length === 0
+      ? `All ${questions.length} item${questions.length === 1 ? "" : "s"} passed.`
+      : `${questions.length - flagged.length} of ${questions.length} items passed. Flagged: ${flagged.map(q => q.question_text).join("; ")}.`;
+    setAiSummary(summary);
+    setAiAssisted(false);
+    setGenError(false);
+    setStep("review");
   };
 
   // ── signature pad ────────────────────────────────────────
@@ -142,36 +237,59 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const endDraw = () => { drawingRef.current = false; };
   const clearSig = () => { if (canvasEl) canvasEl.getContext("2d").clearRect(0, 0, canvasEl.width, canvasEl.height); setHasSignature(false); };
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the inspection; a real server-side rejection shows an error
+  // and lets the worker retry manually. Full auto-queue now that the
+  // server side is idempotent (client_submission_id + a unique index on
+  // inspection_records, added earlier this session) — a blind background
+  // retry can no longer create a duplicate record.
   const submit = async () => {
-    setSigned(true); setSaving(true);
+    setSigned(true); setSaving(true); setSaveError(false);
     const sig = hasSignature && canvasEl ? canvasEl.toDataURL("image/png") : null;
 
     const items = questions.map(q => ({
+      questionId: q.id,
       question: q.question_text,
       answer: answers[q.id]?.answer,
       note: answers[q.id]?.note || "",
     }));
 
-    const pdfUrl = await generateAndUploadMonthlyInspection({
-      formTitle: form.title, siteName: siteName(), companyName, companyLogo,
-      monthLabel: new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long" }),
-      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig, token,
-    });
+    const now = new Date();
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      formTitle: form.title, siteId, formId: form.id, siteNameStr: siteName(), companyName, companyLogo,
+      monthLabel: now.toLocaleDateString("en-CA", { year: "numeric", month: "long" }),
+      periodMonth: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
+      submittedBy: workerName, aiSummary, aiAssisted, items, sig,
+    };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("monthly", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("monthly", companyId);
+      setStep("queued");
+      return;
+    }
 
     try {
-      await fetch("/api/monthly", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "submit_monthly", token,
-          siteId, formId: form.id, submittedBy: workerName, aiSummary, pdfUrl,
-          answers: questions.map(q => ({ questionId: q.id, answer: answers[q.id]?.answer, note: answers[q.id]?.note || "" })),
-        }),
-      });
+      await resubmitMonthly(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("monthly", companyId);
+      setStep("done");
     } catch (e) {
-      console.error("Monthly inspection save failed:", e);
+      if (e.isServerError) {
+        console.error("Monthly inspection save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+        setSigned(false);
+      } else {
+        await enqueueSubmission("monthly", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("monthly", companyId);
+        setStep("queued");
+      }
     }
-    setSaving(false);
-    setStep("done");
   };
 
   const s = {
@@ -279,10 +397,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             );
           })}
 
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the summary. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the summary. Check your connection and try again, or continue without one.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : (workerName && allAnswered && notesComplete) ? "#4338CA" : "#94A3B8")} disabled={loading || !workerName || !allAnswered || !notesComplete} onClick={generateSummary}>
             {loading ? "⏳ Writing summary…" : "Generate Summary"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI summary</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("site")}>← Back</button>
         </>
       )}
@@ -290,6 +415,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* STEP: review */}
       {step === "review" && (
         <>
+          {!aiAssisted && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-summarized — feel free to edit the summary below before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", textTransform: "uppercase", letterSpacing: 0.5 }}>{form.title}</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{siteName()} · By {workerName}</div>
@@ -334,10 +464,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
             <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this inspection. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : hasSignature ? "#16A34A" : "#94A3B8")} disabled={saving || !hasSignature} onClick={submit}>
-            {saving ? "Submitting…" : "Sign & Submit Inspection"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : "Sign & Submit Inspection"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{siteName()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#4338CA")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

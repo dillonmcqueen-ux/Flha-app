@@ -70,14 +70,17 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
 const TABLES = {
   inspection: {
     name: 'inspections',
+    jsonColumn: 'results_json',
     listColumns: 'id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes',
   },
   toolbox: {
     name: 'toolbox_talks',
+    jsonColumn: 'talking_points_json',
     listColumns: 'id, presenter_name, meeting_type, site, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at',
   },
   daily: {
     name: 'daily_reports',
+    jsonColumn: 'report_json',
     listColumns: 'id, reporter_name, site, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at',
   },
 };
@@ -141,11 +144,32 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { record } = req.body;
+      const { record, clientSubmissionId } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
+
+      // Idempotency (docs/scope-offline-capability.md Phase 1) — see the
+      // matching comment in api/reports.js for why this rides inside the
+      // existing jsonb column instead of a new one.
+      if (clientSubmissionId && table.jsonColumn) {
+        const { data: existingRows } = await supabaseAdmin
+          .from(table.name)
+          .select('id')
+          .eq('company_id', session.companyId)
+          .eq(`${table.jsonColumn}->>client_submission_id`, clientSubmissionId)
+          .limit(1);
+        if (existingRows && existingRows.length > 0) {
+          return res.status(200).json({ id: existingRows[0].id });
+        }
+      }
+
+      const recordToInsert = { ...record };
+      if (clientSubmissionId && table.jsonColumn) {
+        recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
+      }
+
       const { data, error } = await supabaseAdmin
         .from(table.name)
-        .insert({ ...record, company_id: session.companyId })
+        .insert({ ...recordToInsert, company_id: session.companyId })
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
