@@ -1,21 +1,34 @@
 # Scope: offline capability
 
-Status: Phase 0 built, Phase 1 mostly built (see Progress below). **Still not
-verified end-to-end against a live backend in a real browser** — twice now,
-for two different reasons. The session that built Phase 0/1 had no Supabase
-credentials. The next session (this one) had Supabase/Vercel API access via
-MCP tools, and found a ready-to-use test company (`ABC Earthworks Company`,
-company code `abcworker`, in the `DEMO` Supabase project — which despite the
-name is the real database backing the live Vercel deployment, not a
-disposable sandbox) and generated a Vercel preview-bypass share link — but
-this session's own network egress policy returned a `403 policy denial` for
-`*.vercel.app` (and general internet hosts), confirmed via the agent proxy's
-status log and a direct `curl`, so no browser in this session could reach
-the preview deploy at all. That's a fixed, session-level restriction, not
-something to route around. **This still needs a human click-through** (e.g.
-from a laptop, per how this work was originally prioritized) before treating
-Phase 0/1 as trustworthy in front of a real worker — see the per-form
-checklist in Progress below for exactly what to check.
+Status: Phase 0 built, Phase 1 mostly built (see Progress below), Phase 2
+scoped in detail but not built. **Partially verified end-to-end now, by the
+user on their own phone against the PR #16 preview deploy** (this Claude
+Code session's own network egress policy 403s all `*.vercel.app` requests,
+confirmed via the agent proxy status log and a direct `curl`, so no
+in-session browser could do this — a human had to). Confirmed so far:
+
+- Login succeeds when online (worker role, `abcworker` test company) —
+  confirmed both from the user reaching the worker menu and from the
+  deployment's own server logs (`get_runtime_logs`) showing two successful
+  `POST /api/login` calls followed by a successful `/api/customforms` call,
+  the exact signature of a real login reaching `WorkerMenu`.
+- ToolboxTalk: going offline right at the final submit step correctly shows
+  **"Saved — No Signal"**, not a false success and not a raw connection
+  error — confirmed live by the user.
+- Along the way, confirmed a real *scope* gap, not a bug: the AI-generation
+  step mid-form (`/api/generate-flha`, e.g. ToolboxTalk's "what's the talk
+  about" step) still hard-requires connectivity and has no fallback yet —
+  this is exactly what Phase 2 (scoped below) now addresses. The user hit
+  this live ("couldn't generate the talk, check connection") while testing
+  offline before Phase 2 existed even as a plan.
+
+**Not yet confirmed:** the other 5 forms' offline-submit-then-auto-send
+(NearMiss, Incident, DailyReport, FLHA, Inspection), the actual
+auto-send-on-reconnect landing in the database (only the offline-queue side
+was confirmed above, not the drain side), the full-tab-close-then-reopen
+session-persistence check specifically, and Inspection/MonthlyInspection's
+draft-restore-on-reload safety. Still worth working through the rest of the
+per-form checklist in Progress below.
 Picked from `TODO.md`'s "Offline capability or a backup plan" item — see
 `docs/competitive-notes.md` for why this is the highest-leverage gap to
 close (it's the single most-cited complaint about SiteDocs-category tools,
@@ -289,16 +302,116 @@ best value-per-effort item in this whole plan.
   Incident/ToolboxTalk/DailyReport has the simplest payload, confirm the
   queue+idempotency mechanism end-to-end, then extend to the rest.
 
-### Phase 2 — graceful offline AI-assist
+### Phase 2 — graceful AI-assist fallback
 
-- Extend the existing local-dev fallback pattern (README's "falls back to
-  demo hazard data") into a real offline path: if `/api/generate-flha` is
-  unreachable, let the worker fill hazards/controls in manually instead of
-  blocking the form, and flag the record (e.g. `ai_assisted: false`) so a
-  supervisor knows it wasn't AI-cross-referenced against the SOP.
-- Optional fast-follow: queue a background regeneration attempt for
-  flagged records once connectivity returns, and let a supervisor accept/
-  discard the AI suggestion after the fact rather than losing it entirely.
+**Correction on the premise this phase was originally scoped from:** README
+claims "the app will fall back to demo hazard data if [`/api/generate-flha`]
+isn't reachable" for local dev. That fallback does not exist anywhere in
+`src/` — checked every caller (grep across `src/*.jsx`, read `App.jsx`'s
+`generateFLHA` catch block in full). Every form's AI-generation catch block
+does the same thing today: `setGenError(true)`, stop, show "Couldn't
+generate ___. Check your connection and try again.", and the worker is
+stuck — there's no path past that screen without a successful AI call. So
+this phase isn't "extend an existing pattern," it's building the fallback
+from scratch. Confirmed live on a preview deploy this session (ToolboxTalk,
+offline at the "what's the talk about" step) — exactly this message, exactly
+this dead end.
+
+**Also worth reframing the trigger, not just the name:** the original scope
+called this "offline AI-assist," implying `navigator.onLine` gates it. But
+every form's `catch` block currently fires on *any* generation failure — a
+genuinely offline device, but equally a flaky connection, an Anthropic
+rate-limit/5xx, or a malformed response. All of those currently produce the
+identical dead-end screen. The fallback should trigger on **generation
+failure**, not specifically on offline detection — simpler (one code path,
+not two), and it degrades gracefully in more situations than just "no
+signal," which is the same reasoning Phase 1 already applied to the
+submit-side `isNetworkFailure` vs. `isServerError` split (though here there's
+no meaningful equivalent of "don't retry a real rejection" — a failed
+*generation* has nothing to retry automatically, so this is simpler: just
+offer the manual path immediately alongside "Try Again," not instead of it.
+
+**7 worker forms call `/api/generate-flha` mid-flow** (confirmed via grep;
+an 8th caller, `AdminPanel.jsx`, is an admin SOP-matching tool used from an
+office context, not a jobsite offline scenario — out of scope here, same
+reasoning as excluding Dashboard/Analytics elsewhere in this doc). Read each
+one's generate function and review step to size this per form rather than
+as one lump:
+
+- **DailyReport — trivial, arguably nothing to build.** The AI call
+  (`generateReport`) turns the worker's own rough notes (`workDone`,
+  `delays`, `tomorrow`) into polished prose; the fallback is just using
+  those raw notes as `workSummary`/`delaysSummary`/`tomorrowPlan` directly
+  and jumping to `review`, where they're already editable textareas. No new
+  UI at all — just a "Continue without AI" button next to "Generate Report"
+  that skips straight to assembling that object.
+- **MonthlyInspection, CustomForm — trivial.** The AI summary
+  (`generateSummary`) is a supplementary write-up of checklist answers that
+  already exist in `answers` before the AI call ever runs — nothing about
+  the actual inspection data depends on it. Fallback: skip straight to
+  `review` with `aiSummary: ""` (or a plain client-side-built sentence like
+  "3 of 5 items flagged — see notes below," no AI needed), which is already
+  a plain editable textarea the worker can type into or leave blank.
+- **FLHA, NearMiss, Incident — small-medium.** All three already have a
+  fully editable review step (FLHA: `openNewHazard`/`openEditHazard`;
+  NearMiss/Incident: `updateList`/`addListItem`/`removeListItem`/
+  `updateText` via a shared `ListEditor`-style pattern) — a worker can
+  already add/edit/remove every field by hand once *on* that screen, they
+  just can't currently reach it without a successful AI call. Fallback: on
+  generation failure, offer "Continue without AI — I'll fill this in
+  myself," which sets an empty/skeleton object of the same shape (e.g. FLHA:
+  `{ taskSummary: cleanTranscript, hazards: [], sopAlerts: [], ppeRequired:
+  [], additionalNotes: null }`) and proceeds straight to `review`. Needs one
+  new addition beyond the skip button: a persistent banner on the review
+  screen itself ("Not AI-reviewed — check this list carefully before
+  submitting") so a worker filling this in cold doesn't mistake a truly
+  empty hazard list for "AI found nothing."
+- **ToolboxTalk — medium-large, the one real exception.** Confirmed by
+  reading its `review` step in full: unlike the other 6, it renders
+  `points.summary`/`sections`/`bullets`/`discussion` as **plain text**, no
+  `onChange` handlers anywhere — a presenter can't currently edit a single
+  word of a generated talk, only continue or go back. There's no existing
+  "manual edit" path to fall back onto. Simplest fix, matching this doc's
+  own "cheapest and highest-value" bias rather than rebuilding the
+  structured sections/bullets editor: on generation failure, skip the
+  structured `review` screen entirely and drop the presenter into one plain
+  textarea ("Type your talking points/notes for this talk"), store whatever
+  they type as `points.summary` with empty `sections`/`discussion` arrays —
+  `talking_points_json` is a jsonb column with no server-side shape
+  validation, so this is a client-only change. This matches how a real
+  presenter would run a talk without AI help anyway (from written notes),
+  not an attempt to replicate the structured format by hand.
+
+**Flagging non-AI-assisted records (`ai_assisted: false`) needs a decision,
+not just an implementation.** 6 of 8 tables already have a jsonb column from
+Phase 1 (`hazards_json`, `report_json`, `talking_points_json`) — the flag
+rides in there for free, zero migration, same trick as
+`client_submission_id`. The 2 that don't (`inspection_records`,
+`custom_form_records` — the same two Phase 1 needed a real migration for)
+would need either a genuine `ai_assisted boolean default true` column (cheap
+now that this session already has Supabase migration access and precedent
+for touching these two tables) or a hacky text marker prefixed onto
+`ai_summary`. **Recommend the real column, but that's a live-schema call —
+same as the Phase 1 migration, worth explicit sign-off before building, not
+assumed.**
+
+**Deliberately not in this pass** (matches the doc's existing "optional
+fast-follow" framing, just made concrete): background regeneration once
+connectivity returns for a flagged record, plus a supervisor accept/discard
+UI in `Dashboard.jsx` for the regenerated suggestion. This is a materially
+bigger feature than the fallback itself — a new queue type (distinct from
+Phase 1's submission queue, since these records are already submitted), a
+PATCH-style update path into `api/flhas.js`/`api/reports.js`/`api/logs.js`
+that doesn't exist today, and new Dashboard UI. Worth scoping separately if
+it turns out supervisors actually want it, not bundled into the base
+fallback.
+
+**Revised size:** small-medium ~2-3 days holds for 6 of 7 forms (3 trivial,
+3 small-medium, all reusing existing editable review UI); ToolboxTalk's new
+plain-textarea fallback adds roughly a day on top. Call it **3-4 days**
+total for the base pass (flag-storage decision + the 7 forms), with
+background regen + supervisor accept/discard scoped and estimated
+separately if pursued.
 
 ### Phase 3 — offline photo/attachment support
 
@@ -346,6 +459,20 @@ The hardest piece, deliberately sequenced last:
    conflict, they're pure creates). Recommend excluding amendments from the
    offline queue in v1 and requiring connectivity for them, rather than
    building conflict resolution for an edge case up front.
+5. **Real `ai_assisted` column vs. a jsonb-embedded flag for
+   `inspection_records`/`custom_form_records`?** (Phase 2.) The other 6
+   tables get this for free via their existing jsonb column; these two
+   don't. Recommend the real column, consistent with the
+   `client_submission_id` migration already applied to both tables this
+   session — but that was an explicit, asked-for sign-off each time, not a
+   standing default to keep altering this schema without asking.
+6. **Does anyone actually want background AI regeneration + a supervisor
+   accept/discard UI for `ai_assisted: false` records** (Phase 2's original
+   "optional fast-follow"), or is the fallback itself (worker fills it in,
+   flagged for a supervisor's attention) enough? It's a materially bigger
+   build — a second, different kind of queue, a record-PATCH path that
+   doesn't exist in any `api/*.js` file today, and new `Dashboard.jsx` UI —
+   worth confirming there's real demand before scoping it in detail.
 
 ## Out of scope for this pass
 
@@ -372,8 +499,13 @@ The hardest piece, deliberately sequenced last:
   `resubmitX` + `enqueueSubmission` wiring — the last remaining piece of
   this phase. Not yet verified end-to-end against a real backend (blocked
   twice now for two different reasons — see Progress above).
-- **Phase 2 (offline AI-assist fallback): small-medium, ~2-3 days**, mostly
-  UI state + flagging, reusing an existing fallback pattern.
+- **Phase 2 (AI-assist fallback): ~3-4 days, scoped in detail this session**
+  (see the Phase 2 section above) — no code written yet. 6 of 7 forms
+  (DailyReport, MonthlyInspection, CustomForm trivial; FLHA, NearMiss,
+  Incident small-medium) reuse an already-editable review step; ToolboxTalk
+  needs new UI since its review step is read-only today. The README's
+  claimed "falls back to demo hazard data" pattern this phase was
+  originally meant to "extend" doesn't actually exist in code — checked.
 - **Phase 3 (offline photos): medium-large, ~1-2 weeks** — the IndexedDB
   blob handling and storage-budget logic is the fiddliest part of this
   whole plan.
