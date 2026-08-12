@@ -1,7 +1,7 @@
 # Scope: offline capability
 
-Status: Phase 0, 1, and 2 all built (see Progress
-below for all three). **Partially verified end-to-end now, by the user on
+Status: Phase 0, 1, and 2 all built; Phase 3 scoped in detail, not built
+(see Progress below). **Partially verified end-to-end now, by the user on
 their own phone against the PR #16 preview deploy** (this Claude Code
 session's own network egress policy 403s all `*.vercel.app` requests,
 confirmed via the agent proxy status log and a direct `curl`, so no
@@ -482,16 +482,109 @@ separately if pursued.
 
 ### Phase 3 — offline photo/attachment support
 
-The hardest piece, deliberately sequenced last:
+**Correction on scope, same as Phase 2's premise correction:** this was
+framed as "offline photos across the app." Checked every worker form
+(`grep` for `type="file"` and `uploadViaSignedUrl` across `src/*.jsx`) —
+**only `Incident.jsx` actually captures photos.** `NearMiss.jsx` uses
+`uploadViaSignedUrl` too, but only for the signature PNG at submit/resubmit
+time, which is already a plain data URL string in the queue payload today
+(no blob, no Phase 3 needed there — Phase 1 already handles it correctly).
+`AdminPanel.jsx`/`Onboarding.jsx` have file inputs but are office-context,
+same exclusion reasoning as Dashboard/Analytics elsewhere in this doc. So
+this phase is really "fix Incident's photo evidence for spotty connectivity
+on-site," not an app-wide feature — much narrower than the original
+estimate assumed.
 
-- Store selected photo `File`/`Blob` objects in IndexedDB alongside their
-  queued record (not `localStorage` — no size ceiling problem that way).
-- Defer the two-step signed-upload flow (`uploadViaSignedUrl.js`) until the
-  device is back online; keep the queued record in a "pending attachments"
-  state until every photo for it has confirmed-uploaded.
-- Cap total queued blob storage (e.g. warn or block new offline photo
-  capture past some IndexedDB budget) so a multi-day offline stretch on a
-  remote site can't silently exhaust device storage.
+**Current behavior, read from the code (`handlePhotoSelect`,
+`Incident.jsx:202-231`):** every selected photo starts uploading
+*immediately* via `uploadViaSignedUrl` (a two-step flow: ask
+`/api/reports`'s `create_upload_url` for a signed token, then PUT the blob
+straight to Supabase Storage — both steps need a live connection). If that
+fails — offline, or just a flaky connection at the wrong moment — the tile
+shows a "Failed" badge and the photo is silently dropped: `uploadedPhotoUrls()`
+only collects photos with a confirmed `uploadedUrl`, and nothing blocks the
+worker from continuing past `Continue →` (only `uploadingCount > 0`, actively
+uploading, blocks that button — an `error` tile doesn't). So today, a photo
+taken in the exact moment connectivity drops — arguably the single most
+likely time for that to happen on a real incident, e.g. right after an
+accident in a dead zone — just vanishes from the record with no queuing and
+no clear warning that it never made it in.
+
+**Design:**
+
+- Add a second IndexedDB object store to `src/offlineQueue.js` (same
+  database, bump `DB_VERSION`, new `onupgradeneeded` branch) — `photos`,
+  keyed by a local id, storing `{ id, blob, contentType, createdAt }`.
+  Keeps the existing `queue` store's "plain JSON only" guarantee intact
+  (per its own header comment) by keeping blobs in a store built for them,
+  rather than retrofitting the submission queue itself.
+  `storePhoto`/`getPhoto`/`deletePhoto`/`listPhotos`/`totalPhotoBytes`
+  functions, same style as the existing `enqueueSubmission`/`listQueued`/etc.
+- `handlePhotoSelect`: on the same network-failure-vs-server-rejection split
+  Phase 1 already established elsewhere (`fetch()` throwing vs. resolving
+  non-ok), a network-level failure stores the blob via the new `photos`
+  store instead of marking the tile `error`. Tile gets a new `pending`
+  state ("📶 queued" badge, distinct from `error`) — doesn't block
+  `Continue →`, same as `error` doesn't today, but now the photo isn't
+  silently lost.
+- Submit payload gains `pendingPhotoIds` (local blob ids) alongside the
+  existing `uploadedPhotoUrls`. `resubmitIncident` (already exported from
+  `Incident.jsx` for Phase 1's queue) gets one addition: before assembling
+  `photo_urls` for the record, upload any `pendingPhotoIds` now that
+  there's connectivity (same `uploadViaSignedUrl` call, just deferred),
+  merge the resulting URLs into `photo_urls`, and delete each blob from the
+  `photos` store once confirmed-uploaded. If a photo upload still fails at
+  resubmit time, throwing (matching `resubmitX`'s existing contract) leaves
+  the whole item queued for the next drain attempt — no new queue-semantics
+  work needed, `drainQueue` already handles this correctly.
+- `removePhoto`: for a `pending` tile, also delete the blob from the
+  `photos` store (currently just revokes the object URL and drops the
+  React state entry) — otherwise a removed-then-never-synced photo leaks in
+  IndexedDB forever.
+- **Storage budget cap**, per the original bullet: track total bytes across
+  all pending blobs (`totalPhotoBytes()`) and block new offline photo
+  capture past a fixed threshold — proposing **~25-30MB** (roughly 15-20
+  phone photos) as a starting point, with a clear message rather than a
+  silent failure, until the pending ones sync. A fixed cap is simpler and
+  more predictable to test than querying `navigator.storage.estimate()` for
+  actual available device space; worth revisiting only if the fixed number
+  turns out wrong in practice.
+- **Newly worth including, not originally in scope:** extend Incident's
+  Phase 0 draft restore to cover pending photos. The scope doc's Phase 0
+  section explicitly excluded "Incident's in-flight photo uploads" from
+  restore because "a `File` object doesn't survive `JSON.stringify` anyway
+  ... restoring already-uploaded photo URLs is real Phase 3 work, not this
+  pass." With blobs now persisted in IndexedDB (not the draft's plain-JSON
+  snapshot), that's no longer strictly true — the draft can store just
+  `{ id, pending, uploadedUrl }` metadata per photo, and on restore, for any
+  `pending` entry, load the blob back from the `photos` store and
+  regenerate a fresh `previewUrl` via `URL.createObjectURL`. Without this,
+  Phase 3 only protects a photo between "captured offline" and "later
+  synced" — an accidental reload or crash in between would still lose it,
+  which undercuts the point. Flagging as the most delicate part to test
+  (same caution this doc already gives Inspection/MonthlyInspection's
+  restore logic) — a wrong restore here means either a broken thumbnail or
+  a lost blob reference, not just a missing field.
+- **Adjacent, cheap, but not core to this phase:** a manual "Retry" on a
+  tile that shows `error` (a genuine server-side rejection, not a network
+  failure — e.g. an oversized file or an unexpected content-type). The
+  `File` object is already sitting in the component's in-memory state for
+  the current session, so retrying needs no persistence at all, just a
+  button that re-runs the same upload call. Worth doing alongside this
+  phase since it's nearly free, but it's a same-session UX fix, not an
+  offline-resilience one — doesn't depend on anything above and could ship
+  independently.
+
+**Revised size: ~2-3 days**, not the original "medium-large, ~1-2 weeks" —
+that estimate assumed offline photo handling across the whole app; in
+reality it's one form, and the existing upload/queue/drain infrastructure
+from Phase 1 already does most of the work. No `api/*.js` changes needed —
+`create_upload_url` already works identically whether called at capture
+time or later at resubmit time.
+
+**Open questions to settle before building** (added to the list below):
+the exact storage-budget number, and whether the draft-restore extension
+ships in the same pass or as an explicit fast-follow.
 
 ### Phase 4 — PWA shell
 
@@ -540,6 +633,16 @@ The hardest piece, deliberately sequenced last:
    build — a second, different kind of queue, a record-PATCH path that
    doesn't exist in any `api/*.js` file today, and new `Dashboard.jsx` UI —
    worth confirming there's real demand before scoping it in detail.
+7. **What's the right offline photo storage cap** (Phase 3)? Proposed
+   ~25-30MB as a starting, easily-adjustable number — a fixed cap is
+   simpler to reason about and test than querying actual device storage via
+   `navigator.storage.estimate()`, but worth confirming that's a sane
+   number for how many photos a real incident report tends to have.
+8. **Does the Incident draft-restore extension (Phase 3) ship in the same
+   pass as the core photo-queueing work, or as an explicit fast-follow?**
+   It's the most delicate piece to get right (a wrong restore risks a
+   broken thumbnail or an orphaned blob reference, not just a missing
+   field) — worth deciding whether to derisk it separately.
 
 ## Out of scope for this pass
 
@@ -570,9 +673,13 @@ The hardest piece, deliberately sequenced last:
   step is read-only. Background AI regeneration + supervisor accept/discard
   (the original "optional fast-follow") deliberately not built — see open
   question 6. Not yet verified end-to-end against a real backend.
-- **Phase 3 (offline photos): medium-large, ~1-2 weeks** — the IndexedDB
-  blob handling and storage-budget logic is the fiddliest part of this
-  whole plan.
+- **Phase 3 (offline photos): ~2-3 days, scoped in detail this session, not
+  built** (see the Phase 3 section above) — smaller than the original
+  estimate once grounded in the actual code: only `Incident.jsx` captures
+  photos at all (checked every form), and the existing Phase 1
+  upload/queue/drain infrastructure already does most of the work. The
+  IndexedDB blob handling and the draft-restore extension are the fiddliest
+  parts of what's left.
 - **Phase 4 (PWA shell): small, ~2-3 days** once Phases 1–3 give it
   something real to do.
 
