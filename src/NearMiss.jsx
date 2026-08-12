@@ -2,6 +2,74 @@ import { useState, useRef, useEffect } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (signature + PDF upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. `sig` is a
+// data: URL string (from the signature canvas), not a File/Blob, so it's
+// plain JSON and safe to persist in the queue. Throws on failure so the
+// caller can tell success from failure. Exported so WorkerMenu.jsx can
+// drain this form's queue without the component mounted.
+export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequest) {
+  const { reporterLabel, anonymous, site, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig } = payload;
+
+  let signatureUrl = null;
+  if (sig) {
+    try {
+      const blob = await (await fetch(sig)).blob();
+      const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
+        bucket: "signatures", filename, file: blob, contentType: "image/png",
+      });
+      signatureUrl = publicUrl || null;
+    } catch (e) { /* signature upload failure shouldn't block submission */ }
+  }
+
+  const pdfUrl = await generateAndUploadNearMiss({
+    reporter: reporterLabel, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "nearmiss",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          reporter_name: reporterLabel,
+          is_anonymous: anonymous,
+          site,
+          occurred_at: occurredAt,
+          involved,
+          report_json: { ...report, customFields },
+          signed_by: reporterLabel,
+          pdf_url: pdfUrl || null,
+          signature_url: signatureUrl,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const SEVERITY = {
   Low: { color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -37,6 +105,7 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
   const [hasSignature, setHasSignature] = useState(false);
   const [signed, setSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -69,6 +138,33 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("nearmiss", companyId);
+    if (draft && draft.step && draft.step !== "done") {
+      if (draft.reporter) setReporter(draft.reporter);
+      if (draft.anonymous) setAnonymous(draft.anonymous);
+      if (draft.site) setSite(draft.site);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.occurredAt) setOccurredAt(draft.occurredAt);
+      if (draft.involved) setInvolved(draft.involved);
+      if (draft.description) setDescription(draft.description);
+      if (draft.report) setReport(draft.report);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "nearmiss",
+    companyId,
+    { step, reporter, anonymous, site, siteMode, occurredAt, involved, description, report },
+    draftRestored && !!companyId
+  );
 
   const reporterLabel = () => anonymous ? "Anonymous" : reporter;
 
@@ -125,12 +221,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       const a = text.indexOf("{"), b = text.lastIndexOf("}");
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
-      setReport(parsed);
+      setReport({ ...parsed, ai_assisted: true });
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — review is
+  // already fully editable (add/edit/remove every list item), so the
+  // fallback just needs an empty skeleton to fill in by hand.
+  // ai_assisted:false flags the record so a supervisor knows it wasn't
+  // AI-structured.
+  const continueWithoutAI = () => {
+    setReport({
+      severity: "Medium", severityReason: "", whatHappened: description,
+      contributingFactors: [], potentialOutcome: "", immediateActions: [], nextSteps: [],
+      ai_assisted: false,
+    });
+    setGenError(false);
+    setStep("review");
   };
 
   // editing helpers for list fields
@@ -139,53 +251,43 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const addListItem = (field) => setReport(prev => ({ ...prev, [field]: [...(prev[field] || []), ""] }));
   const updateText = (field, val) => setReport(prev => ({ ...prev, [field]: val }));
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the report; a real server-side rejection shows an error and
+  // lets the worker retry manually.
   const submit = async () => {
     setSigned(true);
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { reporterLabel: reporterLabel(), anonymous, site, occurredAt, involved, report, customFields: cf.entries(), companyName, companyLogo, companyId, sig };
 
-    let signatureUrl = null;
-    if (sig) {
-      try {
-        const blob = await (await fetch(sig)).blob();
-        const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { publicUrl } = await uploadViaSignedUrl({
-          endpoint: "/api/reports", action: "create_upload_url", token,
-          bucket: "signatures", filename, file: blob, contentType: "image/png",
-        });
-        signatureUrl = publicUrl || null;
-      } catch (e) { /* signature upload failure shouldn't block submission */ }
+    if (!navigator.onLine) {
+      await enqueueSubmission("nearmiss", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("nearmiss", companyId);
+      setStep("queued");
+      return;
     }
 
-    const pdfUrl = await generateAndUploadNearMiss({
-      reporter: reporterLabel(), site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields: cf.entries(), token,
-    });
     try {
-      await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "nearmiss",
-          action: "submit",
-          token,
-          record: {
-            reporter_name: reporterLabel(),
-            is_anonymous: anonymous,
-            site,
-            occurred_at: occurredAt,
-            involved,
-            report_json: { ...report, customFields: cf.entries() },
-            signed_by: reporterLabel(),
-            pdf_url: pdfUrl || null,
-            signature_url: signatureUrl,
-          },
-        }),
-      });
+      await resubmitNearMiss(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("nearmiss", companyId);
+      setStep("done");
     } catch (e) {
-      console.error("Near miss save failed:", e);
+      if (e.isServerError) {
+        console.error("Near miss save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+        setSigned(false);
+      } else {
+        await enqueueSubmission("nearmiss", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("nearmiss", companyId);
+        setStep("queued");
+      }
     }
-    setSaving(false);
-    setStep("done");
   };
 
   const s = {
@@ -270,10 +372,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What happened?</div>
           <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the near miss in your own words. The AI will structure it into a clean report.</div>
           <textarea style={{ ...s.input, minHeight: 140, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. I was walking behind the excavator and the operator started to swing without seeing me. I stepped back just in time. There was no spotter and the horn didn't sound." value={description} onChange={e => setDescription(e.target.value)} />
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the report. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the report. Check your connection and try again, or continue and write it up yourself.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : description.trim() ? "#D97706" : "#94A3B8")} disabled={loading || !description.trim()} onClick={generateReport}>
             {loading ? "⏳ Structuring report…" : "Generate Report"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — I'll fill this in myself</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
         </div>
       )}
@@ -281,6 +390,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* REVIEW */}
       {step === "review" && report && (
         <>
+          {report.ai_assisted === false && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-structured — fill in the details below yourself before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#B45309", textTransform: "uppercase", letterSpacing: 0.5 }}>Near Miss Incident Report</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{reporterLabel()} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
@@ -379,10 +493,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </>
           )}
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this report. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : (anonymous || hasSignature) ? "#16A34A" : "#94A3B8")} disabled={saving || (!anonymous && !hasSignature)} onClick={submit}>
-            {saving ? "Submitting…" : anonymous ? "Submit Report" : "Sign & Submit Report"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : anonymous ? "Submit Report" : "Sign & Submit Report"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reporterLabel()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#D97706")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

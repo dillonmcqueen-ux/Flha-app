@@ -112,6 +112,56 @@ comments — was publicly reachable running the live app; enabled
 `ssoProtection` on preview deployments only (production left untouched,
 since that's the actual customer-facing app).
 
+## Post-upgrade cleanup (one-time, event-triggered)
+
+The project is deliberately staying on Vercel's **Hobby** plan for now to
+keep costs at zero pre-revenue — `api/` is at 12/12 of the Hobby function
+cap, and two files carry workarounds purely because of it (see
+`.claude/agents/vercel-function-budget-guardian.md`).
+
+**Trigger condition: the first paying customer.** At that point, the plan
+is: add a payment method, upgrade the Vercel team to Pro, then run
+`hobby-cap-unwinder` once to split those two workarounds back into their
+own clean files now that the function cap that forced them no longer
+applies. Do not run `hobby-cap-unwinder` before the Pro upgrade is
+confirmed — it would push `api/` over the still-active Hobby cap and break
+deployment. Neither the upgrade nor the agent run should happen
+automatically; both wait for an explicit go-ahead, since the upgrade is a
+recurring paid charge and needs fresh confirmation at the time (see the
+`buy_pro` tool's own confirmation requirement), not something to
+pre-authorize in advance.
+
+## Weekly competitive intelligence
+
+Two more agents form a market-research pipeline, distinct from the
+code-review and UI-build agents above — they don't touch product code at
+all, they produce a business-intelligence report:
+
+| Agent | Scope |
+|---|---|
+| `competitive-intel-researcher` | Searches Reddit, forums, review sites and news for competitor moves, mid-market buyer pain points, and new AI/tech worth adopting. Writes sourced findings to a scratch file. Read-only research (plus `Write` for its own scratch file) — never edits product code. |
+| `market-report-writer` | Turns that week's findings plus `docs/marketing/competitive-analysis.md` (the baseline landscape doc) into a short, Slack-ready weekly report. |
+
+Baseline reference: `docs/marketing/competitive-analysis.md` — a
+competitive analysis of the AI field-documentation / frontline-ops market
+(Mitti/SafetyCulture, SiteDocs, Xenia, MaintainX, Dashpivot/Sitemate,
+GoCanvas, Raken, HammerTech), FORA's positioning wedge against each, and
+the 20 recurring customer pain points in this space. Each week's research
+layers on top of this baseline rather than re-deriving it — don't rewrite
+the baseline doc from a routine run; that's a deliberate human edit if the
+strategic analysis itself needs updating.
+
+**Runs weekly** via a recurring trigger, fresh session each time (per the
+Agent-tool limitation above — the fired session reads and manually follows
+both `.md` files rather than invoking them as subagents), delivered as a
+Slack DM. Sundays 10:00am Mountain time (16:00 UTC during MDT / 17:00 UTC
+during MST — cron is UTC-fixed, so the actual delivery time drifts by an
+hour across the DST boundary; adjust the trigger's `cron_expression` twice
+a year, or accept the hour drift). This pipeline is research-only and
+never commits or pushes to the repo — it has no "safe to fix directly"
+tier the way the security audits do, since a business-intel report isn't
+an infrastructure toggle.
+
 ## Daily standup log
 
 Two more agents keep a running, plain-English record of what's happening on this project,

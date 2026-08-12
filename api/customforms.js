@@ -354,7 +354,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl } = req.body;
+      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId } = req.body;
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -368,15 +368,55 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Not allowed for this form.' });
       }
 
+      // Idempotency (docs/scope-offline-capability.md Phase 1) — same
+      // reasoning as api/monthly.js's submit_monthly: this is a multi-step
+      // insert (record + per-question answers), so the unique index on
+      // client_submission_id (see the migration that added this column) is
+      // the real backstop against a race between this check and the insert
+      // below, not just the check by itself.
+      // Scoped by form_id (already verified above to belong to
+      // session.companyId) rather than a bare client_submission_id lookup —
+      // custom_form_records has no company_id column of its own, and an
+      // unscoped check would match across tenants on a (practically
+      // unlikely, but unnecessary to allow) clientSubmissionId collision.
+      if (clientSubmissionId) {
+        const { data: existingRows } = await supabaseAdmin
+          .from('custom_form_records')
+          .select('id')
+          .eq('form_id', formId)
+          .eq('client_submission_id', clientSubmissionId)
+          .limit(1);
+        if (existingRows && existingRows.length > 0) {
+          return res.status(200).json({ id: existingRows[0].id });
+        }
+      }
+
       const { data: record, error: recErr } = await supabaseAdmin
         .from('custom_form_records')
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
           ai_summary: aiSummary || null, pdf_url: pdfUrl || null, status: 'complete',
+          client_submission_id: clientSubmissionId || null,
+          // docs/scope-offline-capability.md Phase 2 — flags a record
+          // submitted without AI-generated content (worker filled it in by
+          // hand because /api/generate-flha was unreachable). Defaults true
+          // (column default) when the client doesn't send it at all.
+          ai_assisted: aiAssisted !== false,
         })
         .select()
         .single();
-      if (recErr) return res.status(500).json({ error: 'Save failed. Try again.' });
+      if (recErr) {
+        if (recErr.code === '23505' && clientSubmissionId) {
+          const { data: raceRows } = await supabaseAdmin
+            .from('custom_form_records')
+            .select('id')
+            .eq('form_id', formId)
+            .eq('client_submission_id', clientSubmissionId)
+            .limit(1);
+          if (raceRows && raceRows.length > 0) return res.status(200).json({ id: raceRows[0].id });
+        }
+        return res.status(500).json({ error: 'Save failed. Try again.' });
+      }
 
       for (const a of answers) {
         await supabaseAdmin.from('custom_form_answers').insert({

@@ -236,7 +236,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl } = req.body;
+      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId, periodMonth } = req.body;
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -250,8 +250,62 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Not allowed for this form.' });
       }
 
+      // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
+      // offline monthly inspection gets retried, possibly more than once.
+      // This is a multi-step insert (record + per-question answers +
+      // conditional corrective actions), so unlike the single-insert tables
+      // a plain re-check isn't enough on its own — the unique index on
+      // client_submission_id (see the migration that added this column) is
+      // the real backstop against a race between this check and the insert
+      // below creating two records for the same retried submission.
+      // Scoped by form_id (already verified above to belong to
+      // session.companyId) rather than a bare client_submission_id lookup —
+      // inspection_records has no company_id column of its own, and an
+      // unscoped check would match across tenants on a (practically
+      // unlikely, but unnecessary to allow) clientSubmissionId collision.
+      if (clientSubmissionId) {
+        const { data: existingRows } = await supabaseAdmin
+          .from('inspection_records')
+          .select('id')
+          .eq('form_id', formId)
+          .eq('client_submission_id', clientSubmissionId)
+          .limit(1);
+        if (existingRows && existingRows.length > 0) {
+          return res.status(200).json({ id: existingRows[0].id });
+        }
+      }
+
+      // docs/scope-offline-capability.md Phase 1: period_month used to
+      // always be computed from the server's now() at insert time, which
+      // is wrong for a queued-offline submission resynced after a delay
+      // that crosses a month boundary — an inspection actually done on the
+      // last day of the month could land attributed to the next month.
+      // periodMonth (YYYY-MM-01) is captured client-side once, at the
+      // original fill time, and used here if given.
+      //
+      // A tenant-scope review of this exact field (after an earlier,
+      // premature "came back clean" note here that this comment replaces —
+      // the review hadn't actually finished when that was written) found a
+      // real gap: validating only the string's *shape* let a client submit
+      // any date at all, not just a plausible one. That opened two paths —
+      // pre-dating a submission into a future month to make
+      // get_active_form's duplicate check silently treat a real future
+      // inspection as "already done," and submitting several records for
+      // the same real month under different periodMonth values to evade
+      // that same duplicate check entirely. Fixed by bounding periodMonth
+      // to the server's current month or the immediately preceding one —
+      // covers the legitimate resync-a-day-late case this was built for
+      // without accepting an arbitrary client-chosen date. Also tightens
+      // the month digits to 01-12 (previously any two digits passed the
+      // regex and only got caught by Postgres's own date validation,
+      // surfacing as a confusing generic 500 instead of a clear rejection).
       const now = new Date();
-      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const serverPeriod = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevPeriod = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1).toISOString().slice(0, 10);
+      const periodMonthValid = typeof periodMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])-01$/.test(periodMonth)
+        && (periodMonth === serverPeriod || periodMonth === prevPeriod);
+      const periodStart = periodMonthValid ? periodMonth : serverPeriod;
 
       const { data: record, error: recErr } = await supabaseAdmin
         .from('inspection_records')
@@ -259,10 +313,32 @@ export default async function handler(req, res) {
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
           period_month: periodStart, ai_summary: aiSummary || null,
           pdf_url: pdfUrl || null, status: 'complete',
+          client_submission_id: clientSubmissionId || null,
+          // docs/scope-offline-capability.md Phase 2 — flags a record
+          // submitted without AI-generated content (worker filled it in by
+          // hand because /api/generate-flha was unreachable). Defaults true
+          // (column default) when the client doesn't send it at all.
+          ai_assisted: aiAssisted !== false,
         })
         .select()
         .single();
-      if (recErr) return res.status(500).json({ error: 'Save failed. Try again.' });
+      if (recErr) {
+        // A unique-index violation here means a concurrent retry of the
+        // same clientSubmissionId won the race between the check above and
+        // this insert — treat it as the same success the first insert got,
+        // not a failure, so a retried queue item doesn't show an error for
+        // a submission that actually landed.
+        if (recErr.code === '23505' && clientSubmissionId) {
+          const { data: raceRows } = await supabaseAdmin
+            .from('inspection_records')
+            .select('id')
+            .eq('form_id', formId)
+            .eq('client_submission_id', clientSubmissionId)
+            .limit(1);
+          if (raceRows && raceRows.length > 0) return res.status(200).json({ id: raceRows[0].id });
+        }
+        return res.status(500).json({ error: 'Save failed. Try again.' });
+      }
 
       for (const a of answers) {
         const { data: answerRow, error: ansErr } = await supabaseAdmin

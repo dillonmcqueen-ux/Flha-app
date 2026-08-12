@@ -103,7 +103,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { amendingId, record } = req.body;
+      const { amendingId, record, clientSubmissionId } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
 
       if (amendingId) {
@@ -117,9 +117,30 @@ export default async function handler(req, res) {
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
         return res.status(200).json({ id: amendingId });
       } else {
+        // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
+        // offline FLHA gets retried, possibly more than once. Only applies
+        // to a fresh submission, not an amendment (amendments are out of
+        // offline scope — see the scope doc's open question 4). Embedded in
+        // hazards_json rather than a new column, same reasoning as
+        // api/reports.js and api/logs.js.
+        if (clientSubmissionId) {
+          const { data: existingRows } = await supabaseAdmin
+            .from('flhas')
+            .select('id')
+            .eq('company_id', session.companyId)
+            .eq('hazards_json->>client_submission_id', clientSubmissionId)
+            .limit(1);
+          if (existingRows && existingRows.length > 0) {
+            return res.status(200).json({ id: existingRows[0].id });
+          }
+        }
+        const recordToInsert = { ...record };
+        if (clientSubmissionId) {
+          recordToInsert.hazards_json = { ...(recordToInsert.hazards_json || {}), client_submission_id: clientSubmissionId };
+        }
         const { data, error } = await supabaseAdmin
           .from('flhas')
-          .insert({ ...record, company_id: session.companyId })
+          .insert({ ...recordToInsert, company_id: session.companyId })
           .select('id')
           .limit(1);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
