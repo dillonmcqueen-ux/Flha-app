@@ -1,11 +1,14 @@
 # Scope: offline capability
 
-Status: Phase 0, 1, 2, and 3 all built; Phase 4 scoped in detail, not built
-(see Progress below). **Partially verified end-to-end now, by the user on
-their own phone against the PR #16 preview deploy** (this Claude Code
-session's own network egress policy 403s all `*.vercel.app` requests,
-confirmed via the agent proxy status log and a direct `curl`, so no
-in-session browser could do this — a human had to). Confirmed so far:
+Status: **all 5 phases built** (see Progress below). Phase 4 is the one
+exception to the standing "not verified end-to-end" caveat below — it
+needed no live backend or preview deploy, so it actually was verified in
+this session via `vite build && vite preview` + Playwright on `localhost`.
+Phases 0-3 are **partially verified end-to-end now, by the user on their
+own phone against the PR #16 preview deploy** (this Claude Code session's
+own network egress policy 403s all `*.vercel.app` requests, confirmed via
+the agent proxy status log and a direct `curl`, so no in-session browser
+could reach the real deploy — a human had to). Confirmed so far:
 
 - Login succeeds when online (worker role, `abcworker` test company) —
   confirmed both from the user reaching the worker menu and from the
@@ -375,6 +378,58 @@ bolted this on late).
     files touched, so no tenant-scope review was triggered this pass
     (nothing here reads or writes a company-scoped table server-side — the
     `photos` IndexedDB store is purely local to the device).
+
+- **Phase 4: built.** `public/sw.js` (hand-rolled, no Workbox, ~95 lines),
+  `public/manifest.json`, a set of generated icons, and the corresponding
+  `index.html`/`src/main.jsx` wiring. Genuinely **verified end-to-end this
+  time** — unlike every other phase, this one could be tested for real
+  from inside the session, since it needs no live backend or preview
+  deploy: `npm run build && vite preview` gives a real production bundle
+  with actually-hashed filenames, servable on `localhost` (unaffected by
+  this session's network-egress restriction on `*.vercel.app`). A
+  Playwright run against that confirmed: the service worker installs and
+  activates; a second page load is SW-controlled; the shell (`index.html`,
+  the JS bundle, the logo, the manifest, all three icons) is precached
+  during `install`, not left to opportunistic runtime caching alone; a
+  **fully offline reload renders the actual Login screen** ("Select your
+  role to continue" visible, not just a non-empty `<body>`) — the
+  phase's actual goal, the app opening with zero signal, confirmed working
+  rather than assumed; and a simulated offline `/api/login` fetch still
+  throws a network error rather than getting served a fabricated cached
+  response, confirming the "never touch `/api/`" rule holds and every
+  offline-detection path from Phases 0–3 is undisturbed.
+  - **Design deviated from the original plan in one way, found during
+    testing, not anticipated in the scoping pass:** pure opportunistic
+    runtime caching (cache a request the first time the SW happens to
+    intercept it) turned out to miss the shell's *own first load* — a page
+    isn't controlled by its service worker until after that worker
+    installs, activates, and claims clients, so the very first
+    index.html/JS/CSS requests are never routed through the `fetch`
+    handler at all. Fixed by having `install` explicitly fetch `/`, parse
+    out which script/link URLs Vite actually emitted for the current
+    build, and precache those directly (plus the manifest's icon list) —
+    still no build-time manifest file needed, just doing the equivalent
+    read at runtime instead. This is exactly the kind of gap that live
+    testing (even against a local preview server, not a real deploy)
+    catches and a code-only review wouldn't have.
+  - **Icons are a real limitation, flagged rather than hidden:** the only
+    source asset is `fora-logo.png`, a wide wordmark (960×394, no square
+    mark or symbol version exists in the repo). Generated 192×192, 512×512,
+    a maskable 512×512 (extra safe-zone padding for Android's adaptive-icon
+    cropping), an apple-touch-icon, and a 48×48 favicon by centering the
+    wordmark on the app's actual dark background (`#0A0A0A`, confirmed from
+    `Login.jsx`). The larger sizes read fine; the 48×48 favicon is legible
+    but soft — a dense multi-line wordmark doesn't compress to a tiny icon
+    as cleanly as a dedicated symbol mark would. Not broken, just not
+    crisp — worth swapping if a proper square mark/symbol asset exists or
+    gets made, per open question 9.
+  - **Update-lifecycle design as scoped:** `self.skipWaiting()` in
+    `install` and `clients.claim()` in `activate`, plus `activate` deleting
+    any cache not matching the current `CACHE_VERSION` string — a new
+    deploy's SW takes over on the next navigation rather than requiring
+    every open tab to close first, safe here specifically because the SW
+    only ever touches the static shell, never `/api/` calls or the
+    IndexedDB queues from Phases 1–3.
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -826,13 +881,12 @@ is separate, real design work outside a pure code estimate.
   form), so this ended up much smaller than the original "medium-large,
   ~1-2 weeks" estimate. Includes the draft-restore extension in the same
   pass rather than as a deferred fast-follow.
-- **Phase 4 (PWA shell): ~2-3 days, scoped in detail this session, not
-  built** (see the Phase 4 section above) — smaller router-wise than a
-  typical PWA (the app has no client-side router at all, just one SPA
-  shell), but the update-lifecycle risk deserves real care given how much
-  of Phases 0–3 depends on long-lived offline sessions. Icon-asset creation
-  (open question 9) is separate, real design work outside the code
-  estimate.
+- **Phase 4 (PWA shell): done, and actually verified end-to-end** (see
+  Progress above) — the one phase in this whole plan that could be, since
+  it needs no live backend. Simpler router-wise than a typical PWA (no
+  client-side router at all), and testing caught a real gap the scoping
+  pass didn't anticipate: pure runtime caching misses the shell's own
+  first load, fixed with an explicit install-time precache instead.
 
 Actual build order ended up **0 → 1 → 2 → 3 → 4** rather than the
 originally-recommended **0 → 1 → 4 → 2 → 3** — Phase 4 got scoped last
