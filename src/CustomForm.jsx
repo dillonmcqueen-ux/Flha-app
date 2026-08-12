@@ -18,6 +18,7 @@ export default function CustomForm({ companyId, companyName, userName: loginUser
   const [genError, setGenError] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
 
   useEffect(() => {
@@ -162,8 +163,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const endDraw = () => { drawingRef.current = false; };
   const clearSig = () => { if (canvasEl) canvasEl.getContext("2d").clearRect(0, 0, canvasEl.width, canvasEl.height); setHasSignature(false); };
 
+  // docs/scope-offline-capability.md Phase 1: this used to only log a
+  // failed submit to the console and still move on to the "done" screen —
+  // meaning a dropped connection right at Submit told the worker the
+  // document was in when it never reached the server. Now it shows a real
+  // error and lets the worker retry manually. Deliberately NOT
+  // auto-queued like NearMiss/Incident/ToolboxTalk/DailyReport — same
+  // reasoning as MonthlyInspection.jsx: a record insert followed by a
+  // per-question answers insert isn't idempotent yet, so a blind
+  // background retry could create a duplicate record.
   const submit = async () => {
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const sig = hasSignature && canvasEl ? canvasEl.toDataURL("image/png") : null;
 
     const items = questions.map(q => ({
@@ -178,7 +188,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     });
 
     try {
-      await fetch("/api/customforms", {
+      const res = await fetch("/api/customforms", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "submit_custom", token,
@@ -186,8 +196,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           answers: questions.map(q => ({ questionId: q.id, answer: answers[q.id]?.answer, note: answers[q.id]?.note || "" })),
         }),
       });
+      if (!res.ok) {
+        console.error("Custom form save failed:", res.status, await res.json().catch(() => ({})));
+        setSaveError(true);
+        setSaving(false);
+        return;
+      }
     } catch (e) {
       console.error("Custom form save failed:", e);
+      setSaveError(true);
+      setSaving(false);
+      return;
     }
     setSaving(false);
     clearDraft("customform", draftScope);
@@ -324,8 +343,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
             <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this document. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : hasSignature ? "#16A34A" : "#94A3B8")} disabled={saving || !hasSignature} onClick={submit}>
-            {saving ? "Submitting…" : "Sign & Submit"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : "Sign & Submit"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
         </div>

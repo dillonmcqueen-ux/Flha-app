@@ -1,10 +1,11 @@
 # Scope: offline capability
 
-Status: scoped, not built. Picked from `TODO.md`'s "Offline capability or a
-backup plan" item — see `docs/competitive-notes.md` for why this is the
-highest-leverage gap to close (it's the single most-cited complaint about
-SiteDocs-category tools, and FORA currently has nothing here at all, not
-even a degraded fallback).
+Status: Phase 0 and Phase 1 built (Phase 1 partially — see Progress below).
+Picked from `TODO.md`'s "Offline capability or a backup plan" item — see
+`docs/competitive-notes.md` for why this is the highest-leverage gap to
+close (it's the single most-cited complaint about SiteDocs-category tools,
+and FORA had nothing here at all before this work, not even a degraded
+fallback).
 
 ## Current state
 
@@ -121,6 +122,92 @@ bolted this on late).
     done — pay closest attention to Inspection and MonthlyInspection,
     where a wrong restore could crash the render (see the excluded-steps
     list above for why those two are the most delicate).
+
+- **Phase 1: server-side idempotency done everywhere it's a clean fit;
+  full auto-queue done for 4 of 8 forms, correctness fix (no auto-queue
+  yet) for the other 2, unstarted for FLHA and Inspection.**
+  - **A real bug found and fixed along the way, not just scoped:**
+    `NearMiss.jsx`, `Incident.jsx`, `ToolboxTalk.jsx`, `DailyReport.jsx`,
+    `MonthlyInspection.jsx`, and `CustomForm.jsx` all previously caught a
+    failed submit's network error, logged it to `console.error`, and then
+    **still moved on to the "done" screen** — telling the worker their
+    report was safely in when it had never reached the server at all. A
+    dropped connection right at Submit meant silent data loss with a false
+    success message, which is a worse failure mode than anything on the
+    original SiteDocs pain-point list. `App.jsx` (FLHA) and `Inspection.jsx`
+    already handled this correctly (check the response, show an error, let
+    the worker retry) — they were the model the other 6 needed to match.
+  - **Server-side idempotency** (`api/flhas.js`, `api/reports.js`,
+    `api/logs.js` — covering FLHA, NearMiss, Incident, Inspection,
+    ToolboxTalk, DailyReport): a `clientSubmissionId` sent alongside a
+    submission is checked for an existing row before inserting, and
+    embedded into the record on insert, so a retried submission can't
+    create a duplicate. No `client_submission_id` column exists on any of
+    these tables — rather than requiring a manual schema migration this
+    session couldn't apply anyway (no Supabase credentials/MCP access
+    here), the id rides inside each table's existing jsonb column
+    (`hazards_json`, `report_json`, `results_json`,
+    `talking_points_json`) via PostgREST's `column->>key` filter syntax.
+    Works today with zero migration; a dedicated indexed column would be
+    a cleaner future upgrade if duplicate-check query volume ever
+    justifies it, which is unlikely at this scale.
+  - **`src/offlineQueue.js`** is the reusable queue: a small IndexedDB
+    wrapper (`enqueueSubmission`, `listQueued`, `drainQueue`,
+    `removeQueued`) storing plain JSON only — never a `File`/`Blob` — see
+    the file's own header comment for why (PDF generation itself needs a
+    network round trip for the signed-upload-URL step, so there's nothing
+    useful to pre-generate while still offline; a drained item just redoes
+    the whole submission later). Verified directly in a real browser
+    (Playwright against a running `vite` dev server, no backend needed for
+    this part): enqueue, ordered listing, a failing drain stops after the
+    first failure and leaves everything queued rather than skipping ahead
+    out of order, a succeeding drain clears items in order, and different
+    form types don't interfere with each other.
+  - **Full auto-queue wired into `NearMiss.jsx`, `Incident.jsx`,
+    `ToolboxTalk.jsx`, `DailyReport.jsx`** (`DailyReport` first, as the
+    reference — simplest payload, no signature, matching this doc's own
+    original recommendation). Each exports a `resubmitX(payload,
+    clientSubmissionId, token)` function that redoes signature/PDF upload
+    + the final POST from plain data; `submit()` calls it directly when
+    online, and falls back to `enqueueSubmission` on a network-level
+    failure (distinguished from a real server rejection by whether
+    `fetch()` itself threw vs. resolved with a non-ok status — a `!res.ok`
+    shows an error and lets the worker retry manually instead of being
+    silently queued and retried against what might be a real, non-transient
+    rejection). `WorkerMenu.jsx` centrally drains all four queues on mount
+    and on the browser's `online` event, via a small `RESUBMIT_HANDLERS`
+    map — so a worker who reopens the app after reconnecting gets queued
+    items sent automatically without needing to reopen the specific form.
+    Each form gained a new "queued" step/screen ("Saved — No Signal") and
+    a `saveError` banner + "Try Again" for real rejections.
+  - **`MonthlyInspection.jsx` and `CustomForm.jsx` got the correctness fix
+    only, deliberately not the auto-queue.** Their submit endpoints
+    (`api/monthly.js`'s `submit_monthly`, `api/customforms.js`'s
+    `submit_custom`) each do a record insert followed by a per-question
+    answers insert (and a conditional `corrective_actions` insert) — a
+    multi-step shape that isn't idempotent yet the way the single-insert
+    tables above are. Auto-queueing on top of that risked a blind
+    background retry creating a duplicate record with duplicate answer
+    rows, which is a worse outcome than the bug being fixed. They now
+    correctly show an error and let the worker retry by hand instead of
+    lying about success — safe, just not yet automatic. Making these two
+    endpoints idempotent (e.g. checking for an existing record by the same
+    `client_submission_id` before the whole insert sequence) is the
+    prerequisite before extending the queue to them.
+  - **FLHA (`App.jsx`) and Inspection (`Inspection.jsx`) weren't touched
+    for auto-queueing** — they already had correct error handling (no
+    lying-about-success bug to fix), so there was no urgent correctness
+    issue forcing the change. Adding auto-queue to them is next, now that
+    the pattern is proven four times over; it's the same mechanical
+    `resubmitX` + `enqueueSubmission` treatment, no new design questions.
+  - **Not verified end-to-end** for the same reason as Phase 0: no
+    Supabase/session credentials in this environment to actually submit a
+    real document, online or offline. The queue mechanics themselves
+    (enqueue/list/drain/ordering/failure-handling) were verified for real
+    in a browser; the full "go offline in devtools, submit, come back
+    online, watch it actually land in the database" path was not, and is
+    the single most important thing to check on a preview deploy before
+    trusting this in front of a real worker.
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -242,8 +329,13 @@ The hardest piece, deliberately sequenced last:
   above) — session persistence and draft autosave across all 8
   worker-facing forms. Still worth a real click-through on a preview
   deploy before treating it as fully verified, per the caveat above.
-- **Phase 1 (submission queue, text-only): medium, ~1 week**, including the
-  idempotency/schema change across the relevant tables.
+- **Phase 1 (submission queue, text-only): mostly done** (see Progress
+  above) — server-side idempotency and the queue infrastructure are done;
+  4 of 8 forms (NearMiss, Incident, ToolboxTalk, DailyReport) have full
+  auto-queue, FLHA and Inspection are the same mechanical extension left
+  to do, and MonthlyInspection/CustomForm need their submit endpoints made
+  idempotent first before they can safely get it too. Not yet verified
+  end-to-end against a real backend.
 - **Phase 2 (offline AI-assist fallback): small-medium, ~2-3 days**, mostly
   UI state + flagging, reusing an existing fallback pattern.
 - **Phase 3 (offline photos): medium-large, ~1-2 weeks** — the IndexedDB

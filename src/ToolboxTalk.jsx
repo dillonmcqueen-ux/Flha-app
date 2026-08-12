@@ -2,6 +2,56 @@ import { useState, useRef, useEffect } from "react";
 import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (PDF upload + the final POST) from plain
+// input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Only covers
+// the "new talk" flow, not sign-late (see the matching note on the
+// autosave restore logic above — sign-late updates an existing record
+// fetched live, it isn't a fresh queueable submission).
+export async function resubmitToolboxTalk(payload, clientSubmissionId, tokenForRequest) {
+  const { presenter, meetingType, site, topic, points, attendees, customFields, companyName, companyLogo } = payload;
+  const pdfUrl = await generateAndUploadToolbox({
+    presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "toolbox",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          presenter_name: presenter,
+          meeting_type: meetingType,
+          site,
+          topic,
+          talking_points_json: { ...points, customFields },
+          attendees_json: attendees,
+          pdf_url: pdfUrl || null,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly", "After Incident"];
 
@@ -27,6 +77,7 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const drawingRef = useRef(false);
   const [presenterSigned, setPresenterSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Sign-later — for crew who missed the talk and are coming back to sign
   const [openTalks, setOpenTalks] = useState([]);
@@ -235,36 +286,40 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setStep("done");
   };
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the talk; a real server-side rejection shows an error and
+  // lets the presenter retry manually.
   const submit = async () => {
-    setSaving(true);
-    const pdfUrl = await generateAndUploadToolbox({
-      presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields: cf.entries(), token,
-    });
-    try {
-      await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "toolbox",
-          action: "submit",
-          token,
-          record: {
-            presenter_name: presenter,
-            meeting_type: meetingType,
-            site,
-            topic,
-            talking_points_json: { ...points, customFields: cf.entries() },
-            attendees_json: attendees,
-            pdf_url: pdfUrl || null,
-          },
-        }),
-      });
-    } catch (e) {
-      console.error("Toolbox talk save failed:", e);
+    setSaving(true); setSaveError(false);
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { presenter, meetingType, site, topic, points, attendees, customFields: cf.entries(), companyName, companyLogo };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("toolbox", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("toolbox", companyId);
+      setStep("queued");
+      return;
     }
-    setSaving(false);
-    clearDraft("toolbox", companyId);
-    setStep("done");
+
+    try {
+      await resubmitToolboxTalk(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("toolbox", companyId);
+      setStep("done");
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Toolbox talk save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+      } else {
+        await enqueueSubmission("toolbox", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("toolbox", companyId);
+        setStep("queued");
+      }
+    }
   };
 
   const s = {
@@ -446,9 +501,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             )}
           </div>
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this talk. Check your connection and try again.
+            </div>
+          )}
           {presenterSigned && (
             <button style={s.btn(saving ? "#94A3B8" : "#16A34A")} disabled={saving} onClick={submit}>
-              {saving ? "Saving…" : `Finish & Save (${attendees.length} signed)`}
+              {saving ? "Saving…" : saveError ? "Try Again" : `Finish & Save (${attendees.length} signed)`}
             </button>
           )}
         </>
@@ -513,6 +573,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {signingLate ? "Saving…" : "Sign & Submit"}
           </button>
           <button style={s.ghost} onClick={() => setStep("findtalk")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This talk is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#7C3AED")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

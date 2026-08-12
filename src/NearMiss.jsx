@@ -3,6 +3,73 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (signature + PDF upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. `sig` is a
+// data: URL string (from the signature canvas), not a File/Blob, so it's
+// plain JSON and safe to persist in the queue. Throws on failure so the
+// caller can tell success from failure. Exported so WorkerMenu.jsx can
+// drain this form's queue without the component mounted.
+export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequest) {
+  const { reporterLabel, anonymous, site, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig } = payload;
+
+  let signatureUrl = null;
+  if (sig) {
+    try {
+      const blob = await (await fetch(sig)).blob();
+      const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
+        bucket: "signatures", filename, file: blob, contentType: "image/png",
+      });
+      signatureUrl = publicUrl || null;
+    } catch (e) { /* signature upload failure shouldn't block submission */ }
+  }
+
+  const pdfUrl = await generateAndUploadNearMiss({
+    reporter: reporterLabel, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "nearmiss",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          reporter_name: reporterLabel,
+          is_anonymous: anonymous,
+          site,
+          occurred_at: occurredAt,
+          involved,
+          report_json: { ...report, customFields },
+          signed_by: reporterLabel,
+          pdf_url: pdfUrl || null,
+          signature_url: signatureUrl,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const SEVERITY = {
   Low: { color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -38,6 +105,7 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
   const [hasSignature, setHasSignature] = useState(false);
   const [signed, setSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -167,54 +235,43 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const addListItem = (field) => setReport(prev => ({ ...prev, [field]: [...(prev[field] || []), ""] }));
   const updateText = (field, val) => setReport(prev => ({ ...prev, [field]: val }));
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the report; a real server-side rejection shows an error and
+  // lets the worker retry manually.
   const submit = async () => {
     setSigned(true);
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { reporterLabel: reporterLabel(), anonymous, site, occurredAt, involved, report, customFields: cf.entries(), companyName, companyLogo, companyId, sig };
 
-    let signatureUrl = null;
-    if (sig) {
-      try {
-        const blob = await (await fetch(sig)).blob();
-        const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { publicUrl } = await uploadViaSignedUrl({
-          endpoint: "/api/reports", action: "create_upload_url", token,
-          bucket: "signatures", filename, file: blob, contentType: "image/png",
-        });
-        signatureUrl = publicUrl || null;
-      } catch (e) { /* signature upload failure shouldn't block submission */ }
+    if (!navigator.onLine) {
+      await enqueueSubmission("nearmiss", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("nearmiss", companyId);
+      setStep("queued");
+      return;
     }
 
-    const pdfUrl = await generateAndUploadNearMiss({
-      reporter: reporterLabel(), site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields: cf.entries(), token,
-    });
     try {
-      await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "nearmiss",
-          action: "submit",
-          token,
-          record: {
-            reporter_name: reporterLabel(),
-            is_anonymous: anonymous,
-            site,
-            occurred_at: occurredAt,
-            involved,
-            report_json: { ...report, customFields: cf.entries() },
-            signed_by: reporterLabel(),
-            pdf_url: pdfUrl || null,
-            signature_url: signatureUrl,
-          },
-        }),
-      });
+      await resubmitNearMiss(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("nearmiss", companyId);
+      setStep("done");
     } catch (e) {
-      console.error("Near miss save failed:", e);
+      if (e.isServerError) {
+        console.error("Near miss save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+        setSigned(false);
+      } else {
+        await enqueueSubmission("nearmiss", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("nearmiss", companyId);
+        setStep("queued");
+      }
     }
-    setSaving(false);
-    clearDraft("nearmiss", companyId);
-    setStep("done");
   };
 
   const s = {
@@ -408,10 +465,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </>
           )}
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this report. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : (anonymous || hasSignature) ? "#16A34A" : "#94A3B8")} disabled={saving || (!anonymous && !hasSignature)} onClick={submit}>
-            {saving ? "Submitting…" : anonymous ? "Submit Report" : "Sign & Submit Report"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : anonymous ? "Submit Report" : "Sign & Submit Report"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reporterLabel()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#D97706")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

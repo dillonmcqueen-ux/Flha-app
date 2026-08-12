@@ -1,13 +1,24 @@
 import { useState, useEffect } from "react";
 import App from "./App.jsx";
 import Inspection from "./Inspection.jsx";
-import ToolboxTalk from "./ToolboxTalk.jsx";
-import NearMiss from "./NearMiss.jsx";
-import Incident from "./Incident.jsx";
-import DailyReport from "./DailyReport.jsx";
+import ToolboxTalk, { resubmitToolboxTalk } from "./ToolboxTalk.jsx";
+import NearMiss, { resubmitNearMiss } from "./NearMiss.jsx";
+import Incident, { resubmitIncident } from "./Incident.jsx";
+import DailyReport, { resubmitDaily } from "./DailyReport.jsx";
 import MonthlyInspection from "./MonthlyInspection.jsx";
 import CustomForm from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
+import { drainQueue } from "./offlineQueue.js";
+
+// Which form types have a queue-drain function wired up (offlineQueue.js +
+// docs/scope-offline-capability.md Phase 1). MonthlyInspection and
+// CustomForm still need this — see the scope doc.
+const RESUBMIT_HANDLERS = {
+  daily: resubmitDaily,
+  nearmiss: resubmitNearMiss,
+  incident: resubmitIncident,
+  toolbox: resubmitToolboxTalk,
+};
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
 const BUILTIN_TYPES = [
@@ -50,6 +61,25 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       }
     }
     loadDocs();
+  }, [token]);
+
+  // Drain any queued offline submissions (docs/scope-offline-capability.md
+  // Phase 1) whenever a worker lands back on this menu — covers reopening
+  // the app after reconnecting, not just staying on the same form — and
+  // again on the browser's `online` event for whoever leaves the menu open.
+  // Best-effort: a drain failure here just leaves the item queued for the
+  // next opportunity, same as offlineQueue.drainQueue already handles.
+  useEffect(() => {
+    if (!token) return;
+    const drainAll = () => {
+      Object.entries(RESUBMIT_HANDLERS).forEach(([formType, resubmit]) => {
+        drainQueue(formType, (payload, clientSubmissionId) => resubmit(payload, clientSubmissionId, token))
+          .catch(() => { /* best-effort — stays queued, tried again next time */ });
+      });
+    };
+    drainAll();
+    window.addEventListener("online", drainAll);
+    return () => window.removeEventListener("online", drainAll);
   }, [token]);
 
   if (doc === "flha") {

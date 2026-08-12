@@ -3,6 +3,74 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (signature + PDF upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. `photoUrls`
+// only ever contains already-uploaded photo URLs (strings) — an in-flight
+// photo upload that failed offline isn't retried here, that's Phase 3
+// (offline photo support), not this pass. `sig` is a data: URL string, not
+// a File/Blob, so it's plain JSON and safe to persist in the queue.
+export async function resubmitIncident(payload, clientSubmissionId, tokenForRequest) {
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls } = payload;
+
+  let signatureUrl = null;
+  if (sig) {
+    try {
+      const blob = await (await fetch(sig)).blob();
+      const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
+        bucket: "signatures", filename, file: blob, contentType: "image/png",
+      });
+      signatureUrl = publicUrl || null;
+    } catch (e) { /* signature upload failure shouldn't block submission */ }
+  }
+
+  const pdfUrl = await generateAndUploadIncident({
+    reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields,
+    report, companyName, companyLogo, signatureDataUrl: sig, photoUrls, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "incident",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          reporter_name: reporter,
+          site, occurred_at: occurredAt, incident_type: incidentType,
+          injured_person: injuredPerson, body_part: bodyPart, treatment,
+          medical_attention: medicalAttention, witnesses, evidence,
+          report_json: { ...report, customFields },
+          signed_by: reporter,
+          pdf_url: pdfUrl || null,
+          photo_urls: photoUrls,
+          signature_url: signatureUrl,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const INCIDENT_TYPES = [
   "Injury / Illness",
@@ -51,6 +119,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [hasSignature, setHasSignature] = useState(false);
   const [signed, setSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -235,54 +304,44 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const addListItem = (field) => setReport(prev => ({ ...prev, [field]: [...(prev[field] || []), ""] }));
   const updateText = (field, val) => setReport(prev => ({ ...prev, [field]: val }));
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the report; a real server-side rejection shows an error and
+  // lets the worker retry manually.
   const submit = async () => {
     setSigned(true);
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
-
-    let signatureUrl = null;
-    if (sig) {
-      try {
-        const blob = await (await fetch(sig)).blob();
-        const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { publicUrl } = await uploadViaSignedUrl({
-          endpoint: "/api/reports", action: "create_upload_url", token,
-          bucket: "signatures", filename, file: blob, contentType: "image/png",
-        });
-        signatureUrl = publicUrl || null;
-      } catch (e) { /* signature upload failure shouldn't block submission */ }
-    }
-
-    const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
     const photoUrls = uploadedPhotoUrls();
-    const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig, photoUrls, token });
-    try {
-      await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "incident",
-          action: "submit",
-          token,
-          record: {
-            reporter_name: reporter,
-            site, occurred_at: occurredAt, incident_type: incidentType,
-            injured_person: injuredPerson, body_part: bodyPart, treatment,
-            medical_attention: medicalAttention, witnesses, evidence,
-            report_json: { ...report, customFields: cf.entries() },
-            signed_by: reporter,
-            pdf_url: pdfUrl || null,
-            photo_urls: photoUrls,
-            signature_url: signatureUrl,
-          },
-        }),
-      });
-    } catch (e) {
-      console.error("Incident save failed:", e);
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("incident", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("incident", companyId);
+      setStep("queued");
+      return;
     }
-    setSaving(false);
-    clearDraft("incident", companyId);
-    setStep("done");
+
+    try {
+      await resubmitIncident(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("incident", companyId);
+      setStep("done");
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Incident save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+        setSigned(false);
+      } else {
+        await enqueueSubmission("incident", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("incident", companyId);
+        setStep("queued");
+      }
+    }
   };
 
   const s = {
@@ -501,10 +560,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: "#475569" }}>Reported by: <strong>{reporter}</strong></div>
             <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this report. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : hasSignature ? "#16A34A" : "#94A3B8")} disabled={saving || !hasSignature} onClick={submit}>
-            {saving ? "Submitting…" : "Sign & Submit Report"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : "Sign & Submit Report"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{incidentType} · {site} · {reporter}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#DC2626")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

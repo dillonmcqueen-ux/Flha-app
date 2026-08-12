@@ -2,8 +2,62 @@ import { useState, useEffect } from "react";
 import { generateAndUploadDaily } from "./generateDailyPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (PDF generation + upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Throws on any
+// failure so the caller can tell success from failure; never touches UI
+// state itself. Exported so WorkerMenu.jsx can drain this form's queue
+// without needing the DailyReport component mounted.
+export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest) {
+  const { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report, customFields, companyName, companyLogo } = payload;
+  const pdfUrl = await generateAndUploadDaily({
+    reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report,
+    companyName, companyLogo, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "daily",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          reporter_name: reporter,
+          site, report_date: reportDate, weather, temperature,
+          crew, equipment, visitors,
+          report_json: { ...report, customFields },
+          pdf_url: pdfUrl || null,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    // fetch() itself only throws for a network-level failure (no
+    // connectivity, DNS, connection reset) — never for an HTTP error
+    // status, which resolves normally. That's the signal this is safe to
+    // queue and retry later rather than a real rejection to show the
+    // worker now.
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 export default function DailyReport({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | notes | review | done
@@ -31,6 +85,7 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
   const [companyLogo, setCompanyLogo] = useState("");
   const cf = useCustomFields(companyId, "daily", token);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -179,35 +234,45 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   const updateText = (field, val) => setReport(prev => ({ ...prev, [field]: val }));
 
+  // docs/scope-offline-capability.md Phase 1: previously this only logged a
+  // failed submit to the console and still moved on to the "done" screen —
+  // meaning going offline right at Submit told the worker their report was
+  // in when it never reached the server at all. Now a network-level
+  // failure gets queued (offlineQueue.js) and retried automatically once
+  // back online; a real server-side rejection shows an error and lets the
+  // worker retry manually instead of silently discarding their report.
   const submit = async () => {
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const equipment = equipmentSummary();
     const weatherStr = weatherSummary();
-    const meta = { reporter, site, reportDate, weather: weatherStr, temperature, crew, equipment, visitors, customFields: cf.entries() };
-    const pdfUrl = await generateAndUploadDaily({ ...meta, report, companyName, companyLogo, token });
-    try {
-      await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "daily",
-          action: "submit",
-          token,
-          record: {
-            reporter_name: reporter,
-            site, report_date: reportDate, weather: weatherStr, temperature,
-            crew, equipment, visitors,
-            report_json: { ...report, customFields: cf.entries() },
-            pdf_url: pdfUrl || null,
-          },
-        }),
-      });
-    } catch (e) {
-      console.error("Daily report save failed:", e);
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { reporter, site, reportDate, weather: weatherStr, temperature, crew, equipment, visitors, report, customFields: cf.entries(), companyName, companyLogo };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("daily", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("daily", companyId);
+      setStep("queued");
+      return;
     }
-    setSaving(false);
-    clearDraft("daily", companyId);
-    setStep("done");
+
+    try {
+      await resubmitDaily(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("daily", companyId);
+      setStep("done");
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Daily report save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+      } else {
+        await enqueueSubmission("daily", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("daily", companyId);
+        setStep("queued");
+      }
+    }
   };
 
   const s = {
@@ -376,11 +441,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={report.tomorrowPlan} onChange={e => updateText("tomorrowPlan", e.target.value)} />
           </div>
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this report. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : "#16A34A")} disabled={saving} onClick={submit}>
-            {saving ? "Submitting…" : "Submit Daily Report"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : "Submit Daily Report"}
           </button>
           <button style={s.ghost} onClick={() => setStep("notes")}>← Back</button>
         </>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reportDate}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#16A34A")} onClick={onBack}>Back to menu</button>
+          </div>
+        </div>
       )}
 
       {/* DONE */}
