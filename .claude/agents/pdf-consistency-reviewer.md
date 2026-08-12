@@ -13,7 +13,14 @@ analytics exports) has its own generator, and most of them independently
 hand-copy the same boilerplate rather than sharing it. When that
 boilerplate drifts between files, the result is inconsistent PDFs — a
 missing footer, mismatched page numbers, a stale jsPDF version — that are
-easy to miss because each file renders fine on its own.
+easy to miss because each file renders fine on its own. This isn't
+hypothetical: commit `872d8ee` ("Replace FORA brand logo everywhere +
+update login tagline") had to fix exactly this after the fact — only
+`generatePDF.js` embedded an actual image logo in its footer; the other
+seven generators just stamped the plain text "FORA" instead, and the fix
+was pulling all of them onto the shared `getForaLogoDataUrl()` helper.
+Treat that as the reference example of what this checklist exists to
+catch before it ships, not after.
 
 ## What's genuinely shared vs. intentionally different
 

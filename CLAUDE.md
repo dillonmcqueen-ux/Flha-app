@@ -15,6 +15,7 @@ tool rather than reviewing it inline.
 | `api/*.js` handlers reading or writing a company-scoped table (`roster`, `sops`, `sites`, `equipment`, `custom_fields`, `custom_forms`, `inspection_forms`, `equipment_reports`, `flhas`, `timeclock_reports`, `company_document_settings`) | `tenant-scope-reviewer` | Multi-tenant isolation bugs here mean one company's data becomes readable or writable by another. See `.claude/agents/tenant-scope-reviewer.md` for the exact checklist. |
 | `src/generate*PDF.js` (any of the 11 PDF generators) | `pdf-consistency-reviewer` | Each document type hand-copies the same jsPDF-loader/header/footer boilerplate instead of sharing it, so it drifts silently — see `.claude/agents/pdf-consistency-reviewer.md` for known drift (e.g. `generateInspectionPDF.js` missing the footer entirely). |
 | A new file under `api/`, `vercel.json`, or `api/cron-equipment-reports.js` | `vercel-function-budget-guardian` | `api/` is already at 12/12 of Vercel's Hobby-plan serverless function cap — any new file breaks deployment. See `.claude/agents/vercel-function-budget-guardian.md` for the existing workarounds (fold into a dispatcher, or use `server-lib/`). |
+| `website/pricing.html`, `terms.html`, `index.html`, or `custom-builds.html` when pricing, plans, or Stripe links are involved | `pricing-legal-consistency-reviewer` | This exact drift (displayed price ↔ actual Stripe amount ↔ fee disclosure ↔ Terms language) took 5 separate follow-up PRs to fully resolve once (PRs #2–#6) — see `.claude/agents/pricing-legal-consistency-reviewer.md`. |
 
 ### How to delegate
 
@@ -70,3 +71,43 @@ producing reviewable PRs, not continuously deploying unreviewed changes.
 up to the admin's approve/reject decision on a new company, not remove
 that decision — see the agent file for why that boundary is deliberate,
 not a gap to be closed.
+
+## Recurring security audits
+
+Five more agents run a privacy/exposure sweep. The stated bar: **nothing
+but the `company-logos` Supabase Storage bucket should ever be public,
+anywhere** — no company's data, and nothing in this codebase or any
+connected service, should be reachable without authentication.
+
+| Agent | Scope |
+|---|---|
+| `storage-exposure-auditor` | Confirms only `company-logos` is a public Supabase Storage bucket; everything else must be private. |
+| `rls-coverage-auditor` | Confirms RLS is enabled (deny-by-default, no policies) on every table, per README's documented access-control model. |
+| `secret-hygiene-scanner` | Scans tracked files for hardcoded credentials and confirms `.gitignore` covers env files. |
+| `public-url-discipline-auditor` | Confirms code never builds an unsigned public URL for a private bucket — this exact bug class has recurred twice in this repo's history (commits `9553f19`, `378b826`). |
+| `external-surface-auditor` | Checks Vercel preview-deployment protection and Stripe webhook signature verification — exposure that lives in connected services, not source files. |
+
+**Each agent's file states exactly what it may fix itself vs. what needs a
+human.** The dividing line is whether the fix can only ever *tighten*
+access and is easily reversible (enabling RLS with no policies, flipping
+a bucket back to private after confirming no code depends on it being
+public, re-enabling Vercel preview protection) vs. anything that's a real
+access-control judgment call, touches production availability, or means a
+secret needs rotating — those get reported, not silently fixed.
+
+**Runs every 3 days** via a recurring trigger: a fresh session applies all
+five checklists (manually, per the Agent-tool limitation noted above),
+fixes what's safe to fix, and re-runs the checks once after fixing to
+confirm clean before stopping — it doesn't loop indefinitely. Code-level
+fixes still go through branch → draft PR, same as everywhere else in this
+repo; only live-infrastructure toggles that meet the "only tightens
+access, easily reversible" bar happen directly.
+
+**Verified clean as of this writing:** storage buckets (only
+`company-logos` public), RLS coverage (all 30 tables correctly enabled
+with no policies), no hardcoded secrets in tracked files. **Found and
+fixed as of this writing:** Vercel preview-deployment protection was off
+on `flha-app`, meaning every PR's preview URL — posted openly in GitHub
+comments — was publicly reachable running the live app; enabled
+`ssoProtection` on preview deployments only (production left untouched,
+since that's the actual customer-facing app).
