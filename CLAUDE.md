@@ -161,3 +161,31 @@ a year, or accept the hour drift). This pipeline is research-only and
 never commits or pushes to the repo — it has no "safe to fix directly"
 tier the way the security audits do, since a business-intel report isn't
 an infrastructure toggle.
+
+## Daily standup log
+
+Two more agents keep a running, plain-English record of what's happening on this project,
+so nothing gets lost between sessions and the user gets a simple morning summary.
+
+| Agent | Cadence | Job |
+|---|---|---|
+| `standup-hourly-logger` | Every hour | Checks what changed on the repo in the last hour. If anything did, appends a short non-technical bullet to `STANDUP_LOG.md`, updates the **Outstanding Items** list, and flags anything that's now shown up more than once under **Repeating Issues**. Does nothing (no commit) if nothing changed. |
+| `standup-daily-reporter` | Daily, 9:00am Mountain | Reads the day's accumulated log, sends a short plain-English "what got done / what's unfinished / what's next" Slack DM, then archives the day into `STANDUP_LOG_ARCHIVE.md` and resets the log for the next day. |
+
+Both are wired up as scheduled Routines (`mcp__Claude_Code_Remote__create_trigger`) that
+spawn a fresh session each time and point it at the matching `.claude/agents/*.md` file.
+
+**`STANDUP_LOG.md` is the reference point for picking up work in a new chat.** Say "read
+STANDUP_LOG.md and complete these outstanding items" to hand a fresh session the current
+state of things without re-explaining it.
+
+**Exception to the "never commit to main directly" rule above:** these two agents push
+directly to `main`, but *only* for `STANDUP_LOG.md` / `STANDUP_LOG_ARCHIVE.md` — never
+application code. This was an explicit user decision (notes need to be trivially
+referenceable from any new chat, which a side branch would work against). Any other
+change these agents' sessions might be asked to make still goes through branch → draft PR
+like everything else.
+
+The 9am firing time is stored in UTC and will drift by an hour across the
+Mountain-time DST boundary (~early Nov, ~early Mar) until the trigger's cron expression is
+manually adjusted.
