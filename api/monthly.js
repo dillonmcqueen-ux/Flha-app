@@ -281,13 +281,31 @@ export default async function handler(req, res) {
       // that crosses a month boundary — an inspection actually done on the
       // last day of the month could land attributed to the next month.
       // periodMonth (YYYY-MM-01) is captured client-side once, at the
-      // original fill time, and used here if given; a validated format
-      // only, never trusted blindly — falls back to server-computed now()
-      // for older clients or if the value is malformed.
+      // original fill time, and used here if given.
+      //
+      // A tenant-scope review of this exact field (after an earlier,
+      // premature "came back clean" note here that this comment replaces —
+      // the review hadn't actually finished when that was written) found a
+      // real gap: validating only the string's *shape* let a client submit
+      // any date at all, not just a plausible one. That opened two paths —
+      // pre-dating a submission into a future month to make
+      // get_active_form's duplicate check silently treat a real future
+      // inspection as "already done," and submitting several records for
+      // the same real month under different periodMonth values to evade
+      // that same duplicate check entirely. Fixed by bounding periodMonth
+      // to the server's current month or the immediately preceding one —
+      // covers the legitimate resync-a-day-late case this was built for
+      // without accepting an arbitrary client-chosen date. Also tightens
+      // the month digits to 01-12 (previously any two digits passed the
+      // regex and only got caught by Postgres's own date validation,
+      // surfacing as a confusing generic 500 instead of a clear rejection).
       const now = new Date();
-      const periodStart = (typeof periodMonth === 'string' && /^\d{4}-\d{2}-01$/.test(periodMonth))
-        ? periodMonth
-        : new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const serverPeriod = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevPeriod = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1).toISOString().slice(0, 10);
+      const periodMonthValid = typeof periodMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])-01$/.test(periodMonth)
+        && (periodMonth === serverPeriod || periodMonth === prevPeriod);
+      const periodStart = periodMonthValid ? periodMonth : serverPeriod;
 
       const { data: record, error: recErr } = await supabaseAdmin
         .from('inspection_records')

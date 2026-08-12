@@ -242,18 +242,32 @@ bolted this on late).
     `customform` — `customform` is a single shared queue bucket covering
     every custom document type a company runs; `formId` inside each queued
     item's payload is what routes it back to the right one on drain).
-    **A real bug fixed along the way, not just mechanical wiring:**
-    `submit_monthly` computed `period_month` from the server's own `now()`
-    at insert time — correct for a live submission, but wrong for a queued
-    one resynced after a delay that crosses a month boundary (an inspection
-    actually completed on the last day of the month could land attributed
-    to the next month if it happened to sync a day late). Fixed by having
-    the client capture `periodMonth` once at the original fill time and
-    send it along; the server uses it when given (format-validated, not
-    blindly trusted) and falls back to its own `now()` for older clients or
-    a malformed value. A follow-up tenant-scope review specifically checked
-    this new client-controlled date value for a data-integrity angle (not
-    just cross-tenant) and came back clean.
+    **A real bug fixed along the way, not just mechanical wiring — and a
+    second real bug found in the fix itself, caught by review before it
+    shipped.** `submit_monthly` computed `period_month` from the server's
+    own `now()` at insert time — correct for a live submission, but wrong
+    for a queued one resynced after a delay that crosses a month boundary
+    (an inspection actually completed on the last day of the month could
+    land attributed to the next month if it happened to sync a day late).
+    First fix: have the client capture `periodMonth` once at the original
+    fill time and send it along, validated only for *string shape*
+    (`YYYY-MM-01`). A tenant-scope review of that exact value — asked to
+    look past cross-tenant concerns at data integrity specifically, since
+    this was new client-controlled data landing in the database — found
+    that shape-only validation let a client submit *any* date, not just a
+    plausible one: pre-dating a submission into a future month would make
+    `get_active_form`'s duplicate check silently treat a real future
+    inspection as "already done," and submitting several records for the
+    same real month under different `periodMonth` values would evade that
+    same duplicate check entirely, since `submit_monthly` itself never
+    checks for a duplicate — only `get_active_form` does, keyed to
+    whatever month the client claims. (An earlier version of this note
+    said the review "came back clean" — that was written before the review
+    had actually finished and was wrong; corrected here.) Fixed by bounding
+    `periodMonth` to the server's current month or the immediately
+    preceding one (covers the real resync-a-day-late case without accepting
+    an arbitrary client-chosen date) and tightening the month digits to
+    01-12 in the format check.
   - **Still not verified end-to-end against a live backend**, for a
     different reason than Phase 0's original gap. This pass had real
     Supabase/Vercel API access (via MCP tools) — enough to find a ready test
