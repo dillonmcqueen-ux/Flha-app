@@ -1,5 +1,11 @@
 # Daily Standup Log
 
+<!-- last-logged-commit: 6ab76b556e64120ee15730381fd0279132c06564 -->
+<!-- The line above is a watermark the hourly logger uses to find new commits since it last
+     ran (git log <sha>..origin/main). Update it to the new HEAD SHA only after a successful
+     push — leaving it unchanged on failure lets the next hourly run catch the same commits
+     instead of losing them. Don't remove this comment. -->
+
 This file is auto-updated by two scheduled agents (see `.claude/agents/standup-hourly-logger.md`
 and `.claude/agents/standup-daily-reporter.md`). It is the running memory of what's happening on
 this project day to day.
