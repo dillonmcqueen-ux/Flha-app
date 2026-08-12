@@ -1,6 +1,21 @@
 # Scope: offline capability
 
-Status: Phase 0 and Phase 1 built (Phase 1 partially — see Progress below).
+Status: Phase 0 built, Phase 1 mostly built (see Progress below). **Still not
+verified end-to-end against a live backend in a real browser** — twice now,
+for two different reasons. The session that built Phase 0/1 had no Supabase
+credentials. The next session (this one) had Supabase/Vercel API access via
+MCP tools, and found a ready-to-use test company (`ABC Earthworks Company`,
+company code `abcworker`, in the `DEMO` Supabase project — which despite the
+name is the real database backing the live Vercel deployment, not a
+disposable sandbox) and generated a Vercel preview-bypass share link — but
+this session's own network egress policy returned a `403 policy denial` for
+`*.vercel.app` (and general internet hosts), confirmed via the agent proxy's
+status log and a direct `curl`, so no browser in this session could reach
+the preview deploy at all. That's a fixed, session-level restriction, not
+something to route around. **This still needs a human click-through** (e.g.
+from a laptop, per how this work was originally prioritized) before treating
+Phase 0/1 as trustworthy in front of a real worker — see the per-form
+checklist in Progress below for exactly what to check.
 Picked from `TODO.md`'s "Offline capability or a backup plan" item — see
 `docs/competitive-notes.md` for why this is the highest-leverage gap to
 close (it's the single most-cited complaint about SiteDocs-category tools,
@@ -123,9 +138,10 @@ bolted this on late).
     where a wrong restore could crash the render (see the excluded-steps
     list above for why those two are the most delicate).
 
-- **Phase 1: server-side idempotency done everywhere it's a clean fit;
-  full auto-queue done for 4 of 8 forms, correctness fix (no auto-queue
-  yet) for the other 2, unstarted for FLHA and Inspection.**
+- **Phase 1: server-side idempotency done on all 6 forms with a suitable
+  table; full auto-queue done for 6 of 8 forms; MonthlyInspection and
+  CustomForm have idempotent endpoints now too but their frontends still
+  need clientSubmissionId + auto-queue wired in (mechanical, unblocked).**
   - **A real bug found and fixed along the way, not just scoped:**
     `NearMiss.jsx`, `Incident.jsx`, `ToolboxTalk.jsx`, `DailyReport.jsx`,
     `MonthlyInspection.jsx`, and `CustomForm.jsx` all previously caught a
@@ -180,34 +196,51 @@ bolted this on late).
     items sent automatically without needing to reopen the specific form.
     Each form gained a new "queued" step/screen ("Saved — No Signal") and
     a `saveError` banner + "Try Again" for real rejections.
-  - **`MonthlyInspection.jsx` and `CustomForm.jsx` got the correctness fix
-    only, deliberately not the auto-queue.** Their submit endpoints
-    (`api/monthly.js`'s `submit_monthly`, `api/customforms.js`'s
-    `submit_custom`) each do a record insert followed by a per-question
-    answers insert (and a conditional `corrective_actions` insert) — a
-    multi-step shape that isn't idempotent yet the way the single-insert
-    tables above are. Auto-queueing on top of that risked a blind
-    background retry creating a duplicate record with duplicate answer
-    rows, which is a worse outcome than the bug being fixed. They now
-    correctly show an error and let the worker retry by hand instead of
-    lying about success — safe, just not yet automatic. Making these two
-    endpoints idempotent (e.g. checking for an existing record by the same
-    `client_submission_id` before the whole insert sequence) is the
-    prerequisite before extending the queue to them.
-  - **FLHA (`App.jsx`) and Inspection (`Inspection.jsx`) weren't touched
-    for auto-queueing** — they already had correct error handling (no
-    lying-about-success bug to fix), so there was no urgent correctness
-    issue forcing the change. Adding auto-queue to them is next, now that
-    the pattern is proven four times over; it's the same mechanical
-    `resubmitX` + `enqueueSubmission` treatment, no new design questions.
-  - **Not verified end-to-end** for the same reason as Phase 0: no
-    Supabase/session credentials in this environment to actually submit a
-    real document, online or offline. The queue mechanics themselves
-    (enqueue/list/drain/ordering/failure-handling) were verified for real
-    in a browser; the full "go offline in devtools, submit, come back
-    online, watch it actually land in the database" path was not, and is
-    the single most important thing to check on a preview deploy before
-    trusting this in front of a real worker.
+  - **FLHA (`App.jsx`) and Inspection (`Inspection.jsx`) now have full
+    auto-queue too**, same mechanical treatment as the first four: each
+    exports a `resubmitX` function (`resubmitFLHA`, `resubmitInspection` —
+    the latter covers both the pre-trip and post-trip submit flows) and
+    gained a "queued" step; both are wired into `WorkerMenu.jsx`'s
+    `RESUBMIT_HANDLERS` map (keys `flha`, `inspection`). FLHA's amend flow
+    (`amendingId`) deliberately keeps its original direct-fetch path with no
+    queueing — amendments are still out of offline scope (see open question
+    4). Server-side idempotency for both `flhas` and `inspections` was
+    already in place from the earlier pass, so no backend change was needed
+    here.
+  - **`MonthlyInspection.jsx` and `CustomForm.jsx`'s endpoints are now
+    idempotent too, via a real schema change rather than the jsonb-embed
+    trick** the other 4 tables use. `inspection_records` and
+    `custom_form_records` have no jsonb column to piggyback on, so — with
+    the user's explicit sign-off, since this touches the live Supabase
+    project's schema — this session applied an additive migration (nullable
+    `client_submission_id text` + a partial unique index on both tables,
+    migration name `add_client_submission_id_monthly_customform`) and wired
+    a check-before-insert into `api/monthly.js`'s `submit_monthly` and
+    `api/customforms.js`'s `submit_custom`, with a unique-violation fallback
+    (Postgres error code `23505`) in case a race between the check and the
+    insert ever lets two concurrent retries both get past the check — the
+    unique index is the real backstop, the app-level check is just the fast
+    path. **The frontends (`MonthlyInspection.jsx`, `CustomForm.jsx`) don't
+    send a `clientSubmissionId` yet and still don't have auto-queue** — that
+    wiring is now unblocked and is the same mechanical `resubmitX` +
+    `enqueueSubmission` + "queued" step treatment as the other 6 forms, left
+    for a follow-up pass.
+  - **Still not verified end-to-end against a live backend**, for a
+    different reason than Phase 0's original gap. This pass had real
+    Supabase/Vercel API access (via MCP tools) — enough to find a ready test
+    company (`ABC Earthworks Company`, company code `abcworker`, worker
+    login) and apply the migration above — but this session's own network
+    egress policy blocked every request to `*.vercel.app` with a `403`
+    (confirmed via the agent proxy's status endpoint and a direct `curl`),
+    so no in-session browser could reach the preview deploy to click
+    through it. The queue mechanics themselves
+    (enqueue/list/drain/ordering/failure-handling) were verified for real in
+    a browser in an earlier pass; the full "go offline in devtools, submit,
+    come back online, watch it actually land in the database" path — now
+    across 6 forms instead of 4 — still has not been, and remains the
+    single most important thing to check on a preview deploy (from a
+    network that can actually reach it) before trusting this in front of a
+    real worker.
 
 ## Proposed approach: phased, cheapest-and-highest-value first
 
@@ -330,12 +363,15 @@ The hardest piece, deliberately sequenced last:
   worker-facing forms. Still worth a real click-through on a preview
   deploy before treating it as fully verified, per the caveat above.
 - **Phase 1 (submission queue, text-only): mostly done** (see Progress
-  above) — server-side idempotency and the queue infrastructure are done;
-  4 of 8 forms (NearMiss, Incident, ToolboxTalk, DailyReport) have full
-  auto-queue, FLHA and Inspection are the same mechanical extension left
-  to do, and MonthlyInspection/CustomForm need their submit endpoints made
-  idempotent first before they can safely get it too. Not yet verified
-  end-to-end against a real backend.
+  above) — server-side idempotency and the queue infrastructure are done on
+  all 8 forms' tables now (including a schema migration for
+  MonthlyInspection/CustomForm); 6 of 8 forms (NearMiss, Incident,
+  ToolboxTalk, DailyReport, FLHA, Inspection) have full auto-queue.
+  MonthlyInspection/CustomForm's endpoints are idempotent but their
+  frontends still need the same mechanical `clientSubmissionId` +
+  `resubmitX` + `enqueueSubmission` wiring — the last remaining piece of
+  this phase. Not yet verified end-to-end against a real backend (blocked
+  twice now for two different reasons — see Progress above).
 - **Phase 2 (offline AI-assist fallback): small-medium, ~2-3 days**, mostly
   UI state + flagging, reusing an existing fallback pattern.
 - **Phase 3 (offline photos): medium-large, ~1-2 weeks** — the IndexedDB

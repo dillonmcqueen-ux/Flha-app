@@ -3,6 +3,75 @@ import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes an entire inspection submission (PDF generation + upload + the
+// final POST) from plain input data, covering both pre-trip and post-trip —
+// used both by a live online submit below and by offlineQueue's
+// drainQueue() to resend a queued one later. Throws on any failure so the
+// caller can tell success from failure. Exported so WorkerMenu.jsx can
+// drain this form's queue without the Inspection component mounted.
+export async function resubmitInspection(payload, clientSubmissionId, tokenForRequest) {
+  const {
+    tripType, label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit, equipmentId,
+    resultsJson, startReading,
+    endReading, hasChanges, changeCondition, changeNotes,
+    linkedPretripId, linkedPretripStartReading, linkedPretripReadingUnit,
+  } = payload;
+
+  const pdfUrl = await generateAndUploadInspection({
+    equipmentLabel: label, workerName, companyName, companyLogo,
+    results: tripType === "pretrip" ? resultsJson : undefined,
+    signatureDataUrl: sig,
+    tripType,
+    startReading: isTrailer ? null : (tripType === "pretrip" ? startReading : linkedPretripStartReading),
+    endReading: tripType === "posttrip" ? (isTrailer ? null : endReading) : undefined,
+    readingUnit: isTrailer ? null : readingUnit,
+    hasChanges: tripType === "posttrip" ? !!hasChanges : undefined,
+    changeCondition: tripType === "posttrip" ? changeCondition : undefined,
+    changeNotes: tripType === "posttrip" ? changeNotes : undefined,
+    linkedPretrip: tripType === "posttrip" ? { id: linkedPretripId, start_reading: linkedPretripStartReading, reading_unit: linkedPretripReadingUnit } : undefined,
+    token: tokenForRequest,
+  });
+
+  const record = tripType === "pretrip" ? {
+    worker_name: workerName, equipment_label: label, equipment_id: equipmentId,
+    results_json: resultsJson, signed_by: workerName, pdf_url: pdfUrl || null,
+    trip_type: "pretrip", linked_inspection_id: null,
+    start_reading: isTrailer ? null : startReading, end_reading: null,
+    reading_unit: isTrailer ? null : readingUnit, has_changes: null,
+  } : {
+    worker_name: workerName, equipment_label: label, equipment_id: equipmentId,
+    results_json: resultsJson, signed_by: workerName, pdf_url: pdfUrl || null,
+    trip_type: "posttrip", linked_inspection_id: linkedPretripId,
+    start_reading: isTrailer ? null : linkedPretripStartReading,
+    end_reading: isTrailer ? null : endReading,
+    reading_unit: isTrailer ? null : (linkedPretripReadingUnit || readingUnit),
+    has_changes: !!hasChanges,
+  };
+
+  let res;
+  try {
+    res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "inspection", action: "submit", token: tokenForRequest, clientSubmissionId, record }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
@@ -12,7 +81,7 @@ const CONDITIONS = [
 ];
 
 export default function Inspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("equipment"); // equipment | choice | worker | inspect | posttrip | done
+  const [step, setStep] = useState("equipment"); // equipment | choice | worker | inspect | posttrip | queued | done
   const [equipment, setEquipment] = useState([]);
   const [eqMode, setEqMode] = useState("list"); // list | other
   const [selectedEq, setSelectedEq] = useState("");
@@ -295,53 +364,39 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       }
     }
 
-    try {
-      // PDF generation lives inside this try too — it used to run outside
-      // any try/catch, so an exception during PDF building left this
-      // function's promise permanently rejected with no error shown: the
-      // submit button would stay stuck disabled forever with no way to
-      // retry short of reloading and losing the completed checklist.
-      const pdfUrl = await generateAndUploadInspection({
-        equipmentLabel: label, workerName, companyName, companyLogo,
-        results: resultsJson, signatureDataUrl: sig,
-        tripType: "pretrip", startReading: isTrailer ? null : startReading, readingUnit: isTrailer ? null : readingUnit, token,
-      });
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      tripType: "pretrip", label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit,
+      equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
+      resultsJson, startReading,
+    };
 
-      const res = await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "inspection",
-          action: "submit",
-          token,
-          record: {
-            worker_name: workerName,
-            equipment_label: label,
-            equipment_id: eqMode === "list" ? (selectedEqId || null) : null,
-            results_json: resultsJson,
-            signed_by: workerName,
-            pdf_url: pdfUrl || null,
-            trip_type: "pretrip",
-            linked_inspection_id: null,
-            start_reading: isTrailer ? null : startReading,
-            end_reading: null,
-            reading_unit: isTrailer ? null : readingUnit,
-            has_changes: null,
-          },
-        }),
-      });
-      if (!res.ok) {
-        console.error("Inspection save failed:", res.status, await res.json().catch(() => ({})));
+    // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+    // queued and retried automatically once back online instead of leaving
+    // the submit button stuck; a real server-side rejection shows an error
+    // and lets the worker retry manually.
+    if (!navigator.onLine) {
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
+      setSavingInspection(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
+      return;
+    }
+
+    try {
+      await resubmitInspection(payload, clientSubmissionId, token);
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Inspection save failed:", e.message);
         setSaveError(true);
         setSavingInspection(false);
         setSigned(false);
         return;
       }
-    } catch (e) {
-      console.error("Inspection save failed:", e);
-      setSaveError(true);
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
       setSavingInspection(false);
-      setSigned(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
       return;
     }
     setSavingInspection(false);
@@ -364,51 +419,40 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       monitorCount: hasChanges && changeCondition === "Monitor" ? 1 : 0,
     };
 
-    try {
-      const pdfUrl = await generateAndUploadInspection({
-        equipmentLabel: label, workerName, companyName, companyLogo,
-        signatureDataUrl: sig,
-        tripType: "posttrip",
-        startReading: isTrailer ? null : openPretrip.start_reading, endReading: isTrailer ? null : endReading, readingUnit: isTrailer ? null : readingUnit,
-        hasChanges: !!hasChanges, changeCondition, changeNotes,
-        linkedPretrip: openPretrip, token,
-      });
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      tripType: "posttrip", label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit,
+      equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
+      resultsJson, endReading, hasChanges: !!hasChanges, changeCondition, changeNotes,
+      linkedPretripId: openPretrip.id, linkedPretripStartReading: openPretrip.start_reading, linkedPretripReadingUnit: openPretrip.reading_unit,
+    };
 
-      const res = await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "inspection",
-          action: "submit",
-          token,
-          record: {
-            worker_name: workerName,
-            equipment_label: label,
-            equipment_id: eqMode === "list" ? (selectedEqId || null) : null,
-            results_json: resultsJson,
-            signed_by: workerName,
-            pdf_url: pdfUrl || null,
-            trip_type: "posttrip",
-            linked_inspection_id: openPretrip.id,
-            start_reading: isTrailer ? null : openPretrip.start_reading,
-            end_reading: isTrailer ? null : endReading,
-            reading_unit: isTrailer ? null : (openPretrip.reading_unit || readingUnit),
-            has_changes: !!hasChanges,
-          },
-        }),
-      });
-      if (!res.ok) {
-        console.error("Post-trip save failed:", res.status, await res.json().catch(() => ({})));
+    // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+    // queued and retried automatically once back online instead of leaving
+    // the submit button stuck; a real server-side rejection shows an error
+    // and lets the worker retry manually.
+    if (!navigator.onLine) {
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
+      setSavingInspection(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
+      return;
+    }
+
+    try {
+      await resubmitInspection(payload, clientSubmissionId, token);
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Post-trip save failed:", e.message);
         setSaveError(true);
         setSavingInspection(false);
         setSigned(false);
         return;
       }
-    } catch (e) {
-      console.error("Post-trip save failed:", e);
-      setSaveError(true);
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
       setSavingInspection(false);
-      setSigned(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
       return;
     }
     setSavingInspection(false);
@@ -752,6 +796,19 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             })()}
           </div>
         </>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{equipmentLabel()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#0369A1")} onClick={onBack}>Back to menu</button>
+          </div>
+        </div>
       )}
 
       {/* STEP: done */}

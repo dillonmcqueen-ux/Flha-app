@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import App from "./App.jsx";
-import Inspection from "./Inspection.jsx";
+import App, { resubmitFLHA } from "./App.jsx";
+import Inspection, { resubmitInspection } from "./Inspection.jsx";
 import ToolboxTalk, { resubmitToolboxTalk } from "./ToolboxTalk.jsx";
 import NearMiss, { resubmitNearMiss } from "./NearMiss.jsx";
 import Incident, { resubmitIncident } from "./Incident.jsx";
@@ -18,6 +18,8 @@ const RESUBMIT_HANDLERS = {
   nearmiss: resubmitNearMiss,
   incident: resubmitIncident,
   toolbox: resubmitToolboxTalk,
+  flha: resubmitFLHA,
+  inspection: resubmitInspection,
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.

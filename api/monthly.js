@@ -236,7 +236,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl } = req.body;
+      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl, clientSubmissionId } = req.body;
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -250,6 +250,31 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Not allowed for this form.' });
       }
 
+      // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
+      // offline monthly inspection gets retried, possibly more than once.
+      // This is a multi-step insert (record + per-question answers +
+      // conditional corrective actions), so unlike the single-insert tables
+      // a plain re-check isn't enough on its own — the unique index on
+      // client_submission_id (see the migration that added this column) is
+      // the real backstop against a race between this check and the insert
+      // below creating two records for the same retried submission.
+      // Scoped by form_id (already verified above to belong to
+      // session.companyId) rather than a bare client_submission_id lookup —
+      // inspection_records has no company_id column of its own, and an
+      // unscoped check would match across tenants on a (practically
+      // unlikely, but unnecessary to allow) clientSubmissionId collision.
+      if (clientSubmissionId) {
+        const { data: existingRows } = await supabaseAdmin
+          .from('inspection_records')
+          .select('id')
+          .eq('form_id', formId)
+          .eq('client_submission_id', clientSubmissionId)
+          .limit(1);
+        if (existingRows && existingRows.length > 0) {
+          return res.status(200).json({ id: existingRows[0].id });
+        }
+      }
+
       const now = new Date();
       const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 
@@ -259,10 +284,27 @@ export default async function handler(req, res) {
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
           period_month: periodStart, ai_summary: aiSummary || null,
           pdf_url: pdfUrl || null, status: 'complete',
+          client_submission_id: clientSubmissionId || null,
         })
         .select()
         .single();
-      if (recErr) return res.status(500).json({ error: 'Save failed. Try again.' });
+      if (recErr) {
+        // A unique-index violation here means a concurrent retry of the
+        // same clientSubmissionId won the race between the check above and
+        // this insert — treat it as the same success the first insert got,
+        // not a failure, so a retried queue item doesn't show an error for
+        // a submission that actually landed.
+        if (recErr.code === '23505' && clientSubmissionId) {
+          const { data: raceRows } = await supabaseAdmin
+            .from('inspection_records')
+            .select('id')
+            .eq('form_id', formId)
+            .eq('client_submission_id', clientSubmissionId)
+            .limit(1);
+          if (raceRows && raceRows.length > 0) return res.status(200).json({ id: raceRows[0].id });
+        }
+        return res.status(500).json({ error: 'Save failed. Try again.' });
+      }
 
       for (const a of answers) {
         const { data: answerRow, error: ansErr } = await supabaseAdmin

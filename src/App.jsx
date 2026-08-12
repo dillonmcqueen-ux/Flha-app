@@ -1,6 +1,63 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes a fresh FLHA submission (PDF generation + upload + the final POST)
+// from plain input data — used both by a live online saveFLHA() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Amendments
+// (amendingId) are deliberately not covered here — they're out of offline
+// scope, see docs/scope-offline-capability.md's open question 4. Throws on
+// any failure so the caller can tell success from failure; never touches UI
+// state itself. Exported so WorkerMenu.jsx can drain this form's queue
+// without needing the FLHA component mounted.
+export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest) {
+  const { flha, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew } = payload;
+  const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
+  const newStatus = hasExtreme ? "pending_approval" : "complete";
+
+  const pdfUrl = await generateAndUploadFLHA({
+    flha, workerName, jobSite, signName: workerName, companyName, signatureDataUrl, companyLogo,
+    amendedNote: null, pendingApproval: newStatus === "pending_approval", crewSignatures: crew,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/flhas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          worker_name: workerName,
+          job_site: jobSite,
+          task_description: taskDescription,
+          hazards_json: flha,
+          signed_by: workerName,
+          pdf_url: pdfUrl || null,
+          status: newStatus,
+          worker_signature: signatureDataUrl || null,
+          crew_signatures: crew,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 // Fallback used only if Supabase has no data yet (e.g. first run)
 const FALLBACK_SOPS = {
@@ -683,81 +740,96 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       ? { ...flha, customFields: customEntries }
       : (flha.customFields ? flha : { ...flha });
 
-    try {
-      // PDF generation lives inside this try too — it used to run outside
-      // the try/catch entirely, so any exception during PDF building (a
-      // jsPDF quirk, a bad signature data URL, etc.) left saveFLHA's promise
-      // permanently rejected with no error shown: savingFLHA never reset,
-      // so the submit button stayed stuck on "Saving…" forever with no way
-      // to retry short of reloading and losing what the worker entered.
-      const pdfUrl = await generateAndUploadFLHA({
-        flha: flhaWithCustom,
-        workerName,
-        jobSite,
-        signName: workerName,
-        companyName,
-        signatureDataUrl,
-        companyLogo,
-        amendedNote,
-        pendingApproval: newStatus === "pending_approval",
-        crewSignatures: crew,
-      });
+    // Amendments are out of offline scope (docs/scope-offline-capability.md
+    // open question 4 — a conflict is possible if the record also changed
+    // server-side while offline) so they keep the original direct-fetch
+    // path, no queueing.
+    if (amendingId) {
+      try {
+        const pdfUrl = await generateAndUploadFLHA({
+          flha: flhaWithCustom,
+          workerName,
+          jobSite,
+          signName: workerName,
+          companyName,
+          signatureDataUrl,
+          companyLogo,
+          amendedNote,
+          pendingApproval: newStatus === "pending_approval",
+          crewSignatures: crew,
+        });
 
-      const res = amendingId
-        ? await fetch("/api/flhas", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "submit",
-              token,
-              amendingId,
-              record: {
-                job_site: jobSite,
-                task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
-                hazards_json: flhaWithCustom,
-                pdf_url: pdfUrl || null,
-                status: newStatus,
-                crew_signatures: crew,
-              },
-            }),
-          })
-        : await fetch("/api/flhas", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "submit",
-              token,
-              record: {
-                worker_name: workerName,
-                job_site: jobSite,
-                task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-                hazards_json: flhaWithCustom,
-                signed_by: workerName,
-                pdf_url: pdfUrl || null,
-                status: newStatus,
-                worker_signature: signatureDataUrl || null,
-                crew_signatures: crew,
-              },
-            }),
-          });
+        const res = await fetch("/api/flhas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "submit",
+            token,
+            amendingId,
+            record: {
+              job_site: jobSite,
+              task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
+              hazards_json: flhaWithCustom,
+              pdf_url: pdfUrl || null,
+              status: newStatus,
+              crew_signatures: crew,
+            },
+          }),
+        });
 
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        console.error("FLHA save failed:", res.status, errBody);
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          console.error("FLHA save failed:", res.status, errBody);
+          setSaveError(true);
+          setSavingFLHA(false);
+          return false;
+        }
+      } catch (e) {
+        console.error("FLHA save failed:", e);
         setSaveError(true);
         setSavingFLHA(false);
         return false;
       }
-    } catch (e) {
-      console.error("FLHA save failed:", e);
-      setSaveError(true);
       setSavingFLHA(false);
-      return false;
+      setPendingApproval(newStatus === "pending_approval");
+      clearDraft("flha", forcedCompanyId);
+      return true;
     }
-    setSavingFLHA(false);
-    setPendingApproval(newStatus === "pending_approval");
-    clearDraft("flha", forcedCompanyId);
-    return true;
+
+    // Fresh submission (docs/scope-offline-capability.md Phase 1) — a
+    // network-level failure gets queued and retried automatically once
+    // back online instead of silently discarding the FLHA; a real
+    // server-side rejection shows an error and lets the worker retry
+    // manually, same as the FLHA form already did before this pass.
+    const taskDescription = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { flha: flhaWithCustom, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("flha", clientSubmissionId, payload);
+      setSavingFLHA(false);
+      clearDraft("flha", forcedCompanyId);
+      return "queued";
+    }
+
+    try {
+      await resubmitFLHA(payload, clientSubmissionId, token);
+      setSavingFLHA(false);
+      setPendingApproval(newStatus === "pending_approval");
+      clearDraft("flha", forcedCompanyId);
+      return true;
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("FLHA save failed:", e.message);
+        setSaveError(true);
+        setSavingFLHA(false);
+        return false;
+      }
+      await enqueueSubmission("flha", clientSubmissionId, payload);
+      setSavingFLHA(false);
+      clearDraft("flha", forcedCompanyId);
+      return "queued";
+    }
   };
 
   const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
@@ -1248,8 +1320,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               disabled={signed && !saveError}
               onClick={async () => {
                 setSigned(true);
-                const ok = await saveFLHA();
-                if (ok) setTimeout(() => setStep("done"), 600);
+                const result = await saveFLHA();
+                if (result === true) setTimeout(() => setStep("done"), 600);
+                else if (result === "queued") setStep("queued");
                 else setSigned(false);
               }}>
               {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
@@ -1261,8 +1334,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                 onClick={async () => {
                   setSignName(workerName);
                   setSigned(true);
-                  const ok = await saveFLHA();
-                  if (ok) setTimeout(() => setStep("done"), 600);
+                  const result = await saveFLHA();
+                  if (result === true) setTimeout(() => setStep("done"), 600);
+                  else if (result === "queued") setStep("queued");
                   else setSigned(false);
                 }}>
                 {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
@@ -1271,6 +1345,19 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             </>
           )}
         </>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={styles.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 8 }}>{jobSite} · {workerName}</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 20 }}>This FLHA is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            {onLogout && <button style={styles.btn("#F97316")} onClick={onLogout}>Back to menu</button>}
+          </div>
+        </div>
       )}
 
       {step === "done" && (
