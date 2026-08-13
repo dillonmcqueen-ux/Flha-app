@@ -1,11 +1,14 @@
 # Scope: company brain
 
-Status: **Phase 1 (data model) and Phase 2 (onboarding research) built.**
-Phase 1 was tenant-scope-reviewed (no cross-tenant issue found; one
-low-severity defense-in-depth suggestion applied). Phase 2's tenant-scope
-review is in progress — see Progress below. **Migration not yet applied to
-the live DB** — needs a human with Supabase access. Phases 3-6 not
-started.
+Status: **Phase 1 (data model) and Phase 2 (onboarding research) built and
+tenant-scope-reviewed.** Phase 1: no cross-tenant issue found; one
+low-severity defense-in-depth suggestion applied. Phase 2: no findings at
+all — `company_id` is always server-derived (a freshly-inserted company
+row's own id, or a value gated behind claim-token validation), never
+client-supplied, even accounting for the attacker-influenced free text
+(`company_name`, `units_list`) that flows into the drafting prompt.
+**Migration not yet applied to the live DB** — needs a human with Supabase
+access. Phases 3-6 not started.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -180,8 +183,8 @@ signals justify a change.
 - [x] Phase 2: onboarding research pass (`draftCompanyProfile` in
       `server-lib/onboardingDrafting.js`, wired into `runOnboardingDrafts`;
       fixed `onboardingApproval.js`'s fire-and-forget call site to actually
-      pass the new company's id through). `tenant-scope-reviewer` pass in
-      progress.
+      pass the new company's id through). `tenant-scope-reviewer` ran
+      against both call sites and the write path: no findings.
 - [ ] Phase 3: signal capture on FLHA edits / toolbox talks / incidents /
       near-misses.
 - [ ] Phase 4: batch profile-summarization Routine.
