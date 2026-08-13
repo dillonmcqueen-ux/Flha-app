@@ -169,7 +169,7 @@ so nothing gets lost between sessions and the user gets a simple morning summary
 
 | Agent | Cadence | Job |
 |---|---|---|
-| `standup-hourly-logger` | Every hour | Checks what changed on the repo in the last hour. If anything did, appends a short non-technical bullet to `STANDUP_LOG.md`, updates the **Outstanding Items** list, and flags anything that's now shown up more than once under **Repeating Issues**. Does nothing (no commit) if nothing changed. |
+| `standup-hourly-logger` | Every 4 hours | Checks what changed on the repo since it last logged something. If anything did, appends a short non-technical bullet to `STANDUP_LOG.md`, updates the **Outstanding Items** list, and flags anything that's now shown up more than once under **Repeating Issues**. Does nothing (no commit) if nothing changed. |
 | `standup-daily-reporter` | Daily, 9:00am Mountain | Reads the day's accumulated log, sends a short plain-English "what got done / what's unfinished / what's next" Slack DM, then archives the day into `STANDUP_LOG_ARCHIVE.md` and resets the log for the next day. |
 
 Both are wired up as scheduled Routines (`mcp__Claude_Code_Remote__create_trigger`) that
