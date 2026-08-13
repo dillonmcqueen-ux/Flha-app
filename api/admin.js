@@ -7,6 +7,15 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { parseSiteLines, parseUserLines, planSeatCap, randomToken } from '../server-lib/onboardingHelpers.js';
+import { sendEmail, siteOrigin } from '../server-lib/email.js';
+import {
+  CLAIM_TOKEN_TTL_MS,
+  genAccountNumber,
+  genSalt,
+  hashPin,
+  provisionCompanyFromRequest,
+} from '../server-lib/onboardingApproval.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -50,37 +59,11 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
-function genAccountNumber() {
-  return Math.floor(100000 + Math.random() * 900000);
-}
-
-function genSalt() {
-  return crypto.randomBytes(16).toString('hex');
-}
-
-function hashPin(pin, salt) {
-  return crypto.scryptSync(String(pin), salt, 64).toString('hex');
-}
-
-// Same shape as the manual "Onboard Company" flow's suggested code, for
-// when a company is created automatically from an onboarding request
-// instead of typed in by hand.
-function randomSuffix(len = 3) {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-function codePrefix(name) {
-  const clean = (name || '').trim().toUpperCase();
-  if (!clean) return 'CO';
-  const words = clean.split(/\s+/).filter(Boolean);
-  if (words.length === 1) return words[0].slice(0, 3);
-  return words.map(w => w[0]).join('').slice(0, 3);
-}
-function genPin() {
-  return String(Math.floor(1000 + Math.random() * 9000));
-}
+// genAccountNumber / genSalt / hashPin are imported from
+// server-lib/onboardingApproval.js (still used below by set_master_code
+// and create_company) — kept in one place so this file and the
+// onboarding auto-approve path in api/login.js can never drift on how a
+// PIN gets hashed or an account number gets generated.
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -166,37 +149,84 @@ export default async function handler(req, res) {
       if (reqErr) return res.status(500).json({ error: 'Could not load onboarding requests.' });
 
       const enriched = await Promise.all((requests || []).map(async (r) => {
-        if (!r.sop_file_paths || r.sop_file_paths.length === 0) return { ...r, sop_file_urls: [] };
-        const { data: signed } = await supabaseAdmin.storage
-          .from('onboarding-uploads')
-          .createSignedUrls(r.sop_file_paths, 60 * 60); // 1 hour
-        return { ...r, sop_file_urls: (signed || []).map(s => s.signedUrl).filter(Boolean) };
+        let sop_file_urls = [];
+        if (r.sop_file_paths && r.sop_file_paths.length > 0) {
+          const { data: signed } = await supabaseAdmin.storage
+            .from('onboarding-uploads')
+            .createSignedUrls(r.sop_file_paths, 60 * 60); // 1 hour
+          sop_file_urls = (signed || []).map(s => s.signedUrl).filter(Boolean);
+        }
+
+        // Surface at-a-glance what the admin needs for the approve/reject
+        // call — plan tier + seat count vs. cap, and a clean/skipped site
+        // and user parse preview — instead of them re-deriving it by eye
+        // from the raw sites_list/units_list/users_list text every time.
+        const siteNames = parseSiteLines(r.sites_list);
+        const { roster, skippedUserLines } = parseUserLines(r.users_list);
+        const seatCount = roster.length;
+        const seatCap = planSeatCap(r.plan_tier);
+
+        return {
+          ...r,
+          sop_file_urls,
+          siteCount: siteNames.length,
+          seatCount,
+          seatCap,
+          overSeatCap: seatCap != null && seatCount > seatCap,
+          skippedUserLines,
+        };
       }));
 
       return res.status(200).json({ requests: enriched });
     }
 
-    // ── Onboarding intake — mark a submission new / in progress / done ──
+    // ── Onboarding intake — mark a submission new / in progress / needs
+    // more info from the submitter / done. needs_info carries an optional
+    // note; the submitter sees it (and can fix + resubmit themselves via
+    // their edit link) rather than the admin relaying "please fix X" by
+    // hand over email. ───────────────────────────────────────────────────
     if (action === 'update_onboarding_status') {
-      const { id, status } = req.body;
-      if (!id || !['new', 'in_progress', 'done'].includes(status)) {
+      const { id, status, note } = req.body;
+      if (!id || !['new', 'in_progress', 'needs_info', 'done'].includes(status)) {
         return res.status(400).json({ error: 'Missing or invalid status.' });
       }
-      const { error } = await supabaseAdmin.from('onboarding_requests').update({ status }).eq('id', id);
+      const updates = { status };
+      if (status === 'needs_info') updates.admin_note = (note || '').trim() || null;
+      const { data: reqRows, error } = await supabaseAdmin.from('onboarding_requests').update(updates).eq('id', id).select('contact_email, company_name, edit_token').limit(1);
       if (error) return res.status(500).json({ error: "Couldn't update status." });
+
+      if (status === 'needs_info' && reqRows?.[0]?.contact_email && reqRows[0].edit_token) {
+        const r = reqRows[0];
+        try {
+          await sendEmail({
+            to: r.contact_email,
+            subject: `A quick fix needed on your FORA onboarding — ${r.company_name || ''}`,
+            text: [
+              updates.admin_note || 'A team member flagged something on your onboarding submission that needs a quick fix.',
+              '',
+              `Update it here: ${siteOrigin(req)}/onboarding?edit=${r.edit_token}`,
+            ].join('\n'),
+          });
+        } catch (e) {
+          console.error('needs_info notification email failed:', e.message);
+        }
+      }
       return res.status(200).json({ ok: true });
     }
 
     // ── Onboarding intake — approve: create the company from the
     // submission in one click. Sites (one per line) are created outright
     // since they're a single plain field. Users are parsed as "Name —
-    // role" / "Name - role" and get a random 4-digit PIN each — any line
-    // that doesn't parse cleanly is skipped and reported back rather than
-    // guessed at. Equipment is deliberately NOT auto-created: its fields
-    // (year/make/model/unit number) are too easy to mis-parse from free
-    // text, so units_list stays visible on the request for a quick manual
-    // add instead. created_company_id is stamped on the request so this
-    // can't be run twice into duplicate companies.
+    // role" / "Name - role" and get a random 4-digit PIN each — but unlike
+    // before, those PINs are never returned here or emailed anywhere: the
+    // contact assigns their own real PINs on the claim-link page (see
+    // claim_set_roster_pin in api/login.js), so this handler doesn't even
+    // hand them back to the admin. Equipment and SOPs are deliberately NOT
+    // auto-created here either — an AI-drafted, editable version of each is
+    // generated after this returns (see runOnboardingDrafts) and only ever
+    // saved once the contact confirms it on the claim-link page.
+    // created_company_id is stamped on the request so this can't be run
+    // twice into duplicate companies.
     if (action === 'approve_onboarding_request') {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing request id.' });
@@ -216,90 +246,43 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'This request has no company name to onboard.' });
       }
 
-      const prefix = codePrefix(request.company_name);
-      let companyCode = '';
-      for (let tries = 0; tries < 8; tries++) {
-        const candidate = `${prefix}${randomSuffix()}`;
-        const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('company_code', candidate).limit(1);
-        if (!clash || clash.length === 0) { companyCode = candidate; break; }
+      // Actual provisioning (company/sites/roster/claim-link/draft kickoff)
+      // is shared with the auto-approve path in api/login.js's
+      // submit_onboarding_intake — see server-lib/onboardingApproval.js —
+      // so a manual click and the system's own "clean request" check can
+      // never silently create a company differently.
+      const result = await provisionCompanyFromRequest(supabaseAdmin, stripe, req, request, { autoApproved: false });
+      if (result.error) return res.status(500).json({ error: result.error });
+
+      return res.status(200).json({ ok: true, ...result });
+    }
+
+    // ── Fetch (or refresh) a company's claim link — the admin-facing
+    // fallback for when claim_email wasn't sent (no contact email on file)
+    // or needs resending. Regenerates the token if it's missing/expired,
+    // rather than ever handing back PINs directly as a substitute.
+    if (action === 'get_claim_link') {
+      const { companyId } = req.body;
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data: rows, error } = await supabaseAdmin
+        .from('onboarding_requests')
+        .select('id, claim_token, claim_token_expires_at')
+        .eq('created_company_id', companyId)
+        .limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load claim link.' });
+      const request = rows && rows[0];
+      if (!request) return res.status(404).json({ error: 'This company was not created from an onboarding request.' });
+
+      let claimToken = request.claim_token;
+      const expired = !request.claim_token_expires_at || new Date(request.claim_token_expires_at) < new Date();
+      if (!claimToken || expired) {
+        claimToken = randomToken();
+        await supabaseAdmin.from('onboarding_requests').update({
+          claim_token: claimToken,
+          claim_token_expires_at: new Date(Date.now() + CLAIM_TOKEN_TTL_MS).toISOString(),
+        }).eq('id', request.id);
       }
-      if (!companyCode) return res.status(500).json({ error: "Couldn't generate a unique company code. Try again." });
-
-      let acct = genAccountNumber();
-      for (let tries = 0; tries < 5; tries++) {
-        const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('account_number', acct).limit(1);
-        if (!clash || clash.length === 0) break;
-        acct = genAccountNumber();
-      }
-
-      const { data: companyRows, error: coErr } = await supabaseAdmin.from('companies').insert({
-        name: request.company_name.trim(),
-        company_code: companyCode,
-        account_number: acct,
-        contact_name: request.contact_name || null,
-        contact_email: request.contact_email || null,
-        contact_phone: request.contact_phone || null,
-        address: request.address || null,
-        logo_url: request.logo_url || null,
-        ...(['basic', 'advanced'].includes(request.plan_tier) ? { plan_tier: request.plan_tier } : {}),
-        stripe_customer_id: request.stripe_customer_id || null,
-      }).select('id').limit(1);
-      if (coErr) return res.status(500).json({ error: "Couldn't create company: " + coErr.message });
-      const companyId = companyRows[0].id;
-
-      // Best-effort: this request came from a paid checkout, so pick up the
-      // subscription it created and stamp its status — lets the webhook
-      // (api/stripe-webhook.js) start syncing this company on the very next
-      // subscription event instead of only after one arrives from scratch.
-      if (stripe && request.stripe_customer_id) {
-        try {
-          const subs = await stripe.subscriptions.list({ customer: request.stripe_customer_id, limit: 1 });
-          const sub = subs.data[0];
-          if (sub) {
-            await supabaseAdmin.from('companies').update({
-              stripe_subscription_id: sub.id,
-              stripe_subscription_status: sub.status,
-            }).eq('id', companyId);
-          }
-        } catch (e) {
-          console.error('Could not look up Stripe subscription for approved company:', e.message);
-        }
-      }
-
-      const siteNames = (request.sites_list || '').split('\n').map(s => s.trim()).filter(Boolean);
-      if (siteNames.length > 0) {
-        await supabaseAdmin.from('sites').insert(siteNames.map(name => ({ company_id: companyId, name })));
-      }
-
-      const userLines = (request.users_list || '').split('\n').map(s => s.trim()).filter(Boolean);
-      const roster = [];
-      const skippedUserLines = [];
-      for (const line of userLines) {
-        const m = line.match(/^(.+?)\s*[—-]\s*(worker|supervisor)$/i);
-        const name = m && m[1].trim();
-        if (!m || !name) { skippedUserLines.push(line); continue; }
-        const role = m[2].toLowerCase();
-        const pin = genPin();
-        const salt = genSalt();
-        roster.push({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt, active: true, pin });
-      }
-      if (roster.length > 0) {
-        const { error: rosterErr } = await supabaseAdmin.from('roster').insert(
-          roster.map(({ pin, ...r }) => r)
-        );
-        if (!rosterErr) await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
-      }
-
-      await supabaseAdmin.from('onboarding_requests').update({ status: 'in_progress', created_company_id: companyId }).eq('id', id);
-
-      return res.status(200).json({
-        ok: true,
-        companyId,
-        companyCode,
-        sitesCreated: siteNames.length,
-        roster: roster.map(({ name, role, pin }) => ({ name, role, pin })),
-        skippedUserLines,
-      });
+      return res.status(200).json({ ok: true, claimUrl: `${siteOrigin(req)}/claim?token=${claimToken}` });
     }
 
     // ── Onboard a new company ───────────────────────────────────────────

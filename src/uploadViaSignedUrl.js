@@ -21,5 +21,9 @@ export async function uploadViaSignedUrl({ endpoint, action, token, bucket, file
   if (error) throw new Error(error.message || "Upload failed.");
 
   const { data: pub } = supabase.storage.from(bucket).getPublicUrl(data.path);
-  return { path: data.path, publicUrl: pub?.publicUrl || "" };
+  // Spread the endpoint's response first so any extra fields it returns
+  // (e.g. api/login.js's onboarding-uploads pathToken, used to prove a
+  // later submission actually owns this path) pass through to the caller
+  // untouched, alongside the two fields every caller already expects.
+  return { ...data, path: data.path, publicUrl: pub?.publicUrl || "" };
 }
