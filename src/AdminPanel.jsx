@@ -1631,7 +1631,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     ["Hazards most often removed by workers", brainTrends.topRemovedHazards],
                     ["Common toolbox talk topics", brainTrends.topToolboxTopics],
                     ["Common incident categories", brainTrends.topIncidentCategories],
-                    ["Common near-miss involvement", brainTrends.topNearMissInvolved],
+                    ["Recent near-miss involvement (free text — often unique per report)", brainTrends.topNearMissInvolved],
                   ].filter(([, list]) => list.length > 0).map(([label, list]) => (
                     <div key={label}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>{label}</div>

@@ -11,7 +11,12 @@ subagent's trigger condition in CLAUDE.md's delegation table (it's
 delegation applied — self-reviewed instead. Phase 6's new
 `get_company_signal_trends` action is a new `api/*.js` read on the
 company-scoped `company_signals` table, so `tenant-scope-reviewer` ran
-against it — see the Phase 6 write-up below for the result.
+against it: clean, no tenant-isolation issue. It raised one non-blocking
+labeling accuracy note (not a security finding) — the "near-miss
+involvement" trend is free text, so entries are mostly unique rather than
+genuinely "common"; the Admin Panel label was corrected to say so
+("Recent near-miss involvement (free text — often unique per report)")
+rather than implying a real category rollup.
 **Migration not yet applied to the live DB** — needs a human with Supabase
 access. This is otherwise feature-complete against the plan; ongoing
 tuning (thresholds, prompt wording, which document types get which
@@ -346,5 +351,7 @@ Setup" tab group (`AdminPanel.jsx`, next to Profile/SOPs/Sites/Equipment):
 - [x] Phase 6: Admin Panel "🧠 Brain" tab — profile view/editor (reuses
       Phase 1's `update_company_profile`, no new write path), read-only
       hazard-emphasis display, and a signal-based trending view via the
-      new `get_company_signal_trends` action. `tenant-scope-reviewer` pass
-      on that new action is in progress.
+      new `get_company_signal_trends` action. `tenant-scope-reviewer` ran:
+      clean, no tenant-isolation issue; one labeling nit fixed (near-miss
+      "involvement" trend relabeled to reflect that it's free text, not a
+      real category).
