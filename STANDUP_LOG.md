@@ -41,3 +41,7 @@ this file stays short and easy to scan.
 - 03:18 — Closed out a second, smaller bug in that same notes checker: it could have
   mistaken its own past notes for new project activity and kept re-reporting them forever.
   That's fixed too, so this system should now be fully reliable going forward.
+- 03:45 — Double-checked the notes checker fix on a real scheduled run (not just a manual
+  test) and confirmed it correctly logged real project activity on its own. Also switched
+  it from checking every hour to every 4 hours, since that's plenty often for a running
+  log like this.
