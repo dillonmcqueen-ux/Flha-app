@@ -1,6 +1,9 @@
 # Scope: company brain
 
-Status: **Phase 1 (data model) in progress.** Phases 2-6 not started.
+Status: **Phase 1 (data model) built and tenant-scope-reviewed** (no
+cross-tenant issue found; one low-severity defense-in-depth suggestion
+applied — see Progress below). **Migration not yet applied to the live
+DB** — needs a human with Supabase access. Phases 2-6 not started.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -149,11 +152,15 @@ signals justify a change.
 
 ## Progress
 
-- [ ] Phase 1: `company_profiles` / `company_signals` migration written
+- [x] Phase 1: `company_profiles` / `company_signals` migration written
       (`docs/schema/company-brain-migration.sql`, **not yet applied** — no
       DB credentials in this environment, same caveat as the onboarding-
       automation migration) + `get_company_profile` / `update_company_profile`
-      actions added to `api/companydata.js`.
+      actions added to `api/companydata.js`. `tenant-scope-reviewer` ran
+      against both actions: no cross-tenant issue found; `update_company_profile`
+      now resolves `companyId` through `resolveCompanyId` (was reading it
+      raw from the request body, safe only because of the admin-role check
+      on the line above — tightened for defense-in-depth per the review).
 - [ ] Phase 2: onboarding research pass.
 - [ ] Phase 3: signal capture on FLHA edits / toolbox talks / incidents /
       near-misses.

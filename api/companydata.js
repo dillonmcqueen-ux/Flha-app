@@ -616,7 +616,8 @@ export default async function handler(req, res) {
 
     if (action === 'update_company_profile') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId, industryInference, equipmentSummary, terminologyNotes } = req.body;
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      const { industryInference, equipmentSummary, terminologyNotes } = req.body;
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { error } = await supabaseAdmin
         .from('company_profiles')
