@@ -1,101 +1,27 @@
 // api/cron-equipment-reports.js
 // Hit automatically by Vercel Cron every Sunday at 11:59pm UTC. Generates
 // the week-just-finished's equipment usage report AND time clock report
-// for every company
-// (the latter only for companies on individual roster logins). Both jobs
-// live in one file/function to stay under Vercel's serverless function
-// count limit. Protected by CRON_SECRET so it can't be triggered by
-// anyone else.
+// for every company (the latter only for companies on individual roster
+// logins). Both jobs live in one file/function since they're naturally
+// related (same weekly cron, same "for every company" loop). Protected by
+// CRON_SECRET so it can't be triggered by anyone else.
 //
-// Also doubles as the Stripe webhook endpoint (registered in Stripe as
-// this file's URL), for the same function-count reason — this handler
-// never reads req.body itself, so disabling Vercel's body parser below
-// (required to verify Stripe's signature against the raw payload) has no
-// effect on the cron path. Requests are told apart by the presence of a
-// `stripe-signature` header, which only Stripe ever sends.
+// The Stripe webhook used to share this file/URL too, for the same reason
+// every dispatcher here folds actions together — the Vercel Hobby-plan
+// 12-function cap. Split into its own api/stripe-webhook.js once the
+// project moved to Pro (see vercel-function-budget-guardian.md). The Stripe
+// Dashboard's webhook endpoint URL must be updated by hand to match — see
+// that file's header comment.
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import Stripe from 'stripe';
 import { buildReportForCompanyWeek, mondayOf, toISODate } from './equipmentreports.js';
-import { buildTimeClockReportForCompanyWeek } from './companydata.js';
+import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-export const config = { api: { bodyParser: false } };
-
-async function readRawBody(req) {
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-// active/trialing -> access restored; canceled/unpaid/incomplete_expired ->
-// suspend. Anything else (e.g. past_due) is left alone: Stripe is still
-// retrying the payment, so we don't cut access during that grace period.
-const SUSPEND_STATUSES = new Set(['canceled', 'unpaid', 'incomplete_expired']);
-const RESTORE_STATUSES = new Set(['active', 'trialing']);
-
-async function syncSubscriptionToCompany(subscription) {
-  const status = subscription.status;
-  const updates = {
-    stripe_subscription_id: subscription.id,
-    stripe_subscription_status: status,
-  };
-  if (SUSPEND_STATUSES.has(status)) updates.suspended = true;
-  else if (RESTORE_STATUSES.has(status)) updates.suspended = false;
-
-  await supabaseAdmin
-    .from('companies')
-    .update(updates)
-    .eq('stripe_customer_id', subscription.customer);
-}
-
-async function handleStripeWebhook(req, res) {
-  let event;
-  try {
-    const rawBody = await readRawBody(req);
-    event = stripe.webhooks.constructEvent(rawBody, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    return res.status(400).send(`Webhook signature verification failed: ${err.message}`);
-  }
-
-  // Idempotency: Stripe retries on timeout/non-2xx, and can occasionally
-  // deliver the same event twice even on success.
-  const { error: dupeCheckErr } = await supabaseAdmin
-    .from('stripe_webhook_events')
-    .insert({ id: event.id, type: event.type });
-  if (dupeCheckErr) {
-    if (dupeCheckErr.code === '23505') return res.status(200).json({ ok: true, duplicate: true });
-    return res.status(500).json({ error: 'Could not record event.' });
-  }
-
-  try {
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      await supabaseAdmin.from('stripe_checkouts').upsert({
-        session_id: session.id,
-        customer_id: session.customer || null,
-        subscription_id: session.subscription || null,
-        plan_tier: session.metadata?.plan_tier || null,
-        email: session.customer_details?.email || null,
-      });
-    } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
-      await syncSubscriptionToCompany(event.data.object);
-    }
-  } catch (e) {
-    return res.status(500).json({ error: 'Webhook handling failed.' });
-  }
-
-  return res.status(200).json({ ok: true });
-}
 
 // Hash-then-compare so mismatched-length headers never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -117,8 +43,6 @@ async function isDocKeyActive(companyId, documentKey) {
 }
 
 export default async function handler(req, res) {
-  if (req.headers['stripe-signature']) return handleStripeWebhook(req, res);
-
   const authHeader = req.headers['authorization'];
   if (!process.env.CRON_SECRET || !authHeader || !safeEqual(authHeader, `Bearer ${process.env.CRON_SECRET}`)) {
     return res.status(401).json({ error: 'Unauthorized.' });

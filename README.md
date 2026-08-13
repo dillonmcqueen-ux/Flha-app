@@ -72,13 +72,14 @@ Set these on Vercel (Project Settings → Environment Variables):
 
 The pricing page (`website/index.html`) links to two live Stripe Payment
 Links (Basic, Advanced), each bundling a recurring plan price + one-time
-setup fee. The Stripe webhook is registered at `/api/cron-equipment-reports`
-— it shares that file (not a dedicated `/api/stripe-webhook`) to stay under
-Vercel's 12 serverless function cap on the Hobby plan, the same reason the
-time clock report logic lives in `companydata.js` instead of its own file.
-Requests are told apart by the `stripe-signature` header, which only Stripe
-sends. It listens for `checkout.session.completed` (stages the purchased
-plan tier + Stripe customer id, keyed by Checkout Session id) and
+setup fee. The Stripe webhook is registered at its own dedicated endpoint,
+`api/stripe-webhook.js` — it used to share `api/cron-equipment-reports.js`
+with the weekly cron job (the same reason time clock report logic used to
+live in `companydata.js` instead of its own file) to stay under Vercel's
+12 serverless function cap on the Hobby plan; both were split back into
+their own files once the project moved to the Pro plan. It listens for
+`checkout.session.completed` (stages the purchased plan tier + Stripe
+customer id, keyed by Checkout Session id) and
 `customer.subscription.updated`/`deleted` (keeps an existing company's
 `suspended` flag and `stripe_subscription_status` in sync — a canceled/
 unpaid subscription suspends access automatically).
@@ -91,10 +92,13 @@ plan tier and customer id carry through to `approve_onboarding_request`
 created.
 
 In the Stripe Dashboard, register the webhook endpoint at
-`https://<your-domain>/api/cron-equipment-reports` for
+`https://<your-domain>/api/stripe-webhook` for
 `checkout.session.completed`, `customer.subscription.updated`, and
 `customer.subscription.deleted`, and set the resulting signing secret as
-`STRIPE_WEBHOOK_SECRET` on Vercel.
+`STRIPE_WEBHOOK_SECRET` on Vercel. **If you're updating an existing
+registration that pointed at `/api/cron-equipment-reports`, change the URL
+by hand** — that configuration lives in the Stripe Dashboard, outside this
+repo, and nothing in code updates it automatically.
 
 `src/supabaseClient.js` separately hardcodes the Supabase project URL and
 **anon publishable key** — that's expected, not a leaked secret: it's a
