@@ -7,6 +7,59 @@ import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
+import theme from "./theme";
+import {
+  HardHat,
+  Wrench,
+  Users,
+  ClipboardList,
+  ClipboardCheck,
+  Presentation,
+  TriangleAlert,
+  Siren,
+  CalendarCheck,
+  FileText,
+  FolderOpen,
+  BarChart3,
+  Tractor,
+  Hammer,
+  Clock,
+  KeyRound,
+  ShieldAlert,
+  Flag,
+  ListChecks,
+  PenLine,
+  LogOut,
+} from "lucide-react";
+
+// Icon + label metadata for every tab, keyed the same way as TAB_VISIBLE /
+// CATEGORIES below — the single source of truth the tab nav renders from,
+// replacing the old per-tab emoji hardcoded into each button.
+const TAB_META = {
+  flhas: { label: "FLHAs", Icon: ClipboardList },
+  toolbox: { label: "Toolbox Talks", Icon: Presentation },
+  nearmiss: { label: "Near Miss", Icon: TriangleAlert },
+  incident: { label: "Incidents", Icon: Siren },
+  monthly: { label: "Monthly", Icon: CalendarCheck },
+  sops: { label: "SOPs", Icon: FileText },
+  safetycustomdocs: { label: "Custom Docs", Icon: FolderOpen },
+  safetyanalytics: { label: "Safety Analytics", Icon: BarChart3 },
+  inspections: { label: "Inspections", Icon: Tractor },
+  daily: { label: "Daily", Icon: ClipboardCheck },
+  equipment: { label: "Equipment", Icon: Wrench },
+  maintenance: { label: "Maintenance", Icon: Hammer },
+  customdocs: { label: "Custom Docs", Icon: FolderOpen },
+  analytics: { label: "Equipment Analytics", Icon: BarChart3 },
+  timeclock: { label: "Time Clock", Icon: Clock },
+  roster: { label: "Roster", Icon: KeyRound },
+  workforcecustomdocs: { label: "Custom Docs", Icon: FolderOpen },
+};
+
+const CATEGORY_META = {
+  safety: { label: "Safety", Icon: HardHat },
+  operations: { label: "Operations", Icon: Wrench },
+  workforce: { label: "Workforce", Icon: Users },
+};
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -1369,9 +1422,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // dashboards, not one page mixing both audiences' numbers together.
   // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
-    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
-    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
+    { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
+    { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
+    { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -2392,31 +2445,68 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   );
 
   const styles = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
+    wrap: { fontFamily: theme.type.fontFamily, background: theme.colors.background, minHeight: "100vh", color: theme.colors.textPrimary },
     header: {
-      background: "linear-gradient(135deg,#1E3A5F,#2D5F8A)",
-      padding: "16px 20px", color: "#fff",
+      background: theme.colors.primaryDarker,
+      padding: "14px 20px", color: theme.colors.textOnPrimary,
       display: "flex", justifyContent: "space-between", alignItems: "center"
     },
-    card: { background: "#fff", borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px #0001" },
+    card: { background: theme.colors.surface, borderRadius: theme.radius.lg, padding: theme.space[4], marginBottom: theme.space[3], boxShadow: theme.shadow.sm, border: `1px solid ${theme.colors.border}` },
     stat: (accent) => ({
-      background: "#fff", borderRadius: 12, padding: "14px 16px",
-      borderLeft: `4px solid ${accent}`, boxShadow: "0 1px 4px #0001"
+      background: theme.colors.surface, borderRadius: theme.radius.lg, padding: "14px 16px",
+      borderLeft: `4px solid ${accent}`, boxShadow: theme.shadow.sm
     }),
     tab: (active) => ({
-      padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-      background: active ? "#1E3A5F" : "transparent", color: active ? "#fff" : "#6B7280"
+      padding: "8px 16px", borderRadius: theme.radius.pill, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
+      background: active ? theme.colors.primary : "transparent", color: active ? theme.colors.textOnPrimary : theme.colors.textSecondary,
+      display: "inline-flex", alignItems: "center", gap: 6, transition: `background ${theme.motion.fast}, color ${theme.motion.fast}`
     }),
-    flhaRow: { padding: "12px 14px", borderBottom: "1px solid #F3F4F6", cursor: "pointer" },
-    select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", outline: "none" },
-    searchInput: { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" },
+    flhaRow: { padding: "12px 14px", borderBottom: `1px solid ${theme.colors.surfaceSunken}`, cursor: "pointer" },
+    select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: theme.radius.sm, border: `1.5px solid ${theme.colors.border}`, fontSize: 13, background: theme.colors.surface, color: theme.colors.textSecondary, cursor: "pointer", outline: "none" },
+    searchInput: { width: "100%", padding: "9px 12px", borderRadius: theme.radius.sm, border: `1.5px solid ${theme.colors.border}`, fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" },
   };
+
+  // Stat-tile metadata: single source of truth for the 4 tiles rendered
+  // below, replacing 4 near-identical hand-copied blocks. `tone` picks the
+  // alert color when the count is > 0; tiles are neutral/white at zero.
+  const statTiles = [
+    {
+      key: "awaiting", label: "Awaiting Sign-Off", value: awaitingSignOff, Icon: ShieldAlert,
+      tone: theme.colors.status.critical.bg, toneText: "#FECACA",
+      onClick: () => TAB_VISIBLE.flhas && setActiveTab("flhas"),
+    },
+    {
+      key: "review", label: "Needs Review", value: needsReview, Icon: Flag,
+      tone: theme.colors.status.warning.solid, toneText: "#FEF3C7",
+      onClick: () => {
+        const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
+        if (TAB_VISIBLE[target]) setActiveTab(target);
+        else if (TAB_VISIBLE.incident) setActiveTab("incident");
+        else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
+      },
+    },
+    {
+      key: "corrective", label: "Open Corrective Actions", value: openCorrectiveCount, Icon: ListChecks,
+      tone: "#4338CA", toneText: "#E0E7FF",
+      onClick: () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
+    },
+    {
+      key: "week", label: "Docs This Week", value: docsThisWeek, Icon: FileText,
+      tone: null, toneText: null,
+      onClick: () => setShowThisWeekModal(true),
+    },
+  ];
 
   if (loading) return (
     <div style={{ ...styles.wrap, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
-      <div style={{ textAlign: "center", color: "#6B7280" }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>⏳</div>
-        Loading dashboard...
+      <div style={{ textAlign: "center", color: theme.colors.textMuted }}>
+        <div style={{
+          width: 32, height: 32, margin: "0 auto 10px", borderRadius: "50%",
+          border: `3px solid ${theme.colors.border}`, borderTopColor: theme.colors.primary,
+          animation: "fora-spin 0.8s linear infinite"
+        }} />
+        <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } }"}</style>
+        Loading dashboard…
       </div>
     </div>
   );
@@ -2453,19 +2543,35 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       )}
 
       <div style={styles.header}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 18 }}>FORA Dashboard</div>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>{isAdmin ? "Admin View — All Companies" : "Supervisor View"}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: theme.radius.md, background: theme.colors.primary,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+          }}>
+            <HardHat size={19} color={theme.colors.textOnPrimary} strokeWidth={2.25} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: 0.2 }}>FORA</div>
+            <div style={{ fontSize: 12, color: theme.colors.teal[200] }}>{isAdmin ? "Admin — All Companies" : "Supervisor Dashboard"}</div>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {viewerRole === "supervisor" && (
-            <button onClick={() => setShowWorkerForms(true)} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-              📝 Fill Out a Form
+            <button onClick={() => setShowWorkerForms(true)} style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              color: "#fff", fontSize: 13, border: "1px solid #ffffff2A", background: "#ffffff18",
+              padding: "7px 13px", borderRadius: theme.radius.pill, cursor: "pointer", fontWeight: 600
+            }}>
+              <PenLine size={14} /> Fill Out a Form
             </button>
           )}
           {onLogout && (
-            <button onClick={onLogout} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-              {backLabel}
+            <button onClick={onLogout} style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              color: "#fff", fontSize: 13, border: "1px solid #ffffff2A", background: "#ffffff18",
+              padding: "7px 13px", borderRadius: theme.radius.pill, cursor: "pointer", fontWeight: 600
+            }}>
+              <LogOut size={14} /> {backLabel}
             </button>
           )}
         </div>
@@ -2482,14 +2588,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {isAdmin && companies.length > 1 && (
           <div style={styles.card}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8 }}>COMPANY</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.textSecondary, marginBottom: 8, letterSpacing: 0.4 }}>COMPANY</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {companies.map(c => (
                 <button key={c.id} onClick={() => setSelectedCompany(c.id)} style={{
-                  padding: "8px 14px", borderRadius: 8, border: "1.5px solid",
-                  borderColor: selectedCompany === c.id ? "#1E3A5F" : "#E5E7EB",
-                  background: selectedCompany === c.id ? "#1E3A5F" : "#fff",
-                  color: selectedCompany === c.id ? "#fff" : "#374151",
+                  padding: "8px 14px", borderRadius: theme.radius.pill, border: "1.5px solid",
+                  borderColor: selectedCompany === c.id ? theme.colors.primary : theme.colors.border,
+                  background: selectedCompany === c.id ? theme.colors.primary : theme.colors.surface,
+                  color: selectedCompany === c.id ? theme.colors.textOnPrimary : theme.colors.textPrimary,
                   fontWeight: 600, fontSize: 14, cursor: "pointer"
                 }}>{c.name}</button>
               ))}
@@ -2497,103 +2603,94 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-          <div onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: awaitingSignOff > 0 ? "#fff" : "#94A3B8" }}>{awaitingSignOff}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: awaitingSignOff > 0 ? "#FECACA" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🛑 Awaiting Sign-Off</div>
-          </div>
-          <div onClick={() => {
-            const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
-            if (TAB_VISIBLE[target]) setActiveTab(target);
-            else if (TAB_VISIBLE.incident) setActiveTab("incident");
-            else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
-          }} style={{ background: needsReview > 0 ? "#B45309" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: needsReview > 0 ? "none" : "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: needsReview > 0 ? "#fff" : "#94A3B8" }}>{needsReview}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚩 Needs Review</div>
-          </div>
-          <div onClick={() => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } }} style={{ background: openCorrectiveCount > 0 ? "#4338CA" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: openCorrectiveCount > 0 ? "none" : "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
-          </div>
-          <div onClick={() => setShowThisWeekModal(true)} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>📄 Docs This Week</div>
-          </div>
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 10, marginBottom: 14
+        }}>
+          {statTiles.map(t => {
+            const alert = t.tone && t.value > 0;
+            return (
+              <div key={t.key} onClick={t.onClick} style={{
+                background: alert ? t.tone : theme.colors.surface,
+                borderRadius: theme.radius.lg, padding: "14px 16px", cursor: "pointer",
+                boxShadow: theme.shadow.sm, border: alert ? "none" : `1px solid ${theme.colors.border}`,
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10
+              }}>
+                <div>
+                  <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, color: alert ? "#fff" : theme.colors.textPrimary }}>{t.value}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginTop: 4, color: alert ? t.toneText : theme.colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.label}</div>
+                </div>
+                <div style={{
+                  width: 34, height: 34, borderRadius: theme.radius.md, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: alert ? "#ffffff26" : theme.colors.primarySoft,
+                }}>
+                  <t.Icon size={17} color={alert ? "#fff" : theme.colors.primary} strokeWidth={2.25} />
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => (
-            <button
-              key={cat.key}
-              style={styles.tab(activeCategory === cat.key)}
-              onClick={() => {
-                const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
-                if (firstVisible) setActiveTab(firstVisible);
-              }}
-            >{cat.label}</button>
-          ))}
+        <div style={{
+          ...styles.card, padding: 5, display: "inline-flex", gap: 2, marginBottom: 10,
+          background: theme.colors.surfaceSunken, border: "none", boxShadow: "none"
+        }}>
+          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => {
+            const meta = CATEGORY_META[cat.key];
+            const active = activeCategory === cat.key;
+            return (
+              <button
+                key={cat.key}
+                onClick={() => {
+                  const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
+                  if (firstVisible) setActiveTab(firstVisible);
+                }}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 7,
+                  padding: "8px 16px", borderRadius: theme.radius.pill, border: "none", cursor: "pointer",
+                  fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+                  background: active ? theme.colors.surface : "transparent",
+                  color: active ? theme.colors.primaryDark : theme.colors.textSecondary,
+                  boxShadow: active ? theme.shadow.sm : "none",
+                }}
+              >
+                {meta && <meta.Icon size={15} strokeWidth={2.25} />}
+                {cat.label}
+              </button>
+            );
+          })}
         </div>
 
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
-          )}
-          {TAB_VISIBLE.toolbox && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
-          )}
-          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
-              ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
-            </button>
-          )}
-          {TAB_VISIBLE.incident && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
-              🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
-            </button>
-          )}
-          {TAB_VISIBLE.monthly && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
-              🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
-            </button>
-          )}
-          {activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
-          )}
-          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "safetycustomdocs")} onClick={() => setActiveTab("safetycustomdocs")}>🗂️ Custom Docs</button>
-          )}
-          {activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}>📊 Safety Analytics</button>
-          )}
-          {TAB_VISIBLE.inspections && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
-          )}
-          {TAB_VISIBLE.daily && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
-          )}
-          {TAB_VISIBLE.equipment && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
-          )}
-          {TAB_VISIBLE.maintenance && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
-              🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
-            </button>
-          )}
-          {TAB_VISIBLE.customdocs && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
-          )}
-          {activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Equipment Analytics</button>
-          )}
-          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
-          )}
-          {TAB_VISIBLE.roster && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
-          )}
-          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "workforcecustomdocs")} onClick={() => setActiveTab("workforcecustomdocs")}>🗂️ Custom Docs</button>
-          )}
+        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          {CATEGORIES.find(c => c.key === activeCategory)?.tabs
+            .filter(key => TAB_VISIBLE[key] !== false)
+            .map(key => {
+              const meta = TAB_META[key];
+              if (!meta) return null;
+              const badge =
+                key === "nearmiss" ? companyNearMisses.filter(n => !n.reviewed).length :
+                key === "incident" ? companyIncidents.filter(n => !n.reviewed).length :
+                key === "monthly" ? openCorrectiveCount :
+                key === "maintenance" ? maintenanceStatus.filter(e => e.status === "overdue").length :
+                0;
+              const active = activeTab === key;
+              return (
+                <button key={key} style={styles.tab(active)} onClick={() => setActiveTab(key)}>
+                  <meta.Icon size={14} strokeWidth={2.25} />
+                  {meta.label}
+                  {badge > 0 && (
+                    <span style={{
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      minWidth: 17, height: 17, padding: "0 4px", borderRadius: theme.radius.pill,
+                      fontSize: 10, fontWeight: 800,
+                      background: active ? "#ffffff30" : theme.colors.status.danger.solid,
+                      color: "#fff"
+                    }}>{badge}</span>
+                  )}
+                </button>
+              );
+            })}
         </div>
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
