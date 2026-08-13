@@ -68,6 +68,7 @@ export default function Onboarding() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [autoApproved, setAutoApproved] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(!!editToken);
   const [alreadyApproved, setAlreadyApproved] = useState(false);
@@ -122,21 +123,29 @@ export default function Onboarding() {
   };
 
   const uploadSops = async () => {
+    // paths/pathTokens stay parallel arrays — the server only accepts a
+    // sop file path back at submit time if it comes paired with the
+    // matching pathToken it handed out right here, so it can tell "this
+    // browser actually uploaded this file through this flow" apart from
+    // any other string a submitter could type into the request. See
+    // filterVerifiedSopPaths in api/login.js.
     const paths = [];
+    const pathTokens = [];
     for (const file of files) {
       const ext = file.name.split(".").pop();
       const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
       try {
-        const { path } = await uploadViaSignedUrl({
+        const { path, pathToken } = await uploadViaSignedUrl({
           endpoint: "/api/login", action: "create_onboarding_upload_url",
           bucket: "onboarding-uploads", filename, file, contentType: file.type,
         });
         paths.push(path);
+        pathTokens.push(pathToken);
       } catch (e) {
         throw new Error(`Couldn't upload ${file.name}: ${e.message}`);
       }
     }
-    return paths;
+    return { paths, pathTokens };
   };
 
   const uploadLogo = async () => {
@@ -187,7 +196,7 @@ export default function Onboarding() {
     setSubmitting(true);
     try {
       setUploading(true);
-      const [sopFilePaths, logoUrl] = await Promise.all([uploadSops(), uploadLogo()]);
+      const [{ paths: sopFilePaths, pathTokens: sopPathTokens }, logoUrl] = await Promise.all([uploadSops(), uploadLogo()]);
       setUploading(false);
 
       const stripeSessionId = new URLSearchParams(window.location.search).get("session_id") || "";
@@ -208,6 +217,7 @@ export default function Onboarding() {
           usersList: form.usersList.trim(),
           customRequest: form.customRequest.trim(),
           sopFilePaths,
+          sopPathTokens,
           logoUrl,
           stripeSessionId,
         }),
@@ -219,6 +229,7 @@ export default function Onboarding() {
         return;
       }
       setSavedEditToken(data.editToken || editToken || "");
+      setAutoApproved(!!data.autoApproved);
       setDone(true);
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -253,11 +264,15 @@ export default function Onboarding() {
       <div style={styles.wrap}>
         <div style={{ ...styles.card, maxWidth: 480, textAlign: "center", marginTop: 80 }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#F97316", marginBottom: 8 }}>You're all set</div>
-          <div style={{ fontSize: 14, color: "#9CA3AF", lineHeight: 1.6 }}>
-            Thanks — we've got everything. We'll email you within one business day once your company is live on FORA.
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#F97316", marginBottom: 8 }}>
+            {autoApproved ? "You're already live!" : "You're all set"}
           </div>
-          {savedEditToken && (
+          <div style={{ fontSize: 14, color: "#9CA3AF", lineHeight: 1.6 }}>
+            {autoApproved
+              ? "Your FORA account is ready right now — check your email for a link to finish setup: assign your team's PINs and review what we drafted from what you sent."
+              : "Thanks — we've got everything. We'll email you within one business day once your company is live on FORA."}
+          </div>
+          {!autoApproved && savedEditToken && (
             <div style={{ fontSize: 12, color: "#9CA3AF", lineHeight: 1.6, marginTop: 14 }}>
               Need to fix or add something first? We also emailed this, but you can bookmark it now:
               <br />

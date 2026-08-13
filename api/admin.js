@@ -8,10 +8,14 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { parseSiteLines, parseUserLines, planSeatCap, randomToken } from '../server-lib/onboardingHelpers.js';
-import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
-
-const CLAIM_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+import {
+  CLAIM_TOKEN_TTL_MS,
+  genAccountNumber,
+  genSalt,
+  hashPin,
+  provisionCompanyFromRequest,
+} from '../server-lib/onboardingApproval.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -55,37 +59,11 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
-function genAccountNumber() {
-  return Math.floor(100000 + Math.random() * 900000);
-}
-
-function genSalt() {
-  return crypto.randomBytes(16).toString('hex');
-}
-
-function hashPin(pin, salt) {
-  return crypto.scryptSync(String(pin), salt, 64).toString('hex');
-}
-
-// Same shape as the manual "Onboard Company" flow's suggested code, for
-// when a company is created automatically from an onboarding request
-// instead of typed in by hand.
-function randomSuffix(len = 3) {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-function codePrefix(name) {
-  const clean = (name || '').trim().toUpperCase();
-  if (!clean) return 'CO';
-  const words = clean.split(/\s+/).filter(Boolean);
-  if (words.length === 1) return words[0].slice(0, 3);
-  return words.map(w => w[0]).join('').slice(0, 3);
-}
-function genPin() {
-  return String(Math.floor(1000 + Math.random() * 9000));
-}
+// genAccountNumber / genSalt / hashPin are imported from
+// server-lib/onboardingApproval.js (still used below by set_master_code
+// and create_company) — kept in one place so this file and the
+// onboarding auto-approve path in api/login.js can never drift on how a
+// PIN gets hashed or an account number gets generated.
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -268,131 +246,15 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'This request has no company name to onboard.' });
       }
 
-      const prefix = codePrefix(request.company_name);
-      let companyCode = '';
-      for (let tries = 0; tries < 8; tries++) {
-        const candidate = `${prefix}${randomSuffix()}`;
-        const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('company_code', candidate).limit(1);
-        if (!clash || clash.length === 0) { companyCode = candidate; break; }
-      }
-      if (!companyCode) return res.status(500).json({ error: "Couldn't generate a unique company code. Try again." });
+      // Actual provisioning (company/sites/roster/claim-link/draft kickoff)
+      // is shared with the auto-approve path in api/login.js's
+      // submit_onboarding_intake — see server-lib/onboardingApproval.js —
+      // so a manual click and the system's own "clean request" check can
+      // never silently create a company differently.
+      const result = await provisionCompanyFromRequest(supabaseAdmin, stripe, req, request, { autoApproved: false });
+      if (result.error) return res.status(500).json({ error: result.error });
 
-      let acct = genAccountNumber();
-      for (let tries = 0; tries < 5; tries++) {
-        const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('account_number', acct).limit(1);
-        if (!clash || clash.length === 0) break;
-        acct = genAccountNumber();
-      }
-
-      const { data: companyRows, error: coErr } = await supabaseAdmin.from('companies').insert({
-        name: request.company_name.trim(),
-        company_code: companyCode,
-        account_number: acct,
-        contact_name: request.contact_name || null,
-        contact_email: request.contact_email || null,
-        contact_phone: request.contact_phone || null,
-        address: request.address || null,
-        logo_url: request.logo_url || null,
-        ...(['basic', 'advanced'].includes(request.plan_tier) ? { plan_tier: request.plan_tier } : {}),
-        stripe_customer_id: request.stripe_customer_id || null,
-      }).select('id').limit(1);
-      if (coErr) return res.status(500).json({ error: "Couldn't create company: " + coErr.message });
-      const companyId = companyRows[0].id;
-
-      // Best-effort: this request came from a paid checkout, so pick up the
-      // subscription it created and stamp its status — lets the webhook
-      // (api/stripe-webhook.js) start syncing this company on the very next
-      // subscription event instead of only after one arrives from scratch.
-      if (stripe && request.stripe_customer_id) {
-        try {
-          const subs = await stripe.subscriptions.list({ customer: request.stripe_customer_id, limit: 1 });
-          const sub = subs.data[0];
-          if (sub) {
-            await supabaseAdmin.from('companies').update({
-              stripe_subscription_id: sub.id,
-              stripe_subscription_status: sub.status,
-            }).eq('id', companyId);
-          }
-        } catch (e) {
-          console.error('Could not look up Stripe subscription for approved company:', e.message);
-        }
-      }
-
-      const siteNames = parseSiteLines(request.sites_list);
-      if (siteNames.length > 0) {
-        await supabaseAdmin.from('sites').insert(siteNames.map(name => ({ company_id: companyId, name })));
-      }
-
-      const { roster: parsedRoster, skippedUserLines } = parseUserLines(request.users_list);
-      const roster = parsedRoster.map(({ name, role }) => {
-        const salt = genSalt();
-        // Randomly generated and never surfaced anywhere below — this row
-        // only exists so the company has an active roster from minute one;
-        // the actual PIN a person will use is whatever the contact sets for
-        // them on the claim-link page.
-        return { company_id: companyId, name, role, pin_hash: hashPin(genPin(), salt), pin_salt: salt, active: true };
-      });
-      if (roster.length > 0) {
-        const { error: rosterErr } = await supabaseAdmin.from('roster').insert(roster);
-        if (!rosterErr) await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
-      }
-
-      const claimToken = randomToken();
-      const claimTokenExpiresAt = new Date(Date.now() + CLAIM_TOKEN_TTL_MS).toISOString();
-      await supabaseAdmin.from('onboarding_requests').update({
-        status: 'in_progress',
-        created_company_id: companyId,
-        claim_token: claimToken,
-        claim_token_expires_at: claimTokenExpiresAt,
-        draft_status: 'pending',
-      }).eq('id', id);
-
-      // Credential delivery — a self-serve claim link, not emailed PINs.
-      // Best-effort: the company is already created either way, so a
-      // failed email here doesn't undo anything — the admin can still see
-      // the claim link never went out and resend/relay manually as a
-      // fallback.
-      let claimEmailSent = false;
-      if (request.contact_email) {
-        try {
-          await sendEmail({
-            to: request.contact_email,
-            subject: `Your FORA account is ready — ${request.company_name}`,
-            text: [
-              `Your company code: ${companyCode}`,
-              '',
-              `Finish setup — assign PINs to your team, and review the equipment/SOPs we drafted from what you sent:`,
-              `${siteOrigin(req)}/claim?token=${claimToken}`,
-              '',
-              'This link works for the next 14 days.',
-            ].join('\n'),
-          });
-          claimEmailSent = true;
-        } catch (e) {
-          console.error('Claim-link email failed:', e.message);
-        }
-      }
-
-      // Post-approval automation, fire-and-forget: kicks off the AI draft
-      // of equipment (from units_list) and SOPs (from the uploaded files)
-      // now that the company exists, without making the admin's approve
-      // click wait on an LLM call. Deliberately not awaited — see the
-      // top-of-file comment in server-lib/onboardingDrafting.js for why,
-      // and for the claim page's own fallback if this doesn't finish in
-      // time. Errors are caught inside runOnboardingDrafts itself.
-      runOnboardingDrafts(supabaseAdmin, { ...request, id }).catch(e => {
-        console.error('Background onboarding draft generation failed:', e.message);
-      });
-
-      return res.status(200).json({
-        ok: true,
-        companyId,
-        companyCode,
-        sitesCreated: siteNames.length,
-        rosterCreated: roster.length,
-        skippedUserLines,
-        claimEmailSent,
-      });
+      return res.status(200).json({ ok: true, ...result });
     }
 
     // ── Fetch (or refresh) a company's claim link — the admin-facing

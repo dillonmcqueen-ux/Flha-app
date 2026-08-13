@@ -42,3 +42,11 @@ create index if not exists onboarding_requests_created_company_id_idx
 -- consistent with how 'new'/'in_progress'/'done' aren't enforced today
 -- either. No schema change needed for it beyond the admin_note column
 -- above.
+--
+-- Same story for 'auto_approved' (server-lib/onboardingApproval.js,
+-- stamped in place of 'in_progress' when a request is provisioned by the
+-- auto-approve path instead of a human clicking Approve): no new column,
+-- no constraint — it's just another application-level value in the same
+-- free-text status column. It also doubles as the auto-approve dup-check
+-- ("no other request with this stripe_customer_id already
+-- auto-approved") — see canAutoApprove.

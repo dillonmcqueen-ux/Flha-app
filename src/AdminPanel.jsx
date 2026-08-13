@@ -1086,19 +1086,34 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
                     </div>
                   </div>
-                  <select
-                    value={r.status}
-                    onChange={e => {
-                      if (e.target.value === "needs_info") { setNeedsInfoNoteFor(r.id); setNeedsInfoNote(r.admin_note || ""); return; }
-                      updateOnboardingStatus(r.id, e.target.value);
-                    }}
-                    style={{
-                      padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
-                      color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer",
-                    }}
-                  >
-                    {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
-                  </select>
+                  {r.status === "auto_approved" ? (
+                    // Auto-approved rows never join the manual queue (the
+                    // "new"-status badge count on the console home screen
+                    // only counts status === "new") — this is an
+                    // informational badge, not an interactive control,
+                    // since update_onboarding_status doesn't accept
+                    // "auto_approved" as a settable value.
+                    <span style={{
+                      padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                      color: C.green, background: "#F0FDF4", border: "1.5px solid #BBF7D0",
+                    }}>
+                      ⚡ Auto-approved
+                    </span>
+                  ) : (
+                    <select
+                      value={r.status}
+                      onChange={e => {
+                        if (e.target.value === "needs_info") { setNeedsInfoNoteFor(r.id); setNeedsInfoNote(r.admin_note || ""); return; }
+                        updateOnboardingStatus(r.id, e.target.value);
+                      }}
+                      style={{
+                        padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
+                        color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer",
+                      }}
+                    >
+                      {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                    </select>
+                  )}
                 </div>
 
                 {/* At-a-glance approve/reject context: plan tier from the Stripe

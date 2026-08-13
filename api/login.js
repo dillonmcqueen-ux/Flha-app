@@ -13,15 +13,19 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
+import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 const ROSTER_TICKET_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_LOCKOUT_AFTER_ATTEMPTS = 8;
@@ -34,6 +38,39 @@ function safeEqual(a, b) {
   const ah = crypto.createHash('sha256').update(String(a)).digest();
   const bh = crypto.createHash('sha256').update(String(b)).digest();
   return crypto.timingSafeEqual(ah, bh);
+}
+
+// Proves a given onboarding-uploads storage path was actually issued by
+// THIS server's create_onboarding_upload_url call, not just supplied by
+// the client — submit_onboarding_intake used to accept sopFilePaths
+// as-is, which meant any string could be sent in, including another
+// company's already-uploaded SOP path (paths aren't secret — they're
+// shown back to admins as signed URLs in the Admin Panel, and the SOP
+// drafting feature downloads and LLM-summarizes whatever path is on the
+// request, so an unscoped path could pull another company's SOP content
+// into a submitter's own claim page). create_onboarding_upload_url signs
+// each path it hands out; submit_onboarding_intake only keeps paths whose
+// token verifies, and silently drops anything else rather than failing
+// the whole submission over it.
+function signSopPathToken(path) {
+  return crypto.createHmac('sha256', process.env.SESSION_SECRET).update(`sop-path:${path}`).digest('base64url');
+}
+
+function verifySopPathToken(path, token) {
+  if (!path || typeof path !== 'string' || !token || typeof token !== 'string') return false;
+  return safeEqual(signSopPathToken(path), token);
+}
+
+// Keeps only the (path, token) pairs that verify, in the original order —
+// `paths` and `pathTokens` are parallel arrays built client-side from
+// successive create_onboarding_upload_url responses (see uploadSops() in
+// src/Onboarding.jsx). Anything that doesn't verify (missing token,
+// tampered path, a path never issued through this flow at all) is simply
+// left out.
+function filterVerifiedSopPaths(paths, pathTokens) {
+  if (!Array.isArray(paths)) return [];
+  const tokens = Array.isArray(pathTokens) ? pathTokens : [];
+  return paths.filter((p, i) => typeof p === 'string' && verifySopPathToken(p, tokens[i]));
 }
 
 // Creates a signed "pass" (session token) that proves this login was checked
@@ -206,7 +243,17 @@ export default async function handler(req, res) {
     }
     const result = await createUploadUrl(supabaseAdmin, bucket, filename);
     if (result.error) return res.status(500).json({ error: result.error });
-    return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    const response = { ok: true, path: result.path, uploadToken: result.uploadToken };
+    // Only onboarding-uploads (SOP files) needs a scoping guarantee — that
+    // path is later downloaded server-side and fed to an LLM (see
+    // server-lib/onboardingDrafting.js), so submit_onboarding_intake below
+    // must only ever accept a path this same call issued. company-logos
+    // doesn't need this: a logoUrl is just displayed back, never read
+    // server-side, so there's nothing sensitive to scope.
+    if (bucket === 'onboarding-uploads') {
+      response.pathToken = signSopPathToken(result.path);
+    }
+    return res.status(200).json(response);
   }
 
   // ── Step 2: name picker (ticket only, no PIN yet) ───────────────────────
@@ -324,7 +371,7 @@ export default async function handler(req, res) {
   if (action === 'submit_onboarding_intake') {
     const {
       companyName, contactName, contactEmail, contactPhone, address,
-      sitesList, unitsList, usersList, customRequest, sopFilePaths, logoUrl,
+      sitesList, unitsList, usersList, customRequest, sopFilePaths, sopPathTokens, logoUrl,
       stripeSessionId, editToken,
     } = req.body;
 
@@ -341,7 +388,12 @@ export default async function handler(req, res) {
       units_list: unitsList || null,
       users_list: usersList || null,
       custom_request: customRequest || null,
-      sop_file_paths: Array.isArray(sopFilePaths) ? sopFilePaths : [],
+      // Only paths this submission's own create_onboarding_upload_url
+      // calls actually issued survive here — anything else (a guessed or
+      // otherwise-obtained path to another company's uploaded SOP) is
+      // silently dropped rather than trusted from the client. See
+      // filterVerifiedSopPaths / verifySopPathToken above.
+      sop_file_paths: filterVerifiedSopPaths(sopFilePaths, sopPathTokens),
       logo_url: logoUrl || null,
     };
 
@@ -392,6 +444,43 @@ export default async function handler(req, res) {
       requestId = data?.[0]?.id || null;
     }
 
+    // ── Auto-approve: instantly provision the company if this request is
+    // "clean" by every criterion in canAutoApprove — no custom request, no
+    // unparseable user lines, a claimed+active Stripe subscription, and no
+    // prior auto-approval already used up this same Stripe customer. Fails
+    // safe: any error evaluating the criteria (a Stripe hiccup, an
+    // unreadable dup-check) is treated as "not clean" and falls through to
+    // the normal manual Admin Panel queue below, unchanged. This never
+    // skips the checks themselves — it's a stricter, automated stand-in
+    // for the admin's eyeball check, not a removal of gating.
+    let autoApproveResult = null;
+    try {
+      const eligible = await canAutoApprove(supabaseAdmin, stripe, { id: requestId, ...record }, skippedUserLines);
+      if (eligible) {
+        const provisioned = await provisionCompanyFromRequest(supabaseAdmin, stripe, req, { id: requestId, ...record }, { autoApproved: true });
+        if (!provisioned.error) autoApproveResult = provisioned;
+        else console.error('Auto-approve provisioning failed, falling back to manual queue:', provisioned.error);
+      }
+    } catch (e) {
+      console.error('Auto-approve check failed, falling back to manual queue:', e.message);
+    }
+
+    if (autoApproveResult) {
+      // The claim-link email (with the actual company code + next steps)
+      // was already sent by provisionCompanyFromRequest above — no need
+      // for either the "we'll review within one business day" submitter
+      // confirmation or an admin review-needed notification, since there's
+      // nothing left for either of them to do.
+      return res.status(200).json({
+        ok: true,
+        id: requestId,
+        editToken: editToken || record.edit_token,
+        skippedUserLines,
+        autoApproved: true,
+        companyCode: autoApproveResult.companyCode,
+      });
+    }
+
     try {
       await sendOnboardingNotification({ ...record, skippedUserLines });
     } catch (e) {
@@ -403,7 +492,7 @@ export default async function handler(req, res) {
       console.error('Onboarding submitter confirmation email failed:', e.message);
     }
 
-    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines });
+    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines, autoApproved: false });
   }
 
   // ── Fetch an in-progress request for self-serve editing. Public, but
