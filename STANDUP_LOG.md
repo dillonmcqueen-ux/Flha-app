@@ -40,24 +40,3 @@ this file stays short and easy to scan.
 - None yet — this list fills in automatically once the same issue shows up more than once.
 
 ## Today
-
-- 21:50 — Fixed the hourly notes checker itself: it had been running on schedule all day
-  but never actually saving anything. Turned out running it as a brand-new one-off each
-  hour wasn't reliable, so it now runs inside a persistent, already-working session
-  instead.
-- 03:18 — Closed out a second, smaller bug in that same notes checker: it could have
-  mistaken its own past notes for new project activity and kept re-reporting them forever.
-  That's fixed too, so this system should now be fully reliable going forward.
-- 03:45 — Double-checked the notes checker fix on a real scheduled run (not just a manual
-  test) and confirmed it correctly logged real project activity on its own. Also switched
-  it from checking every hour to every 4 hours, since that's plenty often for a running
-  log like this.
-- 04:19 — Finished automating new-customer signup end-to-end: qualifying signups can now
-  get approved and set up automatically (you specifically asked to turn this on), new
-  customers get a secure link to set their own login instead of an emailed password, and
-  their starter equipment list and safety documents get AI-drafted for them to review
-  before anything goes live. A data-privacy gap in the old signup form was also closed
-  along the way.
-- 04:19 — With the Vercel plan now on Pro, split two workaround files that only existed
-  because of the old plan's limits back into their own clean files. One manual step is
-  needed to finish this off — see Outstanding Items above about the Stripe webhook address.
