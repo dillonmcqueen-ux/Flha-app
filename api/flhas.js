@@ -67,6 +67,33 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
   return error ? null : data.signedUrl;
 }
 
+// docs/scope-company-brain.md Phase 3 — client-computed diff between the
+// AI-generated hazard baseline and what actually got submitted. This is
+// untrusted browser input (like `record` itself), so it's re-validated
+// into a fixed shape here rather than trusted as-is before it's stored in
+// company_signals — caps array lengths and coerces every value to a short
+// string, same discipline as the AI-drafting code in
+// server-lib/onboardingDrafting.js caps its own model output.
+function sanitizeAiEditSignal(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const strList = (arr) => (Array.isArray(arr) ? arr : [])
+    .filter((v) => typeof v === 'string' && v.trim())
+    .slice(0, 20)
+    .map((v) => v.trim().slice(0, 200));
+  const riskChanged = (Array.isArray(raw.riskChanged) ? raw.riskChanged : [])
+    .filter((r) => r && typeof r === 'object' && typeof r.hazard === 'string')
+    .slice(0, 20)
+    .map((r) => ({
+      hazard: r.hazard.trim().slice(0, 200),
+      from: typeof r.from === 'string' ? r.from.slice(0, 20) : null,
+      to: typeof r.to === 'string' ? r.to.slice(0, 20) : null,
+    }));
+  const added = strList(raw.added);
+  const removed = strList(raw.removed);
+  if (added.length === 0 && removed.length === 0 && riskChanged.length === 0) return null;
+  return { added, removed, riskChanged };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -103,7 +130,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { amendingId, record, clientSubmissionId } = req.body;
+      const { amendingId, record, clientSubmissionId, aiEditSignal } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
 
       if (amendingId) {
@@ -144,7 +171,25 @@ export default async function handler(req, res) {
           .select('id')
           .limit(1);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-        return res.status(200).json({ id: data?.[0]?.id || null });
+        const newId = data?.[0]?.id || null;
+
+        // docs/scope-company-brain.md Phase 3 — best-effort signal capture,
+        // never allowed to affect the FLHA submission itself: the worker's
+        // record is already saved above by the time this runs, and a
+        // failure here is swallowed (logged, not thrown) rather than
+        // turned into a 500 on an otherwise-successful submit.
+        const signal = sanitizeAiEditSignal(aiEditSignal);
+        if (signal && newId) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: 'flha_edit',
+            source_id: String(newId),
+            signal_json: signal,
+          });
+          if (signalErr) console.error('company_signals insert failed for FLHA', newId, signalErr.message);
+        }
+
+        return res.status(200).json({ id: newId });
       }
     }
 

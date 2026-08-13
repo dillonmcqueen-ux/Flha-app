@@ -1,14 +1,11 @@
 # Scope: company brain
 
-Status: **Phase 1 (data model) and Phase 2 (onboarding research) built and
-tenant-scope-reviewed.** Phase 1: no cross-tenant issue found; one
-low-severity defense-in-depth suggestion applied. Phase 2: no findings at
-all — `company_id` is always server-derived (a freshly-inserted company
-row's own id, or a value gated behind claim-token validation), never
-client-supplied, even accounting for the attacker-influenced free text
-(`company_name`, `units_list`) that flows into the drafting prompt.
-**Migration not yet applied to the live DB** — needs a human with Supabase
-access. Phases 3-6 not started.
+Status: **Phase 1 (data model), Phase 2 (onboarding research), and Phase 3
+(signal capture) built.** Phase 1 and Phase 2 are tenant-scope-reviewed
+(Phase 1: one low-severity defense-in-depth suggestion applied; Phase 2: no
+findings). Phase 3's tenant-scope review is in progress — see Progress
+below. **Migration not yet applied to the live DB** — needs a human with
+Supabase access. Phases 4-6 not started.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -78,13 +75,43 @@ company-creation step, which never had `created_company_id` set — so
 nothing at that call site could have written a company-scoped row even if
 it tried. Now passes `created_company_id: companyId` explicitly.
 
-**Phase 3 — Signal capture (passive, cheap).** Insert a `company_signals`
-row only on a *substantive* FLHA edit (a hazard added/removed, or a risk
-level changed between the AI-generated version and what the supervisor
-actually submitted) — not on wording/typo edits. Toolbox talks, incidents,
-and near-misses log their topic/category as a signal on normal submission.
-All writes are plain inserts alongside existing submission handlers; no
-synchronous LLM call and no added latency on the worker-facing path.
+**Phase 3 — Signal capture (passive, cheap). Built.**
+
+- FLHA edits: `src/App.jsx` now keeps an `aiBaselineRef` snapshot of
+  `{hazard, risk}` pairs exactly as the AI generated them (captured right
+  after each successful `/api/generate-flha` call, before any worker
+  edit). At submit time, `computeFlhaEditSignal` diffs that baseline
+  against the final `flha.hazards` — keyed on hazard name — and only
+  flags a *substantive* difference: a hazard added, a hazard removed, or a
+  risk level changed. A reworded control on an otherwise-unchanged hazard
+  produces no signal. Only computed when `flha.ai_assisted` is true for
+  the whole record (a mixed AI+manual record can't be cleanly attributed
+  to "the AI's version"). The diff travels through the existing submit
+  payload (`aiEditSignal`) — including through the offline queue
+  (`offlineQueue.js` already persists "whatever plain JSON-serializable
+  data the form's resubmit function needs", so no queue changes were
+  needed) — and `api/flhas.js`'s `submit` action re-validates/caps it
+  server-side (`sanitizeAiEditSignal`, since it's untrusted browser input
+  same as `record` itself) before writing to `company_signals` as
+  `source_type: 'flha_edit'`. Amendments are out of scope for now (there's
+  no clean AI baseline to diff an amendment against — same reasoning
+  `docs/scope-offline-capability.md` already used to exclude amendments
+  from offline queueing).
+- Toolbox talks: `api/logs.js`'s `submit` action logs each toolbox talk's
+  `topic` column as `source_type: 'toolbox_talk'`. Inspections and daily
+  reports (the other two record types this same file handles) are
+  deliberately excluded — only FLHA edits, toolbox talks, incidents, and
+  near-misses are in Phase 3's signal set per the plan above.
+- Incidents / near-misses: `api/reports.js`'s `submit` action logs
+  `incident_type` as `source_type: 'incident'`, and `involved` +
+  `report_json.severity` as `source_type: 'near_miss'` (near-misses have
+  no dedicated category column today, unlike incidents).
+- Every insert is best-effort and non-blocking: the underlying
+  submission is already saved by the time the signal insert runs, and a
+  signal-insert failure is logged, never turned into a submission
+  failure. No synchronous LLM call anywhere in this phase — signal
+  capture is pure plain-string/diff logic, keeping the worker-facing path
+  exactly as fast as before.
 
 **Phase 4 — Profile summarization (batch, not live).** A scheduled Routine
 (same shape as the existing standup/security-audit triggers) periodically
@@ -185,8 +212,11 @@ signals justify a change.
       fixed `onboardingApproval.js`'s fire-and-forget call site to actually
       pass the new company's id through). `tenant-scope-reviewer` ran
       against both call sites and the write path: no findings.
-- [ ] Phase 3: signal capture on FLHA edits / toolbox talks / incidents /
-      near-misses.
+- [x] Phase 3: signal capture on FLHA edits (`src/App.jsx`'s
+      `aiBaselineRef` + `computeFlhaEditSignal`, sanitized server-side in
+      `api/flhas.js`), toolbox talk topics (`api/logs.js`), and incident/
+      near-miss categories (`api/reports.js`). `tenant-scope-reviewer`
+      pass in progress.
 - [ ] Phase 4: batch profile-summarization Routine.
 - [ ] Phase 5: generation-time prompt integration.
 - [ ] Phase 6: Admin Panel profile view/editor + signal-based trending

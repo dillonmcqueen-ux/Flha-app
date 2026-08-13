@@ -7,8 +7,8 @@
 -- with project access needs to run this against the Supabase project
 -- before deploying the corresponding code (api/companydata.js's
 -- get_company_profile / update_company_profile actions read/write
--- company_profiles; company_signals is created now so Phase 3's signal
--- capture has somewhere to write, but nothing writes to it yet).
+-- company_profiles; api/flhas.js, api/logs.js, and api/reports.js write
+-- to company_signals as part of Phase 3's signal capture).
 --
 -- Two new tables, both company-scoped exactly like every other
 -- company-scoped table in this schema (roster, sops, sites, equipment,
@@ -39,7 +39,7 @@ create table if not exists company_signals (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references companies(id) on delete cascade,
   source_type text not null, -- 'flha_edit' | 'toolbox_talk' | 'incident' | 'near_miss'
-  source_id uuid, -- id of the originating row (flhas.id, etc.) where applicable — nullable since not every source table uses a uuid pk today
+  source_id text, -- id of the originating row (flhas.id, etc.), stringified — text rather than uuid since source tables use mixed PK types (this repo has no single convention) and this column has no FK constraint, only informational
   signal_json jsonb not null, -- structured payload: for flha_edit, a diff of hazards added/removed/risk-changed between AI output and what was submitted; for toolbox_talk/incident/near_miss, topic/category
   created_at timestamptz not null default now()
 );

@@ -143,7 +143,30 @@ export default async function handler(req, res) {
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-      return res.status(200).json({ id: data?.[0]?.id || null });
+      const newId = data?.[0]?.id || null;
+
+      // docs/scope-company-brain.md Phase 3 — log the category/topic of
+      // every incident and near-miss as a company_signals row, same
+      // best-effort discipline as api/flhas.js's FLHA-edit signal: never
+      // allowed to affect the report submission itself, which is already
+      // saved by the time this runs.
+      if (newId && (type === 'incident' || type === 'nearmiss')) {
+        const shortStr = (v) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 200) : null;
+        const signalJson = type === 'incident'
+          ? { category: shortStr(record.incident_type) }
+          : { involved: shortStr(record.involved), severity: shortStr(record.report_json?.severity) };
+        if (Object.values(signalJson).some((v) => v !== null)) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: type === 'incident' ? 'incident' : 'near_miss',
+            source_id: String(newId),
+            signal_json: signalJson,
+          });
+          if (signalErr) console.error('company_signals insert failed for', type, newId, signalErr.message);
+        }
+      }
+
+      return res.status(200).json({ id: newId });
     }
 
     // ── Supervisor / Admin: load reports for the dashboard ──────────
