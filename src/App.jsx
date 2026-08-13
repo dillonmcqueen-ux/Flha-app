@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -16,7 +17,7 @@ function newClientSubmissionId() {
 // state itself. Exported so WorkerMenu.jsx can drain this form's queue
 // without needing the FLHA component mounted.
 export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest) {
-  const { flha, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew } = payload;
+  const { flha, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal } = payload;
   const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
   const newStatus = hasExtreme ? "pending_approval" : "complete";
 
@@ -34,6 +35,7 @@ export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest)
         action: "submit",
         token: tokenForRequest,
         clientSubmissionId,
+        aiEditSignal: aiEditSignal || null,
         record: {
           worker_name: workerName,
           job_site: jobSite,
@@ -234,6 +236,35 @@ function ensureBaselineHazards(hazards, taskLabel) {
   return result;
 }
 
+// docs/scope-company-brain.md Phase 3 — diffs the AI-generated hazard
+// baseline against what actually got submitted, keyed on hazard name
+// (case-insensitive), so a company_signals row only gets written for a
+// *substantive* edit: a hazard added, removed, or its risk level changed.
+// Wording-only edits (e.g. a reworded control with the same hazard name
+// and risk) are deliberately invisible to this diff — not a real signal.
+// Returns null when there's nothing worth recording (no baseline to
+// compare against, or no substantive difference), so the caller can skip
+// sending anything to the server at all.
+function computeFlhaEditSignal(baseline, finalHazards) {
+  if (!baseline || baseline.length === 0) return null;
+  const norm = h => (h.hazard || "").trim().toLowerCase();
+  const baseMap = new Map(baseline.filter(h => norm(h)).map(h => [norm(h), h.risk]));
+  const finalMap = new Map((finalHazards || []).filter(h => norm(h)).map(h => [norm(h), h.risk]));
+
+  const removed = [...baseMap.keys()].filter(k => !finalMap.has(k));
+  const added = [...finalMap.keys()].filter(k => !baseMap.has(k));
+  const riskChanged = [...baseMap.keys()]
+    .filter(k => finalMap.has(k) && finalMap.get(k) !== baseMap.get(k))
+    .map(k => ({ hazard: k, from: baseMap.get(k), to: finalMap.get(k) }));
+
+  if (removed.length === 0 && added.length === 0 && riskChanged.length === 0) return null;
+  return {
+    added: added.slice(0, 20),
+    removed: removed.slice(0, 20),
+    riskChanged: riskChanged.slice(0, 20),
+  };
+}
+
 function Badge({ text, color = "blue" }) {
   const colors = {
     blue: "background:#1D4ED820;color:#1D4ED8;border:1px solid #1D4ED840",
@@ -296,6 +327,10 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [companyId, setCompanyId] = useState(forcedCompanyId);
   const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null until loaded, and stays
+  // null for a company with no profile yet (cold start); buildCompanyContextBlock
+  // handles null gracefully so the prompt doesn't need to branch on it.
+  const [companyProfile, setCompanyProfile] = useState(null);
 
   // Load SOPs/sites/custom fields for forcedCompanyId (from login) on first
   // render. Company name comes from the login session (propCompanyName) —
@@ -352,6 +387,12 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
         console.error("custom fields read error:", e.message);
       }
 
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort
+      // (fetchCompanyProfile never throws): a company with no profile yet
+      // just gets null, which buildCompanyContextBlock treats as "nothing
+      // to add".
+      setCompanyProfile(await fetchCompanyProfile(token, forcedCompanyId));
+
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
@@ -394,6 +435,13 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [flha, setFlha] = useState(null);
+  // docs/scope-company-brain.md Phase 3 — snapshot of {hazard, risk} pairs
+  // exactly as the AI generated them, captured before any worker edit.
+  // Compared against the final submitted hazards at save time to detect a
+  // *substantive* edit (hazard added/removed, or risk level changed) for
+  // company_signals. A ref, not state: it must survive across renders
+  // without itself triggering one, and nothing in the UI reads it directly.
+  const aiBaselineRef = useRef([]);
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -649,7 +697,7 @@ INSTRUCTIONS:
   - "Low" = minor risk.
 - Read the task description for controls the worker already mentioned, and lower the risk accordingly. Do not rate the raw hazard — rate what could still realistically happen given their approach.
 - If a hazard is already well-controlled by the worker's described approach, rate it Lower.
-
+${buildCompanyContextBlock(companyProfile, { includeHazardEmphasis: true })}
 Respond ONLY with a valid JSON object (no markdown, no backticks):
 {
   "taskSummary": "one sentence summary of what the worker is doing",
@@ -688,6 +736,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       const groundedPPE = stripHedged(parsed.ppeRequired, p => p);
 
       if (addingTask && flha) {
+        aiBaselineRef.current = [...aiBaselineRef.current, ...tagged.map(h => ({ hazard: h.hazard, risk: h.risk }))];
         setFlha(prev => {
           const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...groundedPPE]));
           const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...groundedAlerts]));
@@ -704,6 +753,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         setAddingTask(false);
       } else {
         const withBaseline = ensureBaselineHazards(tagged, parsed.taskSummary || taskLabel);
+        aiBaselineRef.current = withBaseline.map(h => ({ hazard: h.hazard, risk: h.risk }));
         setFlha({ ...parsed, hazards: withBaseline, sopAlerts: groundedAlerts, ppeRequired: groundedPPE, ai_assisted: true });
       }
       setStep("review");
@@ -731,6 +781,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       setAddingTask(false);
     } else {
       const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
+      aiBaselineRef.current = [];
       setFlha({ taskSummary: cleanTranscript, hazards: [], sopAlerts: [], ppeRequired: [], additionalNotes: null, ai_assisted: false });
     }
     setGenError(false);
@@ -827,7 +878,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     // manually, same as the FLHA form already did before this pass.
     const taskDescription = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { flha: flhaWithCustom, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew };
+    // docs/scope-company-brain.md Phase 3 — only meaningful when the whole
+    // record actually went through AI (ai_assisted), since a mixed record
+    // (one task AI-generated, another added manually via continueWithoutAI)
+    // can't be cleanly attributed to "the AI's version" as a single baseline.
+    const aiEditSignal = flha.ai_assisted ? computeFlhaEditSignal(aiBaselineRef.current, flha.hazards) : null;
+    const payload = { flha: flhaWithCustom, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal };
 
     if (!navigator.onLine) {
       await enqueueSubmission("flha", clientSubmissionId, payload);
@@ -1425,7 +1481,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>

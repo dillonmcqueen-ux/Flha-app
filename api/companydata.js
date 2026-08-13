@@ -591,6 +591,97 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ══ COMPANY PROFILE (docs/scope-company-brain.md, Phase 1) ═════════
+    // company_profiles is written by two paths: the (not-yet-built) Phase 2
+    // onboarding research pass, staged as status: 'draft'; and an admin's
+    // own edit here, which is always authoritative and marks the row
+    // 'confirmed'. Neither path may write hazard_emphasis directly to
+    // anything that changes risk-rating logic — see the migration's column
+    // comment and the Phase 4 note in the scope doc; this endpoint only
+    // stores what it's given, the "never lowers the safety floor" rule is
+    // enforced by how Phase 5's generation prompt consumes the field, not
+    // here.
+
+    if (action === 'get_company_profile') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin
+        .from('company_profiles')
+        .select('status, industry_inference, equipment_summary, terminology_notes, hazard_emphasis, last_summarized_at, updated_at')
+        .eq('company_id', companyId)
+        .limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load company profile.' });
+      return res.status(200).json({ profile: (data && data[0]) || null });
+    }
+
+    if (action === 'update_company_profile') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      const { industryInference, equipmentSummary, terminologyNotes } = req.body;
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { error } = await supabaseAdmin
+        .from('company_profiles')
+        .upsert({
+          company_id: companyId,
+          status: 'confirmed',
+          industry_inference: (industryInference || '').trim(),
+          equipment_summary: (equipmentSummary || '').trim(),
+          terminology_notes: (terminologyNotes || '').trim(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'company_id' });
+      if (error) return res.status(500).json({ error: "Couldn't save company profile: " + error.message });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Phase 6 (docs/scope-company-brain.md) — a read-only aggregation of
+    // company_signals for the Admin Panel's "Brain" tab: reuses the exact
+    // same rows Phase 3 writes and Phase 4 reads, no separate pipeline.
+    // Admin/supervisor only, like the other dashboard "list" actions in
+    // this file — workers never see this (unlike get_company_profile
+    // above, which worker-facing generation prompts also read).
+    if (action === 'get_company_signal_trends') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data, error } = await supabaseAdmin
+        .from('company_signals')
+        .select('source_type, signal_json, created_at')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (error) return res.status(500).json({ error: 'Could not load signal trends.' });
+
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0 };
+      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {} };
+      const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
+      (data || []).forEach((row) => {
+        const j = row.signal_json || {};
+        if (bySourceType[row.source_type] !== undefined) bySourceType[row.source_type] += 1;
+        if (row.source_type === 'flha_edit') {
+          (j.added || []).forEach((h) => bump(tally.addedHazards, h));
+          (j.removed || []).forEach((h) => bump(tally.removedHazards, h));
+        } else if (row.source_type === 'toolbox_talk') {
+          bump(tally.toolboxTopics, j.topic);
+        } else if (row.source_type === 'incident') {
+          bump(tally.incidentCategories, j.category);
+        } else if (row.source_type === 'near_miss') {
+          bump(tally.nearMissInvolved, j.involved);
+        }
+      });
+      const topN = (map, n = 8) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
+
+      return res.status(200).json({
+        totalSignals: (data || []).length,
+        bySourceType,
+        topAddedHazards: topN(tally.addedHazards),
+        topRemovedHazards: topN(tally.removedHazards),
+        topToolboxTopics: topN(tally.toolboxTopics),
+        topIncidentCategories: topN(tally.incidentCategories),
+        topNearMissInvolved: topN(tally.nearMissInvolved),
+      });
+    }
+
     // ── Time Clock: self-service (any registered roster user) ───────────
     if (action === 'clock_in') {
       if (!session.userId) return res.status(403).json({ error: 'Not available for this login.' });

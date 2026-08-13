@@ -3,6 +3,7 @@ import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -68,6 +69,9 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[], ai_assisted }
   const [manualNotes, setManualNotes] = useState(""); // docs/scope-offline-capability.md Phase 2 — plain fallback notes when AI is unreachable
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "toolbox", token);
 
   // Attendees
@@ -116,6 +120,9 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
@@ -177,7 +184,7 @@ INSTRUCTIONS:
 - Cover: the key hazards for this task, safe work practices, and how to prevent injuries/incidents.
 - Include a few discussion prompts — open questions the presenter can ask the crew to encourage participation.
 - This is a talk, not a document to read silently. Write for the ear.
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
   "summary": "one sentence describing what this toolbox talk covers",

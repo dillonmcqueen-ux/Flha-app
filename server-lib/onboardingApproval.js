@@ -231,11 +231,17 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   }
 
   // Post-approval automation, fire-and-forget: kicks off the AI draft of
-  // equipment (from units_list) and SOPs (from the uploaded files) now
-  // that the company exists, without making the caller wait on an LLM
+  // equipment (from units_list), SOPs (from the uploaded files), and now
+  // a first-pass company profile (docs/scope-company-brain.md, Phase 2)
+  // now that the company exists, without making the caller wait on an LLM
   // call. Deliberately not awaited — see the top-of-file comment in
   // onboardingDrafting.js. Errors are caught inside runOnboardingDrafts.
-  runOnboardingDrafts(supabaseAdmin, { ...request, id: request.id }).catch(e => {
+  // created_company_id is passed explicitly here — `request` is the
+  // in-memory row from before this function's own company-creation
+  // update above, so it doesn't have that column set yet; without this,
+  // the company profile draft (which needs a company_id to attach to)
+  // would silently never run on this call path.
+  runOnboardingDrafts(supabaseAdmin, { ...request, id: request.id, created_company_id: companyId }).catch(e => {
     console.error('Background onboarding draft generation failed:', e.message);
   });
 

@@ -3,6 +3,7 @@
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/cron-equipment-reports", "schedule": "59 23 * * 0" }
+    { "path": "/api/cron-equipment-reports", "schedule": "59 23 * * 0" },
+    { "path": "/api/cron-company-brain-summary", "schedule": "0 4 * * *" }
   ]
 }

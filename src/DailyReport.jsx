@@ -3,6 +3,7 @@ import { generateAndUploadDaily } from "./generateDailyPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
@@ -83,6 +84,9 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null); // { workSummary, delaysSummary, tomorrowPlan }
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "daily", token);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -125,6 +129,9 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
@@ -205,7 +212,7 @@ INSTRUCTIONS:
 - "delaysSummary": a clear write-up of any delays, issues, or downtime. If none were reported, return "No delays or issues reported.".
 - "tomorrowPlan": a clean summary of the plan for tomorrow. If not specified, return "Not specified.".
 - Keep it factual and professional. Do not add safety commentary or invented specifics.
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
   "workSummary": "professional summary",

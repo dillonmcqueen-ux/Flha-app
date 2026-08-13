@@ -173,7 +173,28 @@ export default async function handler(req, res) {
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-      return res.status(200).json({ id: data?.[0]?.id || null });
+      const newId = data?.[0]?.id || null;
+
+      // docs/scope-company-brain.md Phase 3 — log each toolbox talk's topic
+      // as a company_signals row, same best-effort discipline as
+      // api/flhas.js's FLHA-edit signal: never allowed to affect the
+      // submission itself, which is already saved by the time this runs.
+      // Inspections and daily reports aren't part of Phase 3's signal set —
+      // only FLHA edits, toolbox talks, incidents, and near-misses are.
+      if (newId && type === 'toolbox') {
+        const topic = (typeof record.topic === 'string' && record.topic.trim()) ? record.topic.trim().slice(0, 200) : null;
+        if (topic) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: 'toolbox_talk',
+            source_id: String(newId),
+            signal_json: { topic },
+          });
+          if (signalErr) console.error('company_signals insert failed for toolbox talk', newId, signalErr.message);
+        }
+      }
+
+      return res.status(200).json({ id: newId });
     }
 
     // ── Supervisor / Admin: load records for the dashboard ──────────
