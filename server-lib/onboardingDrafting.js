@@ -66,6 +66,17 @@ function extractJson(text) {
   }
 }
 
+function extractJsonObject(text) {
+  if (!text) return null;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch (e) {
+    return null;
+  }
+}
+
 // units_list free text -> [{ year, make, model, unitNumber }]. A submitter
 // might write "2005 John Deere 624H Loader — Unit 4" on one line, or a
 // messier multi-line description — the LLM's job is exactly the "too easy
@@ -150,6 +161,50 @@ export async function draftSops(supabaseAdmin, sopFilePaths) {
     .map((s) => s.trim().slice(0, 2000));
 }
 
+// Company name + units_list + the SOP excerpts already drafted above ->
+// a first-pass company_profiles row (docs/scope-company-brain.md, Phase 2).
+// Deliberately built ONLY from what the company itself submitted at
+// onboarding — no external/web research on the company or its industry —
+// per the decision locked in with the user in that scope doc. Same
+// Haiku-and-cap discipline as draftEquipment/draftSops above: this is meant
+// to produce a rough first pass an admin reviews, not a thorough research
+// report.
+export async function draftCompanyProfile(companyName, unitsList, sopExcerpts) {
+  const name = (companyName || '').trim();
+  if (!name) return null;
+  const excerpts = (sopExcerpts || []).slice(0, 15);
+  const prompt = [
+    'You are drafting a brief internal profile of a construction/field-services',
+    'company for an internal safety app, using ONLY the information given below.',
+    'Do not invent or assume facts that aren\'t supported by what\'s here — if',
+    'something genuinely can\'t be inferred from the given information, say so',
+    'with an empty string rather than guessing.',
+    '',
+    `Company name: ${name}`,
+    '',
+    'Equipment/vehicles list (free text, may be messy or empty):',
+    (unitsList || '').trim().slice(0, 4000) || '(none provided)',
+    '',
+    'Sample of the company\'s own safety policies, if any were provided:',
+    excerpts.length ? excerpts.map((s, i) => `${i + 1}. ${s}`).join('\n') : '(none provided)',
+    '',
+    'Respond with ONLY a JSON object, no other text:',
+    '{',
+    '  "industryInference": "one short phrase for the likely trade/industry (e.g. \\"earthworks / heavy civil\\", \\"electrical contracting\\"), or \\"\\" if genuinely unclear from the above",',
+    '  "equipmentSummary": "one or two plain sentences summarizing the fleet/equipment type implied by the list, or \\"\\" if the list is empty or uninformative",',
+    '  "terminologyNotes": "any company-specific terms, abbreviations, or recurring phrasing visible in the SOPs worth reusing in generated documents, or \\"\\" if none stand out"',
+    '}',
+  ].join('\n');
+  const raw = await callAnthropic(prompt, 600);
+  const parsed = extractJsonObject(raw);
+  if (!parsed || typeof parsed !== 'object') return null;
+  return {
+    industryInference: String(parsed.industryInference || '').trim().slice(0, 200),
+    equipmentSummary: String(parsed.equipmentSummary || '').trim().slice(0, 1000),
+    terminologyNotes: String(parsed.terminologyNotes || '').trim().slice(0, 1000),
+  };
+}
+
 // Orchestrates both drafts for one onboarding request and persists the
 // result. Never throws — every failure mode ends in a written
 // draft_status so the claim page always has something definite to render
@@ -171,5 +226,41 @@ export async function runOnboardingDrafts(supabaseAdmin, request) {
   if (!process.env.ANTHROPIC_API_KEY) updates.draft_status = 'none';
 
   await supabaseAdmin.from('onboarding_requests').update(updates).eq('id', request.id);
+
+  // Company profile draft — a separate table (company_profiles), written
+  // independently of the onboarding_requests update above so a failure
+  // here can never affect draft_status/equipment/SOP results the claim
+  // page depends on. Only runs once the company itself exists (needs a
+  // company_id to attach the profile to) — the fire-and-forget call site
+  // right after company creation passes created_company_id explicitly for
+  // this reason; the claim-page fallback call already has it on the row.
+  if (request.created_company_id && process.env.ANTHROPIC_API_KEY) {
+    try {
+      // An admin's own confirmed edit (api/companydata.js's
+      // update_company_profile) always wins over this best-effort draft —
+      // don't clobber it if one already exists.
+      const { data: existing } = await supabaseAdmin
+        .from('company_profiles')
+        .select('status')
+        .eq('company_id', request.created_company_id)
+        .limit(1);
+      if (!existing || !existing[0] || existing[0].status !== 'confirmed') {
+        const profile = await draftCompanyProfile(request.company_name, request.units_list, updates.sop_drafts);
+        if (profile) {
+          await supabaseAdmin.from('company_profiles').upsert({
+            company_id: request.created_company_id,
+            status: 'draft',
+            industry_inference: profile.industryInference,
+            equipment_summary: profile.equipmentSummary,
+            terminology_notes: profile.terminologyNotes,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'company_id' });
+        }
+      }
+    } catch (e) {
+      console.error('Company profile draft failed for onboarding request', request.id, e.message);
+    }
+  }
+
   return updates;
 }

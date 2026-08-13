@@ -1,9 +1,11 @@
 # Scope: company brain
 
-Status: **Phase 1 (data model) built and tenant-scope-reviewed** (no
-cross-tenant issue found; one low-severity defense-in-depth suggestion
-applied — see Progress below). **Migration not yet applied to the live
-DB** — needs a human with Supabase access. Phases 2-6 not started.
+Status: **Phase 1 (data model) and Phase 2 (onboarding research) built.**
+Phase 1 was tenant-scope-reviewed (no cross-tenant issue found; one
+low-severity defense-in-depth suggestion applied). Phase 2's tenant-scope
+review is in progress — see Progress below. **Migration not yet applied to
+the live DB** — needs a human with Supabase access. Phases 3-6 not
+started.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -49,15 +51,29 @@ owns SOPs/sites/equipment/custom fields — this is the same kind of
 company reference data, not a new serverless function, keeping the
 Vercel function count flat).
 
-**Phase 2 — Onboarding research (data-only, no web lookups).** Extend the
-existing `runOnboardingDrafts` flow to also produce a first-pass
-`company_profiles` row from `units_list`, uploaded SOPs, and company
-name/division — same Haiku-and-cap discipline as today's equipment/SOP
-drafting. Staged as `status: 'draft'` until an admin confirms it, same
-review-before-save pattern as the claim-link page already uses for
-equipment/SOPs. Deliberately **no external/web research on the company or
-its industry** — profile is built only from what the company itself
-submitted at onboarding.
+**Phase 2 — Onboarding research (data-only, no web lookups). Built.**
+Extended `runOnboardingDrafts` (`server-lib/onboardingDrafting.js`) to also
+produce a first-pass `company_profiles` row from `company_name`,
+`units_list`, and the SOP excerpts the existing `draftSops` step already
+extracts — same Haiku-and-cap discipline as the equipment/SOP drafting it
+sits alongside (`draftCompanyProfile`, capped prompt, 600 max tokens).
+Staged as `status: 'draft'`; an admin's own edit via
+`update_company_profile` (Phase 1) always wins — the drafting step checks
+for an existing `status: 'confirmed'` row and skips writing if one exists,
+so it can never clobber a human's correction. Deliberately **no
+external/web research on the company or its industry** — profile is built
+only from what the company itself submitted at onboarding. (There's no
+"division" field in `onboarding_requests` today, so unlike the original
+plan wording, the profile draws on company name + equipment list + SOP
+content only — division-level context can be layered on later if that
+becomes a real field.)
+
+Fixed a real gap along the way: the existing fire-and-forget call site in
+`server-lib/onboardingApproval.js` passed `runOnboardingDrafts` the
+in-memory `request` object from *before* that function's own
+company-creation step, which never had `created_company_id` set — so
+nothing at that call site could have written a company-scoped row even if
+it tried. Now passes `created_company_id: companyId` explicitly.
 
 **Phase 3 — Signal capture (passive, cheap).** Insert a `company_signals`
 row only on a *substantive* FLHA edit (a hazard added/removed, or a risk
@@ -161,7 +177,11 @@ signals justify a change.
       now resolves `companyId` through `resolveCompanyId` (was reading it
       raw from the request body, safe only because of the admin-role check
       on the line above — tightened for defense-in-depth per the review).
-- [ ] Phase 2: onboarding research pass.
+- [x] Phase 2: onboarding research pass (`draftCompanyProfile` in
+      `server-lib/onboardingDrafting.js`, wired into `runOnboardingDrafts`;
+      fixed `onboardingApproval.js`'s fire-and-forget call site to actually
+      pass the new company's id through). `tenant-scope-reviewer` pass in
+      progress.
 - [ ] Phase 3: signal capture on FLHA edits / toolbox talks / incidents /
       near-misses.
 - [ ] Phase 4: batch profile-summarization Routine.
