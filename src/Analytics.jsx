@@ -4,14 +4,22 @@ import {
   correctiveActionAging, reporterLeaderboard, monthlyPassRate, toolboxAvgAttendance,
   maintenanceSummary,
 } from "./analyticsUtils";
+import { COLORS, CHART_PALETTE } from "./theme";
+import { HardHat, Wrench, CheckCircle2 } from "lucide-react";
+import {
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
+  CartesianGrid, XAxis, YAxis, Tooltip, Legend,
+} from "recharts";
 
 const TONE = { neutral: "#1E3A5F", good: "#16A34A", warn: "#D97706", bad: "#DC2626" };
 const SEV_COLOR = { Low: "#16A34A", Medium: "#D97706", High: "#DC2626", Critical: "#7F1D1D" };
 
-function SectionCard({ title, subtitle, children }) {
+function SectionCard({ title, subtitle, icon, children }) {
   return (
     <div style={{ background: "#fff", borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px #0001" }}>
-      <div style={{ fontWeight: 800, fontSize: 15, color: "#1E3A5F", marginBottom: subtitle ? 2 : 10 }}>{title}</div>
+      <div style={{ fontWeight: 800, fontSize: 15, color: "#1E3A5F", marginBottom: subtitle ? 2 : 10 }}>
+        {icon ? <span style={{ display: "flex", alignItems: "center", gap: 6 }}>{icon}{title}</span> : title}
+      </div>
       {subtitle && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>{subtitle}</div>}
       {children}
     </div>
@@ -29,7 +37,7 @@ function StatTile({ label, value, sub, tone = "neutral" }) {
   );
 }
 
-function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barColor = "#1E3A5F" }) {
+function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barColor = COLORS.navy }) {
   const list = limit ? items.slice(0, limit) : items;
   const hasData = list.some(it => it.count > 0);
   if (!hasData) return <div style={{ color: "#9CA3AF", fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
@@ -42,7 +50,7 @@ function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barC
             <span style={{ color: "#334155", fontWeight: 600 }}>{it.label}</span>
             <span style={{ color: "#6B7280", fontWeight: 700 }}>{it.count}</span>
           </div>
-          <div style={{ background: "#F1F5F9", borderRadius: 6, height: 8 }}>
+          <div style={{ background: COLORS.border, borderRadius: 6, height: 8 }}>
             <div style={{ width: `${it.count > 0 ? Math.max((it.count / max) * 100, 4) : 0}%`, background: it.color || barColor, height: 8, borderRadius: 6, transition: "width .2s" }} />
           </div>
         </div>
@@ -82,36 +90,19 @@ function SimpleTable({ columns, rows, emptyLabel = "Not enough data yet." }) {
 function TrendBars({ buckets, series, emptyLabel = "Not enough data yet." }) {
   const hasData = buckets.some(b => series.some(s => (b[s.key] || 0) > 0));
   if (!hasData) return <div style={{ color: "#9CA3AF", fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
-  const max = Math.max(...buckets.flatMap(b => series.map(s => b[s.key] || 0)), 1);
   return (
-    <div>
-      <div style={{ display: "flex", gap: 14, marginBottom: 10, flexWrap: "wrap" }}>
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={buckets}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: COLORS.slate }} />
+        <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: COLORS.slate }} />
+        <Tooltip />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
         {series.map(s => (
-          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#6B7280" }}>
-            <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
-            {s.label}
-          </div>
+          <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} radius={[3, 3, 0, 0]} />
         ))}
-      </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
-        {buckets.map((b, i) => (
-          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 84 }}>
-              {series.map(s => {
-                const v = b[s.key] || 0;
-                return (
-                  <div key={s.key} title={`${s.label}: ${v}`} style={{
-                    width: 14, height: v > 0 ? Math.max((v / max) * 80, 4) : 0,
-                    background: s.color, borderRadius: "3px 3px 0 0",
-                  }} />
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>{b.label}</div>
-          </div>
-        ))}
-      </div>
-    </div>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -141,7 +132,7 @@ export function SafetyAnalyticsPanel({
 
   return (
     <div>
-      <SectionCard title={`🦺 Safety Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
+      <SectionCard title={`Safety Analytics — ${companyName || "Company"}`} icon={<HardHat size={18} color={COLORS.navy} />} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <StatTile label="Total FLHAs" value={flhas.length} />
           <StatTile label="Incidents" value={incidents.length} tone={incidents.length > 0 ? "bad" : "good"} />
@@ -155,7 +146,19 @@ export function SafetyAnalyticsPanel({
       </SectionCard>
 
       <SectionCard title="Severity Mix" subtitle="Near misses + incidents combined, by potential/actual severity">
-        <RankedBarList items={severityItems} emptyLabel="No near misses or incidents reported yet." />
+        {severityItems.every(it => it.count === 0) ? (
+          <div style={{ color: "#9CA3AF", fontSize: 13, padding: "8px 0" }}>No near misses or incidents reported yet.</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={severityItems.filter(it => it.count > 0)} dataKey="count" nameKey="label" innerRadius={50} outerRadius={80} paddingAngle={2}>
+                {severityItems.filter(it => it.count > 0).map((it, i) => <Cell key={i} fill={it.color} />)}
+              </Pie>
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        )}
       </SectionCard>
 
       <SectionCard title="Top Sites — Near Misses & Incidents">
@@ -166,7 +169,7 @@ export function SafetyAnalyticsPanel({
         {backlog.total === 0 ? (
           <div style={{ color: "#9CA3AF", fontSize: 13 }}>No reports to review yet.</div>
         ) : backlog.caughtUp ? (
-          <div style={{ color: "#16A34A", fontWeight: 700, fontSize: 14 }}>✓ All {backlog.total} reports reviewed</div>
+          <div style={{ color: "#16A34A", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><CheckCircle2 size={16} /> All {backlog.total} reports reviewed</div>
         ) : (
           <>
             <div style={{ fontSize: 13, color: "#334155", marginBottom: 6 }}>
@@ -301,7 +304,7 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
 
   return (
     <div>
-      <SectionCard title={`🔧 Equipment Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
+      <SectionCard title={`Equipment Analytics — ${companyName || "Company"}`} icon={<Wrench size={18} color={COLORS.navy} />} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <StatTile label="Pretrip Inspections" value={pretripCount} />
           <StatTile label="Daily Reports" value={daily.length} />

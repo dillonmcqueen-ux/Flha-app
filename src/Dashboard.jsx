@@ -7,6 +7,13 @@ import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
+import { COLORS, HEADER_GRADIENT } from "./theme";
+import {
+  CheckCircle2, AlertTriangle, FileText, Download, X, MapPin, Search, HardHat, Trash2,
+  ClipboardList, FolderOpen, CalendarClock, ShieldCheck, Wrench, Tractor, Hammer, Siren,
+  Flag, ShieldAlert, Zap, Users, BarChart3, Settings2, Clock, MessageSquare, User, PenLine,
+  KeyRound, Mic, Loader2,
+} from "lucide-react";
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -83,31 +90,31 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
                 background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
                 padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
                 textDecoration: "none"
-              }}>⬇ PDF</a>
+              }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>
             )}
             {onDelete && (
               <button onClick={() => onDelete(flha.id, flha.worker_name)} style={{
                 background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8,
                 padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
-              }}>🗑 Delete</button>
+              }}><Trash2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Delete</button>
             )}
             <button onClick={onClose} style={{
               background: "#F3F4F6", border: "none", borderRadius: 8,
               padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
-            }}>✕ Close</button>
+            }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
         {isPending && (
           <div style={{ background: "#7F1D1D", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 2 }}>🛑 PENDING SUPERVISOR SIGN-OFF — EXTREME RISK</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}><ShieldAlert size={16} />PENDING SUPERVISOR SIGN-OFF — EXTREME RISK</div>
             <div style={{ fontSize: 13, color: "#FECACA" }}>This FLHA contains extreme-risk work. Review the hazards and controls below, then sign off to approve. Work should not begin until you approve.</div>
           </div>
         )}
 
         {!isPending && flha.supervisor_signed_by && (
           <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ APPROVED BY SUPERVISOR</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={14} />APPROVED BY SUPERVISOR</div>
             <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>{flha.supervisor_signed_by} · {flha.supervisor_signed_at ? new Date(flha.supervisor_signed_at).toLocaleString("en-CA") : ""}</div>
           </div>
         )}
@@ -127,7 +134,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
 
         {h.sopAlerts?.length > 0 && (
           <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6 }}>⚠️ SOP ALERTS TRIGGERED</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6, display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={14} />SOP ALERTS TRIGGERED</div>
             {h.sopAlerts.map((a, i) => <div key={i} style={{ fontSize: 13, color: "#9A3412", marginBottom: 2 }}>• {a}</div>)}
           </div>
         )}
@@ -171,7 +178,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{hz.hazard}</div>
                       <RiskBadge risk={hz.risk} />
                     </div>
-                    <div style={{ fontSize: 13, color: "#374151" }}>🛡 {hz.control}</div>
+                    <div style={{ fontSize: 13, color: "#374151" }}><ShieldCheck size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />{hz.control}</div>
                   </div>
                 </div>
               );
@@ -217,7 +224,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
             </div>
             <button onClick={doApprove} disabled={!supName.trim() || !hasSignature || approving}
               style={{ width: "100%", background: (supName.trim() && hasSignature) ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
-              {approving ? "Approving…" : "✓ Approve & Sign Off"}
+              {approving ? "Approving…" : <><CheckCircle2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Approve & Sign Off</>}
             </button>
           </div>
         )}
@@ -245,12 +252,12 @@ function InspectionCard({ insp, onClose, onDelete }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {insp.pdf_url && (
-              <a href={insp.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+              <a href={insp.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(insp.id, insp.worker_name)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+              <button onClick={() => onDelete(insp.id, insp.worker_name)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><Trash2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Delete</button>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
@@ -270,12 +277,12 @@ function InspectionCard({ insp, onClose, onDelete }) {
           <>
             {insp.has_changes === false && (
               <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#166534" }}>✓ No changes reported since Pre-Trip</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={14} />No changes reported since Pre-Trip</div>
               </div>
             )}
             {insp.has_changes === true && (
               <div style={{ border: `1.5px solid ${r.changeCondition === "Defective" ? "#FCA5A5" : "#FCD34D"}`, background: r.changeCondition === "Defective" ? "#FEF2F2" : "#FFFBEB", borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: r.changeCondition === "Defective" ? "#991B1B" : "#92400E", marginBottom: 4 }}>⚠ Change reported — {r.changeCondition}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: r.changeCondition === "Defective" ? "#991B1B" : "#92400E", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={14} />Change reported — {r.changeCondition}</div>
                 <div style={{ fontSize: 13, color: "#374151" }}>{r.changeNotes}</div>
               </div>
             )}
@@ -309,12 +316,12 @@ function ToolboxCard({ talk, onClose, onDelete }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {talk.pdf_url && (
-              <a href={talk.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+              <a href={talk.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(talk.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+              <button onClick={() => onDelete(talk.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><Trash2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Delete</button>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
@@ -337,7 +344,7 @@ function ToolboxCard({ talk, onClose, onDelete }) {
 
         {p.discussion?.length > 0 && (
           <div style={{ background: "#FAF5FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#5B21B6", marginBottom: 6 }}>💬 Discussion</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#5B21B6", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><MessageSquare size={14} />Discussion</div>
             {p.discussion.map((d, i) => (
               <div key={i} style={{ fontSize: 14, color: "#334155", marginBottom: 4 }}>{i + 1}. {d}</div>
             ))}
@@ -382,11 +389,11 @@ function ReportRow({ rec, last, onClick, kind }) {
             <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{rec.site}</div>
           </div>
           <div style={{ fontSize: 13, color: "#374151" }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🧑 {who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
-          {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2 }}>✓ Reviewed by {rec.reviewed_by}</div>}
+          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><User size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
+          {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={12} />Reviewed by {rec.reviewed_by}</div>}
         </div>
         <div style={{ fontSize: 11, color: rec.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
-          {rec.pdf_url ? "📄 PDF" : ""} →
+          {rec.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF</> : ""} →
         </div>
       </div>
     </div>
@@ -426,12 +433,12 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {nm.pdf_url && (
-              <a href={nm.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#D97706", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+              <a href={nm.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#D97706", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(nm.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+              <button onClick={() => onDelete(nm.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><Trash2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Delete</button>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
@@ -464,7 +471,7 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
 
         {nm.reviewed ? (
           <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(nm.reviewed_by || "").toUpperCase()}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={14} />REVIEWED BY {(nm.reviewed_by || "").toUpperCase()}</div>
             <div style={{ fontSize: 12, color: "#374151", marginTop: 2 }}>{nm.reviewed_at ? new Date(nm.reviewed_at).toLocaleString("en-CA") : ""}</div>
             {nm.review_notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 6 }}><strong>Action taken:</strong> {nm.review_notes}</div>}
           </div>
@@ -479,7 +486,7 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
             />
             <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
             <button onClick={() => onReview(nm.id, reviewNotes, reviewerName.trim())} disabled={!reviewerName.trim()}
-              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}><CheckCircle2 size={15} style={{ verticalAlign: "-3px", marginRight: 4 }} />Mark Reviewed</button>
           </div>
         )}
       </div>
@@ -519,9 +526,9 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
             <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(inc.created_at).toLocaleString("en-CA")} · {inc.site}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {inc.pdf_url && <a href={inc.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#DC2626", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            {onDelete && <button onClick={() => onDelete(inc.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
+            {inc.pdf_url && <a href={inc.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#DC2626", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>}
+            {onDelete && <button onClick={() => onDelete(inc.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><Trash2 size={14} /></button>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} /></button>
           </div>
         </div>
 
@@ -572,7 +579,7 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
 
         {inc.reviewed ? (
           <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(inc.reviewed_by || "").toUpperCase()}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={14} />REVIEWED BY {(inc.reviewed_by || "").toUpperCase()}</div>
             <div style={{ fontSize: 12, color: "#374151", marginTop: 2 }}>{inc.reviewed_at ? new Date(inc.reviewed_at).toLocaleString("en-CA") : ""}</div>
             {inc.review_notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 6 }}><strong>Action taken:</strong> {inc.review_notes}</div>}
           </div>
@@ -587,7 +594,7 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
             />
             <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
             <button onClick={() => onReview(inc.id, reviewNotes, reviewerName.trim())} disabled={!reviewerName.trim()}
-              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}><CheckCircle2 size={15} style={{ verticalAlign: "-3px", marginRight: 4 }} />Mark Reviewed</button>
           </div>
         )}
       </div>
@@ -614,9 +621,9 @@ function DailyCard({ dr, onClose, onDelete }) {
             <div style={{ fontSize: 13, color: "#6B7280" }}>{dr.report_date} · {dr.site}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {dr.pdf_url && <a href={dr.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#16A34A", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            {onDelete && <button onClick={() => onDelete(dr.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
+            {dr.pdf_url && <a href={dr.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#16A34A", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>}
+            {onDelete && <button onClick={() => onDelete(dr.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><Trash2 size={14} /></button>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} /></button>
           </div>
         </div>
 
@@ -648,8 +655,8 @@ function MonthlyRecordCard({ data, onClose }) {
             <div style={{ fontSize: 13, color: "#6B7280" }}>{site?.name} · {record.period_month}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#4338CA", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#4338CA", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
@@ -670,7 +677,7 @@ function MonthlyRecordCard({ data, onClose }) {
             {it.notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
             {it.corrective_action && (
               <div style={{ fontSize: 12, marginTop: 6, color: it.corrective_action.status === "resolved" ? "#166534" : "#991B1B", fontWeight: 700 }}>
-                {it.corrective_action.status === "resolved" ? "✓ Resolved" : "⚠ Open"}
+                {it.corrective_action.status === "resolved" ? <><CheckCircle2 size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Resolved</> : <><AlertTriangle size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Open</>}
                 {it.corrective_action.responsible_name ? ` · ${it.corrective_action.responsible_name}` : ""}
                 {it.corrective_action.target_date ? ` · Due ${it.corrective_action.target_date}` : ""}
               </div>
@@ -695,8 +702,8 @@ function CustomDocCard({ data, onClose }) {
             <div style={{ fontSize: 13, color: "#6B7280" }}>{site?.name} · {new Date(record.created_at).toLocaleString("en-CA")}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>}
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
@@ -728,15 +735,15 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
       <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>📄 This Week's Documents</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F", display: "flex", alignItems: "center", gap: 8 }}><FileText size={20} />This Week's Documents</div>
             <div style={{ fontSize: 13, color: "#6B7280" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
           </div>
-          <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
         </div>
 
         {docs.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><FileText size={28} /></div>
             No documents submitted yet this week.
           </div>
         ) : (
@@ -786,7 +793,7 @@ function CorrectiveActionRow({ ca, onUpdate }) {
       <div style={{ fontSize: 13, color: "#374151", marginBottom: 10, fontStyle: "italic" }}>{ca.description}</div>
       {isResolved ? (
         <div style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>
-          ✓ Resolved by {ca.responsible_name || "—"} · {ca.resolved_at ? new Date(ca.resolved_at).toLocaleDateString("en-CA") : ""}
+          <CheckCircle2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Resolved by {ca.responsible_name || "—"} · {ca.resolved_at ? new Date(ca.resolved_at).toLocaleDateString("en-CA") : ""}
         </div>
       ) : (
         <>
@@ -796,7 +803,7 @@ function CorrectiveActionRow({ ca, onUpdate }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => save("open")} disabled={saving} style={{ flex: 1, background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Save Assignment</button>
-            <button onClick={() => save("resolved")} disabled={saving} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✓ Mark Resolved</button>
+            <button onClick={() => save("resolved")} disabled={saving} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}><CheckCircle2 size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Mark Resolved</button>
           </div>
         </>
       )}
@@ -818,21 +825,21 @@ function EquipmentReportCard({ data, onClose, error }) {
             <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name}</div>
             {rj.pulledUntil && (
               <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
-                ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                <Zap size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
               </div>
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {report.pdf_url ? (
-              <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+              <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>
             ) : (
               <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>PDF unavailable</span>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
-        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>⚠ {error}</div>}
+        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B", display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} />{error}</div>}
 
         {equipment.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No equipment activity recorded this week.</div>
@@ -865,7 +872,7 @@ function EquipmentReportCard({ data, onClose, error }) {
                 </div>
               )}
               {eq.noPostTripCount > 0 && (
-                <div style={{ fontSize: 12, color: "#D97706", fontWeight: 700, marginBottom: 4 }}>⚠ Currently checked out — no post-trip logged</div>
+                <div style={{ fontSize: 12, color: "#D97706", fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={14} />Currently checked out — no post-trip logged</div>
               )}
               {eq.issues.map((iss, j) => (
                 <div key={j} style={{ fontSize: 12, color: "#DC2626", marginBottom: 2 }}>
@@ -897,21 +904,21 @@ function TimeClockReportCard({ data, onClose, error }) {
             <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name} · {grandTotal.toFixed(1)} hrs total</div>
             {rj.pulledUntil && (
               <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
-                ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                <Zap size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
               </div>
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {report.pdf_url ? (
-              <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0891B2", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
+              <a href={report.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0891B2", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />PDF</a>
             ) : (
               <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>PDF unavailable</span>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}><X size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Close</button>
           </div>
         </div>
 
-        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>⚠ {error}</div>}
+        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B", display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} />{error}</div>}
 
         {entries.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No time clock activity recorded this week.</div>
@@ -1369,9 +1376,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // dashboards, not one page mixing both audiences' numbers together.
   // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
-    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
-    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
+    { key: "safety", label: <><ShieldCheck size={15} style={{ verticalAlign: "-3px", marginRight: 5 }} />Safety</>, tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
+    { key: "operations", label: <><Wrench size={15} style={{ verticalAlign: "-3px", marginRight: 5 }} />Operations</>, tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
+    { key: "workforce", label: <><Users size={15} style={{ verticalAlign: "-3px", marginRight: 5 }} />Workforce</>, tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -1829,14 +1836,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const docsThisWeek = docsThisWeekList.length;
 
   const DOC_TYPE_META = {
-    flha: { icon: "📋", label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
-    inspection: { icon: "🚜", label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
-    toolbox: { icon: "🧰", label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
-    nearmiss: { icon: "⚠️", label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    incident: { icon: "🚑", label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    daily: { icon: "📋", label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    monthly: { icon: "🗓️", label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
-    customdoc: { icon: "🗂️", label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
+    flha: { icon: <ClipboardList size={14} />, label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
+    inspection: { icon: <Tractor size={14} />, label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
+    toolbox: { icon: <Hammer size={14} />, label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
+    nearmiss: { icon: <AlertTriangle size={14} />, label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    incident: { icon: <Siren size={14} />, label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    daily: { icon: <ClipboardList size={14} />, label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    monthly: { icon: <CalendarClock size={14} />, label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
+    customdoc: { icon: <FolderOpen size={14} />, label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
   };
 
   const openWeekDoc = (type, doc) => {
@@ -2305,12 +2312,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           {processed.length} of {docs.length} shown — tap any submission to view.
         </div>
 
-        <input
-          style={styles.searchInput}
-          placeholder="🔍 Search document, site, or submitted by…"
-          value={cdSearch}
-          onChange={e => setCdSearch(e.target.value)}
-        />
+        <div style={{ position: "relative" }}>
+          <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+          <input
+            style={{ ...styles.searchInput, paddingLeft: 30 }}
+            placeholder="Search document, site, or submitted by…"
+            value={cdSearch}
+            onChange={e => setCdSearch(e.target.value)}
+          />
+        </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
           <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
@@ -2329,7 +2339,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {processed.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><FolderOpen size={28} /></div>
             {docs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
           </div>
         ) : (
@@ -2342,11 +2352,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={{ flex: 1, paddingRight: 10 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><MapPin size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><HardHat size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{r.submitted_by}</div>
                   </div>
                   <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
-                    {r.pdf_url ? "📄 PDF" : ""} →
+                    {r.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF</> : ""} →
                   </div>
                 </div>
               </div>
@@ -2358,7 +2368,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             return (
               <CollapsibleGroup
                 key={groupName}
-                icon={cdGroupBy === "site" ? "📍" : "🗂️"}
+                icon={cdGroupBy === "site" ? <MapPin size={14} /> : <FolderOpen size={14} />}
                 label={groupName}
                 count={groupItems.length}
                 colorPreset="indigo"
@@ -2392,9 +2402,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   );
 
   const styles = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
+    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: COLORS.bg, minHeight: "100vh" },
     header: {
-      background: "linear-gradient(135deg,#1E3A5F,#2D5F8A)",
+      background: HEADER_GRADIENT,
       padding: "16px 20px", color: "#fff",
       display: "flex", justifyContent: "space-between", alignItems: "center"
     },
@@ -2404,8 +2414,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       borderLeft: `4px solid ${accent}`, boxShadow: "0 1px 4px #0001"
     }),
     tab: (active) => ({
-      padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-      background: active ? "#1E3A5F" : "transparent", color: active ? "#fff" : "#6B7280"
+      padding: "10px 14px",
+      border: "none",
+      borderBottom: active ? `3px solid ${COLORS.orange}` : "3px solid transparent",
+      borderRadius: 0,
+      background: "transparent",
+      cursor: "pointer",
+      fontWeight: active ? 700 : 600,
+      fontSize: 14,
+      color: active ? COLORS.navy : COLORS.slate,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6,
+      transition: "color .15s, border-color .15s",
     }),
     flhaRow: { padding: "12px 14px", borderBottom: "1px solid #F3F4F6", cursor: "pointer" },
     select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", outline: "none" },
@@ -2414,8 +2435,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   if (loading) return (
     <div style={{ ...styles.wrap, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
+      <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } }"}</style>
       <div style={{ textAlign: "center", color: "#6B7280" }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>⏳</div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+          <Loader2 size={32} style={{ animation: "fora-spin 1s linear infinite" }} />
+        </div>
         Loading dashboard...
       </div>
     </div>
@@ -2460,7 +2484,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         <div style={{ display: "flex", gap: 8 }}>
           {viewerRole === "supervisor" && (
             <button onClick={() => setShowWorkerForms(true)} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-              📝 Fill Out a Form
+              <PenLine size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Fill Out a Form
             </button>
           )}
           {onLogout && (
@@ -2475,7 +2499,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {suspended && (
           <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 2 }}>⚠️ Account suspended</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={16} />Account suspended</div>
             <div style={{ fontSize: 13, color: "#B91C1C" }}>Your company's access is currently suspended. You can still view and export existing records, but workers cannot submit new FLHAs. Please contact your administrator.</div>
           </div>
         )}
@@ -2500,7 +2524,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
           <div onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: awaitingSignOff > 0 ? "#fff" : "#94A3B8" }}>{awaitingSignOff}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: awaitingSignOff > 0 ? "#FECACA" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🛑 Awaiting Sign-Off</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: awaitingSignOff > 0 ? "#FECACA" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3, display: "flex", alignItems: "center", gap: 4 }}><ShieldAlert size={12} />Awaiting Sign-Off</div>
           </div>
           <div onClick={() => {
             const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
@@ -2509,23 +2533,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
           }} style={{ background: needsReview > 0 ? "#B45309" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: needsReview > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: needsReview > 0 ? "#fff" : "#94A3B8" }}>{needsReview}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚩 Needs Review</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3, display: "flex", alignItems: "center", gap: 4 }}><Flag size={12} />Needs Review</div>
           </div>
           <div onClick={() => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } }} style={{ background: openCorrectiveCount > 0 ? "#4338CA" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: openCorrectiveCount > 0 ? "none" : "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3, display: "flex", alignItems: "center", gap: 4 }}><CalendarClock size={12} />Open Corrective Actions</div>
           </div>
           <div onClick={() => setShowThisWeekModal(true)} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>📄 Docs This Week</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3, display: "flex", alignItems: "center", gap: 4 }}><FileText size={12} />Docs This Week</div>
           </div>
         </div>
 
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ background: "#fff", borderBottom: `1.5px solid ${COLORS.border}`, display: "flex", gap: 4, marginBottom: 0, flexWrap: "wrap" }}>
           {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => (
             <button
               key={cat.key}
-              style={styles.tab(activeCategory === cat.key)}
+              style={{ ...styles.tab(activeCategory === cat.key), fontSize: 15, fontWeight: activeCategory === cat.key ? 800 : 700 }}
               onClick={() => {
                 const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
                 if (firstVisible) setActiveTab(firstVisible);
@@ -2534,65 +2558,65 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           ))}
         </div>
 
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ background: "#fff", borderBottom: `1.5px solid ${COLORS.border}`, display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
           {TAB_VISIBLE.flhas && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
+            <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}><ClipboardList size={14} />FLHAs</button>
           )}
           {TAB_VISIBLE.toolbox && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
+            <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}><Hammer size={14} />Toolbox Talks</button>
           )}
           {TAB_VISIBLE.nearmiss && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
-              ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
+              <AlertTriangle size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
           {TAB_VISIBLE.incident && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
-              🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
+              <Siren size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
           {TAB_VISIBLE.monthly && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
-              🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
+              <CalendarClock size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
             </button>
           )}
           {activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
+            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}><FileText size={14} />SOPs</button>
           )}
           {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "safetycustomdocs")} onClick={() => setActiveTab("safetycustomdocs")}>🗂️ Custom Docs</button>
+            <button style={styles.tab(activeTab === "safetycustomdocs")} onClick={() => setActiveTab("safetycustomdocs")}><FolderOpen size={14} />Custom Docs</button>
           )}
           {activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}>📊 Safety Analytics</button>
+            <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}><BarChart3 size={14} />Safety Analytics</button>
           )}
           {TAB_VISIBLE.inspections && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
+            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}><Tractor size={14} />Inspections</button>
           )}
           {TAB_VISIBLE.daily && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
+            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}><ClipboardList size={14} />Daily</button>
           )}
           {TAB_VISIBLE.equipment && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
+            <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}><Wrench size={14} />Equipment</button>
           )}
           {TAB_VISIBLE.maintenance && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
-              🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
+              <Settings2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
             </button>
           )}
           {TAB_VISIBLE.customdocs && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}><FolderOpen size={14} />Custom Docs</button>
           )}
           {activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Equipment Analytics</button>
+            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}><BarChart3 size={14} />Equipment Analytics</button>
           )}
           {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
+            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}><Clock size={14} />Time Clock</button>
           )}
           {TAB_VISIBLE.roster && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
+            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}><KeyRound size={14} />Roster</button>
           )}
           {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "workforcecustomdocs")} onClick={() => setActiveTab("workforcecustomdocs")}>🗂️ Custom Docs</button>
+            <button style={styles.tab(activeTab === "workforcecustomdocs")} onClick={() => setActiveTab("workforcecustomdocs")}><FolderOpen size={14} />Custom Docs</button>
           )}
         </div>
 
@@ -2612,21 +2636,24 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   <button onClick={exportSelected} style={{
                     background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
                     padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
-                  }}>⬇ {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
+                  }}><Download size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />{selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
                   <button onClick={deleteSelected} style={{
                     background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8,
                     padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
-                  }}>🗑 Delete</button>
+                  }}><Trash2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Delete</button>
                 </div>
               )}
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search worker or site…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+            <div style={{ position: "relative" }}>
+              <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              <input
+                style={{ ...styles.searchInput, paddingLeft: 30 }}
+                placeholder="Search worker or site…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={styles.select}>
@@ -2651,7 +2678,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedFlhas.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><ClipboardList size={28} /></div>
                 {companyFlhas.length === 0 ? "No FLHAs submitted yet for this company." : "No FLHAs match your filters."}
               </div>
             ) : (
@@ -2677,7 +2704,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div>
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><MapPin size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{f.job_site || "No location"}</div>
                             <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                               {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                             </div>
@@ -2689,7 +2716,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
                             {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
                             <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
-                              {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
+                              {f.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF ready</> : "No PDF"} · {hazards.length} hazards →
                             </div>
                           </div>
                         </div>
@@ -2704,7 +2731,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={groupBy === "site" ? "📍" : "👷"}
+                    icon={groupBy === "site" ? <MapPin size={14} /> : <HardHat size={14} />}
                     label={groupName}
                     count={groupFlhas.length}
                     colorPreset="purple"
@@ -2728,12 +2755,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               {processedInspections.length} of {companyInspections.length} shown — tap any row to view.
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search worker or equipment…"
-              value={inspSearch}
-              onChange={e => setInspSearch(e.target.value)}
-            />
+            <div style={{ position: "relative" }}>
+              <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              <input
+                style={{ ...styles.searchInput, paddingLeft: 30 }}
+                placeholder="Search worker or equipment…"
+                value={inspSearch}
+                onChange={e => setInspSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={inspSortBy} onChange={e => setInspSortBy(e.target.value)} style={styles.select}>
@@ -2752,7 +2782,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedInspections.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🚜</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Tractor size={28} /></div>
                 {companyInspections.length === 0 ? "No inspections submitted yet." : "No inspections match your filters."}
               </div>
             ) : (
@@ -2773,7 +2803,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
                             <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
                           </div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><HardHat size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{insp.worker_name || "Unknown"}</div>
                           {(insp.start_reading || insp.end_reading) && (
                             <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
                               {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
@@ -2790,7 +2820,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
                               : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
                           <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                            {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
+                            {insp.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF ready</> : "No PDF"} →
                           </div>
                         </div>
                       </div>
@@ -2804,7 +2834,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={inspGroupBy === "equipment" ? "🚜" : "👷"}
+                    icon={inspGroupBy === "equipment" ? <Tractor size={14} /> : <HardHat size={14} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="blue"
@@ -2828,12 +2858,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               {processedToolbox.length} of {companyToolbox.length} shown — tap any meeting to view.
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search presenter or site…"
-              value={tbtSearch}
-              onChange={e => setTbtSearch(e.target.value)}
-            />
+            <div style={{ position: "relative" }}>
+              <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              <input
+                style={{ ...styles.searchInput, paddingLeft: 30 }}
+                placeholder="Search presenter or site…"
+                value={tbtSearch}
+                onChange={e => setTbtSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={tbtSortBy} onChange={e => setTbtSortBy(e.target.value)} style={styles.select}>
@@ -2852,7 +2885,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedToolbox.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🧰</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Hammer size={28} /></div>
                 {companyToolbox.length === 0 ? "No toolbox talks recorded yet." : "No toolbox talks match your filters."}
               </div>
             ) : (
@@ -2871,13 +2904,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
                           </div>
                           <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><Mic size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{t.presenter_name} · <Users size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{attendees.length} signed</div>
                           <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                             {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
                         </div>
                         <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
-                          {t.pdf_url ? "📄 PDF" : "No PDF"} →
+                          {t.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF</> : "No PDF"} →
                         </div>
                       </div>
                     </div>
@@ -2890,7 +2923,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={tbtGroupBy === "site" ? "📍" : "🧰"}
+                    icon={tbtGroupBy === "site" ? <MapPin size={14} /> : <Hammer size={14} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="purple"
@@ -2914,12 +2947,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               {processedNearMisses.length} of {companyNearMisses.length} shown.
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search reporter or site…"
-              value={nmSearch}
-              onChange={e => setNmSearch(e.target.value)}
-            />
+            <div style={{ position: "relative" }}>
+              <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              <input
+                style={{ ...styles.searchInput, paddingLeft: 30 }}
+                placeholder="Search reporter or site…"
+                value={nmSearch}
+                onChange={e => setNmSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={nmSortBy} onChange={e => setNmSortBy(e.target.value)} style={styles.select}>
@@ -2938,7 +2974,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedNearMisses.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><AlertTriangle size={28} /></div>
                 {companyNearMisses.length === 0 ? "No near miss reports yet." : "No near miss reports match your filters."}
               </div>
             ) : nmGroupBy === "none" ? (
@@ -2946,7 +2982,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 {nmAwaiting.length > 0 && (
                   <>
                     <div style={{ background: "#B45309", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 22 }}>🚩</span>
+                      <span style={{ fontSize: 22, display: "inline-flex" }}><Flag size={20} /></span>
                       <div>
                         <div style={{ fontSize: 15, fontWeight: 800 }}>{nmAwaiting.length} Awaiting Review</div>
                         <div style={{ fontSize: 12, opacity: 0.9 }}>Tap to review and record action taken</div>
@@ -2972,7 +3008,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               Object.entries(groupedNearMisses).map(([groupName, groupItems]) => (
                 <CollapsibleGroup
                   key={groupName}
-                  icon={nmGroupBy === "site" ? "📍" : "⚠️"}
+                  icon={nmGroupBy === "site" ? <MapPin size={14} /> : <AlertTriangle size={14} />}
                   label={groupName}
                   count={groupItems.length}
                   colorPreset="amber"
@@ -2997,12 +3033,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               {processedIncidents.length} of {companyIncidents.length} shown.
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search reporter, site, or type…"
-              value={incSearch}
-              onChange={e => setIncSearch(e.target.value)}
-            />
+            <div style={{ position: "relative" }}>
+              <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              <input
+                style={{ ...styles.searchInput, paddingLeft: 30 }}
+                placeholder="Search reporter, site, or type…"
+                value={incSearch}
+                onChange={e => setIncSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={incSortBy} onChange={e => setIncSortBy(e.target.value)} style={styles.select}>
@@ -3021,7 +3060,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedIncidents.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🚑</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Siren size={28} /></div>
                 {companyIncidents.length === 0 ? "No incident reports yet." : "No incident reports match your filters."}
               </div>
             ) : incGroupBy === "none" ? (
@@ -3029,7 +3068,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 {incAwaiting.length > 0 && (
                   <>
                     <div style={{ background: "#991B1B", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 22 }}>🚩</span>
+                      <span style={{ fontSize: 22, display: "inline-flex" }}><Flag size={20} /></span>
                       <div>
                         <div style={{ fontSize: 15, fontWeight: 800 }}>{incAwaiting.length} Awaiting Review</div>
                         <div style={{ fontSize: 12, opacity: 0.9 }}>Incident reports require your review — tap to record action taken</div>
@@ -3055,7 +3094,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               Object.entries(groupedIncidents).map(([groupName, groupItems]) => (
                 <CollapsibleGroup
                   key={groupName}
-                  icon={incGroupBy === "site" ? "📍" : "🚑"}
+                  icon={incGroupBy === "site" ? <MapPin size={14} /> : <Siren size={14} />}
                   label={groupName}
                   count={groupItems.length}
                   colorPreset="red"
@@ -3080,12 +3119,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               {processedDaily.length} of {companyDaily.length} shown — tap any report to view.
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search site or reporter…"
-              value={dailySearch}
-              onChange={e => setDailySearch(e.target.value)}
-            />
+            <div style={{ position: "relative" }}>
+              <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              <input
+                style={{ ...styles.searchInput, paddingLeft: 30 }}
+                placeholder="Search site or reporter…"
+                value={dailySearch}
+                onChange={e => setDailySearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={dailySortBy} onChange={e => setDailySortBy(e.target.value)} style={styles.select}>
@@ -3103,7 +3145,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedDaily.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><ClipboardList size={28} /></div>
                 {companyDaily.length === 0 ? "No daily reports yet." : "No daily reports match your filters."}
               </div>
             ) : (
@@ -3122,10 +3164,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
                           </div>
                           <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><MapPin size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{d.site} · {d.reporter_name}</div>
                         </div>
                         <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
-                          {d.pdf_url ? "📄 PDF" : ""} →
+                          {d.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF</> : ""} →
                         </div>
                       </div>
                     </div>
@@ -3138,7 +3180,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={dailyGroupBy === "site" ? "📍" : "👷"}
+                    icon={dailyGroupBy === "site" ? <MapPin size={14} /> : <HardHat size={14} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="green"
@@ -3171,12 +3213,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   {processedMonthly.length} of {companyMonthlyRecords.length} shown — tap any submission to view.
                 </div>
 
-                <input
-                  style={styles.searchInput}
-                  placeholder="🔍 Search site, submitted by, or form…"
-                  value={moSearch}
-                  onChange={e => setMoSearch(e.target.value)}
-                />
+                <div style={{ position: "relative" }}>
+                  <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+                  <input
+                    style={{ ...styles.searchInput, paddingLeft: 30 }}
+                    placeholder="Search site, submitted by, or form…"
+                    value={moSearch}
+                    onChange={e => setMoSearch(e.target.value)}
+                  />
+                </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
                   <select value={moSortBy} onChange={e => setMoSortBy(e.target.value)} style={styles.select}>
@@ -3195,7 +3240,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
                 {processedMonthly.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>🗓️</div>
+                    <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><CalendarClock size={28} /></div>
                     {companyMonthlyRecords.length === 0 ? "No monthly inspections submitted yet." : "No submissions match your filters."}
                   </div>
                 ) : (
@@ -3208,15 +3253,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div style={{ flex: 1, paddingRight: 10 }}>
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><MapPin size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{r.site_name} · {r.period_month}</div>
+                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><HardHat size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{r.submitted_by}</div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
                             {r.open_actions > 0
                               ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
                               : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
                             <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
-                              {r.pdf_url ? "📄 PDF" : "No PDF"} →
+                              {r.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF</> : "No PDF"} →
                             </div>
                           </div>
                         </div>
@@ -3229,7 +3274,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     return (
                       <CollapsibleGroup
                         key={groupName}
-                        icon={moGroupBy === "site" ? "📍" : "🗓️"}
+                        icon={moGroupBy === "site" ? <MapPin size={14} /> : <CalendarClock size={14} />}
                         label={groupName}
                         count={groupItems.length}
                         colorPreset="indigo"
@@ -3251,16 +3296,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 </div>
                 <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Assign a responsible person and target date, then mark resolved once complete.</div>
 
-                <input
-                  style={styles.searchInput}
-                  placeholder="🔍 Search question, site, or submitted by…"
-                  value={moaSearch}
-                  onChange={e => setMoaSearch(e.target.value)}
-                />
+                <div style={{ position: "relative" }}>
+                  <Search size={14} color={COLORS.slate} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+                  <input
+                    style={{ ...styles.searchInput, paddingLeft: 30 }}
+                    placeholder="Search question, site, or submitted by…"
+                    value={moaSearch}
+                    onChange={e => setMoaSearch(e.target.value)}
+                  />
+                </div>
 
                 {processedMonthlyActions.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                    <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><CheckCircle2 size={28} /></div>
                     {companyMonthlyActions.length === 0 ? "No corrective actions logged yet." : "No corrective actions match your search."}
                   </div>
                 ) : (
@@ -3304,9 +3352,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 background: generatingSafetyAnalyticsPdf ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 8,
                 padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
               }}>
-                {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
+                {generatingSafetyAnalyticsPdf ? "Generating…" : <><HardHat size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Safety Analytics PDF</>}
               </button>
-              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{analyticsPdfError}</div>}
             </div>
 
             <SafetyAnalyticsPanel
@@ -3332,9 +3380,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 background: generatingEquipmentAnalyticsPdf ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
                 padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
               }}>
-                {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
+                {generatingEquipmentAnalyticsPdf ? "Generating…" : <><Wrench size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Equipment Analytics PDF</>}
               </button>
-              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{analyticsPdfError}</div>}
             </div>
 
             <EquipmentAnalyticsPanel
@@ -3359,7 +3407,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   background: "#fff", color: "#0369A1", border: "1.5px solid #0369A1", borderRadius: 8,
                   padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                 }}>
-                  🕐 Request Manual Pull
+                  <Clock size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Request Manual Pull
                 </button>
                 <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
                   background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
@@ -3389,7 +3437,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
                   Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
                 </div>
-                {manualPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {manualPullError}</div>}
+                {manualPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{manualPullError}</div>}
               </div>
             )}
 
@@ -3406,7 +3454,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
             ) : sortedEquipmentReports.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🔧</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Wrench size={28} /></div>
                 No equipment reports yet.
               </div>
             ) : (
@@ -3420,7 +3468,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                   </div>
                   <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                    {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                    {r.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF ready</> : "No PDF yet"} →
                   </div>
                 </div>
               ))
@@ -3439,7 +3487,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {maintenanceStatus.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🛠️</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Settings2 size={28} /></div>
                 No equipment registered yet. Add machines from Admin Panel → Equipment.
               </div>
             ) : (
@@ -3489,7 +3537,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           </div>
                           <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
                           <div style={{ display: "flex", gap: 8 }}>
-                            <button onClick={() => savePmSetup(eq)} disabled={savingPmSetup} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingPmSetup ? "Saving…" : "✓ Start Tracking"}</button>
+                            <button onClick={() => savePmSetup(eq)} disabled={savingPmSetup} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingPmSetup ? "Saving…" : <><CheckCircle2 size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Start Tracking</>}</button>
                             <button onClick={() => { setPmSetupFor(null); setPmSetupForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                           </div>
                         </div>
@@ -3509,7 +3557,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <input placeholder="Performed by" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }} value={logServiceForm.performedBy} onChange={e => setLogServiceForm(p => ({ ...p, performedBy: e.target.value }))} />
                         <input placeholder="Notes (optional)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={logServiceForm.notes} onChange={e => setLogServiceForm(p => ({ ...p, notes: e.target.value }))} />
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : "✓ Log Service"}</button>
+                          <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : <><CheckCircle2 size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Log Service</>}</button>
                           <button onClick={() => { setLogServiceFor(null); setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" }); }} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                         </div>
                       </div>
@@ -3590,7 +3638,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                       onChange={e => setAddEntryForm(f => ({ ...f, clockOut: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
                   </div>
                   <button onClick={submitAddEntry} disabled={savingEntry || !addEntryForm.rosterId || !addEntryForm.clockIn} style={{ width: "100%", background: (!addEntryForm.rosterId || !addEntryForm.clockIn) ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                    {savingEntry ? "Saving…" : "✓ Add Entry"}
+                    {savingEntry ? "Saving…" : <><CheckCircle2 size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Add Entry</>}
                   </button>
                 </div>
               )}
@@ -3599,7 +3647,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
               ) : timeClockRoster.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>⏱️</div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Clock size={28} /></div>
                   No one on the roster yet.
                 </div>
               ) : (
@@ -3612,7 +3660,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     return (
                       <CollapsibleGroup
                         key={member.id}
-                        icon={member.role === "supervisor" ? "🦺" : "👷"}
+                        icon={member.role === "supervisor" ? <ShieldCheck size={14} /> : <HardHat size={14} />}
                         label={`${member.name} — ${totalHours.toFixed(1)} hrs`}
                         count={memberEntries.length}
                         colorPreset={member.role === "supervisor" ? "indigo" : "purple"}
@@ -3633,7 +3681,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                                     onChange={ev => setEditEntryForm(f => ({ ...f, clockOut: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
                                 </div>
                                 <div style={{ display: "flex", gap: 8 }}>
-                                  <button onClick={() => saveEditEntry(e.id)} disabled={savingEntry} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingEntry ? "Saving…" : "✓ Save"}</button>
+                                  <button onClick={() => saveEditEntry(e.id)} disabled={savingEntry} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingEntry ? "Saving…" : <><CheckCircle2 size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />Save</>}</button>
                                   <button onClick={() => setEditingEntryId(null)} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                                 </div>
                               </div>
@@ -3676,7 +3724,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     background: "#fff", color: "#0891B2", border: "1.5px solid #0891B2", borderRadius: 8,
                     padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                   }}>
-                    🕐 Request Manual Pull
+                    <Clock size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />Request Manual Pull
                   </button>
                   <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
                     background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
@@ -3706,7 +3754,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
                     Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
                   </div>
-                  {timeClockPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {timeClockPullError}</div>}
+                  {timeClockPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{timeClockPullError}</div>}
                 </div>
               )}
 
@@ -3714,7 +3762,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
               ) : timeClockReports.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><FileText size={28} /></div>
                   No time clock reports yet.
                 </div>
               ) : (
@@ -3728,7 +3776,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                       <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                     </div>
                     <div style={{ fontSize: 11, color: r.pdf_url ? "#0891B2" : "#9CA3AF" }}>
-                      {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                      {r.pdf_url ? <><FileText size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />PDF ready</> : "No PDF yet"} →
                     </div>
                   </div>
                 ))
@@ -3762,7 +3810,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const group = rosterList.filter(m => m.role === roleGroup && m.active);
                   if (group.length === 0) return null;
                   return (
-                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? "🦺" : "👷"} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
+                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? <ShieldCheck size={14} /> : <HardHat size={14} />} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
                       {group.map((m, i) => (
                         <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? "1px solid #F1F5F9" : "none" }}>
                           <div style={{ flex: 1 }}>
@@ -3793,7 +3841,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
             {companySops.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><FileText size={28} /></div>
                 No SOPs loaded for this company.
               </div>
             ) : (
