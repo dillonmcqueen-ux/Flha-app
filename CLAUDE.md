@@ -14,7 +14,7 @@ tool rather than reviewing it inline.
 |---|---|---|
 | `api/*.js` handlers reading or writing a company-scoped table (`roster`, `sops`, `sites`, `equipment`, `custom_fields`, `custom_forms`, `inspection_forms`, `equipment_reports`, `flhas`, `timeclock_reports`, `company_document_settings`) | `tenant-scope-reviewer` | Multi-tenant isolation bugs here mean one company's data becomes readable or writable by another. See `.claude/agents/tenant-scope-reviewer.md` for the exact checklist. |
 | `src/generate*PDF.js` (any of the 11 PDF generators) | `pdf-consistency-reviewer` | Each document type hand-copies the same jsPDF-loader/header/footer boilerplate instead of sharing it, so it drifts silently — see `.claude/agents/pdf-consistency-reviewer.md` for known drift (e.g. `generateInspectionPDF.js` missing the footer entirely). |
-| A new file under `api/`, `vercel.json`, or `api/cron-equipment-reports.js` | `vercel-function-budget-guardian` | `api/` is already at 12/12 of Vercel's Hobby-plan serverless function cap — any new file breaks deployment. See `.claude/agents/vercel-function-budget-guardian.md` for the existing workarounds (fold into a dispatcher, or use `server-lib/`). |
+| A new file under `api/`, `vercel.json`, `api/cron-equipment-reports.js`, or `api/stripe-webhook.js` | `vercel-function-budget-guardian` | `api/` is on Vercel's Pro-plan serverless function cap (far higher than the old Hobby-plan 12, but not infinite — see `.claude/agents/vercel-function-budget-guardian.md`). |
 | `website/pricing.html`, `terms.html`, `index.html`, or `custom-builds.html` when pricing, plans, or Stripe links are involved | `pricing-legal-consistency-reviewer` | This exact drift (displayed price ↔ actual Stripe amount ↔ fee disclosure ↔ Terms language) took 5 separate follow-up PRs to fully resolve once (PRs #2–#6) — see `.claude/agents/pricing-legal-consistency-reviewer.md`. |
 
 ### How to delegate
@@ -112,24 +112,23 @@ comments — was publicly reachable running the live app; enabled
 `ssoProtection` on preview deployments only (production left untouched,
 since that's the actual customer-facing app).
 
-## Post-upgrade cleanup (one-time, event-triggered)
+## Post-upgrade cleanup (one-time, event-triggered) — done
 
-The project is deliberately staying on Vercel's **Hobby** plan for now to
-keep costs at zero pre-revenue — `api/` is at 12/12 of the Hobby function
-cap, and two files carry workarounds purely because of it (see
-`.claude/agents/vercel-function-budget-guardian.md`).
+The project stayed on Vercel's **Hobby** plan pre-revenue to keep costs at
+zero, with two files carrying workarounds purely because of the 12-function
+cap (see `.claude/agents/vercel-function-budget-guardian.md`'s git history
+for the old wording).
 
-**Trigger condition: the first paying customer.** At that point, the plan
-is: add a payment method, upgrade the Vercel team to Pro, then run
-`hobby-cap-unwinder` once to split those two workarounds back into their
-own clean files now that the function cap that forced them no longer
-applies. Do not run `hobby-cap-unwinder` before the Pro upgrade is
-confirmed — it would push `api/` over the still-active Hobby cap and break
-deployment. Neither the upgrade nor the agent run should happen
-automatically; both wait for an explicit go-ahead, since the upgrade is a
-recurring paid charge and needs fresh confirmation at the time (see the
-`buy_pro` tool's own confirmation requirement), not something to
-pre-authorize in advance.
+**Trigger condition (first paying customer) was met**, the Vercel team was
+upgraded to Pro, and `hobby-cap-unwinder`'s unwind ran: the Stripe webhook
+now has its own `api/stripe-webhook.js` (split out of
+`api/cron-equipment-reports.js`) and time-clock report generation now has
+its own `api/timeclockreports.js` (split out of `api/companydata.js`).
+`README.md`, `TODO.md`, and `vercel-function-budget-guardian.md` were
+updated to match. **Outstanding manual step:** the Stripe Dashboard's
+webhook endpoint URL needs to be updated by hand from
+`/api/cron-equipment-reports` to `/api/stripe-webhook`, or Stripe events
+stop arriving — nothing in this repo can do that automatically.
 
 ## Weekly competitive intelligence
 
