@@ -13,6 +13,12 @@ does not read code — and then archive the day so the log stays short.
 **Guardrail: you only ever touch `STANDUP_LOG.md` and `STANDUP_LOG_ARCHIVE.md`. Never edit
 application code. Direct pushes to `main` are allowed for these two files only.**
 
+**Stay quiet in chat.** By explicit user decision (after the system was verified working),
+the Slack DM in step 5 is the only communication this run should produce — don't also post a
+chat summary of what you did. Only speak up in chat if something's actually wrong: the Slack
+send fails, the push in step 7 fails even after the retry, or anything else blocks you from
+completing the checklist.
+
 ## Steps
 
 1. If the repo isn't already checked out in this session, attach it with `add_repo`
