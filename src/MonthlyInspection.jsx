@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -51,6 +52,9 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
   const [siteId, setSiteId] = useState("");
   const [checking, setChecking] = useState(false);
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
 
   const [form, setForm] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -89,6 +93,9 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
@@ -182,7 +189,7 @@ INSTRUCTIONS:
 - If any items were flagged "NO", mention them factually and note that corrective action has been logged.
 - If everything passed, say so plainly.
 - Do not invent details beyond what's given.
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 { "summary": "professional summary text" }`;
 

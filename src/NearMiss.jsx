@@ -4,6 +4,7 @@ import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -93,6 +94,9 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null); // { whatHappened, contributingFactors:[], potentialOutcome, correctiveActions:[] }
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "nearmiss", token);
 
   // editing
@@ -135,6 +139,9 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
@@ -198,7 +205,7 @@ INSTRUCTIONS:
 - "potentialOutcome": one or two sentences on what could realistically have happened.
 - "immediateActions": what was or should have been done right away to make the situation safe (2-3 short points).
 - "nextSteps": longer-term recommended actions to prevent recurrence (2-4 short points).
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
   "severity": "Low|Medium|High|Critical",

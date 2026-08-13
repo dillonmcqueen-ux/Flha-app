@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -326,6 +327,10 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [companyId, setCompanyId] = useState(forcedCompanyId);
   const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null until loaded, and stays
+  // null for a company with no profile yet (cold start); buildCompanyContextBlock
+  // handles null gracefully so the prompt doesn't need to branch on it.
+  const [companyProfile, setCompanyProfile] = useState(null);
 
   // Load SOPs/sites/custom fields for forcedCompanyId (from login) on first
   // render. Company name comes from the login session (propCompanyName) —
@@ -381,6 +386,12 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
       } catch (e) {
         console.error("custom fields read error:", e.message);
       }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort
+      // (fetchCompanyProfile never throws): a company with no profile yet
+      // just gets null, which buildCompanyContextBlock treats as "nothing
+      // to add".
+      setCompanyProfile(await fetchCompanyProfile(token, forcedCompanyId));
 
       // SOPs — via protected endpoint
       try {
@@ -686,7 +697,7 @@ INSTRUCTIONS:
   - "Low" = minor risk.
 - Read the task description for controls the worker already mentioned, and lower the risk accordingly. Do not rate the raw hazard — rate what could still realistically happen given their approach.
 - If a hazard is already well-controlled by the worker's described approach, rate it Lower.
-
+${buildCompanyContextBlock(companyProfile, { includeHazardEmphasis: true })}
 Respond ONLY with a valid JSON object (no markdown, no backticks):
 {
   "taskSummary": "one sentence summary of what the worker is doing",

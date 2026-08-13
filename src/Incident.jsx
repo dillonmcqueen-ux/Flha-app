@@ -4,6 +4,7 @@ import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -149,6 +150,9 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null);
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "incident", token);
 
   const canvasRef = useRef(null);
@@ -186,6 +190,9 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
@@ -357,7 +364,7 @@ INSTRUCTIONS:
 - "rootCause": the underlying root cause, one or two sentences.
 - "immediateActions": what was done right away in response (2-3 short points).
 - "correctiveActions": longer-term actions to prevent recurrence (2-4 short points).
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
   "severity": "Low|Medium|High|Critical",

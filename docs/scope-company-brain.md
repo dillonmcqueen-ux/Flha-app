@@ -1,13 +1,19 @@
 # Scope: company brain
 
 Status: **Phase 1 (data model), Phase 2 (onboarding research), Phase 3
-(signal capture), and Phase 4 (batch profile summarization) built.**
-Phases 1-3 are tenant-scope-reviewed with no findings requiring a fix
-(Phase 1 had one low-severity defense-in-depth suggestion, applied). Phase
-4's `vercel-function-budget-guardian` review is clean (api/ file count
-14→15, single well-justified new endpoint, no config beyond the expected
-cron entry). **Migration not yet applied to the live DB** — needs a human
-with Supabase access. Phases 5-6 not started.
+(signal capture), Phase 4 (batch profile summarization), and Phase 5
+(generation-time integration) built.** Phases 1-3 are tenant-scope-reviewed
+with no findings requiring a fix (Phase 1 had one low-severity
+defense-in-depth suggestion, applied). Phase 4's
+`vercel-function-budget-guardian` review is clean (api/ file count 14→15,
+single well-justified new endpoint, no config beyond the expected cron
+entry). Phase 5 didn't match any existing subagent's trigger condition in
+CLAUDE.md's delegation table (it's `src/*.jsx` prompt-text changes, not an
+`api/*.js` handler, PDF generator, `vercel.json`/`api/` addition, or
+pricing/legal page), so no proactive delegation applied — self-reviewed
+instead (see the Phase 5 write-up below for what was checked).
+**Migration not yet applied to the live DB** — needs a human with Supabase
+access. Phase 6 not started.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -168,14 +174,51 @@ given this codebase's Supabase client usage elsewhere, and fine while
 `company_signals` is a new, low-volume table. Revisit with a real
 per-company query if signal volume ever approaches that cap.
 
-**Phase 5 — Generation-time integration.** `generate-flha` (and by
-extension all 8 document generators that call it) fetch the company's
-`company_profiles` row by `company_id` — a plain DB read, no extra model
-call — and splice `industry_inference` / `terminology_notes` /
-`hazard_emphasis` into the existing prompt next to the current
-SOP-filtering block. **Cold start:** a company with no profile yet (or one
-still in `draft`) behaves exactly as today's stateless prompt does — pure
-graceful degradation, no special-casing required.
+**Phase 5 — Generation-time integration. Built for 7 of the 8 forms.** New
+shared client module `src/companyProfile.js`: `fetchCompanyProfile(token,
+companyId)` (a plain DB read via Phase 1's `get_company_profile` action —
+no extra model call) and `buildCompanyContextBlock(profile, {
+includeHazardEmphasis })`, which formats a profile into a small text block
+or returns `""` for a company with no profile yet (cold start — the
+prompt is then byte-for-byte what it was before this phase existed, no
+special-casing needed).
+
+Wired into all 7 worker-facing document generators (`App.jsx` for FLHA,
+`NearMiss.jsx`, `Incident.jsx`, `ToolboxTalk.jsx`, `DailyReport.jsx`,
+`MonthlyInspection.jsx`, `CustomForm.jsx`) — each already loads company
+data (logo, sites, SOPs) in a `useEffect` on mount, so the profile fetch
+sits alongside that existing pattern, and each prompt gets
+`${buildCompanyContextBlock(companyProfile, ...)}` spliced in right after
+its own INSTRUCTIONS block and before the "Respond ONLY with JSON"
+section — i.e. genuinely additive, appended after every existing rule,
+never replacing any of them.
+
+`includeHazardEmphasis: true` is passed **only** for the FLHA prompt
+(`App.jsx`) — `hazard_emphasis` is specifically about which hazard
+categories a company's history emphasizes (Phase 4), which only means
+something for FLHA's hazard-identification task; the other 6 forms get
+`industry_inference` + `terminology_notes` only. Near-miss and incident
+severity ratings are just as safety-critical as FLHA risk levels, so the
+same discipline applies there too — no risk/severity-influencing content
+is ever added to those prompts, only descriptive industry/terminology
+context.
+
+**Deliberately excluded:** `AdminPanel.jsx`'s `generate-flha` call
+(`condenseSop`) is an admin-only tool for extracting policy lines out of a
+pasted SOP document — a document-*authoring* tool, not a document
+generator producing output shaped by a company's usage history. Company
+context doesn't fit its job (extracting exactly what's in the pasted
+document) and could actively hurt it, so it was left alone.
+
+**Self-review note (see Status above for why no subagent applied):**
+confirmed for every prompt that (1) the company-context block is appended
+strictly after the existing grounding/instruction rules, never before or
+interleaved with them; (2) `hazard_emphasis` only reaches the one prompt
+where the schema and wording (`buildCompanyContextBlock`'s own hard-coded
+sentence) explicitly forbid it from lowering a risk rating or justifying
+skipping a category; (3) the other 6 prompts never receive anything that
+could influence a severity/risk field, since only plain descriptive text
+(industry, terminology) is added there.
 
 **Phase 6 — Analytics + admin visibility (built alongside Phase 1-5, per
 the user's answer, not deferred).** Admin Panel gets a section showing the
@@ -266,6 +309,12 @@ signals justify a change.
       why. `vercel-function-budget-guardian` ran (new `api/` file +
       `vercel.json` cron entry, per CLAUDE.md's delegation table): clean,
       no budget concern (api/ file count 14→15).
-- [ ] Phase 5: generation-time prompt integration.
+- [x] Phase 5: generation-time prompt integration. `src/companyProfile.js`
+      (shared fetch + prompt-block builder) wired into 7 of 8 generators
+      (all but `AdminPanel.jsx`'s SOP condenser, deliberately excluded —
+      see above); `hazard_emphasis` reaches only the FLHA prompt. No
+      subagent's trigger condition matched this diff; self-reviewed for
+      correct placement (after grounding rules) and correct scoping of
+      `hazard_emphasis`.
 - [ ] Phase 6: Admin Panel profile view/editor + signal-based trending
       view.
