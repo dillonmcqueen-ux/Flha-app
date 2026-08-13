@@ -1,11 +1,13 @@
 # Scope: company brain
 
-Status: **Phase 1 (data model), Phase 2 (onboarding research), and Phase 3
-(signal capture) built.** Phase 1 and Phase 2 are tenant-scope-reviewed
-(Phase 1: one low-severity defense-in-depth suggestion applied; Phase 2: no
-findings). Phase 3's tenant-scope review is in progress — see Progress
-below. **Migration not yet applied to the live DB** — needs a human with
-Supabase access. Phases 4-6 not started.
+Status: **Phase 1 (data model), Phase 2 (onboarding research), Phase 3
+(signal capture), and Phase 4 (batch profile summarization) built.**
+Phases 1-3 are tenant-scope-reviewed with no findings requiring a fix
+(Phase 1 had one low-severity defense-in-depth suggestion, applied). Phase
+4's `vercel-function-budget-guardian` review is clean (api/ file count
+14→15, single well-justified new endpoint, no config beyond the expected
+cron entry). **Migration not yet applied to the live DB** — needs a human
+with Supabase access. Phases 5-6 not started.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -113,20 +115,58 @@ it tried. Now passes `created_company_id: companyId` explicitly.
   capture is pure plain-string/diff logic, keeping the worker-facing path
   exactly as fast as before.
 
-**Phase 4 — Profile summarization (batch, not live).** A scheduled Routine
-(same shape as the existing standup/security-audit triggers) periodically
-rolls up new `company_signals` into `company_profiles.hazard_emphasis` /
-`terminology_notes` via one batched LLM call per company with enough new
-signals — never per-request, so generation-time cost and latency stay
-flat. **Hard constraint (locked in with the user):** this step can only
-ever shift emphasis and terminology, never the risk-rating floor. It is
-never allowed to lower confidence in a hazard category or skip a baseline
-category that the existing grounding rules in `App.jsx`'s FLHA prompt
-already require — `hazard_emphasis` is additive context appended after
-those rules, never a replacement for them. This matters because a
-company's own edit history could reflect an unsafe habit (routinely
-downgrading a real hazard) rather than a legitimate operational
+**Phase 4 — Profile summarization (batch, not live). Built — as a Vercel
+cron job, not a Claude Code Routine.** The original plan wording proposed
+"a scheduled Routine, same shape as the existing standup/security-audit
+triggers" — built differently on reflection: this is a fully deterministic,
+scriptable batch job (read `company_signals`, call the model once per
+company, write `company_profiles`) with no need for an LLM agent's
+judgment over the repo, so it fits this codebase's existing
+`api/cron-equipment-reports.js` pattern — a `CRON_SECRET`-protected Vercel
+Function on a `vercel.json` cron schedule — far better than spinning up a
+full Claude Code session daily for mechanical work. New files:
+`server-lib/companyBrainSummary.js` (the actual logic) and
+`api/cron-company-brain-summary.js` (the thin cron-triggered wrapper),
+scheduled daily at 4:00 UTC (`vercel.json`).
+
+For each company with at least `MIN_NEW_SIGNALS` (5) signals since its
+`last_summarized_at` (or ever, if never summarized), one Haiku call gets
+the company's current profile plus a capped, grouped-by-source summary of
+its new signals, and returns a full replacement `hazardEmphasis` array +
+`terminologyNotes` string — re-validated into a fixed shape
+(`sanitizeSummaryOutput`) before being written, same discipline as
+`sanitizeAiEditSignal` in Phase 3. Only `hazard_emphasis`,
+`terminology_notes`, and `last_summarized_at` are ever written by this
+job — `status` and `industry_inference` are left alone regardless of
+existing value, so this can update even an admin-`'confirmed'` profile's
+emphasis/terminology once genuinely new signals justify it (per Phase 6's
+"admin edit takes precedence until new signals justify a change"), without
+ever touching the parts of the profile that are Phase 2/admin-owned.
+
+**Hard constraint (locked in with the user):** this step can only ever
+shift emphasis and terminology, never the risk-rating floor. Enforced
+structurally, not just by prompt wording: the `hazardEmphasis` /
+`terminologyNotes` output schema has no field that could encode a risk
+level or a "skip this category" instruction — there's nothing for such an
+instruction to go *in*, even if the model tried. The prompt itself also
+explicitly forbids suggesting any risk level or de-prioritization, and
+instructs the model to omit rather than downweight anything the signal
+history might suggest is under-reported. `hazard_emphasis` is additive
+context Phase 5 must append after the existing grounding rules in
+`App.jsx`'s FLHA prompt, never a replacement for them — this matters
+because a company's own edit history could reflect an unsafe habit
+(routinely downgrading a real hazard) rather than a legitimate operational
 difference, and the model must not learn to be less cautious from that.
+This file only produces the data; Phase 5 is responsible for wiring it in
+safely.
+
+Known limitation, documented rather than solved here: finding "companies
+with new signals" is done by fetching the most recent `MAX_SIGNAL_ROWS`
+(5000) rows across *all* companies in one query and grouping in
+JavaScript, not a per-company query or a Postgres RPC — simplest option
+given this codebase's Supabase client usage elsewhere, and fine while
+`company_signals` is a new, low-volume table. Revisit with a real
+per-company query if signal volume ever approaches that cap.
 
 **Phase 5 — Generation-time integration.** `generate-flha` (and by
 extension all 8 document generators that call it) fetch the company's
@@ -215,9 +255,17 @@ signals justify a change.
 - [x] Phase 3: signal capture on FLHA edits (`src/App.jsx`'s
       `aiBaselineRef` + `computeFlhaEditSignal`, sanitized server-side in
       `api/flhas.js`), toolbox talk topics (`api/logs.js`), and incident/
-      near-miss categories (`api/reports.js`). `tenant-scope-reviewer`
-      pass in progress.
-- [ ] Phase 4: batch profile-summarization Routine.
+      near-miss categories (`api/reports.js`). `tenant-scope-reviewer` ran
+      against all three write paths: no findings requiring a fix (noted
+      that signal content is untrusted worker free text — a Phase 4
+      data-quality concern, not a tenant-isolation one).
+- [x] Phase 4: batch profile summarization, built as a daily Vercel cron
+      job (`api/cron-company-brain-summary.js` +
+      `server-lib/companyBrainSummary.js`) rather than the originally
+      planned Claude Code Routine — see the Phase 4 write-up above for
+      why. `vercel-function-budget-guardian` ran (new `api/` file +
+      `vercel.json` cron entry, per CLAUDE.md's delegation table): clean,
+      no budget concern (api/ file count 14→15).
 - [ ] Phase 5: generation-time prompt integration.
 - [ ] Phase 6: Admin Panel profile view/editor + signal-based trending
       view.
