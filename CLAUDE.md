@@ -55,13 +55,14 @@ five agents that actively build UI/UX changes (`tools:` includes `Edit`,
 
 | Agent | Scope |
 |---|---|
+| `visual-identity-builder` | Designs and builds a fresh visual identity for the logged-in app — real typography, a deliberate color system, a real icon set (replacing emoji), and real charts for `Analytics.jsx` — starting with `Dashboard.jsx`. Owns `src/theme.js`. |
 | `design-token-builder` | Consolidates the hand-copied hex colors duplicated across every component's inline `styles` object into a shared token module. |
 | `onboarding-automation-builder` | Automates FORA's company onboarding/setup flow (`Onboarding.jsx` → `submit_onboarding_intake` → `approve_onboarding_request`) up to — but not past — the admin's human approval checkpoint on creating a new tenant. |
 | `field-usability-builder` | Improves mobile/field usability of worker-facing forms (touch targets, input types, connectivity resilience) — the components actually used on a jobsite. |
 | `accessibility-builder` | Color contrast, form labeling, and keyboard navigation across the dark-themed frontend. |
 | `ui-backlog-builder` | Reads `TODO.md` and picks the next tractable UI/UX item to build, deferring items the backlog itself says aren't scoped yet. This is the driver for open-ended "keep developing the UI" work. |
 
-**Hard rule for all five: never commit to `main` directly.** Every change
+**Hard rule for all six: never commit to `main` directly.** Every change
 is a branch → commit → push → **draft PR**, same as every other change in
 this repo — these touch a live app with paying customers, so a human
 reviews before merge. "Continuous development" means continuously
@@ -71,6 +72,13 @@ producing reviewable PRs, not continuously deploying unreviewed changes.
 up to the admin's approve/reject decision on a new company, not remove
 that decision — see the agent file for why that boundary is deliberate,
 not a gap to be closed.
+
+`visual-identity-builder` and `design-token-builder` are sequenced, not
+redundant: `visual-identity-builder` defines what the new system *is*
+(colors, type, icons, charts) and creates `src/theme.js`; once that exists,
+`design-token-builder`'s remaining job is migrating any files still on the
+old hand-copied hex values onto that file's tokens, rather than inventing
+its own palette.
 
 ## Recurring security audits
 
