@@ -591,6 +591,47 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ══ COMPANY PROFILE (docs/scope-company-brain.md, Phase 1) ═════════
+    // company_profiles is written by two paths: the (not-yet-built) Phase 2
+    // onboarding research pass, staged as status: 'draft'; and an admin's
+    // own edit here, which is always authoritative and marks the row
+    // 'confirmed'. Neither path may write hazard_emphasis directly to
+    // anything that changes risk-rating logic — see the migration's column
+    // comment and the Phase 4 note in the scope doc; this endpoint only
+    // stores what it's given, the "never lowers the safety floor" rule is
+    // enforced by how Phase 5's generation prompt consumes the field, not
+    // here.
+
+    if (action === 'get_company_profile') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin
+        .from('company_profiles')
+        .select('status, industry_inference, equipment_summary, terminology_notes, hazard_emphasis, last_summarized_at, updated_at')
+        .eq('company_id', companyId)
+        .limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load company profile.' });
+      return res.status(200).json({ profile: (data && data[0]) || null });
+    }
+
+    if (action === 'update_company_profile') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { companyId, industryInference, equipmentSummary, terminologyNotes } = req.body;
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { error } = await supabaseAdmin
+        .from('company_profiles')
+        .upsert({
+          company_id: companyId,
+          status: 'confirmed',
+          industry_inference: (industryInference || '').trim(),
+          equipment_summary: (equipmentSummary || '').trim(),
+          terminology_notes: (terminologyNotes || '').trim(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'company_id' });
+      if (error) return res.status(500).json({ error: "Couldn't save company profile: " + error.message });
+      return res.status(200).json({ ok: true });
+    }
+
     // ── Time Clock: self-service (any registered roster user) ───────────
     if (action === 'clock_in') {
       if (!session.userId) return res.status(403).json({ error: 'Not available for this login.' });
