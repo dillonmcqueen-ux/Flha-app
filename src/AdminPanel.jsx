@@ -56,6 +56,17 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [savingCodes, setSavingCodes] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
+  // docs/scope-company-brain.md Phase 6 — the "Brain" tab: the live
+  // company_profiles row (editable) plus a read-only company_signals
+  // trending view. brainProfile holds what's on the server (including
+  // status/hazard_emphasis/last_summarized_at, none of which this tab
+  // edits); brainForm holds the editable copy bound to the form inputs.
+  const [brainProfile, setBrainProfile] = useState(null);
+  const [brainForm, setBrainForm] = useState({ industryInference: "", equipmentSummary: "", terminologyNotes: "" });
+  const [brainTrends, setBrainTrends] = useState(null);
+  const [brainLoading, setBrainLoading] = useState(false);
+  const [savingBrain, setSavingBrain] = useState(false);
+
   const [sopText, setSopText] = useState("");
   const [existingSops, setExistingSops] = useState([]);
 
@@ -70,6 +81,47 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   // ── document active/deactivated toggles ────────────────────
   const [docSettings, setDocSettings] = useState([]);
   const [loadingDocSettings, setLoadingDocSettings] = useState(false);
+
+  // docs/scope-company-brain.md Phase 6 — the signal-trends aggregation is
+  // a heavier query (up to 500 rows scanned server-side) than the other
+  // eagerly-loaded manage-tab data, so it's loaded lazily, only when the
+  // admin actually opens the Brain tab (see goToManageTab).
+  const loadBrainTrends = async (companyId) => {
+    setBrainLoading(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_company_signal_trends", token, companyId }),
+      });
+      const data = await res.json();
+      setBrainTrends(res.ok ? data : null);
+    } catch (e) { setBrainTrends(null); }
+    setBrainLoading(false);
+  };
+
+  const saveBrainProfile = async () => {
+    setSavingBrain(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_company_profile", token, companyId: activeId, ...brainForm }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't save company profile."); setSavingBrain(false); return; }
+      setMsg("Company profile saved.");
+      setBrainProfile(prev => ({
+        ...(prev || {}),
+        status: "confirmed",
+        industry_inference: brainForm.industryInference,
+        equipment_summary: brainForm.equipmentSummary,
+        terminology_notes: brainForm.terminologyNotes,
+      }));
+    } catch (e) {
+      setMsg("Couldn't save company profile.");
+    }
+    setSavingBrain(false);
+  };
 
   const loadDocSettings = async (companyId) => {
     setLoadingDocSettings(true);
@@ -508,6 +560,26 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       setFieldList(res.ok ? (data.fields || []) : []);
     } catch (e) { setFieldList([]); }
     setNewField({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
+
+    // Company brain profile (docs/scope-company-brain.md Phase 6) — cheap,
+    // so loaded eagerly like the sections above; the heavier signal-trends
+    // aggregation is loaded lazily only if the admin opens the Brain tab
+    // (see goToManageTab).
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_company_profile", token, companyId: c.id }),
+      });
+      const data = await res.json();
+      const p = res.ok ? data.profile : null;
+      setBrainProfile(p);
+      setBrainForm({
+        industryInference: p?.industry_inference || "",
+        equipmentSummary: p?.equipment_summary || "",
+        terminologyNotes: p?.terminology_notes || "",
+      });
+    } catch (e) { setBrainProfile(null); }
+    setBrainTrends(null);
 
     setManageTab("profile");
     setSopText(""); setMsg("");
@@ -1305,7 +1377,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   // ═══ MANAGE ═══════════════════════════════════════════════
   const MANAGE_CATEGORIES = [
-    { key: "company", label: "🏢 Company Setup", tabs: ["profile", "sops", "sites", "equipment"] },
+    { key: "company", label: "🏢 Company Setup", tabs: ["profile", "sops", "sites", "equipment", "brain"] },
     { key: "documents", label: "📄 Documents", tabs: ["fields", "monthly", "custom", "forms"] },
     { key: "people", label: "👤 People & Access", tabs: ["roster", "codes"] },
   ];
@@ -1316,6 +1388,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setMsg("");
     if (tab === "forms") loadDocSettings(activeId);
     if (tab === "roster") { setRevealedPin(null); setAllPinsResult(null); loadRoster(activeId); }
+    if (tab === "brain") loadBrainTrends(activeId);
   };
 
   const cnt = counts[activeId] || { flhas: 0, sops: 0 };
@@ -1357,6 +1430,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
               <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
               <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
+              <button style={st.tab(manageTab === "brain")} onClick={() => goToManageTab("brain")}>🧠 Brain</button>
             </>
           )}
           {activeManageCategory === "documents" && (
@@ -1492,6 +1566,84 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {manageTab === "brain" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink }}>🧠 Company profile</div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                  background: brainProfile?.status === "confirmed" ? "#DCFCE7" : "#FEF3C7",
+                  color: brainProfile?.status === "confirmed" ? "#166534" : "#92400E",
+                }}>{brainProfile?.status === "confirmed" ? "Confirmed" : "Draft — AI-generated, not yet reviewed"}</span>
+              </div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                What FORA has learned about this company — inferred at onboarding, and refined over time from this company's own FLHA edits, toolbox talks, incidents, and near misses. Feeds into document generation as additional context; edit anything below to correct it.
+                {brainProfile?.last_summarized_at && <> Last refreshed from activity: {new Date(brainProfile.last_summarized_at).toLocaleString()}.</>}
+              </div>
+              <label style={st.label}>Industry</label>
+              <input style={st.input} placeholder="e.g. earthworks / heavy civil" value={brainForm.industryInference} onChange={e => setBrainForm(p => ({ ...p, industryInference: e.target.value }))} />
+              <label style={st.label}>Equipment summary</label>
+              <textarea style={{ ...st.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Fleet is mostly excavators and dozers for surface earthworks." value={brainForm.equipmentSummary} onChange={e => setBrainForm(p => ({ ...p, equipmentSummary: e.target.value }))} />
+              <label style={st.label}>Terminology notes</label>
+              <textarea style={{ ...st.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Company calls a spotter a 'signaller'." value={brainForm.terminologyNotes} onChange={e => setBrainForm(p => ({ ...p, terminologyNotes: e.target.value }))} />
+              <button style={{ ...st.darkBtn, width: "100%", marginTop: 6 }} onClick={saveBrainProfile} disabled={savingBrain}>{savingBrain ? "Saving…" : "Save company profile"}</button>
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Hazard emphasis</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                Auto-generated from this company's own signal history (not directly editable here). Context only for document generation — never lowers a risk rating or skips a required hazard category.
+              </div>
+              {(brainProfile?.hazard_emphasis || []).length === 0 ? (
+                <div style={{ color: C.muted, padding: "10px 0", textAlign: "center" }}>Nothing learned yet — needs more activity from this company first.</div>
+              ) : (
+                brainProfile.hazard_emphasis.map((e, i) => (
+                  <div key={i} style={{ padding: "8px 0", borderBottom: i < brainProfile.hazard_emphasis.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>{e.category}</div>
+                    {e.note && <div style={{ fontSize: 12, color: C.inkSoft }}>{e.note}</div>}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Activity trends</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Recurring patterns across this company's last {brainTrends?.totalSignals ?? "…"} logged signals (FLHA edits, toolbox talk topics, incident/near-miss categories).</div>
+              {brainLoading ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>Loading…</div>
+              ) : !brainTrends || brainTrends.totalSignals === 0 ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No activity logged yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.flha_edit}</div><div style={{ fontSize: 11, color: C.muted }}>FLHA edits</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.toolbox_talk}</div><div style={{ fontSize: 11, color: C.muted }}>Toolbox talks</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.incident}</div><div style={{ fontSize: 11, color: C.muted }}>Incidents</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.near_miss}</div><div style={{ fontSize: 11, color: C.muted }}>Near misses</div></div>
+                  </div>
+                  {[
+                    ["Hazards most often added by workers", brainTrends.topAddedHazards],
+                    ["Hazards most often removed by workers", brainTrends.topRemovedHazards],
+                    ["Common toolbox talk topics", brainTrends.topToolboxTopics],
+                    ["Common incident categories", brainTrends.topIncidentCategories],
+                    ["Common near-miss involvement", brainTrends.topNearMissInvolved],
+                  ].filter(([, list]) => list.length > 0).map(([label, list]) => (
+                    <div key={label}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>{label}</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {list.map((item) => (
+                          <span key={item.name} style={{ fontSize: 12, background: C.bg, border: `1px solid ${C.line}`, borderRadius: 999, padding: "3px 10px", color: C.ink }}>{item.name} × {item.count}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

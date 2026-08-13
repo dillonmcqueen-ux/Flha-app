@@ -1,19 +1,21 @@
 # Scope: company brain
 
-Status: **Phase 1 (data model), Phase 2 (onboarding research), Phase 3
-(signal capture), Phase 4 (batch profile summarization), and Phase 5
-(generation-time integration) built.** Phases 1-3 are tenant-scope-reviewed
-with no findings requiring a fix (Phase 1 had one low-severity
-defense-in-depth suggestion, applied). Phase 4's
-`vercel-function-budget-guardian` review is clean (api/ file count 14→15,
-single well-justified new endpoint, no config beyond the expected cron
-entry). Phase 5 didn't match any existing subagent's trigger condition in
-CLAUDE.md's delegation table (it's `src/*.jsx` prompt-text changes, not an
-`api/*.js` handler, PDF generator, `vercel.json`/`api/` addition, or
-pricing/legal page), so no proactive delegation applied — self-reviewed
-instead (see the Phase 5 write-up below for what was checked).
+Status: **All 6 phases built.** Phases 1-3 are tenant-scope-reviewed with
+no findings requiring a fix (Phase 1 had one low-severity defense-in-depth
+suggestion, applied). Phase 4's `vercel-function-budget-guardian` review is
+clean (api/ file count 14→15, single well-justified new endpoint, no
+config beyond the expected cron entry). Phase 5 didn't match any existing
+subagent's trigger condition in CLAUDE.md's delegation table (it's
+`src/*.jsx` prompt-text changes, not an `api/*.js` handler, PDF generator,
+`vercel.json`/`api/` addition, or pricing/legal page), so no proactive
+delegation applied — self-reviewed instead. Phase 6's new
+`get_company_signal_trends` action is a new `api/*.js` read on the
+company-scoped `company_signals` table, so `tenant-scope-reviewer` ran
+against it — see the Phase 6 write-up below for the result.
 **Migration not yet applied to the live DB** — needs a human with Supabase
-access. Phase 6 not started.
+access. This is otherwise feature-complete against the plan; ongoing
+tuning (thresholds, prompt wording, which document types get which
+context) is expected as real usage data comes in.
 
 Goal (from the user, verbatim): when a company onboards, do preliminary
 research on it so the AI has a head start — different earthworks companies
@@ -220,15 +222,40 @@ skipping a category; (3) the other 6 prompts never receive anything that
 could influence a severity/risk field, since only plain descriptive text
 (industry, terminology) is added there.
 
-**Phase 6 — Analytics + admin visibility (built alongside Phase 1-5, per
-the user's answer, not deferred).** Admin Panel gets a section showing the
-live `company_profiles` row, fully visible and editable by the admin (same
-pattern as the existing SOP/equipment claim-review flow), plus a trending
-view sourced from `company_signals` (recurring hazard categories,
-incident/near-miss clusters) — reuses the same signal store Phase 3
-writes to, no separate pipeline. An admin's manual edit to the profile
-takes precedence over the next Phase 4 batch summarization until new
-signals justify a change.
+**Phase 6 — Analytics + admin visibility. Built** (came after Phase 5 in
+build order rather than alongside it, since Phases 1-5 needed to exist
+first for there to be anything to show — the "not deferred" commitment was
+about not pushing this to a separate later project, which it wasn't).
+
+New Admin Panel tab, "🧠 Brain", added to the existing per-company "Company
+Setup" tab group (`AdminPanel.jsx`, next to Profile/SOPs/Sites/Equipment):
+
+- **Company profile card** — the live `company_profiles` row, fully
+  visible and editable (industry, equipment summary, terminology notes),
+  with a Draft/Confirmed status badge and last-refreshed timestamp. Saving
+  calls Phase 1's existing `update_company_profile` action — no new write
+  path, so the "never accepts `hazard_emphasis` from this form" and
+  "admin edit always wins over the next Phase 4 run" guarantees from
+  Phase 1/2/4 carry over unchanged.
+- **Hazard emphasis card** — read-only display of what Phase 4 has learned
+  from signals, explicitly labeled "not directly editable here" and
+  "context only... never lowers a risk rating or skips a required hazard
+  category," matching the same safety-floor language used everywhere else
+  this field appears.
+- **Activity trends card** — counts by signal type plus top-N lists (most
+  commonly added/removed FLHA hazards, common toolbox topics, common
+  incident/near-miss categories), sourced from a new `api/companydata.js`
+  action, `get_company_signal_trends`: fetches up to 500 recent
+  `company_signals` rows for the company and tallies them server-side —
+  reuses the exact same table Phase 3 writes and Phase 4 reads, no
+  separate pipeline. Read-only (never returns raw signal rows to the
+  client, only aggregate category/count pairs) and admin/supervisor-only,
+  unlike `get_company_profile` which worker-facing generation prompts also
+  read (Phase 5).
+- Company profile is loaded eagerly (cheap) when an admin opens a
+  company's management view, same as SOPs/sites/equipment; the heavier
+  trends aggregation is loaded lazily, only if the admin actually opens
+  the Brain tab.
 
 ## Five concerns raised and answered before building
 
@@ -316,5 +343,8 @@ signals justify a change.
       subagent's trigger condition matched this diff; self-reviewed for
       correct placement (after grounding rules) and correct scoping of
       `hazard_emphasis`.
-- [ ] Phase 6: Admin Panel profile view/editor + signal-based trending
-      view.
+- [x] Phase 6: Admin Panel "🧠 Brain" tab — profile view/editor (reuses
+      Phase 1's `update_company_profile`, no new write path), read-only
+      hazard-emphasis display, and a signal-based trending view via the
+      new `get_company_signal_trends` action. `tenant-scope-reviewer` pass
+      on that new action is in progress.
