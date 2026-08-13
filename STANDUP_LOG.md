@@ -1,6 +1,6 @@
 # Daily Standup Log
 
-<!-- last-logged-commit: b5c38fd3ea7dc6999c5a0477c45ac3e389ea1907 -->
+<!-- last-logged-commit: 22192666b57776cc60136d6bfa6c425b5afb913e -->
 <!-- The line above is a watermark the hourly logger uses to find new commits since it last
      ran (git log <sha>..origin/main). Update it to the new HEAD SHA only after a successful
      push — leaving it unchanged on failure lets the next hourly run catch the same commits
@@ -38,3 +38,6 @@ this file stays short and easy to scan.
   but never actually saving anything. Turned out running it as a brand-new one-off each
   hour wasn't reliable, so it now runs inside a persistent, already-working session
   instead.
+- 03:18 — Closed out a second, smaller bug in that same notes checker: it could have
+  mistaken its own past notes for new project activity and kept re-reporting them forever.
+  That's fixed too, so this system should now be fully reliable going forward.
