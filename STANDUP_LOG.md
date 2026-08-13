@@ -1,6 +1,6 @@
 # Daily Standup Log
 
-<!-- last-logged-commit: 22192666b57776cc60136d6bfa6c425b5afb913e -->
+<!-- last-logged-commit: 531e13bca1bf339bef4928d763d1eb5c54f64ea2 -->
 <!-- The line above is a watermark the hourly logger uses to find new commits since it last
      ran (git log <sha>..origin/main). Update it to the new HEAD SHA only after a successful
      push — leaving it unchanged on failure lets the next hourly run catch the same commits
@@ -19,6 +19,13 @@ this file stays short and easy to scan.
 
 ## Outstanding Items
 
+- **Time-sensitive:** update the Stripe billing dashboard's webhook address (it needs to
+  point to the new `/api/stripe-webhook` instead of the old shared address) — until that's
+  changed, payment webhook events stop arriving.
+- Manually walk through the new automated signup flow start to finish (signup →
+  auto-approval or manual approval → new customer's setup link → they set their own login →
+  they review the AI-drafted equipment list and safety documents → done) — built and
+  reviewed for data-isolation safety, but nobody's clicked through the real thing yet.
 - Finish offline support for the last two form types (FLHA and Inspection) so they save
   drafts and retry failed submissions automatically like the others already do.
 - Make two more form types' (MonthlyInspection, CustomForm) submissions safe to retry
@@ -45,3 +52,12 @@ this file stays short and easy to scan.
   test) and confirmed it correctly logged real project activity on its own. Also switched
   it from checking every hour to every 4 hours, since that's plenty often for a running
   log like this.
+- 04:19 — Finished automating new-customer signup end-to-end: qualifying signups can now
+  get approved and set up automatically (you specifically asked to turn this on), new
+  customers get a secure link to set their own login instead of an emailed password, and
+  their starter equipment list and safety documents get AI-drafted for them to review
+  before anything goes live. A data-privacy gap in the old signup form was also closed
+  along the way.
+- 04:19 — With the Vercel plan now on Pro, split two workaround files that only existed
+  because of the old plan's limits back into their own clean files. One manual step is
+  needed to finish this off — see Outstanding Items above about the Stripe webhook address.
