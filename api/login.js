@@ -14,6 +14,9 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
+import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
+import { sendEmail, siteOrigin } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -136,8 +139,6 @@ async function verifyMasterCode(entered) {
 // skipped until RESEND_API_KEY is configured, and never allowed to fail
 // the submission itself (the row is already saved by the time this runs).
 async function sendOnboardingNotification(record) {
-  if (!process.env.RESEND_API_KEY) return;
-
   const text = [
     `Company: ${record.company_name || '—'}`,
     `Contact: ${record.contact_name || '—'} · ${record.contact_email || '—'} · ${record.contact_phone || '—'}`,
@@ -148,6 +149,9 @@ async function sendOnboardingNotification(record) {
     `Units / Equipment:\n${record.units_list || '—'}`,
     '',
     `Users:\n${record.users_list || '—'}`,
+    ...(record.skippedUserLines && record.skippedUserLines.length > 0
+      ? [`Couldn't parse (submitter can self-fix via their edit link): ${record.skippedUserLines.join('; ')}`]
+      : []),
     '',
     `Custom form / build request:\n${record.custom_request || '—'}`,
     '',
@@ -156,23 +160,33 @@ async function sendOnboardingNotification(record) {
     'Review and mark status in the Admin Panel → Onboarding Requests tab.',
   ].join('\n');
 
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({
-      from: 'FORA Onboarding <onboarding@resend.dev>',
-      to: 'forafieldsolutions@gmail.com',
-      subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
-      text,
-    }),
+  await sendEmail({
+    to: 'forafieldsolutions@gmail.com',
+    subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
+    text,
   });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Resend API error: ${res.status} ${body}`);
-  }
+}
+
+// Best-effort confirmation to the submitter themselves, with a self-serve
+// edit link — so if something needs fixing (either the admin flags it via
+// admin_note/needs_info, or the submitter just wants to correct a typo)
+// they can come back and update their own submission instead of emailing
+// FORA and waiting on a manual relay. Only useful before a company has
+// been created from the request — Onboarding.jsx hides the edit form once
+// the record shows created_company_id.
+async function sendSubmitterConfirmation(req, record, editToken) {
+  const editUrl = `${siteOrigin(req)}/onboarding?edit=${editToken}`;
+  const text = [
+    `Thanks — we've got your submission for ${record.company_name || 'your company'}.`,
+    "We'll email you within one business day once your company is live on FORA.",
+    '',
+    `Need to fix or add something first? Edit your submission any time before then: ${editUrl}`,
+  ].join('\n');
+  await sendEmail({
+    to: record.contact_email,
+    subject: `We've got your FORA onboarding request — ${record.company_name || ''}`,
+    text,
+  });
 }
 
 export default async function handler(req, res) {
@@ -302,17 +316,20 @@ export default async function handler(req, res) {
   }
 
   // ── Onboarding intake — public, no login required. A brand-new customer
-  // fills this in right after paying, before they have any credentials. ──
+  // fills this in right after paying, before they have any credentials.
+  // Also handles a self-serve edit: if editToken matches an existing,
+  // not-yet-approved request, this updates that row instead of creating a
+  // new one — see get_onboarding_intake below for how the submitter gets
+  // back to their own submission. ─────────────────────────────────────────
   if (action === 'submit_onboarding_intake') {
     const {
       companyName, contactName, contactEmail, contactPhone, address,
       sitesList, unitsList, usersList, customRequest, sopFilePaths, logoUrl,
-      stripeSessionId,
+      stripeSessionId, editToken,
     } = req.body;
 
-    if (!companyName || !contactEmail) {
-      return res.status(400).json({ error: 'Company name and contact email are required.' });
-    }
+    const { errors, skippedUserLines } = validateOnboardingIntake({ companyName, contactEmail, sitesList, usersList });
+    if (errors.length > 0) return res.status(400).json({ error: errors[0], errors });
 
     const record = {
       company_name: companyName,
@@ -345,20 +362,213 @@ export default async function handler(req, res) {
       }
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('onboarding_requests')
-      .insert(record)
-      .select('id')
-      .limit(1);
-    if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
+    let requestId;
+    if (editToken) {
+      const { data: existingRows, error: findErr } = await supabaseAdmin
+        .from('onboarding_requests')
+        .select('id, created_company_id')
+        .eq('edit_token', editToken)
+        .limit(1);
+      if (findErr) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
+      const existing = existingRows && existingRows[0];
+      if (!existing) return res.status(404).json({ error: "That edit link isn't valid — please use the link from your confirmation email." });
+      if (existing.created_company_id) {
+        return res.status(400).json({ error: 'This request has already been approved — contact FORA support for changes.' });
+      }
+      // Back to "new" so it resurfaces at the top of the admin's queue —
+      // this is the self-serve half of the loop; the admin doesn't have to
+      // relay "please fix X" by hand, they just see the corrected version.
+      const { error } = await supabaseAdmin.from('onboarding_requests').update({ ...record, status: 'new', admin_note: null }).eq('id', existing.id);
+      if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
+      requestId = existing.id;
+    } else {
+      record.edit_token = randomToken();
+      const { data, error } = await supabaseAdmin
+        .from('onboarding_requests')
+        .insert(record)
+        .select('id')
+        .limit(1);
+      if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
+      requestId = data?.[0]?.id || null;
+    }
 
     try {
-      await sendOnboardingNotification(record);
+      await sendOnboardingNotification({ ...record, skippedUserLines });
     } catch (e) {
       console.error('Onboarding notification email failed:', e.message);
     }
+    try {
+      await sendSubmitterConfirmation(req, record, editToken || record.edit_token);
+    } catch (e) {
+      console.error('Onboarding submitter confirmation email failed:', e.message);
+    }
 
-    return res.status(200).json({ ok: true, id: data?.[0]?.id || null });
+    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines });
+  }
+
+  // ── Fetch an in-progress request for self-serve editing. Public, but
+  // gated by the same unguessable edit_token issued at submission —
+  // never accepts a raw request id from the client. ──────────────────────
+  if (action === 'get_onboarding_intake') {
+    const { editToken } = req.body;
+    if (!editToken) return res.status(400).json({ error: 'Missing edit link.' });
+    const { data: rows, error } = await supabaseAdmin
+      .from('onboarding_requests')
+      .select('company_name, contact_name, contact_email, contact_phone, address, sites_list, units_list, users_list, custom_request, sop_file_paths, logo_url, status, admin_note, created_company_id')
+      .eq('edit_token', editToken)
+      .limit(1);
+    if (error) return res.status(500).json({ error: 'Could not load your submission.' });
+    const request = rows && rows[0];
+    if (!request) return res.status(404).json({ error: "That edit link isn't valid." });
+    return res.status(200).json({ request });
+  }
+
+  // ═══ Claim-link — public, no login required. A brand-new company's
+  // contact lands here from the email sent right after admin approval
+  // (auto- or manually-approved, same flow either way) to assign their own
+  // roster PINs, and confirm the AI-drafted equipment/SOPs, without FORA
+  // ever emailing plaintext PINs or hand-typing them in. Every action here
+  // resolves companyId strictly from the claim token server-side — never
+  // from a client-supplied id. ═══════════════════════════════════════════
+
+  async function resolveClaimRequest(claimToken) {
+    if (!claimToken) return { error: 'Missing claim link.' };
+    const { data: rows, error } = await supabaseAdmin
+      .from('onboarding_requests')
+      .select('*')
+      .eq('claim_token', claimToken)
+      .limit(1);
+    if (error) return { error: 'Could not load your claim link.' };
+    const request = rows && rows[0];
+    if (!request || !request.created_company_id) return { error: "That claim link isn't valid." };
+    if (!request.claim_token_expires_at || new Date(request.claim_token_expires_at) < new Date()) {
+      return { error: 'This claim link has expired — contact FORA support for a new one.' };
+    }
+    return { request };
+  }
+
+  if (action === 'claim_get_details') {
+    const { claimToken } = req.body;
+    const { request, error } = await resolveClaimRequest(claimToken);
+    if (error) return res.status(400).json({ error });
+
+    // Best-effort fallback: if the fire-and-forget draft generation kicked
+    // off at approval time hasn't finished (or never ran), try once more,
+    // right here, bounded by this request's own short Hobby timeout. If it
+    // doesn't finish in time either, draft_status just stays 'pending' and
+    // the page shows nothing to review yet rather than blocking on it.
+    let request2 = request;
+    if (request.draft_status === 'pending') {
+      try {
+        const updates = await runOnboardingDrafts(supabaseAdmin, request);
+        request2 = { ...request, ...updates };
+      } catch (e) {
+        console.error('Claim-page fallback draft generation failed:', e.message);
+      }
+    }
+
+    const { data: companyRows } = await supabaseAdmin
+      .from('companies')
+      .select('id, name, company_code, account_number, plan_tier')
+      .eq('id', request.created_company_id)
+      .limit(1);
+    const company = companyRows && companyRows[0];
+    if (!company) return res.status(404).json({ error: 'Company not found.' });
+
+    const { data: roster } = await supabaseAdmin
+      .from('roster')
+      .select('id, name, role')
+      .eq('company_id', company.id)
+      .order('role', { ascending: true })
+      .order('name', { ascending: true });
+
+    return res.status(200).json({
+      company,
+      roster: roster || [],
+      equipmentDraft: request2.equipment_draft || [],
+      sopDrafts: request2.sop_drafts || [],
+      draftStatus: request2.draft_status || 'pending',
+      claimedAt: request.claimed_at || null,
+    });
+  }
+
+  if (action === 'claim_set_roster_pin') {
+    const { claimToken, rosterId, pin } = req.body;
+    const { request, error } = await resolveClaimRequest(claimToken);
+    if (error) return res.status(400).json({ error });
+    if (!rosterId || !/^\d{4}$/.test(String(pin || ''))) {
+      return res.status(400).json({ error: 'Enter a 4-digit PIN.' });
+    }
+
+    // Ownership check — this rosterId must actually belong to the company
+    // this claim token resolved to, never trusted from the client alone.
+    const { data: memberRows, error: memberErr } = await supabaseAdmin
+      .from('roster')
+      .select('id, company_id')
+      .eq('id', rosterId)
+      .limit(1);
+    if (memberErr || !memberRows || memberRows.length === 0 || memberRows[0].company_id !== request.created_company_id) {
+      return res.status(404).json({ error: 'Roster member not found.' });
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = hashPin(pin, salt);
+    const { error: updateErr } = await supabaseAdmin
+      .from('roster')
+      .update({ pin_hash: hash, pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+      .eq('id', rosterId);
+    if (updateErr) return res.status(500).json({ error: "Couldn't save that PIN." });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'claim_confirm_equipment') {
+    const { claimToken, items } = req.body;
+    const { request, error } = await resolveClaimRequest(claimToken);
+    if (error) return res.status(400).json({ error });
+    if (!Array.isArray(items)) return res.status(400).json({ error: 'Missing equipment list.' });
+
+    const rows = items
+      .filter((it) => it && ((it.make || '').trim() || (it.model || '').trim() || (it.type || '').trim() || (it.unitNumber || '').trim()))
+      .map((it) => ({
+        company_id: request.created_company_id,
+        year: (it.year || '').trim(),
+        make: (it.make || '').trim(),
+        model: (it.model || '').trim(),
+        type: (it.type || '').trim(),
+        unit_number: (it.unitNumber || '').trim(),
+      }));
+
+    if (rows.length > 0) {
+      const { error: insErr } = await supabaseAdmin.from('equipment').insert(rows);
+      if (insErr) return res.status(500).json({ error: "Couldn't save equipment: " + insErr.message });
+    }
+    // Clear the draft either way (empty confirm = "skip equipment"), so a
+    // page refresh doesn't re-offer the same draft for a second insert.
+    await supabaseAdmin.from('onboarding_requests').update({ equipment_draft: [] }).eq('id', request.id);
+    return res.status(200).json({ ok: true, added: rows.length });
+  }
+
+  if (action === 'claim_confirm_sops') {
+    const { claimToken, policies } = req.body;
+    const { request, error } = await resolveClaimRequest(claimToken);
+    if (error) return res.status(400).json({ error });
+    if (!Array.isArray(policies)) return res.status(400).json({ error: 'Missing policy list.' });
+
+    const rows = policies.filter((p) => (p || '').trim()).map((policy_text) => ({ company_id: request.created_company_id, policy_text: policy_text.trim() }));
+    if (rows.length > 0) {
+      const { error: insErr } = await supabaseAdmin.from('sops').insert(rows);
+      if (insErr) return res.status(500).json({ error: "Couldn't save SOPs: " + insErr.message });
+    }
+    await supabaseAdmin.from('onboarding_requests').update({ sop_drafts: [] }).eq('id', request.id);
+    return res.status(200).json({ ok: true, added: rows.length });
+  }
+
+  if (action === 'claim_finalize') {
+    const { claimToken } = req.body;
+    const { request, error } = await resolveClaimRequest(claimToken);
+    if (error) return res.status(400).json({ error });
+    await supabaseAdmin.from('onboarding_requests').update({ claimed_at: new Date().toISOString() }).eq('id', request.id);
+    return res.status(200).json({ ok: true });
   }
 
   // ── Step 1: admin code, or company code ─────────────────────────────────

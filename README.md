@@ -62,7 +62,7 @@ Set these on Vercel (Project Settings → Environment Variables):
 | `SUPABASE_URL` | Yes | Every `api/*.js` function |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Every `api/*.js` function — bypasses RLS, the real access-control layer |
 | `SESSION_SECRET` | Yes | Signs session and login-ticket tokens |
-| `ANTHROPIC_API_KEY` | Yes | `/api/generate-flha` (AI hazard generation) |
+| `ANTHROPIC_API_KEY` | Yes | `/api/generate-flha` (AI hazard generation); also `api/admin.js`/`api/login.js` via `server-lib/onboardingDrafting.js` (AI-drafted equipment/SOPs on the claim-link page) — silently skipped (draft_status `'none'`) if unset |
 | `ADMIN_CODE` | No | A bootstrap admin login code, separate from the in-app admin-settable master code |
 | `CRON_SECRET` | No | Secures the weekly equipment-report cron job (`vercel.json`) |
 | `STRIPE_SECRET_KEY` | Yes (for billing) | `/api/cron-equipment-reports` (Stripe webhook handling) and `/api/admin.js` (subscription lookup on onboarding approval) |
@@ -88,7 +88,19 @@ Payment Link redirects to `/onboarding?session_id={CHECKOUT_SESSION_ID}`,
 and `submit_onboarding_intake` (`api/login.js`) claims the staged row so the
 plan tier and customer id carry through to `approve_onboarding_request`
 (`api/admin.js`) when an admin approves the request and the company is
-created.
+created. Approval still requires an admin's click — nothing auto-approves.
+
+Once approved, credentials are delivered via a self-serve **claim link**
+(`/claim?token=...`, `src/ClaimAccount.jsx`) instead of the admin emailing
+PINs: the contact assigns their own roster PINs, and reviews an AI-drafted
+equipment list (parsed from `units_list`) and AI-drafted SOPs (extracted
+from the uploaded files) before either is saved — SOPs stay unpublished
+until then. That drafting runs asynchronously after company creation
+(`server-lib/onboardingDrafting.js`), not inside `approve_onboarding_request`
+itself, since there's no `maxDuration` override in `vercel.json` for it to
+safely run inside. A submitter can also fix and resubmit their own request
+via `/onboarding?edit=<token>` — either on their own, or after an admin
+flags something via `update_onboarding_status`'s `needs_info` status.
 
 In the Stripe Dashboard, register the webhook endpoint at
 `https://<your-domain>/api/cron-equipment-reports` for

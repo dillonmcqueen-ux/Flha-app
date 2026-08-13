@@ -2,12 +2,15 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import Login from './Login.jsx'
 import Onboarding from './Onboarding.jsx'
+import ClaimAccount from './ClaimAccount.jsx'
 
-const isOnboarding = window.location.pathname.replace(/\/+$/, '') === '/onboarding'
+const path = window.location.pathname.replace(/\/+$/, '')
+const isOnboarding = path === '/onboarding'
+const isClaim = path === '/claim'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {isOnboarding ? <Onboarding /> : <Login />}
+    {isClaim ? <ClaimAccount /> : isOnboarding ? <Onboarding /> : <Login />}
   </React.StrictMode>,
 )
 

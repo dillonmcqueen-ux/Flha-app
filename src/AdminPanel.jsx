@@ -274,18 +274,41 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setLoadingOnboarding(false);
   };
 
-  const updateOnboardingStatus = async (id, status) => {
-    setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+  const updateOnboardingStatus = async (id, status, note) => {
+    setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, status, ...(note !== undefined ? { admin_note: note } : {}) } : r));
     try {
       await fetch("/api/admin", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_onboarding_status", token, id, status }),
+        body: JSON.stringify({ action: "update_onboarding_status", token, id, status, note }),
       });
     } catch (e) { /* optimistic update already applied; next reload will reconcile */ }
   };
 
+  const [needsInfoNoteFor, setNeedsInfoNoteFor] = useState(null);
+  const [needsInfoNote, setNeedsInfoNote] = useState("");
+  const sendNeedsInfo = async (id) => {
+    await updateOnboardingStatus(id, "needs_info", needsInfoNote.trim());
+    setNeedsInfoNoteFor(null);
+    setNeedsInfoNote("");
+  };
+
   const [approvingId, setApprovingId] = useState(null);
-  const [approvalResults, setApprovalResults] = useState({}); // { [requestId]: { companyCode, roster, skippedUserLines, sitesCreated } }
+  const [approvalResults, setApprovalResults] = useState({}); // { [requestId]: { companyCode, rosterCreated, skippedUserLines, sitesCreated, claimEmailSent } }
+  const [claimLinks, setClaimLinks] = useState({}); // { [companyId]: url }
+
+  const fetchClaimLink = async (companyId) => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_claim_link", token, companyId }),
+      });
+      const data = await res.json();
+      if (res.ok) setClaimLinks(prev => ({ ...prev, [companyId]: data.claimUrl }));
+      else setMsg(data.error || "Couldn't load the claim link.");
+    } catch (e) {
+      setMsg("Couldn't load the claim link.");
+    }
+  };
 
   const approveOnboardingRequest = async (id) => {
     setApprovingId(id);
@@ -1033,8 +1056,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   // ═══ ONBOARDING REQUESTS ═════════════════════════════════
   if (view === "onboardingRequests") {
-    const STATUS_LABEL = { new: "New", in_progress: "In progress", done: "Done" };
-    const STATUS_COLOR = { new: C.amberDark, in_progress: "#2563EB", done: C.green };
+    const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
+    const STATUS_COLOR = { new: C.amberDark, in_progress: "#2563EB", needs_info: "#B91C1C", done: C.green };
     return (
       <div style={st.wrap}>
         <div style={st.topbar}>
@@ -1065,7 +1088,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   </div>
                   <select
                     value={r.status}
-                    onChange={e => updateOnboardingStatus(r.id, e.target.value)}
+                    onChange={e => {
+                      if (e.target.value === "needs_info") { setNeedsInfoNoteFor(r.id); setNeedsInfoNote(r.admin_note || ""); return; }
+                      updateOnboardingStatus(r.id, e.target.value);
+                    }}
                     style={{
                       padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
                       color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer",
@@ -1074,6 +1100,66 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                   </select>
                 </div>
+
+                {/* At-a-glance approve/reject context: plan tier from the Stripe
+                    checkout, and requested seats vs. that plan's cap — the two
+                    things most likely to need a second look before approving. */}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                  {r.plan_tier && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#EEF2FF", color: "#3730A3" }}>
+                      {r.plan_tier === "advanced" ? "Advanced plan" : "Basic plan"}
+                    </span>
+                  )}
+                  {r.stripe_customer_id ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F0FDF4", color: "#166534" }}>✓ Stripe checkout linked</span>
+                  ) : (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FEF2F2", color: "#991B1B" }}>No Stripe checkout linked</span>
+                  )}
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999,
+                    background: r.overSeatCap ? "#FEF2F2" : "#F1F5F9", color: r.overSeatCap ? "#991B1B" : C.inkSoft,
+                  }}>
+                    {r.seatCount} seat{r.seatCount === 1 ? "" : "s"} requested{r.seatCap ? ` / ${r.seatCap} cap` : ""}{r.overSeatCap ? " — over cap" : ""}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: C.inkSoft }}>
+                    {r.siteCount} site{r.siteCount === 1 ? "" : "s"}
+                  </span>
+                  {r.sop_file_urls && r.sop_file_urls.length > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: C.inkSoft }}>
+                      {r.sop_file_urls.length} SOP file{r.sop_file_urls.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  {r.custom_request && r.custom_request.trim() && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FFFBEB", color: "#92400E" }}>
+                      Custom request — needs bespoke work
+                    </span>
+                  )}
+                </div>
+
+                {r.skippedUserLines && r.skippedUserLines.length > 0 && (
+                  <div style={{ fontSize: 12, color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                    Couldn't parse as "Name — role": {r.skippedUserLines.join("; ")}
+                  </div>
+                )}
+
+                {needsInfoNoteFor === r.id && (
+                  <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 6 }}>What needs fixing? The submitter will see this and can fix + resubmit themselves.</div>
+                    <textarea
+                      style={{ ...st.input, minHeight: 60, width: "100%", boxSizing: "border-box" }}
+                      value={needsInfoNote}
+                      onChange={e => setNeedsInfoNote(e.target.value)}
+                      placeholder="e.g. A few of your user lines didn't parse — please use “Name — worker” or “Name — supervisor”."
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button style={st.amberBtn} onClick={() => sendNeedsInfo(r.id)}>Send</button>
+                      <button style={{ ...st.ghost, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => { setNeedsInfoNoteFor(null); setNeedsInfoNote(""); }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+                {r.status === "needs_info" && r.admin_note && needsInfoNoteFor !== r.id && (
+                  <div style={{ fontSize: 12, color: "#991B1B", marginBottom: 10 }}>Waiting on submitter: "{r.admin_note}"</div>
+                )}
 
                 <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 10, lineHeight: 1.6 }}>
                   <strong style={{ color: C.ink }}>{r.contact_name || "—"}</strong> · {r.contact_email || "—"} · {r.contact_phone || "—"}
@@ -1118,25 +1204,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                         {approvalResults[r.id].sitesCreated > 0 && (
                           <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].sitesCreated} site(s) added.</div>
                         )}
-                        {approvalResults[r.id].roster.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 8, marginBottom: 4 }}>
-                              Roster PINs — shown once, copy these now
-                            </div>
-                            {approvalResults[r.id].roster.map((p, i) => (
-                              <div key={i} style={{ fontSize: 13, color: C.ink, fontFamily: "monospace" }}>
-                                {p.name} ({p.role}) — PIN <strong>{p.pin}</strong>
-                              </div>
-                            ))}
-                          </>
+                        {approvalResults[r.id].rosterCreated > 0 && (
+                          <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].rosterCreated} roster member(s) added.</div>
                         )}
-                        {approvalResults[r.id].skippedUserLines.length > 0 && (
+                        {approvalResults[r.id].skippedUserLines?.length > 0 && (
                           <div style={{ fontSize: 12, color: C.amberDark, marginTop: 8 }}>
-                            Couldn't parse (add manually): {approvalResults[r.id].skippedUserLines.join("; ")}
+                            Couldn't parse (add manually from the Roster tab): {approvalResults[r.id].skippedUserLines.join("; ")}
                           </div>
                         )}
+                        <div style={{ fontSize: 12, color: "#166534", marginTop: 8, fontWeight: 700 }}>
+                          {approvalResults[r.id].claimEmailSent
+                            ? "A claim link was emailed to the contact — they'll assign their own roster PINs and review the AI-drafted equipment/SOPs there."
+                            : "No contact email on file — get the claim link below and share it with them yourself."}
+                        </div>
+                        {!approvalResults[r.id].claimEmailSent && (
+                          claimLinks[approvalResults[r.id].companyId] ? (
+                            <div style={{ fontSize: 12, color: C.ink, marginTop: 6, wordBreak: "break-all", fontFamily: "monospace", background: C.white, borderRadius: 6, padding: 8 }}>
+                              {claimLinks[approvalResults[r.id].companyId]}
+                            </div>
+                          ) : (
+                            <button style={{ ...st.ghost, marginTop: 6, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => fetchClaimLink(approvalResults[r.id].companyId)}>Get claim link</button>
+                          )
+                        )}
                         <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-                          Equipment wasn't auto-added — use the Units / equipment list above with the company's Equipment tab.
+                          Nothing was emailed in plaintext — PINs, equipment, and SOPs are only ever set by the contact on that page.
                         </div>
                       </div>
                     ) : (
