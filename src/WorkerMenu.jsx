@@ -9,6 +9,21 @@ import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
 import { drainQueue } from "./offlineQueue.js";
+import theme from "./theme.js";
+import {
+  HardHat,
+  LogOut,
+  ChevronRight,
+  Inbox,
+  ClipboardList,
+  Tractor,
+  Presentation,
+  TriangleAlert,
+  Siren,
+  ClipboardCheck,
+  CalendarCheck,
+  Clock,
+} from "lucide-react";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
 // docs/scope-offline-capability.md Phase 1) — now all 8 worker-facing forms.
@@ -24,15 +39,21 @@ const RESUBMIT_HANDLERS = {
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
+// Icons are the same lucide components used for the matching tab in
+// Dashboard.jsx's TAB_META, so a document type reads identically whether a
+// worker or a supervisor is looking at it. `accent` stays a per-type brand
+// color (same pattern Dashboard.jsx uses for its stat tiles) rather than
+// forcing every doc type onto a single theme color — these colors are what
+// let a worker tell FLHA apart from Incident apart from Toolbox at a glance.
 const BUILTIN_TYPES = [
-  { key: "flha", icon: "🦺", title: "FLHA", desc: "Field Level Hazard Assessment", ready: true, accent: "#F97316" },
-  { key: "inspection", icon: "🚜", title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1" },
-  { key: "toolbox", icon: "🧰", title: "Toolbox Talk", desc: "Crew safety meeting record", ready: true, accent: "#7C3AED" },
-  { key: "nearmiss", icon: "⚠️", title: "Near Miss Report", desc: "Report a close call", ready: true, accent: "#D97706" },
-  { key: "incident", icon: "🚑", title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626" },
-  { key: "daily", icon: "📋", title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
-  { key: "monthly", icon: "🗓️", title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
-  { key: "timeclock", icon: "⏱️", title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2" },
+  { key: "flha", Icon: ClipboardList, title: "FLHA", desc: "Field Level Hazard Assessment", ready: true, accent: "#F97316" },
+  { key: "inspection", Icon: Tractor, title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1" },
+  { key: "toolbox", Icon: Presentation, title: "Toolbox Talk", desc: "Crew safety meeting record", ready: true, accent: "#7C3AED" },
+  { key: "nearmiss", Icon: TriangleAlert, title: "Near Miss Report", desc: "Report a close call", ready: true, accent: "#D97706" },
+  { key: "incident", Icon: Siren, title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626" },
+  { key: "daily", Icon: ClipboardCheck, title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
+  { key: "monthly", Icon: CalendarCheck, title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
+  { key: "timeclock", Icon: Clock, title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2" },
 ];
 
 export default function WorkerMenu({ companyId, companyName, userName = "", userId = null, onLogout, token, backLabel = "Sign out" }) {
@@ -114,13 +135,19 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   }
 
   const s = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
-    header: { background: "linear-gradient(135deg,#1E3A5F,#2D5F8A)", padding: "20px 20px", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" },
+    wrap: { fontFamily: theme.type.fontFamily, background: theme.colors.background, minHeight: "100vh", color: theme.colors.textPrimary },
+    header: {
+      background: theme.colors.primaryDarker,
+      padding: "16px 20px", color: theme.colors.textOnPrimary,
+      display: "flex", justifyContent: "space-between", alignItems: "center"
+    },
     body: { padding: "18px 16px 40px", maxWidth: 640, margin: "0 auto" },
     card: (accent, ready) => ({
-      background: "#fff", borderRadius: 14, padding: 18, boxShadow: "0 1px 3px #0f172a12",
+      background: theme.colors.surface, borderRadius: theme.radius.lg, padding: 18, boxShadow: theme.shadow.sm,
+      border: `1px solid ${theme.colors.border}`,
       borderLeft: `4px solid ${accent}`, cursor: ready ? "pointer" : "default",
       display: "flex", alignItems: "center", gap: 14, opacity: ready ? 1 : 0.55,
+      minHeight: 44,
     }),
   };
 
@@ -134,42 +161,61 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   return (
     <div style={s.wrap}>
       <div style={s.header}>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, opacity: 0.8, textTransform: "uppercase" }}>{companyName || "FORA"}</div>
-          <div style={{ fontWeight: 800, fontSize: 22, marginTop: 2 }}>Choose a form</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: theme.radius.md, background: theme.colors.primary,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+          }}>
+            <HardHat size={19} color={theme.colors.textOnPrimary} strokeWidth={2.25} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, opacity: 0.85, textTransform: "uppercase" }}>{companyName || "FORA"}</div>
+            <div style={{ fontWeight: 800, fontSize: 19, marginTop: 1 }}>Choose a form</div>
+          </div>
         </div>
-        {onLogout && <button onClick={onLogout} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{backLabel}</button>}
+        {onLogout && (
+          <button onClick={onLogout} style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            background: "#ffffff18", color: "#fff", border: "1px solid #ffffff2A", borderRadius: theme.radius.pill,
+            padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", minHeight: 36
+          }}><LogOut size={14} /> {backLabel}</button>
+        )}
       </div>
 
       <div style={s.body}>
         <div style={{ display: "grid", gap: 12 }}>
           {visibleBuiltins.map(d => (
             <div key={d.key} style={s.card(d.accent, d.ready)} onClick={() => d.ready && setDoc(d.key)}>
-              <div style={{ width: 52, height: 52, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{d.icon}</div>
+              <div style={{
+                width: 52, height: 52, borderRadius: theme.radius.md, background: `${d.accent}18`,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+              }}>
+                <d.Icon size={24} color={d.accent} strokeWidth={2} />
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: 16, color: "#1E293B" }}>{d.title}</div>
-                <div style={{ fontSize: 13, color: "#64748B", marginTop: 1 }}>{d.desc}</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: theme.colors.textPrimary }}>{d.title}</div>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginTop: 1 }}>{d.desc}</div>
               </div>
               {d.ready
-                ? <span style={{ fontSize: 20, color: "#94A3B8", flexShrink: 0 }}>→</span>
-                : <span style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", background: "#F1F5F9", padding: "4px 9px", borderRadius: 20, flexShrink: 0 }}>SOON</span>}
+                ? <ChevronRight size={20} color={theme.colors.textMuted} style={{ flexShrink: 0 }} />
+                : <span style={{ fontSize: 11, fontWeight: 700, color: theme.colors.textMuted, background: theme.colors.surfaceSunken, padding: "4px 9px", borderRadius: theme.radius.pill, flexShrink: 0 }}>SOON</span>}
             </div>
           ))}
 
           {customForms.map(f => (
             <div key={f.id} style={s.card(f.accent_color || "#4338CA", true)} onClick={() => { setCustomFormId(f.id); setDoc("custom"); }}>
-              <div style={{ width: 52, height: 52, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{f.icon || "📄"}</div>
+              <div style={{ width: 52, height: 52, borderRadius: theme.radius.md, background: theme.colors.surfaceSunken, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{f.icon || "📄"}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: 16, color: "#1E293B" }}>{f.title}</div>
-                <div style={{ fontSize: 13, color: "#64748B", marginTop: 1 }}>Custom document</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: theme.colors.textPrimary }}>{f.title}</div>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginTop: 1 }}>Custom document</div>
               </div>
-              <span style={{ fontSize: 20, color: "#94A3B8", flexShrink: 0 }}>→</span>
+              <ChevronRight size={20} color={theme.colors.textMuted} style={{ flexShrink: 0 }} />
             </div>
           ))}
 
           {!loading && visibleBuiltins.length === 0 && customForms.length === 0 && (
-            <div style={{ textAlign: "center", padding: "40px 0", color: "#9CA3AF" }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+            <div style={{ textAlign: "center", padding: "40px 0", color: theme.colors.textMuted }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Inbox size={32} strokeWidth={1.5} /></div>
               No forms are currently set up for your company. Ask your admin.
             </div>
           )}

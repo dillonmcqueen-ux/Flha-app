@@ -3,6 +3,28 @@ import { generateAndUploadFLHA } from "./generatePDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import theme from "./theme.js";
+import {
+  HardHat,
+  LogOut,
+  MapPin,
+  ClipboardList,
+  ChevronDown,
+  TriangleAlert,
+  Mic,
+  Square,
+  CheckCircle2,
+  Plus,
+  Pencil,
+  Trash2,
+  ShieldAlert,
+  Users,
+  WifiOff,
+  FolderCheck,
+  FileText as FileTextIcon,
+  BarChart3,
+  Bell,
+} from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -265,16 +287,24 @@ function computeFlhaEditSignal(baseline, finalHazards) {
   };
 }
 
+// Maps the old semantic color names ("blue"/"green"/"amber"/"red"/"extreme")
+// used throughout this file onto theme.js's status-color system, so callers
+// don't need to be rewritten — just the palette underneath them.
+const BADGE_STATUS = {
+  blue: theme.colors.status.info,
+  green: theme.colors.status.success,
+  amber: theme.colors.status.warning,
+  red: theme.colors.status.danger,
+  extreme: theme.colors.status.critical,
+};
+
 function Badge({ text, color = "blue" }) {
-  const colors = {
-    blue: "background:#1D4ED820;color:#1D4ED8;border:1px solid #1D4ED840",
-    green: "background:#16A34A20;color:#16A34A;border:1px solid #16A34A40",
-    amber: "background:#D9770620;color:#D97706;border:1px solid #D9770640",
-    red: "background:#DC262620;color:#DC2626;border:1px solid #DC262640",
-    extreme: "background:#7F1D1D;color:#FFFFFF;border:1px solid #7F1D1D",
-  };
+  const c = BADGE_STATUS[color] || BADGE_STATUS.blue;
   return (
-    <span style={{ ...Object.fromEntries(colors[color].split(";").map(s => s.split(":"))), borderRadius: 6, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>
+    <span style={{
+      background: c.bg, color: c.text, border: `1px solid ${c.border}`,
+      borderRadius: theme.radius.sm, padding: "2px 10px", fontSize: 12, fontWeight: 600
+    }}>
       {text}
     </span>
   );
@@ -290,19 +320,19 @@ function Stepper({ step }) {
         return (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
-              {i > 0 && <div style={{ flex: 1, height: 2, background: done || active ? "#F97316" : "#E5E7EB" }} />}
+              {i > 0 && <div style={{ flex: 1, height: 2, background: done || active ? theme.colors.primary : theme.colors.border }} />}
               <div style={{
                 width: 30, height: 30, borderRadius: "50%",
-                background: done ? "#F97316" : active ? "#1E3A5F" : "#E5E7EB",
-                color: done || active ? "#fff" : "#9CA3AF",
+                background: done ? theme.colors.primary : active ? theme.colors.primaryDark : theme.colors.border,
+                color: done || active ? "#fff" : theme.colors.textMuted,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontWeight: 700, fontSize: 13, flexShrink: 0
               }}>
-                {done ? "✓" : i + 1}
+                {done ? <CheckCircle2 size={16} strokeWidth={2.5} /> : i + 1}
               </div>
-              {i < labels.length - 1 && <div style={{ flex: 1, height: 2, background: done ? "#F97316" : "#E5E7EB" }} />}
+              {i < labels.length - 1 && <div style={{ flex: 1, height: 2, background: done ? theme.colors.primary : theme.colors.border }} />}
             </div>
-            <span style={{ fontSize: 10, marginTop: 4, color: active ? "#1E3A5F" : done ? "#F97316" : "#9CA3AF", fontWeight: active ? 700 : 400, textAlign: "center" }}>
+            <span style={{ fontSize: 10, marginTop: 4, color: active ? theme.colors.primaryDark : done ? theme.colors.primary : theme.colors.textMuted, fontWeight: active ? 700 : 400, textAlign: "center" }}>
               {label}
             </span>
           </div>
@@ -313,10 +343,10 @@ function Stepper({ step }) {
 }
 
 const RISK_ROW_STYLE = {
-  Extreme: { bg: "#FEF2F2", border: "#7F1D1D", badgeBg: "#7F1D1D", badgeText: "#fff" },
-  High: { bg: "#FEF2F2", border: "#FCA5A5", badgeBg: "#FEE2E2", badgeText: "#DC2626" },
-  Medium: { bg: "#FFFBEB", border: "#FCD34D", badgeBg: "#FEF3C7", badgeText: "#D97706" },
-  Low: { bg: "#F0FDF4", border: "#86EFAC", badgeBg: "#DCFCE7", badgeText: "#16A34A" },
+  Extreme: { bg: theme.colors.status.critical.bg, border: theme.colors.status.critical.border, badgeBg: theme.colors.status.critical.solid, badgeText: "#fff" },
+  High: { bg: theme.colors.status.danger.bg, border: theme.colors.status.danger.border, badgeBg: theme.colors.status.danger.bg, badgeText: theme.colors.status.danger.text },
+  Medium: { bg: theme.colors.status.warning.bg, border: theme.colors.status.warning.border, badgeBg: theme.colors.status.warning.bg, badgeText: theme.colors.status.warning.text },
+  Low: { bg: theme.colors.status.success.bg, border: theme.colors.status.success.border, badgeBg: theme.colors.status.success.bg, badgeText: theme.colors.status.success.text },
 };
 
 export default function FLHAApp({ forcedCompanyId = null, companyName: propCompanyName = "", userName: loginUserName = "", onLogout = null, token = null }) {
@@ -466,7 +496,7 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
     return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) };
   };
   const startCrewDraw = (e) => { e.preventDefault(); crewDrawingRef.current = true; const ctx = crewCanvasRef.current.getContext("2d"); const { x, y } = getCrewPos(e); ctx.beginPath(); ctx.moveTo(x, y); };
-  const crewDraw = (e) => { if (!crewDrawingRef.current) return; e.preventDefault(); const ctx = crewCanvasRef.current.getContext("2d"); const { x, y } = getCrewPos(e); ctx.lineTo(x, y); ctx.strokeStyle = "#1E293B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setCrewHasSig(true); };
+  const crewDraw = (e) => { if (!crewDrawingRef.current) return; e.preventDefault(); const ctx = crewCanvasRef.current.getContext("2d"); const { x, y } = getCrewPos(e); ctx.lineTo(x, y); ctx.strokeStyle = theme.colors.textPrimary; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setCrewHasSig(true); };
   const endCrewDraw = () => { crewDrawingRef.current = false; };
   const clearCrewSig = () => { const c = crewCanvasRef.current; if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height); setCrewHasSig(false); };
   const addCrewMember = () => {
@@ -504,7 +534,7 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
     const ctx = canvasRef.current.getContext("2d");
     const { x, y } = getCanvasPos(e);
     ctx.lineTo(x, y);
-    ctx.strokeStyle = "#1E3A5F";
+    ctx.strokeStyle = theme.colors.primaryDark;
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -940,14 +970,14 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
 
   const styles = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: "16px" },
-    card: { background: "#fff", borderRadius: 14, padding: "24px", marginBottom: 16, boxShadow: "0 1px 4px #0001" },
-    header: { background: "linear-gradient(135deg,#1E3A5F,#2D5F8A)", borderRadius: 14, padding: "20px 24px", marginBottom: 16, color: "#fff" },
-    label: { display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 },
-    input: { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 15, boxSizing: "border-box", outline: "none" },
-    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 9, padding: "12px 20px", fontWeight: 700, fontSize: 15, cursor: "pointer", width: "100%" }),
-    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
-    textarea: { width: "100%", minHeight: 90, padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, resize: "vertical", boxSizing: "border-box" },
+    wrap: { fontFamily: theme.type.fontFamily, background: theme.colors.background, minHeight: "100vh", padding: "16px", color: theme.colors.textPrimary },
+    card: { background: theme.colors.surface, borderRadius: theme.radius.lg, padding: "24px", marginBottom: 16, boxShadow: theme.shadow.sm, border: `1px solid ${theme.colors.border}` },
+    header: { background: theme.colors.primaryDarker, borderRadius: theme.radius.lg, padding: "20px 24px", marginBottom: 16, color: theme.colors.textOnPrimary },
+    label: { display: "block", fontWeight: 600, fontSize: 13, color: theme.colors.textSecondary, marginBottom: 6 },
+    input: { width: "100%", padding: "10px 12px", borderRadius: theme.radius.sm, border: `1.5px solid ${theme.colors.border}`, fontSize: 15, boxSizing: "border-box", outline: "none", fontFamily: theme.type.fontFamily },
+    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: theme.radius.md, padding: "12px 20px", fontWeight: 700, fontSize: 15, cursor: "pointer", width: "100%", fontFamily: theme.type.fontFamily, minHeight: 44 }),
+    ghost: { background: theme.colors.surfaceSunken, color: theme.colors.textPrimary, border: "none", borderRadius: theme.radius.md, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10, minHeight: 44, fontFamily: theme.type.fontFamily },
+    textarea: { width: "100%", minHeight: 90, padding: "10px 12px", borderRadius: theme.radius.sm, border: `1.5px solid ${theme.colors.border}`, fontSize: 14, resize: "vertical", boxSizing: "border-box", fontFamily: theme.type.fontFamily },
   };
 
   return (
@@ -955,18 +985,26 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       <div style={{ ...styles.header, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {companyLogo
-            ? <img src={companyLogo} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", background: "#fff" }} />
-            : <span style={{ fontSize: 28 }}>🦺</span>}
+            ? <img src={companyLogo} alt="" style={{ width: 40, height: 40, borderRadius: theme.radius.sm, objectFit: "cover", background: "#fff" }} />
+            : (
+              <div style={{
+                width: 40, height: 40, borderRadius: theme.radius.md, background: theme.colors.primary,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+              }}>
+                <HardHat size={22} color={theme.colors.textOnPrimary} strokeWidth={2.25} />
+              </div>
+            )}
           <div>
             <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>FLHA</div>
-            <div style={{ fontSize: 13, opacity: 0.8 }}>AI-powered Field Level Hazard Assessment</div>
+            <div style={{ fontSize: 13, color: theme.colors.teal[200] }}>AI-powered Field Level Hazard Assessment</div>
           </div>
         </div>
         {onLogout && (
           <button onClick={onLogout} style={{
-            background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8,
-            padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
-          }}>Exit</button>
+            display: "inline-flex", alignItems: "center", gap: 6,
+            background: "#ffffff18", color: "#fff", border: "1px solid #ffffff2A", borderRadius: theme.radius.pill,
+            padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", minHeight: 36
+          }}><LogOut size={14} /> Exit</button>
         )}
       </div>
 
@@ -977,11 +1015,11 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       {step === "company" && (
         <div style={styles.card}>
           <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Site & Worker Info</div>
-          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 18 }}>Pre-loaded with <strong>{sopData.company}</strong> SOPs ({sopData.policies.length} policies)</div>
+          <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: 18 }}>Pre-loaded with <strong>{sopData.company}</strong> SOPs ({sopData.policies.length} policies)</div>
 
           <label style={styles.label}>Worker Name</label>
           <input
-            style={{ ...styles.input, marginBottom: 14, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            style={{ ...styles.input, marginBottom: 14, ...(loginUserName ? { background: theme.colors.surfaceSunken, color: theme.colors.textSecondary } : {}) }}
             placeholder="e.g. John Smith" value={workerName}
             onChange={e => setWorkerName(e.target.value)}
             readOnly={!!loginUserName}
@@ -1014,7 +1052,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               {sites.length > 0 && (
                 <button
                   onClick={() => { setSiteMode("list"); setJobSite(""); }}
-                  style={{ background: "transparent", border: "none", color: "#F97316", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 22 }}>
+                  style={{ background: "transparent", border: "none", color: theme.colors.primaryDark, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 22, minHeight: 44 }}>
                   ← Choose from saved sites
                 </button>
               )}
@@ -1022,21 +1060,21 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             </>
           )}
 
-          <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, marginBottom: 22, overflow: "hidden" }}>
+          <div style={{ background: theme.colors.status.info.bg, border: `1px solid ${theme.colors.status.info.border}`, borderRadius: theme.radius.md, marginBottom: 22, overflow: "hidden" }}>
             <button
               onClick={() => setSopsOpen(o => !o)}
               style={{
                 width: "100%", background: "transparent", border: "none", cursor: "pointer",
                 padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center",
-                fontWeight: 600, fontSize: 13, color: "#0369A1"
+                fontWeight: 600, fontSize: 13, color: theme.colors.status.info.text, minHeight: 44
               }}>
-              <span>📋 Loaded Company SOPs ({sopData.policies.length})</span>
-              <span style={{ fontSize: 12, transform: sopsOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><ClipboardList size={15} /> Loaded Company SOPs ({sopData.policies.length})</span>
+              <ChevronDown size={14} style={{ transform: sopsOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
             </button>
             {sopsOpen && (
               <div style={{ padding: "0 14px 12px", maxHeight: 240, overflowY: "auto" }}>
                 {sopData.policies.map((p, i) => (
-                  <div key={i} style={{ fontSize: 12, color: "#374151", marginBottom: 5 }}>• {p}</div>
+                  <div key={i} style={{ fontSize: 12, color: theme.colors.textSecondary, marginBottom: 5 }}>• {p}</div>
                 ))}
               </div>
             )}
@@ -1062,7 +1100,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             </div>
           )}
 
-          <button style={styles.btn("#F97316")} onClick={async () => {
+          <button style={styles.btn(theme.colors.primary)} onClick={async () => {
             if (!workerName || !jobSite) return;
             const missing = customFields.filter(f => f.required && !(customValues[f.id] || "").trim());
             if (missing.length > 0) { alert(`Please fill in: ${missing.map(m => m.label).join(", ")}`); return; }
@@ -1083,23 +1121,23 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             Continue to Voice Input →
           </button>
 
-          <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px solid #E5E7EB" }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: "#1E3A5F" }}>Already started an FLHA today?</div>
-            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10 }}>Enter your name to reopen today's FLHA and add a task to it.</div>
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: `1px solid ${theme.colors.border}` }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: theme.colors.primaryDark }}>Already started an FLHA today?</div>
+            <div style={{ fontSize: 12, color: theme.colors.textSecondary, marginBottom: 10 }}>Enter your name to reopen today's FLHA and add a task to it.</div>
             <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Your name (as entered earlier)" value={resumeName} onChange={e => setResumeName(e.target.value)} />
-            {resumeError && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 13, color: "#991B1B" }}>{resumeError}</div>}
+            {resumeError && <div style={{ background: theme.colors.status.danger.bg, border: `1px solid ${theme.colors.status.danger.border}`, borderRadius: theme.radius.sm, padding: "8px 12px", marginBottom: 8, fontSize: 13, color: theme.colors.status.danger.text }}>{resumeError}</div>}
             {resumeChoices.length > 0 && (
               <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Multiple found — pick one:</div>
+                <div style={{ fontSize: 12, color: theme.colors.textSecondary, marginBottom: 6 }}>Multiple found — pick one:</div>
                 {resumeChoices.map(c => (
-                  <button key={c.id} onClick={() => loadForAmend(c)} style={{ width: "100%", textAlign: "left", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 12px", marginBottom: 6, cursor: "pointer" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1E3A5F" }}>{c.job_site || "No site"}</div>
-                    <div style={{ fontSize: 11, color: "#6B7280" }}>{new Date(c.created_at).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
+                  <button key={c.id} onClick={() => loadForAmend(c)} style={{ width: "100%", textAlign: "left", background: theme.colors.surfaceSunken, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.sm, padding: "10px 12px", marginBottom: 6, cursor: "pointer", minHeight: 44 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.primaryDark }}>{c.job_site || "No site"}</div>
+                    <div style={{ fontSize: 11, color: theme.colors.textSecondary }}>{new Date(c.created_at).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
                   </button>
                 ))}
               </div>
             )}
-            <button style={{ ...styles.btn("#F3F4F6", "#374151") }} onClick={resumeTodaysFLHA}>
+            <button style={{ ...styles.btn(theme.colors.surfaceSunken, theme.colors.textPrimary) }} onClick={resumeTodaysFLHA}>
               Resume today's FLHA
             </button>
           </div>
@@ -1109,7 +1147,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       {step === "voice" && (
         <div style={styles.card}>
           <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Describe Your Task</div>
-          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 18 }}>Speak or type what work you're about to do. Be specific — mention equipment, location conditions, and any hazards you already see.</div>
+          <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: 18 }}>Speak or type what work you're about to do. Be specific — mention equipment, location conditions, and any hazards you already see.</div>
 
           {hasSpeech ? (
             <div style={{ textAlign: "center", marginBottom: 18 }}>
@@ -1117,29 +1155,30 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                 onClick={isListening ? stopListening : startListening}
                 style={{
                   width: 100, height: 100, borderRadius: "50%", border: "none",
-                  background: isListening ? "#DC2626" : "#1E3A5F",
-                  color: "#fff", fontSize: 36, cursor: "pointer",
-                  boxShadow: isListening ? "0 0 0 8px #DC262630" : "0 4px 20px #1E3A5F40",
+                  background: isListening ? theme.colors.status.danger.solid : theme.colors.primary,
+                  color: "#fff", cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: isListening ? `0 0 0 8px ${theme.colors.status.danger.solid}30` : `0 4px 20px ${theme.colors.primary}40`,
                   transition: "all 0.2s"
                 }}>
-                {isListening ? "⏹" : "🎙"}
+                {isListening ? <Square size={34} fill="#fff" /> : <Mic size={40} />}
               </button>
-              <div style={{ marginTop: 10, fontWeight: 600, color: isListening ? "#DC2626" : "#374151" }}>
+              <div style={{ marginTop: 10, fontWeight: 600, color: isListening ? theme.colors.status.danger.solid : theme.colors.textSecondary }}>
                 {isListening ? "Listening… tap to stop" : "Tap to speak"}
               </div>
             </div>
           ) : (
-            <div style={{ background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Voice input requires Chrome or Safari. Type your task below.
+            <div style={{ background: theme.colors.status.warning.bg, border: `1px solid ${theme.colors.status.warning.border}`, borderRadius: theme.radius.sm, padding: 12, marginBottom: 14, fontSize: 13, color: theme.colors.status.warning.text, display: "flex", alignItems: "center", gap: 8 }}>
+              <TriangleAlert size={16} style={{ flexShrink: 0 }} /> Voice input requires Chrome or Safari. Type your task below.
             </div>
           )}
 
           {transcript && (
-            <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 14, color: "#374151", minHeight: 60 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", marginBottom: 4 }}>TRANSCRIPT</div>
+            <div style={{ background: theme.colors.surfaceSunken, border: `1px solid ${theme.colors.border}`, borderRadius: theme.radius.sm, padding: 12, marginBottom: 14, fontSize: 14, color: theme.colors.textSecondary, minHeight: 60 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: theme.colors.textMuted, marginBottom: 4 }}>TRANSCRIPT</div>
               {transcript.replace(/\[live\].*$/s, "").trim()}
               {transcript.includes("[live]") && (
-                <span style={{ color: "#9CA3AF" }}> {transcript.replace(/.*\[live\]/s, "").trim()}</span>
+                <span style={{ color: theme.colors.textMuted }}> {transcript.replace(/.*\[live\]/s, "").trim()}</span>
               )}
             </div>
           )}
@@ -1153,25 +1192,25 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           />
 
           {genError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+            <div style={{ background: theme.colors.status.danger.bg, border: `1.5px solid ${theme.colors.status.danger.border}`, borderRadius: theme.radius.sm, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: theme.colors.status.danger.text }}>
               Something went wrong generating the assessment. Please check your connection and try again, or continue and add hazards yourself.
             </div>
           )}
 
           <button
-            style={styles.btn(loading ? "#9CA3AF" : "#16A34A")}
+            style={styles.btn(loading ? theme.colors.gray[400] : theme.colors.status.success.solid)}
             onClick={generateFLHA}
             disabled={loading || (!transcript.replace(/\[live\].*/s, "").trim() && !taskDesc)}>
-            {loading ? "⏳ Analyzing against SOPs…" : addingTask ? "✅ Add this task" : "✅ Generate FLHA"}
+            {loading ? "Analyzing against SOPs…" : addingTask ? "Add this task" : "Generate FLHA"}
           </button>
 
           {genError && (
-            <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={continueWithoutAI}>
+            <button style={{ ...styles.btn(theme.colors.surfaceSunken, theme.colors.textPrimary), marginTop: 10 }} onClick={continueWithoutAI}>
               Continue without AI — I'll add hazards myself
             </button>
           )}
 
-          <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={() => setStep("company")}>
+          <button style={{ ...styles.btn(theme.colors.surfaceSunken, theme.colors.textPrimary), marginTop: 10 }} onClick={() => setStep("company")}>
             ← Back
           </button>
         </div>
@@ -1180,55 +1219,55 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       {step === "review" && flha && (
         <>
           {flha.ai_assisted === false && (
-            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-reviewed — this hazard list was not cross-referenced against your company's SOPs. Check it carefully before submitting.
+            <div style={{ background: theme.colors.status.warning.bg, border: `1.5px solid ${theme.colors.status.warning.border}`, borderRadius: theme.radius.md, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: theme.colors.status.warning.text, display: "flex", alignItems: "center", gap: 8 }}>
+              <TriangleAlert size={15} style={{ flexShrink: 0 }} /> Not AI-reviewed — this hazard list was not cross-referenced against your company's SOPs. Check it carefully before submitting.
             </div>
           )}
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 17 }}>Job Hazard Analysis</div>
-                <div style={{ fontSize: 13, color: "#6B7280" }}>{companyName} • {new Date().toLocaleDateString("en-CA")}</div>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary }}>{companyName} • {new Date().toLocaleDateString("en-CA")}</div>
               </div>
               <Badge text={`${workerName || "Worker"}`} color="blue" />
             </div>
 
-            <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", marginBottom: 4 }}>TASK SUMMARY</div>
-              <div style={{ fontSize: 14, color: "#166534" }}>{flha.taskSummary}</div>
-              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 6 }}>📍 {jobSite}</div>
+            <div style={{ background: theme.colors.status.success.bg, border: `1px solid ${theme.colors.status.success.border}`, borderRadius: theme.radius.md, padding: "12px 14px", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.status.success.text, marginBottom: 4 }}>TASK SUMMARY</div>
+              <div style={{ fontSize: 14, color: theme.colors.status.success.text }}>{flha.taskSummary}</div>
+              <div style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12} /> {jobSite}</div>
             </div>
 
             {flha.sopAlerts?.length > 0 && (
-              <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6 }}>⚠️ SOP REQUIREMENTS TRIGGERED</div>
-                {flha.sopAlerts.map((a, i) => <div key={i} style={{ fontSize: 13, color: "#9A3412", marginBottom: 3 }}>• {a}</div>)}
+              <div style={{ background: theme.colors.status.warning.bg, border: `1.5px solid ${theme.colors.status.warning.border}`, borderRadius: theme.radius.md, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.status.warning.text, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><TriangleAlert size={14} /> SOP REQUIREMENTS TRIGGERED</div>
+                {flha.sopAlerts.map((a, i) => <div key={i} style={{ fontSize: 13, color: theme.colors.status.warning.text, marginBottom: 3 }}>• {a}</div>)}
               </div>
             )}
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Hazard / Control Checklist</div>
-              <button onClick={openNewHazard} style={{ background: "#1E3A5F", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ Add hazard</button>
+              <button onClick={openNewHazard} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: theme.colors.primaryDark, color: "#fff", border: "none", borderRadius: theme.radius.sm, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", minHeight: 32 }}><Plus size={14} /> Add hazard</button>
             </div>
 
             {editingHazard === "new" && (
-              <div style={{ border: "1.5px dashed #1E3A5F", borderRadius: 10, padding: "14px 16px", marginBottom: 10 }}>
+              <div style={{ border: `1.5px dashed ${theme.colors.primaryDark}`, borderRadius: theme.radius.md, padding: "14px 16px", marginBottom: 10 }}>
                 <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Hazard (what's the risk?)" value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                   {["Low", "Medium", "High", "Extreme"].map(r => (
-                    <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hazardDraft.risk === r ? "#1E3A5F" : "#E5E7EB"}`, background: hazardDraft.risk === r ? "#1E3A5F" : "#fff", color: hazardDraft.risk === r ? "#fff" : "#6B7280" }}>{r}</button>
+                    <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: theme.radius.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", minHeight: 36, border: `1.5px solid ${hazardDraft.risk === r ? theme.colors.primaryDark : theme.colors.border}`, background: hazardDraft.risk === r ? theme.colors.primaryDark : "#fff", color: hazardDraft.risk === r ? "#fff" : theme.colors.textSecondary }}>{r}</button>
                   ))}
                 </div>
                 <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Control (how do you manage it?)" value={hazardDraft.control} onChange={e => setHazardDraft(d => ({ ...d, control: e.target.value }))} />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={saveHazard} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Add</button>
-                  <button onClick={cancelHazardEdit} style={{ flex: 1, background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                  <button onClick={saveHazard} style={{ flex: 1, background: theme.colors.status.success.solid, color: "#fff", border: "none", borderRadius: theme.radius.sm, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer", minHeight: 40 }}>Add</button>
+                  <button onClick={cancelHazardEdit} style={{ flex: 1, background: theme.colors.surfaceSunken, color: theme.colors.textPrimary, border: "none", borderRadius: theme.radius.sm, padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer", minHeight: 40 }}>Cancel</button>
                 </div>
               </div>
             )}
 
             {flha.hazards?.length > 0 && (
-              <div style={{ display: "flex", padding: "0 4px 6px", fontSize: 10, fontWeight: 800, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              <div style={{ display: "flex", padding: "0 4px 6px", fontSize: 10, fontWeight: 800, color: theme.colors.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
                 <div style={{ flex: "0 0 46px" }}>#</div>
                 <div style={{ flex: 1 }}>Hazard / Control / SOP Ref</div>
                 <div style={{ flex: "0 0 70px", textAlign: "right" }}>Risk</div>
@@ -1245,39 +1284,39 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               return (
               <div key={i}>
               {showTaskHeader && (
-                <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 10 : 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#1E3A5F", textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
-                  <div style={{ fontSize: 13, color: "#374151", marginTop: 1 }}>{h.task}</div>
+                <div style={{ background: theme.colors.status.info.bg, borderRadius: theme.radius.sm, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 10 : 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: theme.colors.primaryDark, textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
+                  <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginTop: 1 }}>{h.task}</div>
                 </div>
               )}
               {editingHazard === i ? (
-                <div style={{ border: "1.5px dashed #1E3A5F", borderRadius: 10, padding: "14px 16px", marginBottom: 8 }}>
+                <div style={{ border: `1.5px dashed ${theme.colors.primaryDark}`, borderRadius: theme.radius.md, padding: "14px 16px", marginBottom: 8 }}>
                   <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.hazard} onChange={e => setHazardDraft(d => ({ ...d, hazard: e.target.value }))} />
                   <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                     {["Low", "Medium", "High", "Extreme"].map(r => (
-                      <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hazardDraft.risk === r ? "#1E3A5F" : "#E5E7EB"}`, background: hazardDraft.risk === r ? "#1E3A5F" : "#fff", color: hazardDraft.risk === r ? "#fff" : "#6B7280" }}>{r}</button>
+                      <button key={r} onClick={() => setHazardDraft(d => ({ ...d, risk: r }))} style={{ flex: 1, padding: "8px", borderRadius: theme.radius.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", minHeight: 36, border: `1.5px solid ${hazardDraft.risk === r ? theme.colors.primaryDark : theme.colors.border}`, background: hazardDraft.risk === r ? theme.colors.primaryDark : "#fff", color: hazardDraft.risk === r ? "#fff" : theme.colors.textSecondary }}>{r}</button>
                     ))}
                   </div>
                   <input style={{ ...styles.input, marginBottom: 8 }} value={hazardDraft.control} onChange={e => setHazardDraft(d => ({ ...d, control: e.target.value }))} />
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={saveHazard} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Save</button>
-                    <button onClick={cancelHazardEdit} style={{ flex: 1, background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                    <button onClick={saveHazard} style={{ flex: 1, background: theme.colors.status.success.solid, color: "#fff", border: "none", borderRadius: theme.radius.sm, padding: "9px", fontWeight: 700, fontSize: 13, cursor: "pointer", minHeight: 40 }}>Save</button>
+                    <button onClick={cancelHazardEdit} style={{ flex: 1, background: theme.colors.surfaceSunken, color: theme.colors.textPrimary, border: "none", borderRadius: theme.radius.sm, padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer", minHeight: 40 }}>Cancel</button>
                   </div>
                 </div>
               ) : (
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 0, borderLeft: `4px solid ${rowStyle.border}`, background: rowStyle.bg, borderRadius: 8, padding: "10px 12px", marginBottom: 6 }}>
-                  <div style={{ flex: "0 0 30px", fontWeight: 800, fontSize: 13, color: "#94A3B8", paddingTop: 1 }}>{i + 1}</div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 0, borderLeft: `4px solid ${rowStyle.border}`, background: rowStyle.bg, borderRadius: theme.radius.sm, padding: "10px 12px", marginBottom: 6 }}>
+                  <div style={{ flex: "0 0 30px", fontWeight: 800, fontSize: 13, color: theme.colors.textMuted, paddingTop: 1 }}>{i + 1}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 3 }}>{h.hazard}</div>
-                    <div style={{ fontSize: 13, color: "#374151", marginBottom: h.sopRef ? 3 : 0 }}><span style={{ fontWeight: 700, color: "#16A34A" }}>Control:</span> {h.control}</div>
-                    {h.sopRef && <div style={{ fontSize: 11, color: "#6B7280", fontStyle: "italic" }}>📋 SOP Ref: {h.sopRef}</div>}
-                    <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-                      <button onClick={() => openEditHazard(i)} style={{ background: "transparent", border: "none", color: "#1E3A5F", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
-                      <button onClick={() => removeHazard(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Remove</button>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: theme.colors.textPrimary, marginBottom: 3 }}>{h.hazard}</div>
+                    <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: h.sopRef ? 3 : 0 }}><span style={{ fontWeight: 700, color: theme.colors.status.success.text }}>Control:</span> {h.control}</div>
+                    {h.sopRef && <div style={{ fontSize: 11, color: theme.colors.textMuted, fontStyle: "italic", display: "flex", alignItems: "center", gap: 4 }}><ClipboardList size={11} /> SOP Ref: {h.sopRef}</div>}
+                    <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
+                      <button onClick={() => openEditHazard(i)} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: theme.colors.primaryDark, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0", minHeight: 32 }}><Pencil size={12} /> Edit</button>
+                      <button onClick={() => removeHazard(i)} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: theme.colors.status.danger.solid, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0", minHeight: 32 }}><Trash2 size={12} /> Remove</button>
                     </div>
                   </div>
                   <div style={{ flex: "0 0 66px", textAlign: "right", paddingTop: 1 }}>
-                    <span style={{ background: rowStyle.badgeBg, color: rowStyle.badgeText, borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 800 }}>{h.risk}</span>
+                    <span style={{ background: rowStyle.badgeBg, color: rowStyle.badgeText, borderRadius: theme.radius.sm, padding: "3px 8px", fontSize: 11, fontWeight: 800 }}>{h.risk}</span>
                   </div>
                 </div>
               )}
@@ -1285,8 +1324,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               );
             })}
 
-            <button onClick={startAddTask} style={{ width: "100%", background: "#fff", border: "1.5px dashed #1E3A5F", color: "#1E3A5F", borderRadius: 10, padding: "12px", fontWeight: 700, fontSize: 14, cursor: "pointer", marginTop: 4, marginBottom: 16 }}>
-              + Add another task
+            <button onClick={startAddTask} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#fff", border: `1.5px dashed ${theme.colors.primaryDark}`, color: theme.colors.primaryDark, borderRadius: theme.radius.md, padding: "12px", fontWeight: 700, fontSize: 14, cursor: "pointer", marginTop: 4, marginBottom: 16, minHeight: 44 }}>
+              <Plus size={15} /> Add another task
             </button>
 
 
@@ -1296,14 +1335,14 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             </div>
 
             {flha.additionalNotes && (
-              <div style={{ background: "#F9FAFB", borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 4 }}>NOTES</div>
-                <div style={{ fontSize: 13, color: "#374151" }}>{flha.additionalNotes}</div>
+              <div style={{ background: theme.colors.surfaceSunken, borderRadius: theme.radius.md, padding: "12px 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.textSecondary, marginBottom: 4 }}>NOTES</div>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary }}>{flha.additionalNotes}</div>
               </div>
             )}
           </div>
 
-          <button style={styles.btn("#F97316")} onClick={() => setStep("signoff")}>Continue to Sign-Off →</button>
+          <button style={styles.btn(theme.colors.primary)} onClick={() => setStep("signoff")}>Continue to Sign-Off →</button>
         </>
       )}
 
@@ -1311,31 +1350,31 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
         <>
           <div style={styles.card}>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>{amendingId ? "Confirm Amendment" : "Worker Sign-Off"}</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>Primary worker: <strong>{workerName}</strong>{amendingId ? " — confirming the added task(s)." : ""}</div>
+            <div style={{ fontSize: 13, color: theme.colors.textSecondary }}>Primary worker: <strong>{workerName}</strong>{amendingId ? " — confirming the added task(s)." : ""}</div>
           </div>
 
           {amendingId ? (
             <div style={styles.card}>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By confirming, I acknowledge I have reviewed the added task(s) and understand the hazards and controls. This amendment will be time-stamped on the document.</div>
-              <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
-                <div style={{ fontSize: 13, color: "#374151" }}>Worker: <strong>{workerName}</strong></div>
-                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Amendment will be recorded {new Date().toLocaleString("en-CA")}</div>
+              <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: 14 }}>By confirming, I acknowledge I have reviewed the added task(s) and understand the hazards and controls. This amendment will be time-stamped on the document.</div>
+              <div style={{ background: theme.colors.status.info.bg, borderRadius: theme.radius.sm, padding: "12px 14px", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary }}>Worker: <strong>{workerName}</strong></div>
+                <div style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 }}>Amendment will be recorded {new Date().toLocaleString("en-CA")}</div>
               </div>
             </div>
           ) : (
             <div style={styles.card}>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
+              <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: 14 }}>By signing, I confirm I have reviewed this FLHA and understand the hazards and controls before starting work.</div>
 
               <label style={styles.label}>Worker signature</label>
-              <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+              <div style={{ fontSize: 11, color: theme.colors.textMuted, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
               <div style={{ position: "relative", marginBottom: 6 }}>
                 <canvas
                   ref={canvasRef}
                   width={600}
                   height={180}
                   style={{
-                    width: "100%", height: 150, border: "1.5px solid #E5E7EB",
-                    borderRadius: 10, background: "#fff", touchAction: "none", display: "block"
+                    width: "100%", height: 150, border: `1.5px solid ${theme.colors.border}`,
+                    borderRadius: theme.radius.md, background: "#fff", touchAction: "none", display: "block"
                   }}
                   onMouseDown={startDraw}
                   onMouseMove={draw}
@@ -1348,15 +1387,15 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                 {!hasSignature && (
                   <div style={{
                     position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)",
-                    textAlign: "center", color: "#9CA3AF", fontSize: 14, pointerEvents: "none"
+                    textAlign: "center", color: theme.colors.textMuted, fontSize: 14, pointerEvents: "none"
                   }}>Sign here with your finger</div>
                 )}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontSize: 13, color: "#374151" }}>Signed by: <strong>{workerName}</strong></div>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary }}>Signed by: <strong>{workerName}</strong></div>
                 <button onClick={clearSignature} style={{
-                  background: "transparent", border: "none", color: "#6B7280",
-                  fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0
+                  background: "transparent", border: "none", color: theme.colors.textSecondary,
+                  fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "4px 0", minHeight: 32
                 }}>Clear signature</button>
               </div>
             </div>
@@ -1365,8 +1404,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           {/* Crew sign-off — additional workers acknowledging the same FLHA. Reopened on
               amendments too, since the crew hasn't yet acknowledged the amended hazards. */}
           <div style={styles.card}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 4 }}>Additional crew (optional)</div>
-            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: theme.colors.textPrimary, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><Users size={15} /> Additional crew (optional)</div>
+            <div style={{ fontSize: 12, color: theme.colors.textSecondary, marginBottom: 12 }}>
               {amendingId
                 ? "This amendment changed the FLHA — if other workers are covered by it, have each of them re-sign below."
                 : "If other workers are covered by this same FLHA, have each of them sign below. Pass the device to each person."}
@@ -1375,9 +1414,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             {crew.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 {crew.map((c, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < crew.length - 1 ? "1px solid #F1F5F9" : "none" }}>
-                    <span style={{ fontSize: 14, color: "#334155" }}>👷 {c.name}</span>
-                    <button onClick={() => removeCrewMember(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < crew.length - 1 ? `1px solid ${theme.colors.surfaceSunken}` : "none" }}>
+                    <span style={{ fontSize: 14, color: theme.colors.textPrimary, display: "flex", alignItems: "center", gap: 6 }}><HardHat size={14} /> {c.name}</span>
+                    <button onClick={() => removeCrewMember(i)} style={{ background: "transparent", border: "none", color: theme.colors.status.danger.solid, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0", minHeight: 32 }}>Remove</button>
                   </div>
                 ))}
               </div>
@@ -1386,28 +1425,28 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <label style={styles.label}>Crew member name</label>
             <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Full name" value={crewName} onChange={e => setCrewName(e.target.value)} />
             <label style={styles.label}>Signature</label>
-            <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+            <div style={{ fontSize: 11, color: theme.colors.textMuted, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={crewCanvasRef} width={600} height={160}
-                style={{ width: "100%", height: 130, border: "1.5px solid #E5E7EB", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                style={{ width: "100%", height: 130, border: `1.5px solid ${theme.colors.border}`, borderRadius: theme.radius.md, background: "#fff", touchAction: "none", display: "block" }}
                 onMouseDown={startCrewDraw} onMouseMove={crewDraw} onMouseUp={endCrewDraw} onMouseLeave={endCrewDraw}
                 onTouchStart={startCrewDraw} onTouchMove={crewDraw} onTouchEnd={endCrewDraw} />
-              {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+              {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: theme.colors.textMuted, fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
             </div>
             <div style={{ textAlign: "right", marginBottom: 10 }}>
-              <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+              <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: theme.colors.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "4px 0", minHeight: 32 }}>Clear</button>
             </div>
-            <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
+            <button style={styles.btn((crewName.trim() && crewHasSig) ? theme.colors.primaryDark : theme.colors.gray[400])} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
           </div>
 
           {saveError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+            <div style={{ background: theme.colors.status.danger.bg, border: `1.5px solid ${theme.colors.status.danger.border}`, borderRadius: theme.radius.sm, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: theme.colors.status.danger.text }}>
               Couldn't save this FLHA — it has NOT reached your supervisor's dashboard. Check your connection and try again.
             </div>
           )}
 
           {amendingId ? (
-            <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
+            <button style={styles.btn(signed ? theme.colors.status.success.solid : theme.colors.primary)}
               disabled={signed && !saveError}
               onClick={async () => {
                 setSigned(true);
@@ -1420,7 +1459,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             </button>
           ) : (
             <>
-              <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
+              <button style={styles.btn(signed ? theme.colors.status.success.solid : hasSignature ? theme.colors.primary : theme.colors.gray[400])}
                 disabled={!hasSignature || (signed && !saveError)}
                 onClick={async () => {
                   setSignName(workerName);
@@ -1442,11 +1481,11 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       {step === "queued" && (
         <div style={styles.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>Saved — No Signal</div>
-            <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 8 }}>{jobSite} · {workerName}</div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 20 }}>This FLHA is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
-            {onLogout && <button style={styles.btn("#F97316")} onClick={onLogout}>Back to menu</button>}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><WifiOff size={52} color={theme.colors.primaryDark} strokeWidth={1.5} /></div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: theme.colors.primaryDark, marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: theme.colors.textSecondary, marginBottom: 8 }}>{jobSite} · {workerName}</div>
+            <div style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: 20 }}>This FLHA is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            {onLogout && <button style={styles.btn(theme.colors.primary)} onClick={onLogout}>Back to menu</button>}
           </div>
         </div>
       )}
@@ -1454,34 +1493,47 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       {step === "done" && (
         <div style={styles.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 64, marginBottom: 12 }}>{pendingApproval ? "⚠️" : "✅"}</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>{pendingApproval ? "Awaiting Supervisor Sign-Off" : "FLHA Complete"}</div>
-            <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+              {pendingApproval
+                ? <ShieldAlert size={56} color={theme.colors.status.warning.solid} strokeWidth={1.75} />
+                : <CheckCircle2 size={56} color={theme.colors.status.success.solid} strokeWidth={1.75} />}
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: theme.colors.primaryDark, marginBottom: 6 }}>{pendingApproval ? "Awaiting Supervisor Sign-Off" : "FLHA Complete"}</div>
+            <div style={{ fontSize: 14, color: theme.colors.textSecondary, marginBottom: 20 }}>
               Submitted {new Date().toLocaleString("en-CA")} by <strong>{workerName}</strong>{crew.length > 0 ? ` + ${crew.length} crew` : ""}
             </div>
 
             {pendingApproval && (
-              <div style={{ background: "#7F1D1D", borderRadius: 10, padding: 16, marginBottom: 16, textAlign: "left" }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 6 }}>🛑 EXTREME-RISK WORK — DO NOT START YET</div>
-                <div style={{ fontSize: 13, color: "#FECACA", lineHeight: 1.5 }}>This FLHA contains extreme-risk activity and requires a supervisor's sign-off before work begins. Your submission has been sent to your supervisor for review and approval.</div>
+              <div style={{ background: theme.colors.status.critical.bg, borderRadius: theme.radius.md, padding: 16, marginBottom: 16, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><ShieldAlert size={15} /> EXTREME-RISK WORK — DO NOT START YET</div>
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>This FLHA contains extreme-risk activity and requires a supervisor's sign-off before work begins. Your submission has been sent to your supervisor for review and approval.</div>
               </div>
             )}
 
-            <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: 16, marginBottom: 16, textAlign: "left" }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", marginBottom: 8 }}>SUBMITTED SUCCESSFULLY</div>
+            <div style={{ background: theme.colors.status.success.bg, border: `1px solid ${theme.colors.status.success.border}`, borderRadius: theme.radius.md, padding: 16, marginBottom: 16, textAlign: "left" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: theme.colors.status.success.text, marginBottom: 8 }}>SUBMITTED SUCCESSFULLY</div>
               {(pendingApproval
-                ? ["🗂 Saved to company FLHA database", "📄 PDF generated (marked pending approval)", "🔔 Sent to supervisor for required sign-off"]
-                : ["🗂 Saved to company FLHA database", "📄 PDF generated and stored for supervisor", "📊 Hazard data recorded for site trends", "🔔 Available in supervisor dashboard"]
+                ? [
+                    { Icon: FolderCheck, text: "Saved to company FLHA database" },
+                    { Icon: FileTextIcon, text: "PDF generated (marked pending approval)" },
+                    { Icon: Bell, text: "Sent to supervisor for required sign-off" },
+                  ]
+                : [
+                    { Icon: FolderCheck, text: "Saved to company FLHA database" },
+                    { Icon: FileTextIcon, text: "PDF generated and stored for supervisor" },
+                    { Icon: BarChart3, text: "Hazard data recorded for site trends" },
+                    { Icon: Bell, text: "Available in supervisor dashboard" },
+                  ]
               ).map((n, i) => (
-                <div key={i} style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>{n}</div>
+                <div key={i} style={{ fontSize: 13, color: theme.colors.textSecondary, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><n.Icon size={13} style={{ flexShrink: 0 }} /> {n.text}</div>
               ))}
             </div>
             <a href="/dashboard" style={{
-              display: "block", background: "#F97316", color: "#fff", borderRadius: 9,
+              display: "block", background: theme.colors.primary, color: "#fff", borderRadius: theme.radius.md,
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
-              marginBottom: 10, textAlign: "center"
+              marginBottom: 10, textAlign: "center", minHeight: 44, boxSizing: "border-box"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.btn(theme.colors.primaryDark)} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>
