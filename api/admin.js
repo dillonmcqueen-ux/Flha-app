@@ -441,6 +441,10 @@ export default async function handler(req, res) {
 
       // No submitted records remain — safe to clean up company-scoped
       // config/settings. Children before parents where FK-constrained.
+      // onboarding_requests.created_company_id is set on approval (see
+      // server-lib/onboardingApproval.js) and isn't cleared on delete —
+      // null it out first so the FK doesn't block the company row itself.
+      await supabaseAdmin.from('onboarding_requests').update({ created_company_id: null }).eq('created_company_id', companyId);
       if (inspFormIds.length > 0) {
         await supabaseAdmin.from('inspection_form_questions').delete().in('form_id', inspFormIds);
         await supabaseAdmin.from('inspection_forms').delete().eq('company_id', companyId);
