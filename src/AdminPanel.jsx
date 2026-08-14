@@ -1972,7 +1972,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 Delete company
               </button>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-                Only companies with no submitted records (FLHAs, incidents, near misses, inspections, toolbox talks, or daily reports) can be deleted.
+                Only companies with no submitted records (FLHAs, incidents, near misses, inspections, toolbox talks, daily reports, or time clock entries) can be deleted.
               </div>
             </div>
           </div>
