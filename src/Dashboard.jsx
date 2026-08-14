@@ -2734,7 +2734,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     }}>
                       <input type="checkbox" checked={selectedIds.has(f.id)}
                         onChange={() => toggleSelect(f.id)}
-                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
                         onClick={e => e.stopPropagation()}
                       />
                       <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>

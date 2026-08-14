@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FORA</title>
 
+    <!-- The app is dark-themed throughout (src/theme.js) — without this,
+         browsers render native form controls (select dropdown popups,
+         checkboxes, date pickers, scrollbars) with their light-mode
+         defaults regardless of any inline styling on the control itself,
+         showing up as stray white rectangles against the dark UI. -->
+    <meta name="color-scheme" content="dark" />
+
     <!-- docs/scope-offline-capability.md Phase 4: PWA shell -->
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/png" href="/favicon.png" />
