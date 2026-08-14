@@ -19,9 +19,9 @@ this file stays short and easy to scan.
 
 ## Outstanding Items
 
-- **Time-sensitive:** update the Stripe billing dashboard's webhook address (it needs to
-  point to the new `/api/stripe-webhook` instead of the old shared address) — until that's
-  changed, payment webhook events stop arriving.
+- Correction: the Stripe billing dashboard's webhook address is already pointing to
+  `/api/stripe-webhook` and confirmed enabled/live via the Stripe API (checkout +
+  subscription lifecycle events) — this is done, not outstanding.
 - Manually walk through the new automated signup flow start to finish (signup →
   auto-approval or manual approval → new customer's setup link → they set their own login →
   they review the AI-drafted equipment list and safety documents → done) — built and
@@ -32,13 +32,17 @@ this file stays short and easy to scan.
   automatically, so they can get the same offline treatment.
 - Test the offline-support work on a real live version of the app — nobody's clicked through
   it yet, especially the "go offline, fill out a form, come back online" path.
-- A few small, older pending items are sitting open on GitHub (analytics installs, a Terms
-  wording tweak) — low priority, not urgent.
-- New: a big future feature was scoped out — an AI that gets to know each company over
-  time (from their own safety paperwork, never outside web lookups) to make its generated
-  documents fit that company better. The plan and ground rules are written down; only the
-  first small step (the underlying data storage) is built so far, and even that still needs
-  to be turned on in the database by a human before it does anything.
+- Correction: the "company brain" feature (AI that learns each company over time from
+  their own safety paperwork, never outside web lookups, to make generated documents fit
+  that company better) is fully built — all 6 planned phases — and live in production,
+  not just the first step. The database piece is turned on and in use. Ongoing tuning
+  (thresholds, prompt wording, which document types get which context) is expected as
+  real usage data comes in, but it's not a blocker. See `docs/scope-company-brain.md`.
+- The small older pending items previously noted here (analytics installs, a Terms wording
+  tweak) are done — Vercel Web Analytics is installed, and the marketing-copy-vs-Terms
+  contradiction was fixed and merged (PR #33). Two more small PRs also merged since: a QA
+  walkthrough script for the company brain feature (PR #27) and a quiet-mode fix for the
+  standup logger itself (PR #25).
 
 ## Repeating Issues
 
