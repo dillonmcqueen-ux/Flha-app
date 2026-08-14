@@ -7,6 +7,36 @@ import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
+import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
+import {
+  HardHat, Wrench, ShieldAlert, Flag, CalendarClock, FileText, LogOut, ClipboardList,
+  Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
+  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound,
+} from "lucide-react";
+
+// Tab/category icon set — replaces the emoji this screen used to render as
+// tab labels and stat-tile markers. See src/theme.js for the palette these
+// are drawn in.
+const TAB_ICON = {
+  flhas: ClipboardList,
+  toolbox: Hammer,
+  nearmiss: AlertTriangle,
+  incident: Siren,
+  monthly: CalendarClock,
+  sops: FileText,
+  safetycustomdocs: FolderKanban,
+  safetyanalytics: BarChart3,
+  inspections: ClipboardCheck,
+  daily: ClipboardList,
+  equipment: Wrench,
+  maintenance: Settings2,
+  customdocs: FolderKanban,
+  analytics: BarChart3,
+  timeclock: Clock,
+  roster: KeyRound,
+  workforcecustomdocs: FolderKanban,
+};
+const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -17,11 +47,16 @@ function toDatetimeLocal(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Uses website/style.css's --risk-* scale verbatim (Low/Medium/High map to
+// the exact hues the marketing site already defines for this — see
+// src/theme.js `colors.risk`). "High" deliberately shares the brand orange
+// hue, same as the marketing site; badges use a soft translucent fill so
+// they read as a risk level rather than competing with solid-orange CTAs.
 const RISK_COLOR = {
-  Extreme: { bg: "#7F1D1D", border: "#7F1D1D", text: "#FFFFFF", dot: "#7F1D1D" },
-  High: { bg: "#FEF2F2", border: "#FCA5A5", text: "#991B1B", dot: "#DC2626" },
-  Medium: { bg: "#FFFBEB", border: "#FCD34D", text: "#92400E", dot: "#D97706" },
-  Low: { bg: "#F0FDF4", border: "#86EFAC", text: "#166534", dot: "#16A34A" },
+  Extreme: { bg: "#DC2626", border: "#DC2626", text: "#FFFFFF", dot: "#DC2626" },
+  High: { bg: "rgba(249,115,22,0.14)", border: "rgba(249,115,22,0.4)", text: "#FB923C", dot: "#F97316" },
+  Medium: { bg: "rgba(234,179,8,0.14)", border: "rgba(234,179,8,0.4)", text: "#FDE047", dot: "#EAB308" },
+  Low: { bg: "rgba(34,197,94,0.14)", border: "rgba(34,197,94,0.4)", text: "#4ADE80", dot: "#22C55E" },
 };
 
 function RiskBadge({ risk }) {
@@ -62,66 +97,66 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
 
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "#00000080", zIndex: 100,
+      position: "fixed", inset: 0, background: "#000000B3", zIndex: 100,
       display: "flex", alignItems: "flex-start", justifyContent: "center",
       padding: "16px", overflowY: "auto"
     }} onClick={onClose}>
       <div style={{
-        background: "#fff", borderRadius: 14, padding: 24, width: "100%",
+        background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)",
         maxWidth: 640, marginTop: 8
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>FLHA Report</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4" }}>FLHA Report</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>
               {new Date(flha.created_at).toLocaleString("en-CA")} · {flha.job_site}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {flha.pdf_url && (
               <a href={flha.pdf_url} target="_blank" rel="noreferrer" style={{
-                background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
+                background: "#F97316", color: "#0A0A0A", border: "none", borderRadius: 8,
                 padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer",
                 textDecoration: "none"
               }}>⬇ PDF</a>
             )}
             {onDelete && (
               <button onClick={() => onDelete(flha.id, flha.worker_name)} style={{
-                background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8,
+                background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8,
                 padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
               }}>🗑 Delete</button>
             )}
             <button onClick={onClose} style={{
-              background: "#F3F4F6", border: "none", borderRadius: 8,
+              background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8,
               padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
             }}>✕ Close</button>
           </div>
         </div>
 
         {isPending && (
-          <div style={{ background: "#7F1D1D", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+          <div style={{ background: "#DC2626", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 2 }}>🛑 PENDING SUPERVISOR SIGN-OFF — EXTREME RISK</div>
             <div style={{ fontSize: 13, color: "#FECACA" }}>This FLHA contains extreme-risk work. Review the hazards and controls below, then sign off to approve. Work should not begin until you approve.</div>
           </div>
         )}
 
         {!isPending && flha.supervisor_signed_by && (
-          <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ APPROVED BY SUPERVISOR</div>
-            <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>{flha.supervisor_signed_by} · {flha.supervisor_signed_at ? new Date(flha.supervisor_signed_at).toLocaleString("en-CA") : ""}</div>
+          <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#4ADE80" }}>✓ APPROVED BY SUPERVISOR</div>
+            <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 2 }}>{flha.supervisor_signed_by} · {flha.supervisor_signed_at ? new Date(flha.supervisor_signed_at).toLocaleString("en-CA") : ""}</div>
           </div>
         )}
 
-        <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+        <div style={{ background: "rgba(56,189,248,0.12)", border: "1px solid rgba(56,189,248,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#0369A1", marginBottom: 4 }}>WORKER</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: "#1E3A5F" }}>{flha.worker_name}</div>
-          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Signed by: {flha.signed_by}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: "#F5F5F4" }}>{flha.worker_name}</div>
+          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 2 }}>Signed by: {flha.signed_by}</div>
         </div>
 
         {h.taskSummary && (
           <div style={{ background: "#F9FAFB", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", marginBottom: 4 }}>TASK SUMMARY</div>
-            <div style={{ fontSize: 14, color: "#374151" }}>{h.taskSummary}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#A1A1AA", marginBottom: 4 }}>TASK SUMMARY</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8" }}>{h.taskSummary}</div>
           </div>
         )}
 
@@ -133,12 +168,12 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
         )}
 
         {h.customFields?.length > 0 && (
-          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ background: "#1A1A1A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {h.customFields.map((f, i) => (
                 <div key={i}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase" }}>{f.label}</div>
-                  <div style={{ fontSize: 13, color: "#334155" }}>{f.value}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#71717A", textTransform: "uppercase" }}>{f.label}</div>
+                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>{f.value}</div>
                 </div>
               ))}
             </div>
@@ -147,7 +182,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
 
         {h.hazards?.length > 0 && (
           <>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: "#1E3A5F" }}>Hazards & Controls</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: "#F5F5F4" }}>Hazards & Controls</div>
             {h.hazards.map((hz, i) => {
               const c = RISK_COLOR[hz.risk] || RISK_COLOR.Low;
               const prevTask = i > 0 ? h.hazards[i - 1].task : null;
@@ -159,8 +194,8 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
                 <div key={i}>
                   {showTaskHeader && (
                     <div style={{ background: "#EFF6FF", borderRadius: 8, padding: "8px 12px", marginBottom: 8, marginTop: i > 0 ? 10 : 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#1E3A5F", textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
-                      <div style={{ fontSize: 13, color: "#374151", marginTop: 1 }}>{hz.task}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#F5F5F4", textTransform: "uppercase", letterSpacing: 0.5 }}>Task {taskNumber}</div>
+                      <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 1 }}>{hz.task}</div>
                     </div>
                   )}
                   <div style={{
@@ -171,7 +206,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{hz.hazard}</div>
                       <RiskBadge risk={hz.risk} />
                     </div>
-                    <div style={{ fontSize: 13, color: "#374151" }}>🛡 {hz.control}</div>
+                    <div style={{ fontSize: 13, color: "#D4D4D8" }}>🛡 {hz.control}</div>
                   </div>
                 </div>
               );
@@ -181,7 +216,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
 
         {h.ppeRequired?.length > 0 && (
           <div style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8, color: "#1E3A5F" }}>Required PPE</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8, color: "#F5F5F4" }}>Required PPE</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {h.ppeRequired.map((p, i) => (
                 <span key={i} style={{
@@ -194,29 +229,29 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
         )}
 
         {isPending && onApprove && (
-          <div style={{ borderTop: "2px solid #7F1D1D", marginTop: 8, paddingTop: 16 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#7F1D1D", marginBottom: 4 }}>Supervisor Sign-Off Required</div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>By signing, I approve this extreme-risk work to proceed with the controls listed above.</div>
-            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Supervisor name</label>
+          <div style={{ borderTop: "2px solid #DC2626", marginTop: 8, paddingTop: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#DC2626", marginBottom: 4 }}>Supervisor Sign-Off Required</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>By signing, I approve this extreme-risk work to proceed with the controls listed above.</div>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#A1A1AA", marginBottom: 6, textTransform: "uppercase" }}>Supervisor name</label>
             <input
               value={supName} onChange={e => setSupName(e.target.value)} placeholder="Your full name"
               readOnly={!!defaultSupName}
-              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 12, background: defaultSupName ? "#F3F4F6" : "#F8FAFC", color: defaultSupName ? "#6B7280" : "inherit" }}
+              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #242424", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 12, background: defaultSupName ? "#242424" : "#1A1A1A", color: defaultSupName ? "#A1A1AA" : "inherit" }}
             />
-            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Signature</label>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#A1A1AA", marginBottom: 6, textTransform: "uppercase" }}>Signature</label>
+            <div style={{ fontSize: 11, color: "#71717A", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
-                style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                style={{ width: "100%", height: 150, border: "1.5px solid #242424", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
                 onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
                 onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
-              {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here to approve</div>}
+              {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#71717A", fontSize: 14, pointerEvents: "none" }}>Sign here to approve</div>}
             </div>
             <div style={{ textAlign: "right", marginBottom: 12 }}>
               <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
             </div>
             <button onClick={doApprove} disabled={!supName.trim() || !hasSignature || approving}
-              style={{ width: "100%", background: (supName.trim() && hasSignature) ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
+              style={{ width: "100%", background: (supName.trim() && hasSignature) ? "#16A34A" : "#71717A", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
               {approving ? "Approving…" : "✓ Approve & Sign Off"}
             </button>
           </div>
@@ -231,37 +266,37 @@ function InspectionCard({ insp, onClose, onDelete }) {
   const items = r.items || [];
   const isPost = insp.trip_type === "posttrip";
   const condColor = { Good: "#16A34A", Monitor: "#D97706", Defective: "#DC2626" };
-  const condBg = { Good: "#F0FDF4", Monitor: "#FFFBEB", Defective: "#FEF2F2" };
+  const condBg = { Good: "rgba(34,197,94,0.14)", Monitor: "rgba(245,158,11,0.14)", Defective: "rgba(239,68,68,0.14)" };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ fontWeight: 800, fontSize: 18, color: "#1E293B" }}>{isPost ? "Post-Trip Inspection" : "Pre-Trip Inspection"}</div>
+              <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4" }}>{isPost ? "Post-Trip Inspection" : "Pre-Trip Inspection"}</div>
               <span style={{ fontSize: 10, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 8px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(insp.created_at).toLocaleString("en-CA")}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{new Date(insp.created_at).toLocaleString("en-CA")}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {insp.pdf_url && (
               <a href={insp.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#0369A1", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(insp.id, insp.worker_name)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+              <button onClick={() => onDelete(insp.id, insp.worker_name)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
-        <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#1E293B" }}>{insp.equipment_label}</div>
-          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>{isPost ? "Technician" : "Inspector"}: {insp.worker_name}</div>
-          {r.machineSummary && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{r.machineSummary}</div>}
+        <div style={{ background: "rgba(56,189,248,0.12)", border: "1px solid rgba(56,189,248,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#F5F5F4" }}>{insp.equipment_label}</div>
+          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 2 }}>{isPost ? "Technician" : "Inspector"}: {insp.worker_name}</div>
+          {r.machineSummary && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 4 }}>{r.machineSummary}</div>}
           {(insp.start_reading || insp.end_reading) && (
             <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
-              {insp.start_reading && <div style={{ fontSize: 12, color: "#374151" }}>Start: <strong>{insp.start_reading} {insp.reading_unit}</strong></div>}
-              {insp.end_reading && <div style={{ fontSize: 12, color: "#374151" }}>End: <strong>{insp.end_reading} {insp.reading_unit}</strong></div>}
+              {insp.start_reading && <div style={{ fontSize: 12, color: "#D4D4D8" }}>Start: <strong>{insp.start_reading} {insp.reading_unit}</strong></div>}
+              {insp.end_reading && <div style={{ fontSize: 12, color: "#D4D4D8" }}>End: <strong>{insp.end_reading} {insp.reading_unit}</strong></div>}
             </div>
           )}
         </div>
@@ -269,25 +304,25 @@ function InspectionCard({ insp, onClose, onDelete }) {
         {isPost ? (
           <>
             {insp.has_changes === false && (
-              <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#166534" }}>✓ No changes reported since Pre-Trip</div>
+              <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#4ADE80" }}>✓ No changes reported since Pre-Trip</div>
               </div>
             )}
             {insp.has_changes === true && (
-              <div style={{ border: `1.5px solid ${r.changeCondition === "Defective" ? "#FCA5A5" : "#FCD34D"}`, background: r.changeCondition === "Defective" ? "#FEF2F2" : "#FFFBEB", borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: r.changeCondition === "Defective" ? "#991B1B" : "#92400E", marginBottom: 4 }}>⚠ Change reported — {r.changeCondition}</div>
-                <div style={{ fontSize: 13, color: "#374151" }}>{r.changeNotes}</div>
+              <div style={{ border: `1.5px solid ${r.changeCondition === "Defective" ? "rgba(239,68,68,0.4)" : "rgba(245,158,11,0.4)"}`, background: r.changeCondition === "Defective" ? "rgba(239,68,68,0.14)" : "rgba(245,158,11,0.14)", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: r.changeCondition === "Defective" ? "#F87171" : "#FBBF24", marginBottom: 4 }}>⚠ Change reported — {r.changeCondition}</div>
+                <div style={{ fontSize: 13, color: "#D4D4D8" }}>{r.changeNotes}</div>
               </div>
             )}
           </>
         ) : (
           items.map((it, i) => (
-            <div key={i} style={{ border: `1.5px solid ${condColor[it.condition] || "#E5E7EB"}40`, background: condBg[it.condition] || "#fff", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+            <div key={i} style={{ border: `1.5px solid ${condColor[it.condition] || "#242424"}40`, background: condBg[it.condition] || "#1D1D1D", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{it.item}</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{it.item}</div>
                 <span style={{ fontSize: 12, fontWeight: 800, color: condColor[it.condition] }}>{it.condition}</span>
               </div>
-              {it.note && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>Note: {it.note}</div>}
+              {it.note && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4, fontStyle: "italic" }}>Note: {it.note}</div>}
             </div>
           ))
         )}
@@ -300,27 +335,27 @@ function ToolboxCard({ talk, onClose, onDelete }) {
   const p = talk.talking_points_json || {};
   const attendees = talk.attendees_json || [];
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#5B21B6" }}>{talk.meeting_type} Toolbox Talk</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(talk.created_at).toLocaleString("en-CA")} · {talk.site}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{new Date(talk.created_at).toLocaleString("en-CA")} · {talk.site}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {talk.pdf_url && (
               <a href={talk.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(talk.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+              <button onClick={() => onDelete(talk.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
-        <div style={{ background: "#FAF5FF", border: "1px solid #E9D5FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#1E293B" }}>{p.summary || talk.topic}</div>
-          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Presenter: {talk.presenter_name}</div>
+        <div style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#F5F5F4" }}>{p.summary || talk.topic}</div>
+          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 2 }}>Presenter: {talk.presenter_name}</div>
         </div>
 
         {(p.sections || []).map((sec, i) => (
@@ -329,28 +364,28 @@ function ToolboxCard({ talk, onClose, onDelete }) {
             {(sec.bullets || []).map((b, j) => (
               <div key={j} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
                 <span style={{ color: "#7C3AED", fontWeight: 800 }}>•</span>
-                <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{b}</span>
+                <span style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{b}</span>
               </div>
             ))}
           </div>
         ))}
 
         {p.discussion?.length > 0 && (
-          <div style={{ background: "#FAF5FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ background: "rgba(167,139,250,0.12)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#5B21B6", marginBottom: 6 }}>💬 Discussion</div>
             {p.discussion.map((d, i) => (
-              <div key={i} style={{ fontSize: 14, color: "#334155", marginBottom: 4 }}>{i + 1}. {d}</div>
+              <div key={i} style={{ fontSize: 14, color: "#D4D4D8", marginBottom: 4 }}>{i + 1}. {d}</div>
             ))}
           </div>
         )}
 
-        <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 12 }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 8 }}>Attendance ({attendees.length})</div>
+        <div style={{ borderTop: "1px solid #242424", paddingTop: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "#F5F5F4", marginBottom: 8 }}>Attendance ({attendees.length})</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {attendees.map((a, i) => (
-              <div key={i} style={{ border: "1px solid #E5E7EB", borderRadius: 8, padding: 8 }}>
+              <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 8 }}>
                 {a.signature && <img src={a.signature} alt="" style={{ width: "100%", height: 40, objectFit: "contain" }} />}
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#D4D4D8", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}</div>
               </div>
             ))}
           </div>
@@ -363,8 +398,8 @@ function ToolboxCard({ talk, onClose, onDelete }) {
 function ReportRow({ rec, last, onClick, kind }) {
   const r = rec.report_json || {};
   const sevColors = {
-    Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
-    High: { c: "#991B1B", bg: "#FEF2F2" }, Critical: { c: "#fff", bg: "#7F1D1D" },
+    Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
+    High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
   };
   const sev = r.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
@@ -373,16 +408,16 @@ function ReportRow({ rec, last, onClick, kind }) {
     : (r.whatHappened || rec.involved || "");
   const who = kind === "nearmiss" && rec.is_anonymous ? "Anonymous" : rec.reporter_name;
   return (
-    <div onClick={onClick} style={{ padding: "12px 4px", borderBottom: last ? "none" : "1px solid #F3F4F680", cursor: "pointer" }}>
+    <div onClick={onClick} style={{ padding: "12px 4px", borderBottom: last ? "none" : "1px solid #24242480", cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ flex: 1, paddingRight: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, fontWeight: 800, color: sc.c, background: sc.bg, padding: "2px 9px", borderRadius: 20, border: sev === "Critical" ? "none" : `1px solid ${sc.c}30` }}>{sev.toUpperCase()}</span>
-            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", background: "#FEF2F2", padding: "2px 8px", borderRadius: 20 }}>{rec.incident_type}</span>}
-            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{rec.site}</div>
+            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: "#F87171", background: "rgba(239,68,68,0.14)", padding: "2px 8px", borderRadius: 20 }}>{rec.incident_type}</span>}
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{rec.site}</div>
           </div>
-          <div style={{ fontSize: 13, color: "#374151" }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🧑 {who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
+          <div style={{ fontSize: 13, color: "#D4D4D8" }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
+          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>🧑 {who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
           {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2 }}>✓ Reviewed by {rec.reviewed_by}</div>}
         </div>
         <div style={{ fontSize: 11, color: rec.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
@@ -398,8 +433,8 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
   const [reviewerName, setReviewerName] = useState(defaultReviewerName);
   const r = nm.report_json || {};
   const sevColors = {
-    Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
-    High: { c: "#991B1B", bg: "#FEF2F2" }, Critical: { c: "#fff", bg: "#7F1D1D" },
+    Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
+    High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
   };
   const sev = r.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
@@ -410,76 +445,76 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
         {items.map((it, i) => (
           <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
             <span style={{ color: "#D97706", fontWeight: 800 }}>•</span>
-            <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{it}</span>
+            <span style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{it}</span>
           </div>
         ))}
       </div>
     ) : null
   );
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#B45309" }}>Near Miss Report</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(nm.created_at).toLocaleString("en-CA")} · {nm.site}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{new Date(nm.created_at).toLocaleString("en-CA")} · {nm.site}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {nm.pdf_url && (
               <a href={nm.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#D97706", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(nm.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
+              <button onClick={() => onDelete(nm.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
         <div style={{ background: sc.bg, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: sc.c }}>POTENTIAL SEVERITY: {sev.toUpperCase()}</div>
-          {r.severityReason && <div style={{ fontSize: 13, color: sc.c === "#fff" ? "#FECACA" : "#475569", marginTop: 2 }}>{r.severityReason}</div>}
+          {r.severityReason && <div style={{ fontSize: 13, color: sc.c === "#fff" ? "#FECACA" : "#A1A1AA", marginTop: 2 }}>{r.severityReason}</div>}
         </div>
 
-        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-          <div style={{ fontSize: 13, color: "#374151" }}>Reported by: <strong>{nm.is_anonymous ? "Anonymous" : nm.reporter_name}</strong></div>
-          {nm.occurred_at && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>When: {nm.occurred_at}</div>}
-          {nm.involved && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Involved: {nm.involved}</div>}
+        <div style={{ background: "rgba(245,158,11,0.14)", border: "1px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#D4D4D8" }}>Reported by: <strong>{nm.is_anonymous ? "Anonymous" : nm.reporter_name}</strong></div>
+          {nm.occurred_at && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>When: {nm.occurred_at}</div>}
+          {nm.involved && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Involved: {nm.involved}</div>}
         </div>
 
         {r.whatHappened && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#B45309", marginBottom: 6 }}>What Happened</div>
-            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{r.whatHappened}</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{r.whatHappened}</div>
           </div>
         )}
         <List title="Contributing Factors" items={r.contributingFactors} />
         {r.potentialOutcome && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#B45309", marginBottom: 6 }}>Potential Outcome</div>
-            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{r.potentialOutcome}</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{r.potentialOutcome}</div>
           </div>
         )}
         <List title="Immediate Actions Taken" items={r.immediateActions} />
         <List title="Recommended Next Steps" items={r.nextSteps} />
 
         {nm.reviewed ? (
-          <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(nm.reviewed_by || "").toUpperCase()}</div>
-            <div style={{ fontSize: 12, color: "#374151", marginTop: 2 }}>{nm.reviewed_at ? new Date(nm.reviewed_at).toLocaleString("en-CA") : ""}</div>
-            {nm.review_notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 6 }}><strong>Action taken:</strong> {nm.review_notes}</div>}
+          <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#4ADE80" }}>✓ REVIEWED BY {(nm.reviewed_by || "").toUpperCase()}</div>
+            <div style={{ fontSize: 12, color: "#D4D4D8", marginTop: 2 }}>{nm.reviewed_at ? new Date(nm.reviewed_at).toLocaleString("en-CA") : ""}</div>
+            {nm.review_notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 6 }}><strong>Action taken:</strong> {nm.review_notes}</div>}
           </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #B45309", marginTop: 8, paddingTop: 14 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#B45309", marginBottom: 8 }}>Mark as Reviewed</div>
-            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Reviewer name</label>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#A1A1AA", marginBottom: 6, textTransform: "uppercase" }}>Reviewer name</label>
             <input
               value={reviewerName} onChange={e => setReviewerName(e.target.value)} placeholder="Your full name"
               readOnly={!!defaultReviewerName}
-              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 10, background: defaultReviewerName ? "#F3F4F6" : "#F8FAFC", color: defaultReviewerName ? "#6B7280" : "inherit" }}
+              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #242424", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 10, background: defaultReviewerName ? "#242424" : "#1A1A1A", color: defaultReviewerName ? "#A1A1AA" : "inherit" }}
             />
-            <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
+            <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #242424", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#1A1A1A", resize: "vertical" }} />
             <button onClick={() => onReview(nm.id, reviewNotes, reviewerName.trim())} disabled={!reviewerName.trim()}
-              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#71717A", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
           </div>
         )}
       </div>
@@ -492,66 +527,66 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
   const [reviewerName, setReviewerName] = useState(defaultReviewerName);
   const r = inc.report_json || {};
   const sevColors = {
-    Low: { c: "#166534", bg: "#F0FDF4" }, Medium: { c: "#92400E", bg: "#FFFBEB" },
-    High: { c: "#991B1B", bg: "#FEF2F2" }, Critical: { c: "#fff", bg: "#7F1D1D" },
+    Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
+    High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
   };
   const sev = r.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
   const List = ({ title, items }) => (
     (items && items.length > 0) ? (
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>{title}</div>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 6 }}>{title}</div>
         {items.map((it, i) => (
           <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
             <span style={{ color: "#DC2626", fontWeight: 800 }}>•</span>
-            <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{it}</span>
+            <span style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{it}</span>
           </div>
         ))}
       </div>
     ) : null
   );
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#991B1B" }}>{inc.incident_type}</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{new Date(inc.created_at).toLocaleString("en-CA")} · {inc.site}</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#F87171" }}>{inc.incident_type}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{new Date(inc.created_at).toLocaleString("en-CA")} · {inc.site}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {inc.pdf_url && <a href={inc.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#DC2626", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            {onDelete && <button onClick={() => onDelete(inc.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
+            {onDelete && <button onClick={() => onDelete(inc.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
           </div>
         </div>
 
         <div style={{ background: sc.bg, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: sc.c }}>SEVERITY: {sev.toUpperCase()}</div>
-          {r.severityReason && <div style={{ fontSize: 13, color: sc.c === "#fff" ? "#FECACA" : "#475569", marginTop: 2 }}>{r.severityReason}</div>}
+          {r.severityReason && <div style={{ fontSize: 13, color: sc.c === "#fff" ? "#FECACA" : "#A1A1AA", marginTop: 2 }}>{r.severityReason}</div>}
         </div>
 
-        <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-          <div style={{ fontSize: 13, color: "#374151" }}>Reported by: <strong>{inc.reporter_name}</strong></div>
-          {inc.occurred_at && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>When: {inc.occurred_at}</div>}
-          {inc.injured_person && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Injured: {inc.injured_person}{inc.body_part ? ` (${inc.body_part})` : ""}</div>}
-          {inc.medical_attention && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Medical: {inc.medical_attention}</div>}
-          {inc.treatment && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Treatment: {inc.treatment}</div>}
-          {inc.witnesses && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Witnesses: {inc.witnesses}</div>}
-          {inc.evidence && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Evidence: {inc.evidence}</div>}
+        <div style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#D4D4D8" }}>Reported by: <strong>{inc.reporter_name}</strong></div>
+          {inc.occurred_at && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>When: {inc.occurred_at}</div>}
+          {inc.injured_person && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Injured: {inc.injured_person}{inc.body_part ? ` (${inc.body_part})` : ""}</div>}
+          {inc.medical_attention && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Medical: {inc.medical_attention}</div>}
+          {inc.treatment && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Treatment: {inc.treatment}</div>}
+          {inc.witnesses && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Witnesses: {inc.witnesses}</div>}
+          {inc.evidence && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Evidence: {inc.evidence}</div>}
         </div>
 
         {r.summary && (
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>Summary</div>
-            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{r.summary}</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 6 }}>Summary</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{r.summary}</div>
           </div>
         )}
         <List title="Sequence of Events" items={r.sequenceOfEvents} />
         <List title="Contributing Factors" items={r.contributingFactors} />
         {r.rootCause && (
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>Root Cause</div>
-            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{r.rootCause}</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 6 }}>Root Cause</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{r.rootCause}</div>
           </div>
         )}
         <List title="Immediate Actions Taken" items={r.immediateActions} />
@@ -559,10 +594,10 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
 
         {inc.photo_urls && inc.photo_urls.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 6 }}>Photos ({inc.photo_urls.length})</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 6 }}>Photos ({inc.photo_urls.length})</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {inc.photo_urls.map((url, i) => (
-                <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: "block", borderRadius: 8, overflow: "hidden", border: "1px solid #FCA5A5" }}>
+                <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: "block", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(239,68,68,0.4)" }}>
                   <img src={url} alt={`Incident photo ${i + 1}`} style={{ width: "100%", height: 140, objectFit: "cover", display: "block" }} />
                 </a>
               ))}
@@ -571,23 +606,23 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
         )}
 
         {inc.reviewed ? (
-          <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ REVIEWED BY {(inc.reviewed_by || "").toUpperCase()}</div>
-            <div style={{ fontSize: 12, color: "#374151", marginTop: 2 }}>{inc.reviewed_at ? new Date(inc.reviewed_at).toLocaleString("en-CA") : ""}</div>
-            {inc.review_notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 6 }}><strong>Action taken:</strong> {inc.review_notes}</div>}
+          <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#4ADE80" }}>✓ REVIEWED BY {(inc.reviewed_by || "").toUpperCase()}</div>
+            <div style={{ fontSize: 12, color: "#D4D4D8", marginTop: 2 }}>{inc.reviewed_at ? new Date(inc.reviewed_at).toLocaleString("en-CA") : ""}</div>
+            {inc.review_notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 6 }}><strong>Action taken:</strong> {inc.review_notes}</div>}
           </div>
         ) : onReview && (
-          <div style={{ borderTop: "2px solid #991B1B", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 8 }}>Mark as Reviewed</div>
-            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase" }}>Reviewer name</label>
+          <div style={{ borderTop: "2px solid #F87171", marginTop: 8, paddingTop: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 8 }}>Mark as Reviewed</div>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 12, color: "#A1A1AA", marginBottom: 6, textTransform: "uppercase" }}>Reviewer name</label>
             <input
               value={reviewerName} onChange={e => setReviewerName(e.target.value)} placeholder="Your full name"
               readOnly={!!defaultReviewerName}
-              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 10, background: defaultReviewerName ? "#F3F4F6" : "#F8FAFC", color: defaultReviewerName ? "#6B7280" : "inherit" }}
+              style={{ width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #242424", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 10, background: defaultReviewerName ? "#242424" : "#1A1A1A", color: defaultReviewerName ? "#A1A1AA" : "inherit" }}
             />
-            <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#F8FAFC", resize: "vertical" }} />
+            <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} placeholder="Optional — action taken or notes" style={{ width: "100%", minHeight: 60, padding: "10px 12px", borderRadius: 9, border: "1.5px solid #242424", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10, background: "#1A1A1A", resize: "vertical" }} />
             <button onClick={() => onReview(inc.id, reviewNotes, reviewerName.trim())} disabled={!reviewerName.trim()}
-              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#94A3B8", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
+              style={{ width: "100%", background: reviewerName.trim() ? "#16A34A" : "#71717A", color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>✓ Mark Reviewed</button>
           </div>
         )}
       </div>
@@ -601,31 +636,31 @@ function DailyCard({ dr, onClose, onDelete }) {
     body ? (
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontWeight: 800, fontSize: 14, color: "#15803D", marginBottom: 6 }}>{title}</div>
-        <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{body}</div>
+        <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{body}</div>
       </div>
     ) : null
   );
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#15803D" }}>Daily Report</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{dr.report_date} · {dr.site}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{dr.report_date} · {dr.site}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {dr.pdf_url && <a href={dr.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#16A34A", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            {onDelete && <button onClick={() => onDelete(dr.id)} style={{ background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
+            {onDelete && <button onClick={() => onDelete(dr.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
           </div>
         </div>
 
-        <div style={{ background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-          <div style={{ fontSize: 13, color: "#374151" }}>Weather: <strong>{dr.weather}{dr.temperature ? `, ${dr.temperature}` : ""}</strong></div>
-          <div style={{ fontSize: 13, color: "#374151", marginTop: 2 }}>Prepared by: <strong>{dr.reporter_name}</strong></div>
-          {dr.crew && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Crew: {dr.crew}</div>}
-          {dr.equipment && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Equipment: {dr.equipment}</div>}
-          {dr.visitors && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Visitors: {dr.visitors}</div>}
+        <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#D4D4D8" }}>Weather: <strong>{dr.weather}{dr.temperature ? `, ${dr.temperature}` : ""}</strong></div>
+          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 2 }}>Prepared by: <strong>{dr.reporter_name}</strong></div>
+          {dr.crew && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 4 }}>Crew: {dr.crew}</div>}
+          {dr.equipment && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Equipment: {dr.equipment}</div>}
+          {dr.visitors && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Visitors: {dr.visitors}</div>}
         </div>
 
         <Block title="Work Completed" body={r.workSummary} />
@@ -640,36 +675,36 @@ function MonthlyRecordCard({ data, onClose }) {
   if (!data) return null;
   const { record, form, site, items } = data;
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#4338CA" }}>{form?.title}</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{site?.name} · {record.period_month}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{site?.name} · {record.period_month}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#4338CA", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
         {record.ai_summary && (
-          <div style={{ background: "#EEF2FF", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ background: "rgba(99,102,241,0.12)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", marginBottom: 4 }}>SUMMARY</div>
-            <div style={{ fontSize: 14, color: "#374151" }}>{record.ai_summary}</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8" }}>{record.ai_summary}</div>
           </div>
         )}
-        <div style={{ fontSize: 13, color: "#374151", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
+        <div style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
 
         {items.map((it, i) => (
-          <div key={it.id} style={{ border: `1.5px solid ${it.answer ? "#86EFAC" : "#FCA5A5"}`, background: it.answer ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+          <div key={it.id} style={{ border: `1.5px solid ${it.answer ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"}`, background: it.answer ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{i + 1}. {it.question_text}</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{i + 1}. {it.question_text}</div>
               <span style={{ fontSize: 12, fontWeight: 800, color: it.answer ? "#16A34A" : "#DC2626", flexShrink: 0, marginLeft: 8 }}>{it.answer ? "YES" : "NO"}</span>
             </div>
-            {it.notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
+            {it.notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
             {it.corrective_action && (
-              <div style={{ fontSize: 12, marginTop: 6, color: it.corrective_action.status === "resolved" ? "#166534" : "#991B1B", fontWeight: 700 }}>
+              <div style={{ fontSize: 12, marginTop: 6, color: it.corrective_action.status === "resolved" ? "#4ADE80" : "#F87171", fontWeight: 700 }}>
                 {it.corrective_action.status === "resolved" ? "✓ Resolved" : "⚠ Open"}
                 {it.corrective_action.responsible_name ? ` · ${it.corrective_action.responsible_name}` : ""}
                 {it.corrective_action.target_date ? ` · Due ${it.corrective_action.target_date}` : ""}
@@ -687,34 +722,34 @@ function CustomDocCard({ data, onClose }) {
   const { record, form, site, items } = data;
   const accent = form?.accent_color || "#4338CA";
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: accent }}>{form?.icon} {form?.title}</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{site?.name} · {new Date(record.created_at).toLocaleString("en-CA")}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{site?.name} · {new Date(record.created_at).toLocaleString("en-CA")}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
         {record.ai_summary && (
-          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ background: "#1A1A1A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4 }}>SUMMARY</div>
-            <div style={{ fontSize: 14, color: "#374151" }}>{record.ai_summary}</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8" }}>{record.ai_summary}</div>
           </div>
         )}
-        <div style={{ fontSize: 13, color: "#374151", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
+        <div style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
 
         {items.map((it, i) => (
-          <div key={it.id} style={{ border: `1.5px solid ${it.answer ? "#86EFAC" : "#FCA5A5"}`, background: it.answer ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+          <div key={it.id} style={{ border: `1.5px solid ${it.answer ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"}`, background: it.answer ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{i + 1}. {it.question_text}</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{i + 1}. {it.question_text}</div>
               <span style={{ fontSize: 12, fontWeight: 800, color: it.answer ? "#16A34A" : "#DC2626", flexShrink: 0, marginLeft: 8 }}>{it.answer ? "YES" : "NO"}</span>
             </div>
-            {it.notes && <div style={{ fontSize: 13, color: "#374151", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
+            {it.notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
           </div>
         ))}
       </div>
@@ -724,14 +759,14 @@ function CustomDocCard({ data, onClose }) {
 
 function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>📄 This Week's Documents</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4" }}>📄 This Week's Documents</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
           </div>
-          <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
         </div>
 
         {docs.length === 0 ? (
@@ -746,14 +781,14 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
               <div
                 key={`${type}-${doc.id}`}
                 onClick={() => onOpen(type, doc)}
-                style={{ padding: "12px 4px", borderBottom: i < docs.length - 1 ? "1px solid #F3F4F680" : "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}
+                style={{ padding: "12px 4px", borderBottom: i < docs.length - 1 ? "1px solid #24242480" : "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}
               >
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "#EEF2FF", padding: "2px 8px", borderRadius: 20 }}>{m.icon} {m.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "rgba(99,102,241,0.12)", padding: "2px 8px", borderRadius: 20 }}>{m.icon} {m.label}</span>
                   </div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{m.primary(doc)}</div>
-                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{m.secondary(doc)}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{m.primary(doc)}</div>
+                  <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{m.secondary(doc)}</div>
                 </div>
                 <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0, textAlign: "right" }}>
                   {new Date(doc.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })} →
@@ -780,22 +815,22 @@ function CorrectiveActionRow({ ca, onUpdate }) {
   };
 
   return (
-    <div style={{ border: `1.5px solid ${isResolved ? "#86EFAC" : "#FCA5A5"}`, background: isResolved ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-      <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 2 }}>{ca.question_text}</div>
-      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>{ca.site_name} · {ca.period_month} · reported by {ca.submitted_by}</div>
-      <div style={{ fontSize: 13, color: "#374151", marginBottom: 10, fontStyle: "italic" }}>{ca.description}</div>
+    <div style={{ border: `1.5px solid ${isResolved ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"}`, background: isResolved ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4", marginBottom: 2 }}>{ca.question_text}</div>
+      <div style={{ fontSize: 12, color: "#A1A1AA", marginBottom: 6 }}>{ca.site_name} · {ca.period_month} · reported by {ca.submitted_by}</div>
+      <div style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 10, fontStyle: "italic" }}>{ca.description}</div>
       {isResolved ? (
-        <div style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>
+        <div style={{ fontSize: 12, color: "#4ADE80", fontWeight: 700 }}>
           ✓ Resolved by {ca.responsible_name || "—"} · {ca.resolved_at ? new Date(ca.resolved_at).toLocaleDateString("en-CA") : ""}
         </div>
       ) : (
         <>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input placeholder="Responsible person" value={responsibleName} onChange={e => setResponsibleName(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} />
-            <input type="date" value={targetDate || ""} onChange={e => setTargetDate(e.target.value)} style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} />
+            <input placeholder="Responsible person" value={responsibleName} onChange={e => setResponsibleName(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} />
+            <input type="date" value={targetDate || ""} onChange={e => setTargetDate(e.target.value)} style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => save("open")} disabled={saving} style={{ flex: 1, background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Save Assignment</button>
+            <button onClick={() => save("open")} disabled={saving} style={{ flex: 1, background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Save Assignment</button>
             <button onClick={() => save("resolved")} disabled={saving} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✓ Mark Resolved</button>
           </div>
         </>
@@ -810,12 +845,12 @@ function EquipmentReportCard({ data, onClose, error }) {
   const rj = report.report_json || {};
   const equipment = rj.equipment || [];
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 680, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 680, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#0369A1" }}>Weekly Equipment Usage</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name}</div>
             {rj.pulledUntil && (
               <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
                 ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
@@ -828,11 +863,11 @@ function EquipmentReportCard({ data, onClose, error }) {
             ) : (
               <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>PDF unavailable</span>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
-        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>⚠ {error}</div>}
+        {error && <div style={{ background: "rgba(239,68,68,0.14)", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#F87171" }}>⚠ {error}</div>}
 
         {equipment.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No equipment activity recorded this week.</div>
@@ -850,18 +885,18 @@ function EquipmentReportCard({ data, onClose, error }) {
               attachmentLines = Object.entries(byTow).map(([towUnit, v]) => `Attached to ${towUnit} for ${v.distance.toFixed(1)} ${v.unit}`);
             }
             return (
-            <div key={i} style={{ border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 6 }}>{eq.equipmentLabel}</div>
+            <div key={i} style={{ border: "1.5px solid #242424", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4", marginBottom: 6 }}>{eq.equipmentLabel}</div>
               {attachmentLines.length > 0 ? (
                 <div style={{ marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
                   {attachmentLines.map((line, li) => (
-                    <div key={li} style={{ fontSize: 13, color: "#374151" }}>{line}</div>
+                    <div key={li} style={{ fontSize: 13, color: "#D4D4D8" }}>{line}</div>
                   ))}
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
-                  <div style={{ fontSize: 13, color: "#374151" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
-                  <div style={{ fontSize: 13, color: "#374151" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
+                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
+                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
                 </div>
               )}
               {eq.noPostTripCount > 0 && (
@@ -889,12 +924,12 @@ function TimeClockReportCard({ data, onClose, error }) {
   const entries = rj.entries || [];
   const grandTotal = entries.reduce((sum, p) => sum + (p.totalHours || 0), 0);
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 680, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 680, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#0891B2" }}>Weekly Time Clock Report</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name} · {grandTotal.toFixed(1)} hrs total</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name} · {grandTotal.toFixed(1)} hrs total</div>
             {rj.pulledUntil && (
               <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
                 ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
@@ -907,23 +942,23 @@ function TimeClockReportCard({ data, onClose, error }) {
             ) : (
               <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>PDF unavailable</span>
             )}
-            <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
 
-        {error && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>⚠ {error}</div>}
+        {error && <div style={{ background: "rgba(239,68,68,0.14)", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#F87171" }}>⚠ {error}</div>}
 
         {entries.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No time clock activity recorded this week.</div>
         ) : (
           entries.map((p, i) => (
-            <div key={i} style={{ border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+            <div key={i} style={{ border: "1.5px solid #242424", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{p.name} <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>({p.role})</span></div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{p.name} <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>({p.role})</span></div>
                 <div style={{ fontWeight: 700, fontSize: 13, color: "#0891B2" }}>{p.totalHours.toFixed(1)} hrs</div>
               </div>
               {p.days.map((d, j) => (
-                <div key={j} style={{ fontSize: 12, color: "#6B7280", display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                <div key={j} style={{ fontSize: 12, color: "#A1A1AA", display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
                   <span>{d.date} · {new Date(d.clockIn).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {d.openAtReportTime ? "still open" : new Date(d.clockOut).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}{d.edited ? " (edited)" : ""}</span>
                   <span>{d.hours != null ? `${d.hours.toFixed(2)} hrs` : "—"}</span>
                 </div>
@@ -1369,9 +1404,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // dashboards, not one page mixing both audiences' numbers together.
   // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
-    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
-    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
+    { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
+    { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
+    { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -2298,10 +2333,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     const { processed, grouped } = buildCustomDocsView(docs);
     return (
       <div style={styles.card}>
-        <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
           {company?.name} — Custom Document Submissions
         </div>
-        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
           {processed.length} of {docs.length} shown — tap any submission to view.
         </div>
 
@@ -2336,14 +2371,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           Object.entries(grouped).map(([groupName, groupItems]) => {
             const renderRows = () => groupItems.map((r, i) => (
               <div key={r.id} style={{
-                padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
                 cursor: "pointer"
               }} onClick={() => openCustomDocRecord(r)}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={{ flex: 1, paddingRight: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.form_icon} {r.form_title}</div>
+                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {r.submitted_by}</div>
                   </div>
                   <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
                     {r.pdf_url ? "📄 PDF" : ""} →
@@ -2392,29 +2427,58 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   );
 
   const styles = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh" },
-    header: {
-      background: "linear-gradient(135deg,#1E3A5F,#2D5F8A)",
-      padding: "16px 20px", color: "#fff",
-      display: "flex", justifyContent: "space-between", alignItems: "center"
-    },
-    card: { background: "#fff", borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px #0001" },
-    stat: (accent) => ({
-      background: "#fff", borderRadius: 12, padding: "14px 16px",
-      borderLeft: `4px solid ${accent}`, boxShadow: "0 1px 4px #0001"
-    }),
+    wrap: { fontFamily: FONT.body, background: C.bg, minHeight: "100vh", color: C.text.primary },
+    card: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: 16, marginBottom: 12, boxShadow: SHAD.md },
     tab: (active) => ({
-      padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-      background: active ? "#1E3A5F" : "transparent", color: active ? "#fff" : "#6B7280"
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "8px 14px", borderRadius: RAD.md, border: `1px solid ${active ? C.orange : "transparent"}`,
+      cursor: "pointer", fontWeight: 600, fontSize: 13,
+      background: active ? "rgba(249,115,22,0.12)" : "transparent", color: active ? "#FB923C" : C.text.muted,
     }),
-    flhaRow: { padding: "12px 14px", borderBottom: "1px solid #F3F4F6", cursor: "pointer" },
-    select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", color: "#374151", cursor: "pointer", outline: "none" },
-    searchInput: { width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none" },
+    flhaRow: { padding: "12px 14px", borderBottom: `1px solid ${C.line}`, cursor: "pointer" },
+    select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.text.body, cursor: "pointer", outline: "none" },
+    searchInput: { width: "100%", padding: "9px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none", background: C.panelInset, color: C.text.primary },
+  };
+
+  // Stat-tile renderer — a "quiet" state (dark panel, muted numeral) vs an
+  // "alert" state (tinted gradient fill + glow ring in the relevant status
+  // color, brand-orange for the neutral/positive tally). No chart here —
+  // just a decorative ring behind the icon for visual weight, per the
+  // "no charts in this pass" direction.
+  const TONE = {
+    danger: { bg: "linear-gradient(160deg,#3a1414 0%,#1a0d0d 100%)", ring: "0 0 0 1px rgba(239,68,68,0.55), 0 16px 32px -16px rgba(239,68,68,0.5)", accent: "#F87171", label: "rgba(255,255,255,0.72)" },
+    warning: { bg: "linear-gradient(160deg,#3a2a0a 0%,#1c1508 100%)", ring: "0 0 0 1px rgba(245,158,11,0.5), 0 16px 32px -16px rgba(245,158,11,0.4)", accent: "#FBBF24", label: "rgba(255,255,255,0.72)" },
+    accent: { bg: "linear-gradient(160deg,#2c1608 0%,#1a1008 100%)", ring: "0 0 0 1px rgba(249,115,22,0.45), 0 16px 32px -16px rgba(249,115,22,0.4)", accent: "#FB923C", label: "rgba(255,255,255,0.72)" },
+    neutral: { bg: C.panel, ring: `0 0 0 1px ${C.line}`, accent: C.text.faint, label: C.text.muted },
+  };
+  const statTile = (Icon, value, label, onClick, tone = "neutral") => {
+    const t = TONE[tone];
+    return (
+      <div onClick={onClick} style={{
+        position: "relative", overflow: "hidden", background: t.bg, borderRadius: RAD.lg,
+        padding: "16px 18px", cursor: onClick ? "pointer" : "default", boxShadow: t.ring,
+      }}>
+        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: `12px solid ${t.accent}16`, top: -34, right: -34 }} />
+        <Icon size={17} color={t.accent} strokeWidth={2.25} style={{ position: "relative", display: "block", marginBottom: 10 }} />
+        <div style={{ fontFamily: FONT.heading, fontSize: 30, fontWeight: 700, color: tone === "neutral" ? C.text.primary : "#fff", lineHeight: 1, position: "relative" }}>{value}</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: t.label, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 6, position: "relative" }}>{label}</div>
+      </div>
+    );
+  };
+
+  const renderTabBtn = (key, label, count) => {
+    const Icon = TAB_ICON[key];
+    return (
+      <button key={key} style={styles.tab(activeTab === key)} onClick={() => setActiveTab(key)}>
+        {Icon && <Icon size={14} strokeWidth={2.25} />}
+        <span>{label}{count > 0 ? ` (${count})` : ""}</span>
+      </button>
+    );
   };
 
   if (loading) return (
     <div style={{ ...styles.wrap, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
-      <div style={{ textAlign: "center", color: "#6B7280" }}>
+      <div style={{ textAlign: "center", color: "#A1A1AA" }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>⏳</div>
         Loading dashboard...
       </div>
@@ -2452,169 +2516,169 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}
 
-      <div style={styles.header}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 18 }}>FORA Dashboard</div>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>{isAdmin ? "Admin View — All Companies" : "Supervisor View"}</div>
+      <header style={{
+        position: "sticky", top: 0, zIndex: 40,
+        background: "rgba(10,10,10,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+        borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)" }} />
+          <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 18, color: C.text.primary, letterSpacing: "-0.01em" }}>FORA</span>
+          <span style={{
+            marginLeft: 2, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
+            color: C.text.muted, border: `1px solid ${C.line}`, borderRadius: RAD.pill, padding: "3px 10px",
+          }}>{isAdmin ? "Admin" : "Supervisor"}</span>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {viewerRole === "supervisor" && (
-            <button onClick={() => setShowWorkerForms(true)} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-              📝 Fill Out a Form
-            </button>
-          )}
-          {onLogout && (
-            <button onClick={onLogout} style={{ color: "#fff", fontSize: 13, border: "none", background: "#ffffff20", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-              {backLabel}
-            </button>
-          )}
-        </div>
-      </div>
+        {onLogout && (
+          <button onClick={onLogout} style={{
+            display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
+            border: `1px solid ${C.line}`, background: "transparent", padding: "7px 14px",
+            borderRadius: RAD.md, cursor: "pointer", fontWeight: 600,
+          }}>
+            <LogOut size={14} /> {backLabel}
+          </button>
+        )}
+      </header>
 
       <div style={{ padding: 16 }}>
 
+        {/* Hero / welcome moment — the thing the flat-white-card version didn't
+            have at all. Company greeting up front, orange radial glow behind
+            it (same visual language as website's .hero .glow), and the primary
+            "Fill Out a Form" action promoted out of the header into here. */}
+        <div style={{
+          position: "relative", overflow: "hidden",
+          background: "linear-gradient(180deg,#171717 0%,#131313 100%)",
+          border: `1px solid ${C.line}`, borderRadius: RAD.xl,
+          padding: "26px 26px", marginBottom: 16, boxShadow: SHAD.lg,
+        }}>
+          <div style={{
+            position: "absolute", width: 420, height: 420, borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(249,115,22,0.22) 0%, transparent 68%)",
+            top: -190, right: -140, pointerEvents: "none",
+          }} />
+          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 18 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.orange, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>
+                {new Date().toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric" })}
+              </div>
+              <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: "clamp(22px,3.6vw,32px)", color: C.text.primary, letterSpacing: "-0.02em", marginBottom: 8 }}>
+                Welcome back{userName ? `, ${userName.split(" ")[0]}` : ""}
+              </div>
+              <div style={{ fontSize: 14, color: C.text.muted }}>
+                {isAdmin ? "Admin view — all companies" : company?.name ? `Supervising ${company.name}` : "Supervisor view"}
+              </div>
+            </div>
+            {viewerRole === "supervisor" && (
+              <button onClick={() => setShowWorkerForms(true)} style={{
+                display: "flex", alignItems: "center", gap: 8, background: C.orange, color: C.text.onOrange,
+                border: "none", borderRadius: RAD.md, padding: "12px 20px", fontWeight: 700, fontSize: 14,
+                cursor: "pointer", boxShadow: GLOW.orangeSoft,
+              }}>
+                <FilePlus2 size={16} /> Fill Out a Form
+              </button>
+            )}
+          </div>
+        </div>
+
         {suspended && (
-          <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 2 }}>⚠️ Account suspended</div>
-            <div style={{ fontSize: 13, color: "#B91C1C" }}>Your company's access is currently suspended. You can still view and export existing records, but workers cannot submit new FLHAs. Please contact your administrator.</div>
+          <div style={{ background: "rgba(239,68,68,0.14)", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 2 }}>⚠️ Account suspended</div>
+            <div style={{ fontSize: 13, color: "#FCA5A5" }}>Your company's access is currently suspended. You can still view and export existing records, but workers cannot submit new FLHAs. Please contact your administrator.</div>
           </div>
         )}
 
         {isAdmin && companies.length > 1 && (
           <div style={styles.card}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8 }}>COMPANY</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#A1A1AA", marginBottom: 8 }}>COMPANY</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {companies.map(c => (
                 <button key={c.id} onClick={() => setSelectedCompany(c.id)} style={{
-                  padding: "8px 14px", borderRadius: 8, border: "1.5px solid",
-                  borderColor: selectedCompany === c.id ? "#1E3A5F" : "#E5E7EB",
-                  background: selectedCompany === c.id ? "#1E3A5F" : "#fff",
-                  color: selectedCompany === c.id ? "#fff" : "#374151",
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 14px", borderRadius: RAD.md, border: "1.5px solid",
+                  borderColor: selectedCompany === c.id ? C.orange : C.line,
+                  background: selectedCompany === c.id ? C.orange : C.panelInset,
+                  color: selectedCompany === c.id ? C.text.onOrange : C.text.body,
                   fontWeight: 600, fontSize: 14, cursor: "pointer"
-                }}>{c.name}</button>
+                }}><Building2 size={14} /> {c.name}</button>
               ))}
             </div>
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-          <div onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")} style={{ background: awaitingSignOff > 0 ? "#7F1D1D" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: awaitingSignOff > 0 ? "none" : "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: awaitingSignOff > 0 ? "#fff" : "#94A3B8" }}>{awaitingSignOff}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: awaitingSignOff > 0 ? "#FECACA" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🛑 Awaiting Sign-Off</div>
-          </div>
-          <div onClick={() => {
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          {statTile(ShieldAlert, awaitingSignOff, "Awaiting Sign-Off",
+            () => TAB_VISIBLE.flhas && setActiveTab("flhas"),
+            awaitingSignOff > 0 ? "danger" : "neutral")}
+          {statTile(Flag, needsReview, "Needs Review", () => {
             const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
             if (TAB_VISIBLE[target]) setActiveTab(target);
             else if (TAB_VISIBLE.incident) setActiveTab("incident");
             else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
-          }} style={{ background: needsReview > 0 ? "#B45309" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: needsReview > 0 ? "none" : "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: needsReview > 0 ? "#fff" : "#94A3B8" }}>{needsReview}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: needsReview > 0 ? "#FEF3C7" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🚩 Needs Review</div>
-          </div>
-          <div onClick={() => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } }} style={{ background: openCorrectiveCount > 0 ? "#4338CA" : "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: openCorrectiveCount > 0 ? "none" : "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
-          </div>
-          <div onClick={() => setShowThisWeekModal(true)} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>📄 Docs This Week</div>
-          </div>
+          }, needsReview > 0 ? "warning" : "neutral")}
+          {statTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions",
+            () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
+            openCorrectiveCount > 0 ? "accent" : "neutral")}
+          {statTile(FileText, docsThisWeek, "Docs This Week", () => setShowThisWeekModal(true), "neutral")}
         </div>
 
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => (
-            <button
-              key={cat.key}
-              style={styles.tab(activeCategory === cat.key)}
-              onClick={() => {
-                const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
-                if (firstVisible) setActiveTab(firstVisible);
-              }}
-            >{cat.label}</button>
-          ))}
+          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => {
+            const Icon = CATEGORY_ICON[cat.key];
+            const active = activeCategory === cat.key;
+            return (
+              <button
+                key={cat.key}
+                style={styles.tab(active)}
+                onClick={() => {
+                  const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
+                  if (firstVisible) setActiveTab(firstVisible);
+                }}
+              ><Icon size={14} strokeWidth={2.25} /> {cat.label}</button>
+            );
+          })}
         </div>
 
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
-          )}
-          {TAB_VISIBLE.toolbox && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
-          )}
-          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
-              ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
-            </button>
-          )}
-          {TAB_VISIBLE.incident && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
-              🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
-            </button>
-          )}
-          {TAB_VISIBLE.monthly && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
-              🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
-            </button>
-          )}
-          {activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
-          )}
-          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "safetycustomdocs")} onClick={() => setActiveTab("safetycustomdocs")}>🗂️ Custom Docs</button>
-          )}
-          {activeCategory === "safety" && (
-            <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}>📊 Safety Analytics</button>
-          )}
-          {TAB_VISIBLE.inspections && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
-          )}
-          {TAB_VISIBLE.daily && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
-          )}
-          {TAB_VISIBLE.equipment && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
-          )}
-          {TAB_VISIBLE.maintenance && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
-              🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
-            </button>
-          )}
-          {TAB_VISIBLE.customdocs && activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
-          )}
-          {activeCategory === "operations" && (
-            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Equipment Analytics</button>
-          )}
-          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
-          )}
-          {TAB_VISIBLE.roster && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
-          )}
-          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && (
-            <button style={styles.tab(activeTab === "workforcecustomdocs")} onClick={() => setActiveTab("workforcecustomdocs")}>🗂️ Custom Docs</button>
-          )}
+          {TAB_VISIBLE.flhas && activeCategory === "safety" && renderTabBtn("flhas", "FLHAs")}
+          {TAB_VISIBLE.toolbox && activeCategory === "safety" && renderTabBtn("toolbox", "Toolbox Talks")}
+          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && renderTabBtn("nearmiss", "Near Misses", companyNearMisses.filter(n => !n.reviewed).length)}
+          {TAB_VISIBLE.incident && activeCategory === "safety" && renderTabBtn("incident", "Incidents", companyIncidents.filter(n => !n.reviewed).length)}
+          {TAB_VISIBLE.monthly && activeCategory === "safety" && renderTabBtn("monthly", "Monthly", openCorrectiveCount)}
+          {activeCategory === "safety" && renderTabBtn("sops", "SOPs")}
+          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && renderTabBtn("safetycustomdocs", "Custom Docs")}
+          {activeCategory === "safety" && renderTabBtn("safetyanalytics", "Safety Analytics")}
+          {TAB_VISIBLE.inspections && activeCategory === "operations" && renderTabBtn("inspections", "Inspections")}
+          {TAB_VISIBLE.daily && activeCategory === "operations" && renderTabBtn("daily", "Daily")}
+          {TAB_VISIBLE.equipment && activeCategory === "operations" && renderTabBtn("equipment", "Equipment")}
+          {TAB_VISIBLE.maintenance && activeCategory === "operations" && renderTabBtn("maintenance", "Maintenance", maintenanceStatus.filter(e => e.status === "overdue").length)}
+          {TAB_VISIBLE.customdocs && activeCategory === "operations" && renderTabBtn("customdocs", "Custom Docs")}
+          {activeCategory === "operations" && renderTabBtn("analytics", "Equipment Analytics")}
+          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && renderTabBtn("timeclock", "Time Clock")}
+          {TAB_VISIBLE.roster && activeCategory === "workforce" && renderTabBtn("roster", "Roster")}
+          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && renderTabBtn("workforcecustomdocs", "Custom Docs")}
         </div>
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
                   {company?.name} — Field Assessments
                 </div>
-                <div style={{ fontSize: 13, color: "#6B7280" }}>
+                <div style={{ fontSize: 13, color: "#A1A1AA" }}>
                   {processedFlhas.length} of {companyFlhas.length} shown
                 </div>
               </div>
               {selectedIds.size > 0 && (
                 <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                   <button onClick={exportSelected} style={{
-                    background: "#F97316", color: "#fff", border: "none", borderRadius: 8,
+                    background: "#F97316", color: "#0A0A0A", border: "none", borderRadius: 8,
                     padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
                   }}>⬇ {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
                   <button onClick={deleteSelected} style={{
-                    background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 8,
+                    background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8,
                     padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
                   }}>🗑 Delete</button>
                 </div>
@@ -2664,26 +2728,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   return (
                     <div key={f.id} style={{
                       ...styles.flhaRow,
-                      borderBottom: i < groupFlhas.length - 1 ? "1px solid #F3F4F6" : "none",
+                      borderBottom: i < groupFlhas.length - 1 ? "1px solid #242424" : "none",
                       display: "flex", alignItems: "flex-start", gap: 10,
-                      background: selectedIds.has(f.id) ? "#F0F9FF" : "transparent"
+                      background: selectedIds.has(f.id) ? "rgba(56,189,248,0.12)" : "transparent"
                     }}>
                       <input type="checkbox" checked={selectedIds.has(f.id)}
                         onChange={() => toggleSelect(f.id)}
-                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer" }}
+                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
                         onClick={e => e.stopPropagation()}
                       />
                       <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{f.worker_name || "Unknown Worker"}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{f.worker_name || "Unknown Worker"}</div>
+                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
                             <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                               {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                             </div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#7F1D1D", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
+                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#DC2626", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
                             {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                             {highRisk > 0 && <RiskBadge risk="High" />}
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
@@ -2721,10 +2785,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "inspections" && TAB_VISIBLE.inspections && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
               {company?.name} — Equipment Inspections
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
               {processedInspections.length} of {companyInspections.length} shown — tap any row to view.
             </div>
 
@@ -2764,18 +2828,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const mon = r.monitorCount || 0;
                   return (
                     <div key={insp.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedInspection(insp)}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                         <div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{insp.equipment_label || "Equipment"}</div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{insp.equipment_label || "Equipment"}</div>
                             <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
                           </div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
                           {(insp.start_reading || insp.end_reading) && (
-                            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
+                            <div style={{ fontSize: 11, color: "#71717A", marginTop: 2 }}>
                               {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
                             </div>
                           )}
@@ -2785,10 +2849,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
                           {def > 0
-                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(239,68,68,0.14)", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
                             : mon > 0
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
-                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "rgba(245,158,11,0.14)", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
                           <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
                             {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
                           </div>
@@ -2821,10 +2885,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "toolbox" && TAB_VISIBLE.toolbox && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
               {company?.name} — Toolbox Talks
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
               {processedToolbox.length} of {companyToolbox.length} shown — tap any meeting to view.
             </div>
 
@@ -2861,17 +2925,17 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const attendees = t.attendees_json || [];
                   return (
                     <div key={t.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedToolbox(t)}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{t.site}</div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{t.site}</div>
                           </div>
-                          <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
+                          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
+                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
                           <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                             {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
@@ -2907,10 +2971,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "nearmiss" && TAB_VISIBLE.nearmiss && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
               {company?.name} — Near Miss Reports
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
               {processedNearMisses.length} of {companyNearMisses.length} shown.
             </div>
 
@@ -2952,7 +3016,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ fontSize: 12, opacity: 0.9 }}>Tap to review and record action taken</div>
                       </div>
                     </div>
-                    <div style={{ background: "#FFFBEB", borderRadius: 10, border: "1.5px solid #FDE68A", padding: "4px 12px", marginBottom: 20 }}>
+                    <div style={{ background: "rgba(245,158,11,0.14)", borderRadius: 10, border: "1.5px solid #FDE68A", padding: "4px 12px", marginBottom: 20 }}>
                       {nmAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                       ))}
@@ -2990,10 +3054,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "incident" && TAB_VISIBLE.incident && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
               {company?.name} — Incident Reports
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
               {processedIncidents.length} of {companyIncidents.length} shown.
             </div>
 
@@ -3028,14 +3092,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <>
                 {incAwaiting.length > 0 && (
                   <>
-                    <div style={{ background: "#991B1B", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ background: "#F87171", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 22 }}>🚩</span>
                       <div>
                         <div style={{ fontSize: 15, fontWeight: 800 }}>{incAwaiting.length} Awaiting Review</div>
                         <div style={{ fontSize: 12, opacity: 0.9 }}>Incident reports require your review — tap to record action taken</div>
                       </div>
                     </div>
-                    <div style={{ background: "#FEF2F2", borderRadius: 10, border: "1.5px solid #FCA5A5", padding: "4px 12px", marginBottom: 20 }}>
+                    <div style={{ background: "rgba(239,68,68,0.14)", borderRadius: 10, border: "1.5px solid rgba(239,68,68,0.4)", padding: "4px 12px", marginBottom: 20 }}>
                       {incAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                       ))}
@@ -3073,10 +3137,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "daily" && TAB_VISIBLE.daily && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
               {company?.name} — Daily Reports
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
               {processedDaily.length} of {companyDaily.length} shown — tap any report to view.
             </div>
 
@@ -3112,17 +3176,17 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const r = d.report_json || {};
                   return (
                     <div key={d.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedDaily(d)}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                         <div style={{ flex: 1, paddingRight: 10 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{d.report_date}</div>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#F0FDF4", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{d.report_date}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "rgba(34,197,94,0.14)", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
                           </div>
-                          <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
+                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
                         </div>
                         <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
                           {d.pdf_url ? "📄 PDF" : ""} →
@@ -3164,10 +3228,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {monthlySubTab === "records" && (
               <div style={styles.card}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
                   {company?.name} — Monthly Inspections
                 </div>
-                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
                   {processedMonthly.length} of {companyMonthlyRecords.length} shown — tap any submission to view.
                 </div>
 
@@ -3202,19 +3266,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   Object.entries(groupedMonthly).map(([groupName, groupItems]) => {
                     const renderRows = () => groupItems.map((r, i) => (
                       <div key={r.id} style={{
-                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
                         cursor: "pointer"
                       }} onClick={() => openMonthlyRecord(r)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div style={{ flex: 1, paddingRight: 10 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_title}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
-                            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.form_title}</div>
+                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
+                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {r.submitted_by}</div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
                             {r.open_actions > 0
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
-                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(239,68,68,0.14)", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
                             <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
                               {r.pdf_url ? "📄 PDF" : "No PDF"} →
                             </div>
@@ -3246,10 +3310,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {monthlySubTab === "actions" && (
               <div style={styles.card}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
                   {company?.name} — Corrective Actions
                 </div>
-                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Assign a responsible person and target date, then mark resolved once complete.</div>
+                <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>Assign a responsible person and target date, then mark resolved once complete.</div>
 
                 <input
                   style={styles.searchInput}
@@ -3267,7 +3331,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   <>
                     {processedMonthlyActions.filter(a => a.status !== "resolved").length > 0 && (
                       <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#F87171", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
                           Open ({processedMonthlyActions.filter(a => a.status !== "resolved").length})
                         </div>
                         {processedMonthlyActions.filter(a => a.status !== "resolved").map(ca => (
@@ -3299,9 +3363,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "safetyanalytics" && (
           <>
             <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginRight: "auto" }}>Export a snapshot:</div>
               <button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
-                background: generatingSafetyAnalyticsPdf ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 8,
+                background: generatingSafetyAnalyticsPdf ? "#71717A" : "#F97316", color: generatingSafetyAnalyticsPdf ? "#fff" : "#0A0A0A", border: "none", borderRadius: 8,
                 padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
               }}>
                 {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
@@ -3327,9 +3391,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "analytics" && (
           <>
             <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginRight: "auto" }}>Export a snapshot:</div>
               <button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
-                background: generatingEquipmentAnalyticsPdf ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                background: generatingEquipmentAnalyticsPdf ? "#71717A" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
                 padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
               }}>
                 {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
@@ -3351,37 +3415,37 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "equipment" && equipmentReportsEnabled && (
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
                 {company?.name} — Weekly Equipment Usage
               </div>
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                 <button onClick={() => { setShowManualPull(s => !s); setManualPullError(""); }} style={{
-                  background: "#fff", color: "#0369A1", border: "1.5px solid #0369A1", borderRadius: 8,
+                  background: "#1D1D1D", color: "#38BDF8", border: "1.5px solid #38BDF8", borderRadius: 8,
                   padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                 }}>
                   🕐 Request Manual Pull
                 </button>
                 <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
-                  background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                  background: generatingNewReport ? "#71717A" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
                   padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                 }}>
                   {generatingNewReport ? "Generating…" : "+ Generate This Week"}
                 </button>
               </div>
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
 
             {showManualPull && (
-              <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>Pull this week's data up to:</div>
+              <div style={{ background: "#1A1A1A", border: "1.5px solid #242424", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: "#D4D4D8", fontWeight: 600 }}>Pull this week's data up to:</div>
                 <input
                   type="datetime-local"
                   value={manualPullUntil}
                   onChange={e => setManualPullUntil(e.target.value)}
-                  style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #E2E8F0", fontSize: 13 }}
+                  style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #242424", fontSize: 13 }}
                 />
                 <button onClick={requestManualPull} disabled={requestingManualPull} style={{
-                  background: requestingManualPull ? "#94A3B8" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                  background: requestingManualPull ? "#71717A" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
                   padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                 }}>
                   {requestingManualPull ? "Pulling…" : "Pull Now"}
@@ -3412,12 +3476,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             ) : (
               sortedEquipmentReports.map((r, i) => (
                 <div key={r.id} style={{
-                  padding: "12px 14px", borderBottom: i < sortedEquipmentReports.length - 1 ? "1px solid #F3F4F6" : "none",
+                  padding: "12px 14px", borderBottom: i < sortedEquipmentReports.length - 1 ? "1px solid #242424" : "none",
                   cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
                 }} onClick={() => openEquipmentReport(r)}>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.week_start} to {r.week_end}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.week_start} to {r.week_end}</div>
+                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                   </div>
                   <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
                     {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
@@ -3430,10 +3494,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "maintenance" && TAB_VISIBLE.maintenance && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
               {company?.name} — Preventative Maintenance
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 14 }}>
               Every registered machine, flagged by usage since last service. Set up tracking on a machine to start flagging it.
             </div>
 
@@ -3445,29 +3509,29 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             ) : (
               maintenanceStatus.map((eq, i) => {
                 const STATUS = {
-                  overdue: { label: "Overdue", color: "#991B1B", bg: "#FEF2F2", border: "#FCA5A5" },
-                  due_soon: { label: "Due Soon", color: "#92400E", bg: "#FFFBEB", border: "#FCD34D" },
-                  ok: { label: "OK", color: "#166534", bg: "#F0FDF4", border: "#86EFAC" },
-                  unit_mismatch: { label: "Unit mismatch — check readings", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" },
-                  not_started: { label: "No baseline reading", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" },
-                  not_tracked: { label: "Not tracked", color: "#94A3B8", bg: "#F8FAFC", border: "#E2E8F0" },
+                  overdue: { label: "Overdue", color: "#F87171", bg: "rgba(239,68,68,0.14)", border: "rgba(239,68,68,0.4)" },
+                  due_soon: { label: "Due Soon", color: "#FBBF24", bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.4)" },
+                  ok: { label: "OK", color: "#4ADE80", bg: "rgba(34,197,94,0.14)", border: "rgba(34,197,94,0.4)" },
+                  unit_mismatch: { label: "Unit mismatch — check readings", color: "#A1A1AA", bg: "#242424", border: "#333333" },
+                  not_started: { label: "No baseline reading", color: "#A1A1AA", bg: "#242424", border: "#333333" },
+                  not_tracked: { label: "Not tracked", color: "#71717A", bg: "#1A1A1A", border: "#242424" },
                 };
                 const sc = STATUS[eq.status] || STATUS.not_tracked;
                 const pct = eq.usageSinceService != null && eq.pmInterval ? Math.min(100, Math.round((eq.usageSinceService / eq.pmInterval) * 100)) : null;
                 return (
-                  <div key={eq.id} style={{ padding: "12px 0", borderBottom: i < maintenanceStatus.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                  <div key={eq.id} style={{ padding: "12px 0", borderBottom: i < maintenanceStatus.length - 1 ? "1px solid #242424" : "none" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{eq.label}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{eq.label}</div>
                         {eq.status !== "not_tracked" && (
-                          <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>
                             {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}` : "No readings recorded yet"}
                             {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
                           </div>
                         )}
                         {pct != null && (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-                            <div style={{ flex: 1, background: "#F1F5F9", borderRadius: 6, height: 6 }}>
+                            <div style={{ flex: 1, background: "#242424", borderRadius: 6, height: 6 }}>
                               <div style={{ width: `${pct}%`, background: sc.color, height: 6, borderRadius: 6 }} />
                             </div>
                             <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0 }}>{eq.usageSinceService} / {eq.pmInterval} {eq.lastService?.reading_unit}</div>
@@ -3479,44 +3543,44 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
                     {eq.status === "not_tracked" ? (
                       pmSetupFor === eq.id ? (
-                        <div style={{ marginTop: 10, background: "#F8FAFC", borderRadius: 8, padding: 10 }}>
+                        <div style={{ marginTop: 10, background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
                           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                            <input type="number" placeholder="Interval (e.g. 250)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} value={pmSetupForm.interval} onChange={e => setPmSetupForm(p => ({ ...p, interval: e.target.value }))} />
-                            <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", width: 90 }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
+                            <input type="number" placeholder="Interval (e.g. 250)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={pmSetupForm.interval} onChange={e => setPmSetupForm(p => ({ ...p, interval: e.target.value }))} />
+                            <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 90, background: C.panelInset, color: C.text.body, cursor: "pointer" }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
                               <option value="Hours">Hours</option>
                               <option value="KM">KM</option>
                             </select>
                           </div>
-                          <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
+                          <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
                           <div style={{ display: "flex", gap: 8 }}>
                             <button onClick={() => savePmSetup(eq)} disabled={savingPmSetup} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingPmSetup ? "Saving…" : "✓ Start Tracking"}</button>
-                            <button onClick={() => { setPmSetupFor(null); setPmSetupForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                            <button onClick={() => { setPmSetupFor(null); setPmSetupForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                           </div>
                         </div>
                       ) : (
                         <button onClick={() => { setPmSetupFor(eq.id); setPmSetupForm({ interval: "", unit: eq.current?.readingUnit || "Hours", startingReading: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", marginTop: 8, padding: 0 }}>+ Set Up Tracking</button>
                       )
                     ) : logServiceFor === eq.id ? (
-                      <div style={{ marginTop: 10, background: "#F8FAFC", borderRadius: 8, padding: 10 }}>
+                      <div style={{ marginTop: 10, background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
                         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                          <input type="date" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} value={logServiceForm.serviceDate} onChange={e => setLogServiceForm(p => ({ ...p, serviceDate: e.target.value }))} />
-                          <input type="number" placeholder="Reading (optional if today)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }} value={logServiceForm.serviceReading} onChange={e => setLogServiceForm(p => ({ ...p, serviceReading: e.target.value }))} />
-                          <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", width: 80 }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
+                          <input type="date" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={logServiceForm.serviceDate} onChange={e => setLogServiceForm(p => ({ ...p, serviceDate: e.target.value }))} />
+                          <input type="number" placeholder="Reading (optional if today)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={logServiceForm.serviceReading} onChange={e => setLogServiceForm(p => ({ ...p, serviceReading: e.target.value }))} />
+                          <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 80, background: C.panelInset, color: C.text.body, cursor: "pointer" }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
                             <option value="Hours">Hours</option>
                             <option value="KM">KM</option>
                           </select>
                         </div>
-                        <input placeholder="Performed by" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }} value={logServiceForm.performedBy} onChange={e => setLogServiceForm(p => ({ ...p, performedBy: e.target.value }))} />
-                        <input placeholder="Notes (optional)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={logServiceForm.notes} onChange={e => setLogServiceForm(p => ({ ...p, notes: e.target.value }))} />
+                        <input placeholder="Performed by" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }} value={logServiceForm.performedBy} onChange={e => setLogServiceForm(p => ({ ...p, performedBy: e.target.value }))} />
+                        <input placeholder="Notes (optional)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={logServiceForm.notes} onChange={e => setLogServiceForm(p => ({ ...p, notes: e.target.value }))} />
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : "✓ Log Service"}</button>
-                          <button onClick={() => { setLogServiceFor(null); setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" }); }} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                          <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? "#71717A" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : "✓ Log Service"}</button>
+                          <button onClick={() => { setLogServiceFor(null); setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" }); }} style={{ background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                         </div>
                       </div>
                     ) : (
                       <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
                         <button onClick={() => { setLogServiceFor(eq.id); setLogServiceForm({ serviceDate: new Date().toISOString().slice(0, 10), serviceReading: "", readingUnit: eq.current?.readingUnit || "Hours", performedBy: "", notes: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Log Service</button>
-                        <button onClick={() => disablePmTracking(eq)} style={{ background: "transparent", border: "none", color: "#94A3B8", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Turn off tracking</button>
+                        <button onClick={() => disablePmTracking(eq)} style={{ background: "transparent", border: "none", color: "#71717A", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Turn off tracking</button>
                       </div>
                     )}
                   </div>
@@ -3530,14 +3594,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           <>
             {userId && (
               <div style={{ ...styles.card, textAlign: "center" }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 10 }}>My Time</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 10 }}>My Time</div>
                 {myTimeLoading ? (
                   <div style={{ color: "#9CA3AF", padding: "12px 0" }}>Loading…</div>
                 ) : (
                   <>
                     {myTimeStatus?.open ? (
                       <>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Clocked in since {new Date(myTimeStatus.open.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#A1A1AA", textTransform: "uppercase", letterSpacing: 0.5 }}>Clocked in since {new Date(myTimeStatus.open.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
                         <div style={{ fontSize: 32, fontWeight: 800, color: "#0E7490", margin: "8px 0", fontVariantNumeric: "tabular-nums" }}>
                           {(() => {
                             const totalSec = Math.max(0, Math.floor((myTimeNow - new Date(myTimeStatus.open.clock_in).getTime()) / 1000));
@@ -3549,12 +3613,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         </div>
                       </>
                     ) : (
-                      <div style={{ fontSize: 13, color: "#6B7280", margin: "8px 0 14px" }}>You're not clocked in.</div>
+                      <div style={{ fontSize: 13, color: "#A1A1AA", margin: "8px 0 14px" }}>You're not clocked in.</div>
                     )}
                     <button onClick={toggleMyClock} disabled={myTimeWorking} style={{
                       padding: "12px 28px", borderRadius: 10, border: "none", cursor: "pointer",
                       fontWeight: 800, fontSize: 15, color: "#fff",
-                      background: myTimeWorking ? "#94A3B8" : myTimeStatus?.open ? "#DC2626" : "#16A34A",
+                      background: myTimeWorking ? "#71717A" : myTimeStatus?.open ? "#DC2626" : "#16A34A",
                     }}>
                       {myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
                     </button>
@@ -3566,30 +3630,30 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             <div style={styles.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
                   {company?.name} — Everyone's Time{timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}
                 </div>
                 <button onClick={() => setAddEntryOpen(o => !o)} style={{ background: "#0891B2", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
                   {addEntryOpen ? "Cancel" : "+ Add Entry"}
                 </button>
               </div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>Only you can edit or add a punch — workers can't change their own time.</div>
+              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>Only you can edit or add a punch — workers can't change their own time.</div>
 
               {addEntryOpen && (
-                <div style={{ background: "#F8FAFC", borderRadius: 8, padding: 10, marginBottom: 14 }}>
-                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }}>
+                <div style={{ background: "#1A1A1A", borderRadius: 8, padding: 10, marginBottom: 14 }}>
+                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box", background: C.panelInset, color: C.text.body, cursor: "pointer" }}>
                     <option value="">Select person…</option>
                     {timeClockRoster.filter(m => m.active).map(m => <option key={m.id} value={m.id}>{m.name} ({m.role})</option>)}
                   </select>
                   <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
                       value={toDatetimeLocal(addEntryForm.clockIn)}
                       onChange={e => setAddEntryForm(f => ({ ...f, clockIn: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
-                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
                       value={toDatetimeLocal(addEntryForm.clockOut)}
                       onChange={e => setAddEntryForm(f => ({ ...f, clockOut: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
                   </div>
-                  <button onClick={submitAddEntry} disabled={savingEntry || !addEntryForm.rosterId || !addEntryForm.clockIn} style={{ width: "100%", background: (!addEntryForm.rosterId || !addEntryForm.clockIn) ? "#94A3B8" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  <button onClick={submitAddEntry} disabled={savingEntry || !addEntryForm.rosterId || !addEntryForm.clockIn} style={{ width: "100%", background: (!addEntryForm.rosterId || !addEntryForm.clockIn) ? "#71717A" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
                     {savingEntry ? "Saving…" : "✓ Add Entry"}
                   </button>
                 </div>
@@ -3621,29 +3685,29 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         {memberEntries.length === 0 ? (
                           <div style={{ color: "#9CA3AF", padding: "10px 0", fontSize: 13 }}>No entries this week.</div>
                         ) : memberEntries.map((e, i, arr) => (
-                          <div key={e.id} style={{ padding: "10px 0", borderBottom: i < arr.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                          <div key={e.id} style={{ padding: "10px 0", borderBottom: i < arr.length - 1 ? "1px solid #242424" : "none" }}>
                             {editingEntryId === e.id ? (
-                              <div style={{ background: "#F8FAFC", borderRadius: 8, padding: 10 }}>
+                              <div style={{ background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
                                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
                                     value={toDatetimeLocal(editEntryForm.clockIn)}
                                     onChange={ev => setEditEntryForm(f => ({ ...f, clockIn: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
-                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none" }}
+                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
                                     value={toDatetimeLocal(editEntryForm.clockOut)}
                                     onChange={ev => setEditEntryForm(f => ({ ...f, clockOut: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
                                 </div>
                                 <div style={{ display: "flex", gap: 8 }}>
                                   <button onClick={() => saveEditEntry(e.id)} disabled={savingEntry} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingEntry ? "Saving…" : "✓ Save"}</button>
-                                  <button onClick={() => setEditingEntryId(null)} style={{ background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                                  <button onClick={() => setEditingEntryId(null)} style={{ background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                                 </div>
                               </div>
                             ) : (
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                 <div>
-                                  <div style={{ fontWeight: 700, fontSize: 13, color: "#1E293B" }}>
+                                  <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4" }}>
                                     {new Date(e.clock_in).toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric" })}
                                   </div>
-                                  <div style={{ fontSize: 12, color: "#6B7280" }}>
+                                  <div style={{ fontSize: 12, color: "#A1A1AA" }}>
                                     {new Date(e.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {e.clock_out ? new Date(e.clock_out).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "in progress"}
                                     {e.edited_at ? " · edited" : ""}
                                   </div>
@@ -3668,37 +3732,37 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             <div style={styles.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
                   {company?.name} — Weekly Time Clock Reports
                 </div>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                   <button onClick={() => { setShowTimeClockManualPull(s => !s); setTimeClockPullError(""); }} style={{
-                    background: "#fff", color: "#0891B2", border: "1.5px solid #0891B2", borderRadius: 8,
+                    background: "#1D1D1D", color: "#38BDF8", border: "1.5px solid #38BDF8", borderRadius: 8,
                     padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                   }}>
                     🕐 Request Manual Pull
                   </button>
                   <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
-                    background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
+                    background: generatingNewTimeClockReport ? "#71717A" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
                     padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                   }}>
                     {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
                   </button>
                 </div>
               </div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
 
               {showTimeClockManualPull && (
-                <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>Pull this week's data up to:</div>
+                <div style={{ background: "#1A1A1A", border: "1.5px solid #242424", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 12, color: "#D4D4D8", fontWeight: 600 }}>Pull this week's data up to:</div>
                   <input
                     type="datetime-local"
                     value={timeClockPullUntil}
                     onChange={e => setTimeClockPullUntil(e.target.value)}
-                    style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #E2E8F0", fontSize: 13 }}
+                    style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #242424", fontSize: 13 }}
                   />
                   <button onClick={requestTimeClockManualPull} disabled={requestingTimeClockPull} style={{
-                    background: requestingTimeClockPull ? "#94A3B8" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                    background: requestingTimeClockPull ? "#71717A" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
                     padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                   }}>
                     {requestingTimeClockPull ? "Pulling…" : "Pull Now"}
@@ -3720,12 +3784,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               ) : (
                 timeClockReports.map((r, i) => (
                   <div key={r.id} style={{
-                    padding: "12px 14px", borderBottom: i < timeClockReports.length - 1 ? "1px solid #F3F4F6" : "none",
+                    padding: "12px 14px", borderBottom: i < timeClockReports.length - 1 ? "1px solid #242424" : "none",
                     cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
                   }} onClick={() => openTimeClockReport(r)}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.week_start} to {r.week_end}</div>
-                      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.week_start} to {r.week_end}</div>
+                      <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                     </div>
                     <div style={{ fontSize: 11, color: r.pdf_url ? "#0891B2" : "#9CA3AF" }}>
                       {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
@@ -3740,18 +3804,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "roster" && TAB_VISIBLE.roster && (
           <>
             {rosterRevealedPin && (
-              <div style={{ ...styles.card, background: "#FFFBEB", border: "1.5px solid #F59E0B" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E", marginBottom: 4 }}>PIN for {rosterRevealedPin.name} — shown once, write it down now</div>
+              <div style={{ ...styles.card, background: "rgba(245,158,11,0.14)", border: "1.5px solid #F59E0B" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#FBBF24", marginBottom: 4 }}>PIN for {rosterRevealedPin.name} — shown once, write it down now</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 800, color: "#1E3A5F", background: "#fff", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "6px 14px" }}>{rosterRevealedPin.pin}</span>
-                  <button onClick={() => setRosterRevealedPin(null)} style={{ background: "transparent", border: "none", color: "#6B7280", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
+                  <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 800, color: "#F97316", background: "#1D1D1D", border: "1.5px solid #242424", borderRadius: 8, padding: "6px 14px" }}>{rosterRevealedPin.pin}</span>
+                  <button onClick={() => setRosterRevealedPin(null)} style={{ background: "transparent", border: "none", color: "#A1A1AA", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
                 </div>
               </div>
             )}
 
             <div style={styles.card}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>{company?.name} — Roster</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>Reset a forgotten PIN below — it takes effect immediately and is shown once.</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>{company?.name} — Roster</div>
+              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 14 }}>Reset a forgotten PIN below — it takes effect immediately and is shown once.</div>
 
               {loadingRosterList ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
@@ -3764,15 +3828,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   return (
                     <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? "🦺" : "👷"} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
                       {group.map((m, i) => (
-                        <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? "1px solid #F1F5F9" : "none" }}>
+                        <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? "1px solid #242424" : "none" }}>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{m.name}</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#D4D4D8" }}>{m.name}</div>
                             <div style={{ fontSize: 12, color: "#9CA3AF" }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                           </div>
                           <button
                             onClick={() => resetRosterMemberPin(m.id, m.name)}
                             disabled={resettingRosterId === m.id}
-                            style={{ background: "transparent", border: "1.5px solid #E2E8F0", color: "#334155", fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}
+                            style={{ background: "transparent", border: "1.5px solid #242424", color: "#D4D4D8", fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}
                           >
                             {resettingRosterId === m.id ? "Resetting…" : "Reset PIN"}
                           </button>
@@ -3788,7 +3852,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "sops" && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 12 }}>
               {company?.name} — Safety Policies
             </div>
             {companySops.length === 0 ? (
@@ -3799,15 +3863,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             ) : (
               companySops.map((s, i) => (
                 <div key={s.id} style={{
-                  padding: "10px 0", borderBottom: i < companySops.length - 1 ? "1px solid #F3F4F6" : "none",
+                  padding: "10px 0", borderBottom: i < companySops.length - 1 ? "1px solid #242424" : "none",
                   display: "flex", gap: 10, alignItems: "flex-start"
                 }}>
                   <div style={{
-                    width: 22, height: 22, borderRadius: "50%", background: "#1E3A5F",
-                    color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0,
+                    width: 22, height: 22, borderRadius: "50%", background: "#F97316",
+                    color: "#0A0A0A", fontSize: 11, fontWeight: 700, flexShrink: 0,
                     display: "flex", alignItems: "center", justifyContent: "center"
                   }}>{i + 1}</div>
-                  <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.5 }}>{s.policy_text}</div>
+                  <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{s.policy_text}</div>
                 </div>
               ))
             )}
