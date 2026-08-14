@@ -19,6 +19,12 @@ commit just to say "no changes."
 force-push, never push to any branch other than `main`.** Direct pushes to `main` are
 allowed for this one file only, by explicit user decision — not for anything else.
 
+**Stay quiet in chat.** By explicit user decision (after the system was verified working),
+don't post a chat summary of what you did — whether that's "nothing changed" or a real log
+entry. The commit itself is the record. Only speak up in chat if something's actually wrong:
+the push fails even after the retry in step 9, the watermark is unreadable and you had to
+fall back to the time window, or anything else blocks you from completing the checklist.
+
 ## Steps
 
 1. **Always** call `add_repo` (owner `dillonmcqueen-ux`, repo `flha-app`, `access: push`)
