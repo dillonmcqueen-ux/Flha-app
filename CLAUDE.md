@@ -133,10 +133,11 @@ now has its own `api/stripe-webhook.js` (split out of
 `api/cron-equipment-reports.js`) and time-clock report generation now has
 its own `api/timeclockreports.js` (split out of `api/companydata.js`).
 `README.md`, `TODO.md`, and `vercel-function-budget-guardian.md` were
-updated to match. **Outstanding manual step:** the Stripe Dashboard's
-webhook endpoint URL needs to be updated by hand from
-`/api/cron-equipment-reports` to `/api/stripe-webhook`, or Stripe events
-stop arriving — nothing in this repo can do that automatically.
+updated to match. **The Stripe Dashboard's webhook endpoint URL has since
+been updated by hand** to `https://portal.forafieldsolutions.com/api/stripe-webhook`
+(confirmed live and enabled via the Stripe API, events: `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted`) — this
+step is done, no further action needed.
 
 ## Weekly competitive intelligence
 

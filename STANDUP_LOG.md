@@ -19,9 +19,9 @@ this file stays short and easy to scan.
 
 ## Outstanding Items
 
-- **Time-sensitive:** update the Stripe billing dashboard's webhook address (it needs to
-  point to the new `/api/stripe-webhook` instead of the old shared address) — until that's
-  changed, payment webhook events stop arriving.
+- Correction: the Stripe billing dashboard's webhook address is already pointing to
+  `/api/stripe-webhook` and confirmed enabled/live via the Stripe API (checkout +
+  subscription lifecycle events) — this is done, not outstanding.
 - Manually walk through the new automated signup flow start to finish (signup →
   auto-approval or manual approval → new customer's setup link → they set their own login →
   they review the AI-drafted equipment list and safety documents → done) — built and
