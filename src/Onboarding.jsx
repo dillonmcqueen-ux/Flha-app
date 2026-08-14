@@ -3,7 +3,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   Building2, MapPin, Users, FileText, UploadCloud,
-  Sparkles, AlertTriangle, CheckCircle2, ShieldCheck, Loader2, X,
+  Sparkles, AlertTriangle, CheckCircle2, ShieldCheck, Loader2, X, Check,
 } from "lucide-react";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -517,12 +517,33 @@ export default function Onboarding() {
 
           <div style={{ ...styles.section, paddingBottom: 22 }}>
             <label style={styles.consentRow}>
-              <input
-                type="checkbox"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0, accentColor: C.orange }}
-              />
+              <span style={{ position: "relative", flexShrink: 0, marginTop: 2 }}>
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  style={{
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                    width: 16,
+                    height: 16,
+                    margin: 0,
+                    borderRadius: 4,
+                    border: `1.5px solid ${agreed ? C.orange : C.line}`,
+                    background: agreed ? C.orange : C.panelInset,
+                    cursor: "pointer",
+                    display: "block",
+                  }}
+                />
+                {agreed && (
+                  <Check
+                    size={12}
+                    color={C.text.onOrange}
+                    strokeWidth={3.5}
+                    style={{ position: "absolute", top: 2, left: 2, pointerEvents: "none" }}
+                  />
+                )}
+              </span>
               <span style={styles.consentText}>
                 I agree to FORA's{" "}
                 <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: C.orange }}>Privacy Policy</a>
