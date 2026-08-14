@@ -1,5 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { Analytics } from '@vercel/analytics/react'
 import Login from './Login.jsx'
 import Onboarding from './Onboarding.jsx'
 import ClaimAccount from './ClaimAccount.jsx'
@@ -11,6 +12,7 @@ const isClaim = path === '/claim'
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {isClaim ? <ClaimAccount /> : isOnboarding ? <Onboarding /> : <Login />}
+    <Analytics />
   </React.StrictMode>,
 )
 
