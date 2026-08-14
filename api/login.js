@@ -18,6 +18,7 @@ import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
+import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 
 const supabaseAdmin = createClient(
@@ -173,8 +174,10 @@ async function verifyMasterCode(entered) {
 }
 
 // Best-effort notification for a new onboarding submission — silently
-// skipped until RESEND_API_KEY is configured, and never allowed to fail
-// the submission itself (the row is already saved by the time this runs).
+// skipped until RESEND_API_KEY / SLACK_ONBOARDING_WEBHOOK_URL is
+// configured, and never allowed to fail the submission itself (the row is
+// already saved by the time this runs). Email and Slack are independent —
+// one failing (e.g. a bad webhook URL) doesn't skip the other.
 async function sendOnboardingNotification(record) {
   const text = [
     `Company: ${record.company_name || '—'}`,
@@ -197,11 +200,21 @@ async function sendOnboardingNotification(record) {
     'Review and mark status in the Admin Panel → Onboarding Requests tab.',
   ].join('\n');
 
-  await sendEmail({
-    to: 'forafieldsolutions@gmail.com',
-    subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
-    text,
-  });
+  try {
+    await sendEmail({
+      to: 'forafieldsolutions@gmail.com',
+      subject: `New onboarding request — ${record.company_name || 'Unnamed company'}`,
+      text,
+    });
+  } catch (e) {
+    console.error('Onboarding notification email failed:', e.message);
+  }
+
+  try {
+    await sendSlackNotification(`:bell: *New onboarding request — needs review* — ${record.company_name || 'Unnamed company'}\n\n${text}`);
+  } catch (e) {
+    console.error('Onboarding notification Slack message failed:', e.message);
+  }
 }
 
 // Best-effort confirmation to the submitter themselves, with a self-serve
@@ -469,8 +482,14 @@ export default async function handler(req, res) {
       // The claim-link email (with the actual company code + next steps)
       // was already sent by provisionCompanyFromRequest above — no need
       // for either the "we'll review within one business day" submitter
-      // confirmation or an admin review-needed notification, since there's
-      // nothing left for either of them to do.
+      // confirmation or an admin review-needed email, since there's
+      // nothing left for either of them to do. Still worth a Slack FYI —
+      // it's a new sign-up, just one that didn't need a human click.
+      try {
+        await sendSlackNotification(`:white_check_mark: *New company auto-approved* — ${record.company_name || 'Unnamed company'} (code ${autoApproveResult.companyCode}). No action needed.`);
+      } catch (e) {
+        console.error('Auto-approve Slack notification failed:', e.message);
+      }
       return res.status(200).json({
         ok: true,
         id: requestId,
@@ -481,11 +500,7 @@ export default async function handler(req, res) {
       });
     }
 
-    try {
-      await sendOnboardingNotification({ ...record, skippedUserLines });
-    } catch (e) {
-      console.error('Onboarding notification email failed:', e.message);
-    }
+    await sendOnboardingNotification({ ...record, skippedUserLines });
     try {
       await sendSubmitterConfirmation(req, record, editToken || record.edit_token);
     } catch (e) {

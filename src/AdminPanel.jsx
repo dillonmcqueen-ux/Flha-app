@@ -901,7 +901,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     topbar: { background: C.ink, color: C.white, padding: "20px 22px" },
     body: { padding: "18px 16px 40px", maxWidth: 960, margin: "0 auto" },
     card: { background: C.white, borderRadius: 14, padding: 18, boxShadow: "0 1px 3px #0f172a12" },
-    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: `1.5px solid ${C.line}`, fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC" },
+    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: `1.5px solid ${C.line}`, fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC", color: C.ink },
     label: { display: "block", fontWeight: 700, fontSize: 12, color: C.inkSoft, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
     amberBtn: { background: C.amber, color: C.ink, border: "none", borderRadius: 10, padding: "12px 18px", fontWeight: 800, fontSize: 14, cursor: "pointer" },
     darkBtn: { background: C.ink, color: C.white, border: "none", borderRadius: 10, padding: "12px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer" },
@@ -1972,7 +1972,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 Delete company
               </button>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-                Only companies with no submitted records (FLHAs, incidents, near misses, inspections, toolbox talks, or daily reports) can be deleted.
+                Only companies with no submitted records (FLHAs, incidents, near misses, inspections, toolbox talks, daily reports, or time clock entries) can be deleted.
               </div>
             </div>
           </div>

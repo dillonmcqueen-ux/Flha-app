@@ -390,17 +390,18 @@ export default async function handler(req, res) {
 
     // ── Delete a company ─────────────────────────────────────────────────
     // Fixed to check EVERY record type, not just FLHAs, so a company with
-    // only inspections/toolbox talks/near misses/incidents/daily reports
-    // can no longer be deleted and orphan those records.
+    // only inspections/toolbox talks/near misses/incidents/daily reports/
+    // time clock entries/time clock reports can no longer be deleted and
+    // orphan those records.
     if (action === 'delete_company') {
       const { companyId } = req.body;
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
-      const tables = ['flhas', 'incidents', 'near_misses', 'inspections', 'toolbox_talks', 'daily_reports'];
+      const tables = ['flhas', 'incidents', 'near_misses', 'inspections', 'toolbox_talks', 'daily_reports', 'time_clock_entries', 'timeclock_reports'];
       const counts = {};
       for (const t of tables) {
         const { data, error } = await supabaseAdmin.from(t).select('id').eq('company_id', companyId);
-        if (error) return res.status(500).json({ error: `Could not check ${t.replace('_', ' ')} records.` });
+        if (error) return res.status(500).json({ error: `Could not check ${t.replace(/_/g, ' ')} records.` });
         counts[t] = (data || []).length;
       }
 
@@ -441,21 +442,31 @@ export default async function handler(req, res) {
 
       // No submitted records remain — safe to clean up company-scoped
       // config/settings. Children before parents where FK-constrained.
-      if (inspFormIds.length > 0) {
-        await supabaseAdmin.from('inspection_form_questions').delete().in('form_id', inspFormIds);
-        await supabaseAdmin.from('inspection_forms').delete().eq('company_id', companyId);
+      // onboarding_requests.created_company_id is set on approval (see
+      // server-lib/onboardingApproval.js) and isn't cleared on delete —
+      // null it out first so the FK doesn't block the company row itself.
+      const cleanupSteps = [
+        () => supabaseAdmin.from('onboarding_requests').update({ created_company_id: null }).eq('created_company_id', companyId),
+        ...(inspFormIds.length > 0 ? [
+          () => supabaseAdmin.from('inspection_form_questions').delete().in('form_id', inspFormIds),
+          () => supabaseAdmin.from('inspection_forms').delete().eq('company_id', companyId),
+        ] : []),
+        ...(custFormIds.length > 0 ? [
+          () => supabaseAdmin.from('custom_form_questions').delete().in('form_id', custFormIds),
+          () => supabaseAdmin.from('custom_forms').delete().eq('company_id', companyId),
+        ] : []),
+        () => supabaseAdmin.from('company_document_settings').delete().eq('company_id', companyId),
+        () => supabaseAdmin.from('equipment_reports').delete().eq('company_id', companyId),
+        () => supabaseAdmin.from('roster').delete().eq('company_id', companyId),
+        () => supabaseAdmin.from('sops').delete().eq('company_id', companyId),
+        () => supabaseAdmin.from('sites').delete().eq('company_id', companyId),
+        () => supabaseAdmin.from('equipment').delete().eq('company_id', companyId),
+        () => supabaseAdmin.from('custom_fields').delete().eq('company_id', companyId),
+      ];
+      for (const step of cleanupSteps) {
+        const { error: stepError } = await step();
+        if (stepError) return res.status(500).json({ error: "Couldn't delete: " + stepError.message });
       }
-      if (custFormIds.length > 0) {
-        await supabaseAdmin.from('custom_form_questions').delete().in('form_id', custFormIds);
-        await supabaseAdmin.from('custom_forms').delete().eq('company_id', companyId);
-      }
-      await supabaseAdmin.from('company_document_settings').delete().eq('company_id', companyId);
-      await supabaseAdmin.from('equipment_reports').delete().eq('company_id', companyId);
-      await supabaseAdmin.from('roster').delete().eq('company_id', companyId);
-      await supabaseAdmin.from('sops').delete().eq('company_id', companyId);
-      await supabaseAdmin.from('sites').delete().eq('company_id', companyId);
-      await supabaseAdmin.from('equipment').delete().eq('company_id', companyId);
-      await supabaseAdmin.from('custom_fields').delete().eq('company_id', companyId);
       const { error } = await supabaseAdmin.from('companies').delete().eq('id', companyId);
       if (error) return res.status(500).json({ error: "Couldn't delete: " + error.message });
       return res.status(200).json({ ok: true });
