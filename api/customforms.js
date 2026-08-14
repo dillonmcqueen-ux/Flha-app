@@ -5,6 +5,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -76,6 +78,13 @@ function resolveCompanyId(session, requestedCompanyId) {
 // of the non-custom types to show alongside custom ones.
 const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports', 'maintenance', 'timeclock'];
 
+// Which top-level Dashboard menu group (Safety / Operations / Workforce) a
+// custom form's submissions and analytics show up under.
+const CATEGORIES = ['safety', 'operations', 'workforce'];
+function normalizeCategory(category) {
+  return CATEGORIES.includes(category) ? category : 'operations';
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -84,6 +93,13 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Generated PDF uploads for custom form reports ────────────────────
+    if (action === 'create_upload_url') {
+      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
     // ══ ADMIN: custom form builder ═══════════════════════════════════
 
     if (action === 'list_forms') {
@@ -101,7 +117,7 @@ export default async function handler(req, res) {
 
     if (action === 'create_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { companyId, title, icon, accentColor } = req.body;
+      const { companyId, title, icon, accentColor, category } = req.body;
       if (!companyId || !title?.trim()) return res.status(400).json({ error: 'Missing details.' });
       const { data, error } = await supabaseAdmin
         .from('custom_forms')
@@ -110,6 +126,7 @@ export default async function handler(req, res) {
           title: title.trim(),
           icon: icon || '📄',
           accent_color: accentColor || '#4338CA',
+          category: normalizeCategory(category),
           is_active: true,
         })
         .select()
@@ -127,12 +144,13 @@ export default async function handler(req, res) {
 
     if (action === 'update_form') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
-      const { formId, title, icon, accentColor } = req.body;
+      const { formId, title, icon, accentColor, category } = req.body;
       if (!formId) return res.status(400).json({ error: 'Missing form id.' });
       const updates = {};
       if (title !== undefined) updates.title = title.trim();
       if (icon !== undefined) updates.icon = icon;
       if (accentColor !== undefined) updates.accent_color = accentColor;
+      if (category !== undefined) updates.category = normalizeCategory(category);
       const { error } = await supabaseAdmin.from('custom_forms').update(updates).eq('id', formId);
       if (error) return res.status(500).json({ error: "Couldn't update form." });
       return res.status(200).json({ ok: true });
@@ -235,7 +253,7 @@ export default async function handler(req, res) {
 
       const { data: customForms, error: cfErr } = await supabaseAdmin
         .from('custom_forms')
-        .select('id, title, icon, accent_color')
+        .select('id, title, icon, accent_color, category')
         .eq('company_id', companyId)
         .order('created_at', { ascending: true });
       if (cfErr) return res.status(500).json({ error: 'Could not load custom forms.' });
@@ -253,6 +271,7 @@ export default async function handler(req, res) {
         icon: f.icon,
         isCustom: true,
         formId: f.id,
+        category: normalizeCategory(f.category),
         isActive: settingsMap[`custom_${f.id}`] !== undefined ? settingsMap[`custom_${f.id}`] : true,
       }));
 
@@ -335,7 +354,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, pdfUrl } = req.body;
+      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId } = req.body;
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -349,15 +368,55 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Not allowed for this form.' });
       }
 
+      // Idempotency (docs/scope-offline-capability.md Phase 1) — same
+      // reasoning as api/monthly.js's submit_monthly: this is a multi-step
+      // insert (record + per-question answers), so the unique index on
+      // client_submission_id (see the migration that added this column) is
+      // the real backstop against a race between this check and the insert
+      // below, not just the check by itself.
+      // Scoped by form_id (already verified above to belong to
+      // session.companyId) rather than a bare client_submission_id lookup —
+      // custom_form_records has no company_id column of its own, and an
+      // unscoped check would match across tenants on a (practically
+      // unlikely, but unnecessary to allow) clientSubmissionId collision.
+      if (clientSubmissionId) {
+        const { data: existingRows } = await supabaseAdmin
+          .from('custom_form_records')
+          .select('id')
+          .eq('form_id', formId)
+          .eq('client_submission_id', clientSubmissionId)
+          .limit(1);
+        if (existingRows && existingRows.length > 0) {
+          return res.status(200).json({ id: existingRows[0].id });
+        }
+      }
+
       const { data: record, error: recErr } = await supabaseAdmin
         .from('custom_form_records')
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
           ai_summary: aiSummary || null, pdf_url: pdfUrl || null, status: 'complete',
+          client_submission_id: clientSubmissionId || null,
+          // docs/scope-offline-capability.md Phase 2 — flags a record
+          // submitted without AI-generated content (worker filled it in by
+          // hand because /api/generate-flha was unreachable). Defaults true
+          // (column default) when the client doesn't send it at all.
+          ai_assisted: aiAssisted !== false,
         })
         .select()
         .single();
-      if (recErr) return res.status(500).json({ error: 'Save failed. Try again.' });
+      if (recErr) {
+        if (recErr.code === '23505' && clientSubmissionId) {
+          const { data: raceRows } = await supabaseAdmin
+            .from('custom_form_records')
+            .select('id')
+            .eq('form_id', formId)
+            .eq('client_submission_id', clientSubmissionId)
+            .limit(1);
+          if (raceRows && raceRows.length > 0) return res.status(200).json({ id: raceRows[0].id });
+        }
+        return res.status(500).json({ error: 'Save failed. Try again.' });
+      }
 
       for (const a of answers) {
         await supabaseAdmin.from('custom_form_answers').insert({
@@ -373,7 +432,7 @@ export default async function handler(req, res) {
     if (action === 'list_records') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
 
-      let formsQuery = supabaseAdmin.from('custom_forms').select('id, company_id, title, icon, accent_color');
+      let formsQuery = supabaseAdmin.from('custom_forms').select('id, company_id, title, icon, accent_color, category');
       if (session.role === 'supervisor') formsQuery = formsQuery.eq('company_id', session.companyId);
       const { data: forms, error: formsErr } = await formsQuery;
       if (formsErr) return res.status(500).json({ error: 'Could not load forms.' });
@@ -392,14 +451,15 @@ export default async function handler(req, res) {
       const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
       const formMap = {}; (forms || []).forEach(f => { formMap[f.id] = f; });
 
-      const enriched = await Promise.all((records || []).map(async r => ({
+      const signedRecords = await signRows(supabaseAdmin, records, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const enriched = signedRecords.map(r => ({
         ...r,
-        pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports'),
         site_name: siteMap[r.site_id] || 'Unknown site',
         form_title: formMap[r.form_id]?.title || 'Unknown document',
         form_icon: formMap[r.form_id]?.icon || '📄',
+        form_category: normalizeCategory(formMap[r.form_id]?.category),
         company_id: formMap[r.form_id]?.company_id,
-      })));
+      }));
 
       return res.status(200).json({ records: enriched });
     }

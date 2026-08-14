@@ -1,6 +1,15 @@
 node_modules/
 dist/
 
+# Isolated git worktrees the harness creates for background agents —
+# session-local scaffolding, not application source.
+/.claude/worktrees/
+
+# Env files — never commit real secrets
+.env
+.env.local
+.env.*.local
+
 # Playwright
 /test-results/
 /playwright-report/

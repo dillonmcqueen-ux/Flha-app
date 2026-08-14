@@ -6,6 +6,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -66,6 +67,33 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
   return error ? null : data.signedUrl;
 }
 
+// docs/scope-company-brain.md Phase 3 — client-computed diff between the
+// AI-generated hazard baseline and what actually got submitted. This is
+// untrusted browser input (like `record` itself), so it's re-validated
+// into a fixed shape here rather than trusted as-is before it's stored in
+// company_signals — caps array lengths and coerces every value to a short
+// string, same discipline as the AI-drafting code in
+// server-lib/onboardingDrafting.js caps its own model output.
+function sanitizeAiEditSignal(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const strList = (arr) => (Array.isArray(arr) ? arr : [])
+    .filter((v) => typeof v === 'string' && v.trim())
+    .slice(0, 20)
+    .map((v) => v.trim().slice(0, 200));
+  const riskChanged = (Array.isArray(raw.riskChanged) ? raw.riskChanged : [])
+    .filter((r) => r && typeof r === 'object' && typeof r.hazard === 'string')
+    .slice(0, 20)
+    .map((r) => ({
+      hazard: r.hazard.trim().slice(0, 200),
+      from: typeof r.from === 'string' ? r.from.slice(0, 20) : null,
+      to: typeof r.to === 'string' ? r.to.slice(0, 20) : null,
+    }));
+  const added = strList(raw.added);
+  const removed = strList(raw.removed);
+  if (added.length === 0 && removed.length === 0 && riskChanged.length === 0) return null;
+  return { added, removed, riskChanged };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -102,7 +130,7 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { amendingId, record } = req.body;
+      const { amendingId, record, clientSubmissionId, aiEditSignal } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
 
       if (amendingId) {
@@ -116,13 +144,52 @@ export default async function handler(req, res) {
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
         return res.status(200).json({ id: amendingId });
       } else {
+        // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
+        // offline FLHA gets retried, possibly more than once. Only applies
+        // to a fresh submission, not an amendment (amendments are out of
+        // offline scope — see the scope doc's open question 4). Embedded in
+        // hazards_json rather than a new column, same reasoning as
+        // api/reports.js and api/logs.js.
+        if (clientSubmissionId) {
+          const { data: existingRows } = await supabaseAdmin
+            .from('flhas')
+            .select('id')
+            .eq('company_id', session.companyId)
+            .eq('hazards_json->>client_submission_id', clientSubmissionId)
+            .limit(1);
+          if (existingRows && existingRows.length > 0) {
+            return res.status(200).json({ id: existingRows[0].id });
+          }
+        }
+        const recordToInsert = { ...record };
+        if (clientSubmissionId) {
+          recordToInsert.hazards_json = { ...(recordToInsert.hazards_json || {}), client_submission_id: clientSubmissionId };
+        }
         const { data, error } = await supabaseAdmin
           .from('flhas')
-          .insert({ ...record, company_id: session.companyId })
+          .insert({ ...recordToInsert, company_id: session.companyId })
           .select('id')
           .limit(1);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-        return res.status(200).json({ id: data?.[0]?.id || null });
+        const newId = data?.[0]?.id || null;
+
+        // docs/scope-company-brain.md Phase 3 — best-effort signal capture,
+        // never allowed to affect the FLHA submission itself: the worker's
+        // record is already saved above by the time this runs, and a
+        // failure here is swallowed (logged, not thrown) rather than
+        // turned into a 500 on an otherwise-successful submit.
+        const signal = sanitizeAiEditSignal(aiEditSignal);
+        if (signal && newId) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: 'flha_edit',
+            source_id: String(newId),
+            signal_json: signal,
+          });
+          if (signalErr) console.error('company_signals insert failed for FLHA', newId, signalErr.message);
+        }
+
+        return res.status(200).json({ id: newId });
       }
     }
 
@@ -136,7 +203,7 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      const flhas = await Promise.all((data || []).map(async f => ({ ...f, pdf_url: await signStoredUrl(f.pdf_url, 'flha-reports') })));
+      const flhas = await signRows(supabaseAdmin, data, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
       return res.status(200).json({ flhas });
     }
 

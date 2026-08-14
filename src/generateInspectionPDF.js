@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 
 async function loadJsPDF() {
@@ -35,8 +35,25 @@ function drawChecklistCompact(doc, items, { margin, contentW, y, W }) {
   y += 4;
 
   let lastCategory = null;
+  let lastUnit = null;
   items.forEach((it) => {
-    if (y > 273) { doc.addPage(); y = 20; }
+    if (y > 270) { doc.addPage(); y = 20; }
+    // A trailer attached to a tow unit gets its own checklist appended,
+    // tagged by unit — call that out with its own banner so a reader can't
+    // mistake a trailer defect for a defect on the tow vehicle, or vice
+    // versa, the same way the on-screen checklist separates them.
+    if (it.unit && it.unit !== lastUnit) {
+      if (y > 265) { doc.addPage(); y = 20; }
+      const isTrailer = it.unit === "trailer";
+      doc.setFillColor(...(isTrailer ? [237, 233, 254] : [219, 234, 254]));
+      doc.roundedRect(margin, y - 4, contentW, 7, 1.5, 1.5, "F");
+      doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
+      doc.setTextColor(...(isTrailer ? [91, 33, 182] : [30, 64, 175]));
+      doc.text(`${isTrailer ? "TRAILER" : "TRUCK / TOW VEHICLE"}${it.unitLabel ? ` — ${it.unitLabel}` : ""}`, margin + 3, y);
+      y += 6.5;
+      lastUnit = it.unit;
+      lastCategory = null; // force the category header to redraw under the new unit
+    }
     if (it.category && it.category !== lastCategory) {
       doc.setFontSize(7); doc.setFont("helvetica", "bold"); doc.setTextColor(148, 163, 184);
       doc.text(it.category.toUpperCase(), margin, y);
@@ -92,25 +109,43 @@ function drawDeficienciesSection(doc, items, { margin, contentW, y, W }) {
     return y + 16;
   }
 
-  flagged
-    .sort((a, b) => (a.condition === "Defective" ? 0 : 1) - (b.condition === "Defective" ? 0 : 1))
-    .forEach((it) => {
-      const isDef = it.condition === "Defective";
-      const col = isDef ? [220, 38, 38] : [217, 119, 6];
-      const bg = isDef ? [254, 242, 242] : [255, 251, 235];
-      const border = isDef ? [252, 165, 165] : [252, 211, 77];
-      const noteLines = doc.splitTextToSize(it.note || "No note provided.", contentW - 10);
-      const boxH = 9 + noteLines.length * 4.2;
-      if (y + boxH > 280) { doc.addPage(); y = 20; }
+  // A trailer's deficiencies must never read as the tow vehicle's (or vice
+  // versa), so group by unit when items carry that tag — a plain,
+  // non-combined inspection (no unit tags at all) renders exactly as before.
+  const anyUnitTagged = flagged.some(it => it.unit);
+  const groups = anyUnitTagged
+    ? [...new Set(flagged.map(it => it.unit || "—"))].map(u => ({ unit: u, list: flagged.filter(it => (it.unit || "—") === u) }))
+    : [{ unit: null, list: flagged }];
 
-      doc.setFillColor(...bg); doc.setDrawColor(...border); doc.setLineWidth(0.4);
-      doc.roundedRect(margin, y, contentW, boxH, 1.5, 1.5, "FD");
-      doc.setTextColor(...col); doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
-      doc.text(`${isDef ? "DEFECTIVE" : "MONITOR"} — ${it.item}`, margin + 3, y + 5.5, { maxWidth: contentW - 6 });
-      doc.setTextColor(71, 85, 105); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-      doc.text(noteLines, margin + 3, y + 10);
-      y += boxH + 3;
-    });
+  groups.forEach(({ unit, list }) => {
+    if (unit) {
+      if (y > 270) { doc.addPage(); y = 20; }
+      const isTrailer = unit === "trailer";
+      doc.setFontSize(7.5); doc.setFont("helvetica", "bold");
+      doc.setTextColor(...(isTrailer ? [91, 33, 182] : [30, 64, 175]));
+      doc.text(`${isTrailer ? "TRAILER" : "TRUCK / TOW VEHICLE"}${list[0]?.unitLabel ? ` — ${list[0].unitLabel}` : ""}`, margin, y);
+      y += 5;
+    }
+    list
+      .sort((a, b) => (a.condition === "Defective" ? 0 : 1) - (b.condition === "Defective" ? 0 : 1))
+      .forEach((it) => {
+        const isDef = it.condition === "Defective";
+        const col = isDef ? [220, 38, 38] : [217, 119, 6];
+        const bg = isDef ? [254, 242, 242] : [255, 251, 235];
+        const border = isDef ? [252, 165, 165] : [252, 211, 77];
+        const noteLines = doc.splitTextToSize(it.note || "No note provided.", contentW - 10);
+        const boxH = 9 + noteLines.length * 4.2;
+        if (y + boxH > 280) { doc.addPage(); y = 20; }
+
+        doc.setFillColor(...bg); doc.setDrawColor(...border); doc.setLineWidth(0.4);
+        doc.roundedRect(margin, y, contentW, boxH, 1.5, 1.5, "FD");
+        doc.setTextColor(...col); doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
+        doc.text(`${isDef ? "DEFECTIVE" : "MONITOR"} — ${it.item}`, margin + 3, y + 5.5, { maxWidth: contentW - 6 });
+        doc.setTextColor(71, 85, 105); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+        doc.text(noteLines, margin + 3, y + 10);
+        y += boxH + 3;
+      });
+  });
 
   return y + 3;
 }
@@ -135,7 +170,7 @@ function drawInfoBox(doc, { margin, contentW, y, W, rows }) {
 
 export async function generateAndUploadInspection({
   equipmentLabel, workerName, companyName, companyLogo, results, signatureDataUrl,
-  tripType = "pretrip", startReading, endReading, readingUnit, hasChanges, changeCondition, changeNotes, linkedPretrip,
+  tripType = "pretrip", startReading, endReading, readingUnit, hasChanges, changeCondition, changeNotes, linkedPretrip, token,
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -155,6 +190,9 @@ export async function generateAndUploadInspection({
 
   const isPost = tripType === "posttrip";
   const pretripItems = isPost ? (linkedPretrip?.results_json?.items || []) : [];
+  const attachedTrailerLabel = isPost
+    ? linkedPretrip?.results_json?.attachedTrailer?.label
+    : results?.attachedTrailer?.label;
 
   // header
   doc.setFillColor(12, 74, 110); doc.rect(0, 0, W, 30, "F");
@@ -171,7 +209,9 @@ export async function generateAndUploadInspection({
     y = drawInfoBox(doc, {
       margin, contentW, y, W,
       rows: [
-        [{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }],
+        attachedTrailerLabel
+          ? [{ label: "TOW VEHICLE", value: equipmentLabel }, { label: "TRAILER", value: attachedTrailerLabel }, { label: "COMPANY", value: companyName }]
+          : [{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }],
         [
           { label: "PRE-TRIP INSPECTOR", value: linkedPretrip ? `${linkedPretrip.worker_name || "—"} · ${linkedPretrip.created_at ? new Date(linkedPretrip.created_at).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" }) : ""}` : "—" },
           { label: "POST-TRIP TECHNICIAN", value: `${workerName || "—"} · ${new Date().toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" })}` },
@@ -181,7 +221,12 @@ export async function generateAndUploadInspection({
   } else {
     y = drawInfoBox(doc, {
       margin, contentW, y, W,
-      rows: [[{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }, { label: "INSPECTOR", value: workerName }]],
+      rows: attachedTrailerLabel
+        ? [
+            [{ label: "TOW VEHICLE", value: equipmentLabel }, { label: "TRAILER", value: attachedTrailerLabel }],
+            [{ label: "COMPANY", value: companyName }, { label: "INSPECTOR", value: workerName }],
+          ]
+        : [[{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }, { label: "INSPECTOR", value: workerName }]],
     });
   }
 
@@ -274,8 +319,14 @@ export async function generateAndUploadInspection({
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `INSPECTION_${isPost ? "POST" : "PRE"}_${companyName || "co"}_${workerName || "w"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { console.error("inspection pdf upload failed", error.message); return null; }
-  const { data } = supabase.storage.from("flha-reports").getPublicUrl(filename);
-  return data?.publicUrl || null;
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/logs", action: "create_upload_url", token,
+      bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (e) {
+    console.error("inspection pdf upload failed", e.message);
+    return null;
+  }
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
@@ -55,6 +56,17 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [savingCodes, setSavingCodes] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
+  // docs/scope-company-brain.md Phase 6 — the "Brain" tab: the live
+  // company_profiles row (editable) plus a read-only company_signals
+  // trending view. brainProfile holds what's on the server (including
+  // status/hazard_emphasis/last_summarized_at, none of which this tab
+  // edits); brainForm holds the editable copy bound to the form inputs.
+  const [brainProfile, setBrainProfile] = useState(null);
+  const [brainForm, setBrainForm] = useState({ industryInference: "", equipmentSummary: "", terminologyNotes: "" });
+  const [brainTrends, setBrainTrends] = useState(null);
+  const [brainLoading, setBrainLoading] = useState(false);
+  const [savingBrain, setSavingBrain] = useState(false);
+
   const [sopText, setSopText] = useState("");
   const [existingSops, setExistingSops] = useState([]);
 
@@ -69,6 +81,47 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   // ── document active/deactivated toggles ────────────────────
   const [docSettings, setDocSettings] = useState([]);
   const [loadingDocSettings, setLoadingDocSettings] = useState(false);
+
+  // docs/scope-company-brain.md Phase 6 — the signal-trends aggregation is
+  // a heavier query (up to 500 rows scanned server-side) than the other
+  // eagerly-loaded manage-tab data, so it's loaded lazily, only when the
+  // admin actually opens the Brain tab (see goToManageTab).
+  const loadBrainTrends = async (companyId) => {
+    setBrainLoading(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_company_signal_trends", token, companyId }),
+      });
+      const data = await res.json();
+      setBrainTrends(res.ok ? data : null);
+    } catch (e) { setBrainTrends(null); }
+    setBrainLoading(false);
+  };
+
+  const saveBrainProfile = async () => {
+    setSavingBrain(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_company_profile", token, companyId: activeId, ...brainForm }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't save company profile."); setSavingBrain(false); return; }
+      setMsg("Company profile saved.");
+      setBrainProfile(prev => ({
+        ...(prev || {}),
+        status: "confirmed",
+        industry_inference: brainForm.industryInference,
+        equipment_summary: brainForm.equipmentSummary,
+        terminology_notes: brainForm.terminologyNotes,
+      }));
+    } catch (e) {
+      setMsg("Couldn't save company profile.");
+    }
+    setSavingBrain(false);
+  };
 
   const loadDocSettings = async (companyId) => {
     setLoadingDocSettings(true);
@@ -273,18 +326,41 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setLoadingOnboarding(false);
   };
 
-  const updateOnboardingStatus = async (id, status) => {
-    setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+  const updateOnboardingStatus = async (id, status, note) => {
+    setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, status, ...(note !== undefined ? { admin_note: note } : {}) } : r));
     try {
       await fetch("/api/admin", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_onboarding_status", token, id, status }),
+        body: JSON.stringify({ action: "update_onboarding_status", token, id, status, note }),
       });
     } catch (e) { /* optimistic update already applied; next reload will reconcile */ }
   };
 
+  const [needsInfoNoteFor, setNeedsInfoNoteFor] = useState(null);
+  const [needsInfoNote, setNeedsInfoNote] = useState("");
+  const sendNeedsInfo = async (id) => {
+    await updateOnboardingStatus(id, "needs_info", needsInfoNote.trim());
+    setNeedsInfoNoteFor(null);
+    setNeedsInfoNote("");
+  };
+
   const [approvingId, setApprovingId] = useState(null);
-  const [approvalResults, setApprovalResults] = useState({}); // { [requestId]: { companyCode, roster, skippedUserLines, sitesCreated } }
+  const [approvalResults, setApprovalResults] = useState({}); // { [requestId]: { companyCode, rosterCreated, skippedUserLines, sitesCreated, claimEmailSent } }
+  const [claimLinks, setClaimLinks] = useState({}); // { [companyId]: url }
+
+  const fetchClaimLink = async (companyId) => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_claim_link", token, companyId }),
+      });
+      const data = await res.json();
+      if (res.ok) setClaimLinks(prev => ({ ...prev, [companyId]: data.claimUrl }));
+      else setMsg(data.error || "Couldn't load the claim link.");
+    } catch (e) {
+      setMsg("Couldn't load the claim link.");
+    }
+  };
 
   const approveOnboardingRequest = async (id) => {
     setApprovingId(id);
@@ -485,6 +561,26 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { setFieldList([]); }
     setNewField({ doc_type: "flha", label: "", field_type: "text", options: "", required: false });
 
+    // Company brain profile (docs/scope-company-brain.md Phase 6) — cheap,
+    // so loaded eagerly like the sections above; the heavier signal-trends
+    // aggregation is loaded lazily only if the admin opens the Brain tab
+    // (see goToManageTab).
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_company_profile", token, companyId: c.id }),
+      });
+      const data = await res.json();
+      const p = res.ok ? data.profile : null;
+      setBrainProfile(p);
+      setBrainForm({
+        industryInference: p?.industry_inference || "",
+        equipmentSummary: p?.equipment_summary || "",
+        terminologyNotes: p?.terminology_notes || "",
+      });
+    } catch (e) { setBrainProfile(null); }
+    setBrainTrends(null);
+
     setManageTab("profile");
     setSopText(""); setMsg("");
     setView("manage");
@@ -538,12 +634,17 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setUploadingLogo(true); setMsg("");
     const ext = file.name.split(".").pop();
     const filename = `logo_${activeId}_${Date.now()}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-    const { error } = await supabase.storage.from("company-logos").upload(filename, file, { contentType: file.type, upsert: true });
-    if (error) { setMsg("Logo upload failed: " + error.message); setUploadingLogo(false); return; }
-    const { data } = supabase.storage.from("company-logos").getPublicUrl(filename);
-    setProfile(p => ({ ...p, logo_url: data?.publicUrl || "" }));
+    try {
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/admin", action: "create_logo_upload_url", token,
+        bucket: "company-logos", filename, file, contentType: file.type,
+      });
+      setProfile(p => ({ ...p, logo_url: publicUrl }));
+      setMsg("Logo uploaded — tap Save profile to keep it");
+    } catch (e) {
+      setMsg("Logo upload failed: " + e.message);
+    }
     setUploadingLogo(false);
-    setMsg("Logo uploaded — tap Save profile to keep it");
   };
 
   const addSops = async () => {
@@ -1027,8 +1128,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   // ═══ ONBOARDING REQUESTS ═════════════════════════════════
   if (view === "onboardingRequests") {
-    const STATUS_LABEL = { new: "New", in_progress: "In progress", done: "Done" };
-    const STATUS_COLOR = { new: C.amberDark, in_progress: "#2563EB", done: C.green };
+    const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
+    const STATUS_COLOR = { new: C.amberDark, in_progress: "#2563EB", needs_info: "#B91C1C", done: C.green };
     return (
       <div style={st.wrap}>
         <div style={st.topbar}>
@@ -1057,17 +1158,95 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
                     </div>
                   </div>
-                  <select
-                    value={r.status}
-                    onChange={e => updateOnboardingStatus(r.id, e.target.value)}
-                    style={{
-                      padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
-                      color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer",
-                    }}
-                  >
-                    {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
-                  </select>
+                  {r.status === "auto_approved" ? (
+                    // Auto-approved rows never join the manual queue (the
+                    // "new"-status badge count on the console home screen
+                    // only counts status === "new") — this is an
+                    // informational badge, not an interactive control,
+                    // since update_onboarding_status doesn't accept
+                    // "auto_approved" as a settable value.
+                    <span style={{
+                      padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                      color: C.green, background: "#F0FDF4", border: "1.5px solid #BBF7D0",
+                    }}>
+                      ⚡ Auto-approved
+                    </span>
+                  ) : (
+                    <select
+                      value={r.status}
+                      onChange={e => {
+                        if (e.target.value === "needs_info") { setNeedsInfoNoteFor(r.id); setNeedsInfoNote(r.admin_note || ""); return; }
+                        updateOnboardingStatus(r.id, e.target.value);
+                      }}
+                      style={{
+                        padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
+                        color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer",
+                      }}
+                    >
+                      {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                    </select>
+                  )}
                 </div>
+
+                {/* At-a-glance approve/reject context: plan tier from the Stripe
+                    checkout, and requested seats vs. that plan's cap — the two
+                    things most likely to need a second look before approving. */}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                  {r.plan_tier && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#EEF2FF", color: "#3730A3" }}>
+                      {r.plan_tier === "advanced" ? "Advanced plan" : "Basic plan"}
+                    </span>
+                  )}
+                  {r.stripe_customer_id ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F0FDF4", color: "#166534" }}>✓ Stripe checkout linked</span>
+                  ) : (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FEF2F2", color: "#991B1B" }}>No Stripe checkout linked</span>
+                  )}
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999,
+                    background: r.overSeatCap ? "#FEF2F2" : "#F1F5F9", color: r.overSeatCap ? "#991B1B" : C.inkSoft,
+                  }}>
+                    {r.seatCount} seat{r.seatCount === 1 ? "" : "s"} requested{r.seatCap ? ` / ${r.seatCap} cap` : ""}{r.overSeatCap ? " — over cap" : ""}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: C.inkSoft }}>
+                    {r.siteCount} site{r.siteCount === 1 ? "" : "s"}
+                  </span>
+                  {r.sop_file_urls && r.sop_file_urls.length > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: C.inkSoft }}>
+                      {r.sop_file_urls.length} SOP file{r.sop_file_urls.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  {r.custom_request && r.custom_request.trim() && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FFFBEB", color: "#92400E" }}>
+                      Custom request — needs bespoke work
+                    </span>
+                  )}
+                </div>
+
+                {r.skippedUserLines && r.skippedUserLines.length > 0 && (
+                  <div style={{ fontSize: 12, color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                    Couldn't parse as "Name — role": {r.skippedUserLines.join("; ")}
+                  </div>
+                )}
+
+                {needsInfoNoteFor === r.id && (
+                  <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 6 }}>What needs fixing? The submitter will see this and can fix + resubmit themselves.</div>
+                    <textarea
+                      style={{ ...st.input, minHeight: 60, width: "100%", boxSizing: "border-box" }}
+                      value={needsInfoNote}
+                      onChange={e => setNeedsInfoNote(e.target.value)}
+                      placeholder="e.g. A few of your user lines didn't parse — please use “Name — worker” or “Name — supervisor”."
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button style={st.amberBtn} onClick={() => sendNeedsInfo(r.id)}>Send</button>
+                      <button style={{ ...st.ghost, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => { setNeedsInfoNoteFor(null); setNeedsInfoNote(""); }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+                {r.status === "needs_info" && r.admin_note && needsInfoNoteFor !== r.id && (
+                  <div style={{ fontSize: 12, color: "#991B1B", marginBottom: 10 }}>Waiting on submitter: "{r.admin_note}"</div>
+                )}
 
                 <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 10, lineHeight: 1.6 }}>
                   <strong style={{ color: C.ink }}>{r.contact_name || "—"}</strong> · {r.contact_email || "—"} · {r.contact_phone || "—"}
@@ -1112,25 +1291,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                         {approvalResults[r.id].sitesCreated > 0 && (
                           <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].sitesCreated} site(s) added.</div>
                         )}
-                        {approvalResults[r.id].roster.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 8, marginBottom: 4 }}>
-                              Roster PINs — shown once, copy these now
-                            </div>
-                            {approvalResults[r.id].roster.map((p, i) => (
-                              <div key={i} style={{ fontSize: 13, color: C.ink, fontFamily: "monospace" }}>
-                                {p.name} ({p.role}) — PIN <strong>{p.pin}</strong>
-                              </div>
-                            ))}
-                          </>
+                        {approvalResults[r.id].rosterCreated > 0 && (
+                          <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].rosterCreated} roster member(s) added.</div>
                         )}
-                        {approvalResults[r.id].skippedUserLines.length > 0 && (
+                        {approvalResults[r.id].skippedUserLines?.length > 0 && (
                           <div style={{ fontSize: 12, color: C.amberDark, marginTop: 8 }}>
-                            Couldn't parse (add manually): {approvalResults[r.id].skippedUserLines.join("; ")}
+                            Couldn't parse (add manually from the Roster tab): {approvalResults[r.id].skippedUserLines.join("; ")}
                           </div>
                         )}
+                        <div style={{ fontSize: 12, color: "#166534", marginTop: 8, fontWeight: 700 }}>
+                          {approvalResults[r.id].claimEmailSent
+                            ? "A claim link was emailed to the contact — they'll assign their own roster PINs and review the AI-drafted equipment/SOPs there."
+                            : "No contact email on file — get the claim link below and share it with them yourself."}
+                        </div>
+                        {!approvalResults[r.id].claimEmailSent && (
+                          claimLinks[approvalResults[r.id].companyId] ? (
+                            <div style={{ fontSize: 12, color: C.ink, marginTop: 6, wordBreak: "break-all", fontFamily: "monospace", background: C.white, borderRadius: 6, padding: 8 }}>
+                              {claimLinks[approvalResults[r.id].companyId]}
+                            </div>
+                          ) : (
+                            <button style={{ ...st.ghost, marginTop: 6, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => fetchClaimLink(approvalResults[r.id].companyId)}>Get claim link</button>
+                          )
+                        )}
                         <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-                          Equipment wasn't auto-added — use the Units / equipment list above with the company's Equipment tab.
+                          Nothing was emailed in plaintext — PINs, equipment, and SOPs are only ever set by the contact on that page.
                         </div>
                       </div>
                     ) : (
@@ -1193,7 +1377,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   // ═══ MANAGE ═══════════════════════════════════════════════
   const MANAGE_CATEGORIES = [
-    { key: "company", label: "🏢 Company Setup", tabs: ["profile", "sops", "sites", "equipment"] },
+    { key: "company", label: "🏢 Company Setup", tabs: ["profile", "sops", "sites", "equipment", "brain"] },
     { key: "documents", label: "📄 Documents", tabs: ["fields", "monthly", "custom", "forms"] },
     { key: "people", label: "👤 People & Access", tabs: ["roster", "codes"] },
   ];
@@ -1204,6 +1388,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setMsg("");
     if (tab === "forms") loadDocSettings(activeId);
     if (tab === "roster") { setRevealedPin(null); setAllPinsResult(null); loadRoster(activeId); }
+    if (tab === "brain") loadBrainTrends(activeId);
   };
 
   const cnt = counts[activeId] || { flhas: 0, sops: 0 };
@@ -1245,6 +1430,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
               <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
               <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
+              <button style={st.tab(manageTab === "brain")} onClick={() => goToManageTab("brain")}>🧠 Brain</button>
             </>
           )}
           {activeManageCategory === "documents" && (
@@ -1380,6 +1566,84 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {manageTab === "brain" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink }}>🧠 Company profile</div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                  background: brainProfile?.status === "confirmed" ? "#DCFCE7" : "#FEF3C7",
+                  color: brainProfile?.status === "confirmed" ? "#166534" : "#92400E",
+                }}>{brainProfile?.status === "confirmed" ? "Confirmed" : "Draft — AI-generated, not yet reviewed"}</span>
+              </div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                What FORA has learned about this company — inferred at onboarding, and refined over time from this company's own FLHA edits, toolbox talks, incidents, and near misses. Feeds into document generation as additional context; edit anything below to correct it.
+                {brainProfile?.last_summarized_at && <> Last refreshed from activity: {new Date(brainProfile.last_summarized_at).toLocaleString()}.</>}
+              </div>
+              <label style={st.label}>Industry</label>
+              <input style={st.input} placeholder="e.g. earthworks / heavy civil" value={brainForm.industryInference} onChange={e => setBrainForm(p => ({ ...p, industryInference: e.target.value }))} />
+              <label style={st.label}>Equipment summary</label>
+              <textarea style={{ ...st.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Fleet is mostly excavators and dozers for surface earthworks." value={brainForm.equipmentSummary} onChange={e => setBrainForm(p => ({ ...p, equipmentSummary: e.target.value }))} />
+              <label style={st.label}>Terminology notes</label>
+              <textarea style={{ ...st.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Company calls a spotter a 'signaller'." value={brainForm.terminologyNotes} onChange={e => setBrainForm(p => ({ ...p, terminologyNotes: e.target.value }))} />
+              <button style={{ ...st.darkBtn, width: "100%", marginTop: 6 }} onClick={saveBrainProfile} disabled={savingBrain}>{savingBrain ? "Saving…" : "Save company profile"}</button>
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Hazard emphasis</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                Auto-generated from this company's own signal history (not directly editable here). Context only for document generation — never lowers a risk rating or skips a required hazard category.
+              </div>
+              {(brainProfile?.hazard_emphasis || []).length === 0 ? (
+                <div style={{ color: C.muted, padding: "10px 0", textAlign: "center" }}>Nothing learned yet — needs more activity from this company first.</div>
+              ) : (
+                brainProfile.hazard_emphasis.map((e, i) => (
+                  <div key={i} style={{ padding: "8px 0", borderBottom: i < brainProfile.hazard_emphasis.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>{e.category}</div>
+                    {e.note && <div style={{ fontSize: 12, color: C.inkSoft }}>{e.note}</div>}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Activity trends</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Recurring patterns across this company's last {brainTrends?.totalSignals ?? "…"} logged signals (FLHA edits, toolbox talk topics, incident/near-miss categories).</div>
+              {brainLoading ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>Loading…</div>
+              ) : !brainTrends || brainTrends.totalSignals === 0 ? (
+                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No activity logged yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.flha_edit}</div><div style={{ fontSize: 11, color: C.muted }}>FLHA edits</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.toolbox_talk}</div><div style={{ fontSize: 11, color: C.muted }}>Toolbox talks</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.incident}</div><div style={{ fontSize: 11, color: C.muted }}>Incidents</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.near_miss}</div><div style={{ fontSize: 11, color: C.muted }}>Near misses</div></div>
+                  </div>
+                  {[
+                    ["Hazards most often added by workers", brainTrends.topAddedHazards],
+                    ["Hazards most often removed by workers", brainTrends.topRemovedHazards],
+                    ["Common toolbox talk topics", brainTrends.topToolboxTopics],
+                    ["Common incident categories", brainTrends.topIncidentCategories],
+                    ["Recent near-miss involvement (free text — often unique per report)", brainTrends.topNearMissInvolved],
+                  ].filter(([, list]) => list.length > 0).map(([label, list]) => (
+                    <div key={label}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>{label}</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {list.map((item) => (
+                          <span key={item.name} style={{ fontSize: 12, background: C.bg, border: `1px solid ${C.line}`, borderRadius: 999, padding: "3px 10px", color: C.ink }}>{item.name} × {item.count}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

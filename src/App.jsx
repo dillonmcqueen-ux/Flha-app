@@ -1,5 +1,65 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes a fresh FLHA submission (PDF generation + upload + the final POST)
+// from plain input data — used both by a live online saveFLHA() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Amendments
+// (amendingId) are deliberately not covered here — they're out of offline
+// scope, see docs/scope-offline-capability.md's open question 4. Throws on
+// any failure so the caller can tell success from failure; never touches UI
+// state itself. Exported so WorkerMenu.jsx can drain this form's queue
+// without needing the FLHA component mounted.
+export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest) {
+  const { flha, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal } = payload;
+  const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
+  const newStatus = hasExtreme ? "pending_approval" : "complete";
+
+  const pdfUrl = await generateAndUploadFLHA({
+    flha, workerName, jobSite, signName: workerName, companyName, signatureDataUrl, companyLogo,
+    amendedNote: null, pendingApproval: newStatus === "pending_approval", crewSignatures: crew,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/flhas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        aiEditSignal: aiEditSignal || null,
+        record: {
+          worker_name: workerName,
+          job_site: jobSite,
+          task_description: taskDescription,
+          hazards_json: flha,
+          signed_by: workerName,
+          pdf_url: pdfUrl || null,
+          status: newStatus,
+          worker_signature: signatureDataUrl || null,
+          crew_signatures: crew,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 // Fallback used only if Supabase has no data yet (e.g. first run)
 const FALLBACK_SOPS = {
@@ -20,10 +80,51 @@ const SOP_STOPWORDS = new Set([
   "from", "must", "when", "each", "such", "their", "has", "have",
 ]);
 
+// Common construction/safety word families that should count as the same
+// concept even when the exact word differs (e.g. a task that says "digging
+// a ditch" should match an SOP titled "Excavation Procedures").
+const SOP_SYNONYM_GROUPS = [
+  ["excavat", "trench", "dig", "ditch"],
+  ["fenc", "barricad", "barrier"],
+  ["fall", "height"],
+  ["lockout", "tagout", "loto", "isolat", "energiz", "energis"],
+  ["confined", "enclosed"],
+  ["electric", "power", "wire", "cable"],
+  ["traffic", "vehicle", "flagg", "roadway"],
+  ["crane", "lift", "rig", "hoist", "sling"],
+  ["manual", "handl", "ergonom"],
+  ["weather", "environment", "cold", "heat", "rain"],
+  ["scaffold", "ladder", "platform"],
+  ["chemical", "hazmat", "spill"],
+];
+const SOP_SYNONYM_MAP = new Map();
+SOP_SYNONYM_GROUPS.forEach((group, idx) => {
+  group.forEach(term => SOP_SYNONYM_MAP.set(term, `syn${idx}`));
+});
+
+// Light stemmer so "digging"/"dig", "fencing"/"fence" and
+// "excavation"/"excavating" line up without needing an exact word match.
+function stem(word) {
+  if (word.length > 6 && word.endsWith("ation")) return word.slice(0, -5);
+  if (word.length > 6 && word.endsWith("ing")) return word.slice(0, -3);
+  if (word.length > 5 && word.endsWith("ed")) return word.slice(0, -2);
+  if (word.length > 5 && word.endsWith("es")) return word.slice(0, -2);
+  if (word.length > 4 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+function canonicalize(word) {
+  const stemmed = stem(word);
+  for (const [term, tag] of SOP_SYNONYM_MAP) {
+    if (word.startsWith(term) || stemmed.startsWith(term)) return tag;
+  }
+  return stemmed;
+}
+
 function tokenize(text) {
-  return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
-    w => w.length > 2 && !SOP_STOPWORDS.has(w)
-  );
+  return (text.toLowerCase().match(/[a-z0-9]+/g) || [])
+    .filter(w => w.length > 2 && !SOP_STOPWORDS.has(w))
+    .map(canonicalize);
 }
 
 function scorePolicyRelevance(policy, taskWordsSet) {
@@ -39,6 +140,129 @@ function selectRelevantPolicies(policies, taskText, maxCount = 25) {
   const scored = policies.map((p, i) => ({ p, i, score: scorePolicyRelevance(p, taskWords) }));
   scored.sort((a, b) => b.score - a.score || a.i - b.i);
   return scored.slice(0, maxCount).sort((a, b) => a.i - b.i).map(s => s.p);
+}
+
+// ── Deterministic safety net for boilerplate hazards ──────
+// The AI keeps re-adding certain SOP-driven hazard categories (working
+// alone, weather, overhead/underground utilities) even when the prompt
+// explicitly says not to, because those SOPs are sitting right there in
+// its context. Prompt wording alone hasn't reliably stopped this, so
+// strip these categories out after the fact unless the worker's own
+// words actually indicate the condition — this can't be talked out of
+// working by any amount of prompt tuning.
+const UNGROUNDED_HAZARD_RULES = [
+  {
+    // \w* after a stem lets it match inflected forms ("isolation", "isolated")
+    // — a bare \b right after the stem would block those, since the next
+    // letter is still a word character and never counts as a boundary.
+    textMatch: /\b(alone|isolat\w*|remote location|unsupervised)\b/i,
+    taskMatch: /\b(alone|by myself|on my own|no one else|nobody else|unsupervised|remote site|remote location|no cell service|no signal|no radio)\b/i,
+  },
+  {
+    textMatch: /\b(weather|rain\w*|wind\w*|lightning|storm\w*|snow\w*|heat\w*|cold\w*|temperature|low light)\b/i,
+    taskMatch: /\b(rain\w*|wind\w*|storm\w*|lightning|snow\w*|hot out|cold\w*|heat wave|freezing|humid|weather|dark out|nighttime|after dark)\b/i,
+  },
+  {
+    textMatch: /\boverhead (power |electrical )?lines?\b/i,
+    taskMatch: /\b(overhead|power line|hydro line|electrical line|wire|wires|pole|poles|aerial|transmission line)\b/i,
+  },
+  {
+    textMatch: /\b(underground utilit\w*|buried (pipe|cable|line)\w*|utility strike\w*)\b/i,
+    taskMatch: /\b(underground|buried|utilit\w*|pipe\w*|cable\w*|gas line|water line|conduit|call.?before.?you.?dig)\b/i,
+  },
+];
+
+function isUngroundedText(text, lowerTask) {
+  return UNGROUNDED_HAZARD_RULES.some(
+    rule => rule.textMatch.test(text || "") && !rule.taskMatch.test(lowerTask)
+  );
+}
+
+function stripUngroundedHazards(hazards, taskText) {
+  const lowerTask = (taskText || "").toLowerCase();
+  // Check the cited SOP text too, not just the hazard's own wording — the
+  // model can reword a hazard to dodge these keywords while still citing
+  // the exact same working-alone/weather/utility SOP as its justification.
+  return (hazards || []).filter(h => !isUngroundedText(`${h.hazard || ""} ${h.control || ""} ${h.sopRef || ""}`, lowerTask));
+}
+
+function stripUngroundedAlerts(alerts, taskText) {
+  const lowerTask = (taskText || "").toLowerCase();
+  return (alerts || []).filter(a => !isUngroundedText(a, lowerTask));
+}
+
+// General backstop, independent of topic: a hedge is the model's own tell
+// that it isn't sure the condition applies, so the item shouldn't be in the
+// output at all (only optionally as a note) — this catches SOPs the four
+// named categories above don't, like "face shield if driving pins," without
+// needing a new named category every time a new company SOP triggers it.
+const HEDGE_PATTERN = /\(if [^)]*\)|\bif (present|any|applicable|performing|using|required|needed|it applies)\b|\bwhen (performing|using)\b|\bshould (it|they|this) (exist|apply|occur)\b/i;
+
+function stripHedged(items, getText) {
+  return (items || []).filter(item => !HEDGE_PATTERN.test(getText(item) || ""));
+}
+
+// The model doesn't reliably include these baseline items on its own even
+// when told to, so guarantee them here rather than relying on prompt
+// compliance — same reasoning as the exclusion filters above, just for
+// inclusion instead.
+const BASELINE_HAZARD_CHECKS = [
+  {
+    present: /\b(fit(ness)? for duty|fatigue|impair(ed|ment)?)\b/i,
+    hazard: {
+      hazard: "Fitness for duty",
+      risk: "Low",
+      control: "Confirm fitness for duty before starting — well-rested, not under the influence of drugs or alcohol, and free of any illness or medication that could affect safe performance of this task. Do not begin work if fatigued, ill, or impaired.",
+      sopRef: null,
+    },
+  },
+  {
+    present: /\b(muster point|emergency response|assembly point|evacuation (plan|route))\b/i,
+    hazard: {
+      hazard: "Muster point and emergency response plan awareness",
+      risk: "Low",
+      control: "Confirm the site's muster/assembly point and emergency response plan with the supervisor before starting work, confirm 911/emergency services availability, and ensure a working communication method (two-way radio, cell phone, or land line) is on hand.",
+      sopRef: null,
+    },
+  },
+];
+
+function ensureBaselineHazards(hazards, taskLabel) {
+  const result = [...(hazards || [])];
+  BASELINE_HAZARD_CHECKS.forEach(({ present, hazard }) => {
+    const covered = result.some(h => present.test(`${h.hazard || ""} ${h.control || ""}`));
+    if (!covered) result.push({ ...hazard, task: taskLabel });
+  });
+  return result;
+}
+
+// docs/scope-company-brain.md Phase 3 — diffs the AI-generated hazard
+// baseline against what actually got submitted, keyed on hazard name
+// (case-insensitive), so a company_signals row only gets written for a
+// *substantive* edit: a hazard added, removed, or its risk level changed.
+// Wording-only edits (e.g. a reworded control with the same hazard name
+// and risk) are deliberately invisible to this diff — not a real signal.
+// Returns null when there's nothing worth recording (no baseline to
+// compare against, or no substantive difference), so the caller can skip
+// sending anything to the server at all.
+function computeFlhaEditSignal(baseline, finalHazards) {
+  if (!baseline || baseline.length === 0) return null;
+  const norm = h => (h.hazard || "").trim().toLowerCase();
+  const baseMap = new Map(baseline.filter(h => norm(h)).map(h => [norm(h), h.risk]));
+  const finalMap = new Map((finalHazards || []).filter(h => norm(h)).map(h => [norm(h), h.risk]));
+
+  const removed = [...baseMap.keys()].filter(k => !finalMap.has(k));
+  const added = [...finalMap.keys()].filter(k => !baseMap.has(k));
+  const riskChanged = [...baseMap.keys()]
+    .filter(k => finalMap.has(k) && finalMap.get(k) !== baseMap.get(k))
+    .map(k => ({ hazard: k, from: baseMap.get(k), to: finalMap.get(k) }));
+
+  if (removed.length === 0 && added.length === 0 && riskChanged.length === 0) return null;
+  return {
+    added: added.slice(0, 20),
+    removed: removed.slice(0, 20),
+    riskChanged: riskChanged.slice(0, 20),
+  };
 }
 
 function Badge({ text, color = "blue" }) {
@@ -103,6 +327,10 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [companyId, setCompanyId] = useState(forcedCompanyId);
   const [companyLogo, setCompanyLogo] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null until loaded, and stays
+  // null for a company with no profile yet (cold start); buildCompanyContextBlock
+  // handles null gracefully so the prompt doesn't need to branch on it.
+  const [companyProfile, setCompanyProfile] = useState(null);
 
   // Load SOPs/sites/custom fields for forcedCompanyId (from login) on first
   // render. Company name comes from the login session (propCompanyName) —
@@ -159,6 +387,12 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
         console.error("custom fields read error:", e.message);
       }
 
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort
+      // (fetchCompanyProfile never throws): a company with no profile yet
+      // just gets null, which buildCompanyContextBlock treats as "nothing
+      // to add".
+      setCompanyProfile(await fetchCompanyProfile(token, forcedCompanyId));
+
       // SOPs — via protected endpoint
       try {
         const sopsRes = await fetch("/api/companydata", {
@@ -201,8 +435,17 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [flha, setFlha] = useState(null);
+  // docs/scope-company-brain.md Phase 3 — snapshot of {hazard, risk} pairs
+  // exactly as the AI generated them, captured before any worker edit.
+  // Compared against the final submitted hazards at save time to detect a
+  // *substantive* edit (hazard added/removed, or risk level changed) for
+  // company_signals. A ref, not state: it must survive across renders
+  // without itself triggering one, and nothing in the UI reads it directly.
+  const aiBaselineRef = useRef([]);
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [savingFLHA, setSavingFLHA] = useState(false);
   const [sopsOpen, setSopsOpen] = useState(false);
   const [signed, setSigned] = useState(false);
   const [signName, setSignName] = useState("");
@@ -328,6 +571,40 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [resumeError, setResumeError] = useState("");
   const [resumeChoices, setResumeChoices] = useState([]);
 
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Restores an in-progress, not-yet-submitted FLHA on mount, then
+  // debounced-saves it to this device's localStorage as it changes — so a
+  // dropped connection, a crash, or an accidental navigation doesn't cost
+  // the worker their typed task description or AI-generated hazards.
+  // Deliberately excludes the signature canvas (hasSignature/signed) and
+  // the amend flow (amendingId) — see the scope doc for why.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!forcedCompanyId) return;
+    const draft = loadDraft("flha", forcedCompanyId);
+    if (draft && draft.step && draft.step !== "done" && draft.step !== "company") {
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.jobSite) setJobSite(draft.jobSite);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.taskDesc) setTaskDesc(draft.taskDesc);
+      if (draft.transcript) setTranscript(draft.transcript);
+      if (draft.customValues) setCustomValues(draft.customValues);
+      if (draft.flha) setFlha(draft.flha);
+      if (draft.crew) setCrew(draft.crew);
+      if (draft.signName) setSignName(draft.signName);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forcedCompanyId]);
+
+  useDraftAutosave(
+    "flha",
+    forcedCompanyId,
+    { step, workerName, jobSite, siteMode, taskDesc, transcript, customValues, flha, crew, signName },
+    draftRestored && !!forcedCompanyId && !amendingId
+  );
+
   const resumeTodaysFLHA = async () => {
     setResumeError("");
     setResumeChoices([]);
@@ -388,9 +665,30 @@ INSTRUCTIONS:
 - Read the task description carefully. Only flag hazards that are directly present or likely given what the worker described.
 - Do NOT include generic hazards that have nothing to do with this task.
 - If the worker mentions excavation, flag excavation hazards. If they don't mention heights, don't flag fall hazards.
+- Do NOT confuse the "excavator" (a piece of equipment — same as a dozer, loader, or grader) with an "excavation" (a dug hole, trench, or pit with walls that could collapse). Operating an excavator to strip topsoil, grade, load material, or clean up spoil is SURFACE work, not excavation work, even though the machine's name contains "excavat-". Only cite excavation/trenching/shoring SOPs (cave-in, wall collapse, depth-based shoring requirements) when the task actually describes digging a hole, trench, or pit that a worker could fall into or that could collapse on someone — not merely because the machine operating is called an excavator.
+- MANY company SOPs are phrased as a conditional procedure: "when doing X, do Y", "before X, confirm Y", "if performing X, wear/use Y". This is a GENERAL pattern, not specific to any one topic — it applies just as much to a pin-driving/hammer SOP or a hot-work SOP as it does to an overhead-power-line or underground-utility SOP. The fact that a conditional SOP appears in the pre-filtered list above does NOT mean its condition (X) is happening on this task. Before citing ANY such SOP — in a hazard's sopRef, in sopAlerts, or in ppeRequired — check: does the task description actually describe doing X? If not, the SOP is not triggered, full stop. This applies regardless of topic: overhead lines, underground utilities, hammer/punch/pin-driving, hot work, confined space, working at height, chemical handling, etc. — the topic doesn't matter, only whether the task actually describes that specific activity or condition.
+  - If X isn't actually described in the task: do NOT add a hazard row for it, do NOT add it to sopAlerts, and do NOT add its associated gear to ppeRequired — not even in hedged/conditional form. Banned patterns anywhere in the output (hazard names, sopAlerts strings, ppeRequired items): "(if present)", "if any", "if applicable", "if performing", "if using", "when using", "should they exist" — a hedge is proof the condition isn't actually confirmed, which means it doesn't belong in the output at all, only optionally as one line in additionalNotes.
+  - Example 1: task = "installing fencing around an excavated hole" with no mention of power lines. WRONG: a hazard row titled "Contact with overhead power lines (if present near hole)". RIGHT: no overhead-power-line hazard row, no sopAlerts entry for it.
+  - Example 2: task = "operating an excavator to strip topsoil" with no mention of pins, hammers, punches, or repair work. WRONG: citing a "wear a face shield when driving pins with a hammer/punch" SOP in sopAlerts or adding "Face shield (if performing hydraulic pin-driving)" to ppeRequired. RIGHT: that SOP is not mentioned anywhere in the output, because nothing about pin-driving is happening on this task.
 - For sopAlerts and sopRef, only cite a policy if it is SPECIFICALLY and clearly triggered by a concrete detail in the task description (a named piece of equipment, a specific hazard type, or a specific procedure) — not because it's broadly applicable to almost any task. Do NOT default to citing general catch-all policies (e.g. a blanket "PPE is mandatory" or "conduct an FLHA before starting" policy) as the reason for a hazard's control unless the hazard specifically calls for PPE or a procedure beyond the baseline. Every citation should feel like it was picked FOR this task, not reused from the last one.
-- For ppeRequired, only list PPE actually needed for this specific task.
-- Identify all hazards genuinely relevant to this task — typically 4-8. Include the everyday ones that belong on a thorough FLHA even when they are Low risk, such as weather/environmental conditions, communication/coordination, housekeeping, manual handling, and site access — as long as they actually relate to this task. The strict rating rules above are about HOW you rate a hazard's severity, NOT about excluding lower-risk hazards. A good FLHA captures the full picture: a few higher-risk items plus the routine Low/Medium ones.
+- For ppeRequired, only list PPE actually needed for this specific task, using CSA-approved terminology where applicable (e.g. "CSA-approved eye protection", "CSA-approved foot protection", "CSA-approved head protection", "CSA-approved hearing protection", "CSA-approved respiratory protection", "High-visibility clothing") rather than generic brand-neutral phrasing.
+- Use this standard hazard-category taxonomy as a scanning checklist so nothing gets missed — for each category below, ask whether it genuinely applies to this task per the inclusion tests further down, and include it if so (do not skip a category just because it's not the most dramatic one, but do not force an item that doesn't apply either):
+  - Ergonomic: congested work area, parts of body in the line of fire, repetitive motion, over-extension, static work position, pinch points.
+  - Environmental: housekeeping, dust/mist/fumes, extreme temperatures, other workers in the area, SDS/chemical safety review, biohazardous materials, communication, noise, weather conditions, working alone, unknown materials, wildlife, equipment or traffic in the area.
+  - Access/egress: ladders, elevated work platforms, evacuation routes.
+  - Overhead: harness/lanyard inspection, barricades and signage, falling objects, overhead utility lines.
+  - Equipment: struck-by, mechanical failure, communication with equipment operators, cuts/abrasion/laceration, vehicle traffic, burns, fire, line-of-sight/visual contact, pinch points/crushing, mounting/dismounting, hot work.
+  - Electrical: lockout/tagout, working on or near energized equipment, electrical cords/tools.
+  This taxonomy is a memory aid for coverage, not a license to override the grounding rules above or below — the circumstantial categories (working alone, weather, overhead lines, underground utilities) still need an actual signal in the task description per the EXCEPTION rule below, and everything else still needs to pass test (a) or (b) below.
+- Identify all hazards genuinely relevant to this task — aim for a THOROUGH assessment, typically 10-15 hazards, not a minimal one. A short list is not a sign of quality here; a real FLHA covers the whole workday around the task, including the routine Low-risk items, not just the one or two most dramatic risks. Low-risk hazards are just as important to document as High ones — do not trim them for brevity. A hazard belongs on the list if ANY of these is true:
+  (a) It's inherent to the actual work, equipment, or environment described — a competent safety officer would expect it just from knowing what the worker is doing, even if the worker didn't use the specific word for it and even if no company SOP covers it. Example: a task description that says "operate an excavator and dozer" foreseeably involves restricted cab visibility/blind spots, 3-point contact when mounting/dismounting the machine, mechanical breakdown or hydraulic/fuel leaks and spill response, and working near other equipment or personnel on an active site — include hazards like these even with no matching SOP (sopRef: null is completely normal and expected for this kind of hazard — do not skip a real hazard just because you have nothing to cite).
+  (b) It's tied to a specific circumstantial detail the worker actually described (a named piece of equipment, a specific procedure, a stated site condition).
+  (c) It's a standard baseline hazard that belongs on virtually every field FLHA regardless of the specific task — worker fitness for duty (fatigue, illness, medication, impairment); awareness of the site's muster point and emergency response plan, including confirming 911/emergency services availability; and having a working communication method on hand (two-way radio, cell phone, or land line, whichever the task or site implies) are always worth including (typically Low risk) even when nothing in the task description calls them out specifically. Unlike (a) and (b), these don't need to be "inherent to the described work" — they're baseline readiness items for anyone on site.
+  Do NOT pad the list with hazards that belong to a DIFFERENT kind of job than the one described (e.g. don't add fall-from-height hazards to ground-level work) just to hit a count. The test for (a)/(b) is "would this hazard actually occur doing the described work" — not "is there a literal keyword match in the task text," and not "is there an SOP to cite."
+  - EXCEPTION — a few hazard categories depend on a circumstance that may or may not exist today, so they need an actual signal in the task description before you add them (a keyword match IS required here, unlike the general case above):
+    - Do NOT add a "working alone" / isolation / communication-check hazard unless the task explicitly says the worker is alone, unsupervised, or in a remote/no-signal location. The mere absence of any mention of coworkers is NOT evidence of solo work.
+    - Do NOT add a weather/environmental hazard unless the task explicitly mentions a weather, temperature, precipitation, wind, or lighting/visibility condition. "End of day" or a location name alone does not imply weather or darkness.
+    - Do NOT add an overhead-power-line, underground-utility, or excavation-collapse hazard, or infer a hazard purely from the type of site named (e.g. "gas station," "roadway," "warehouse"), unless the task gives a concrete indication of that specific condition — see the rules above.
 - Risk levels — rate the RESIDUAL risk (the risk that REMAINS after accounting for the safeguards and controls the worker has already described). Apply STRICTLY:
   - CRITICAL RULE: If the worker has described a control that properly manages a hazard (e.g. "using a trench box" for excavation collapse, "locked out the equipment" for energized machinery, "using a fall arrest harness" for heights), then the residual risk is REDUCED — usually to High or Medium — NOT Extreme. A well-controlled hazard is not Extreme.
   - "Extreme" = even WITH normal controls in place, a single mistake or equipment failure could realistically be CATASTROPHIC or FATAL, with almost no margin for error. Reserve ONLY for inherently life-threatening work where the danger persists despite safeguards: working on an energized high-voltage source, entry into a confined space with a hazardous atmosphere, work on a LIVE (un-isolated) pressurized water/gas main, a critical/complex crane lift over people, or hot work in a confirmed explosive atmosphere. Extreme is rare. If a proper safeguard is described, it is almost never Extreme.
@@ -399,7 +697,7 @@ INSTRUCTIONS:
   - "Low" = minor risk.
 - Read the task description for controls the worker already mentioned, and lower the risk accordingly. Do not rate the raw hazard — rate what could still realistically happen given their approach.
 - If a hazard is already well-controlled by the worker's described approach, rate it Lower.
-
+${buildCompanyContextBlock(companyProfile, { includeHazardEmphasis: true })}
 Respond ONLY with a valid JSON object (no markdown, no backticks):
 {
   "taskSummary": "one sentence summary of what the worker is doing",
@@ -431,12 +729,17 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       }
       const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1));
 
-      const tagged = (parsed.hazards || []).map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+      const unhedgedHazards = stripHedged(parsed.hazards, h => `${h.hazard || ""} ${h.control || ""}`);
+      const groundedHazards = stripUngroundedHazards(unhedgedHazards, cleanTranscript);
+      const tagged = groundedHazards.map(h => ({ ...h, task: parsed.taskSummary || taskLabel }));
+      const groundedAlerts = stripUngroundedAlerts(stripHedged(parsed.sopAlerts, a => a), cleanTranscript);
+      const groundedPPE = stripHedged(parsed.ppeRequired, p => p);
 
       if (addingTask && flha) {
+        aiBaselineRef.current = [...aiBaselineRef.current, ...tagged.map(h => ({ hazard: h.hazard, risk: h.risk }))];
         setFlha(prev => {
-          const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...(parsed.ppeRequired || [])]));
-          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...(parsed.sopAlerts || [])]));
+          const mergedPPE = Array.from(new Set([...(prev.ppeRequired || []), ...groundedPPE]));
+          const mergedAlerts = Array.from(new Set([...(prev.sopAlerts || []), ...groundedAlerts]));
           const existingTagged = (prev.hazards || []).map(h => h.task ? h : { ...h, task: prev.taskSummary || "Task 1" });
           return {
             ...prev,
@@ -444,11 +747,14 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             ppeRequired: mergedPPE,
             sopAlerts: mergedAlerts,
             additionalNotes: prev.additionalNotes,
+            ai_assisted: true,
           };
         });
         setAddingTask(false);
       } else {
-        setFlha({ ...parsed, hazards: tagged });
+        const withBaseline = ensureBaselineHazards(tagged, parsed.taskSummary || taskLabel);
+        aiBaselineRef.current = withBaseline.map(h => ({ hazard: h.hazard, risk: h.risk }));
+        setFlha({ ...parsed, hazards: withBaseline, sopAlerts: groundedAlerts, ppeRequired: groundedPPE, ai_assisted: true });
       }
       setStep("review");
       setTranscript("");
@@ -460,6 +766,30 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     setLoading(false);
   };
 
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — the review
+  // step already lets a worker add/edit/remove hazards by hand ("+ Add
+  // hazard"), so the fallback just needs to get them there without an AI
+  // call. Adding a task to an existing FLHA (addingTask) needs no new
+  // state — the worker adds it manually via the same UI. A fresh FLHA gets
+  // an empty skeleton to fill in. Either way ai_assisted flips to false so
+  // a supervisor knows to double-check this one — even when only the most
+  // recent added task skipped AI, since the flag covers the whole record.
+  const continueWithoutAI = () => {
+    if (addingTask && flha) {
+      setFlha(prev => ({ ...prev, ai_assisted: false }));
+      setAddingTask(false);
+    } else {
+      const cleanTranscript = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
+      aiBaselineRef.current = [];
+      setFlha({ taskSummary: cleanTranscript, hazards: [], sopAlerts: [], ppeRequired: [], additionalNotes: null, ai_assisted: false });
+    }
+    setGenError(false);
+    setStep("review");
+    setTranscript("");
+    setTaskDesc("");
+  };
+
   const startAddTask = () => {
     setAddingTask(true);
     setTranscript("");
@@ -468,7 +798,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
   };
 
   const saveFLHA = async () => {
-    if (!flha) return;
+    if (!flha) return false;
+    setSavingFLHA(true);
+    setSaveError(false);
 
     const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
     const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
@@ -483,22 +815,26 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       ? { ...flha, customFields: customEntries }
       : (flha.customFields ? flha : { ...flha });
 
-    const pdfUrl = await generateAndUploadFLHA({
-      flha: flhaWithCustom,
-      workerName,
-      jobSite,
-      signName: workerName,
-      companyName,
-      signatureDataUrl,
-      companyLogo,
-      amendedNote,
-      pendingApproval: newStatus === "pending_approval",
-      crewSignatures: crew,
-    });
+    // Amendments are out of offline scope (docs/scope-offline-capability.md
+    // open question 4 — a conflict is possible if the record also changed
+    // server-side while offline) so they keep the original direct-fetch
+    // path, no queueing.
+    if (amendingId) {
+      try {
+        const pdfUrl = await generateAndUploadFLHA({
+          flha: flhaWithCustom,
+          workerName,
+          jobSite,
+          signName: workerName,
+          companyName,
+          signatureDataUrl,
+          companyLogo,
+          amendedNote,
+          pendingApproval: newStatus === "pending_approval",
+          crewSignatures: crew,
+        });
 
-    try {
-      if (amendingId) {
-        await fetch("/api/flhas", {
+        const res = await fetch("/api/flhas", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -515,31 +851,65 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             },
           }),
         });
-      } else {
-        await fetch("/api/flhas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "submit",
-            token,
-            record: {
-              worker_name: workerName,
-              job_site: jobSite,
-              task_description: transcript.replace(/\[live\].*/s, "").trim() || taskDesc,
-              hazards_json: flhaWithCustom,
-              signed_by: workerName,
-              pdf_url: pdfUrl || null,
-              status: newStatus,
-              worker_signature: signatureDataUrl || null,
-              crew_signatures: crew,
-            },
-          }),
-        });
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          console.error("FLHA save failed:", res.status, errBody);
+          setSaveError(true);
+          setSavingFLHA(false);
+          return false;
+        }
+      } catch (e) {
+        console.error("FLHA save failed:", e);
+        setSaveError(true);
+        setSavingFLHA(false);
+        return false;
       }
-    } catch (e) {
-      console.error("FLHA save failed:", e);
+      setSavingFLHA(false);
+      setPendingApproval(newStatus === "pending_approval");
+      clearDraft("flha", forcedCompanyId);
+      return true;
     }
-    setPendingApproval(newStatus === "pending_approval");
+
+    // Fresh submission (docs/scope-offline-capability.md Phase 1) — a
+    // network-level failure gets queued and retried automatically once
+    // back online instead of silently discarding the FLHA; a real
+    // server-side rejection shows an error and lets the worker retry
+    // manually, same as the FLHA form already did before this pass.
+    const taskDescription = transcript.replace(/\[live\].*/s, "").trim() || taskDesc;
+    const clientSubmissionId = newClientSubmissionId();
+    // docs/scope-company-brain.md Phase 3 — only meaningful when the whole
+    // record actually went through AI (ai_assisted), since a mixed record
+    // (one task AI-generated, another added manually via continueWithoutAI)
+    // can't be cleanly attributed to "the AI's version" as a single baseline.
+    const aiEditSignal = flha.ai_assisted ? computeFlhaEditSignal(aiBaselineRef.current, flha.hazards) : null;
+    const payload = { flha: flhaWithCustom, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("flha", clientSubmissionId, payload);
+      setSavingFLHA(false);
+      clearDraft("flha", forcedCompanyId);
+      return "queued";
+    }
+
+    try {
+      await resubmitFLHA(payload, clientSubmissionId, token);
+      setSavingFLHA(false);
+      setPendingApproval(newStatus === "pending_approval");
+      clearDraft("flha", forcedCompanyId);
+      return true;
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("FLHA save failed:", e.message);
+        setSaveError(true);
+        setSavingFLHA(false);
+        return false;
+      }
+      await enqueueSubmission("flha", clientSubmissionId, payload);
+      setSavingFLHA(false);
+      clearDraft("flha", forcedCompanyId);
+      return "queued";
+    }
   };
 
   const riskColor = r => r === "Extreme" ? "extreme" : r === "High" ? "red" : r === "Medium" ? "amber" : "green";
@@ -784,7 +1154,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
           {genError && (
             <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Something went wrong generating the assessment. Please check your connection and try again.
+              Something went wrong generating the assessment. Please check your connection and try again, or continue and add hazards yourself.
             </div>
           )}
 
@@ -795,6 +1165,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             {loading ? "⏳ Analyzing against SOPs…" : addingTask ? "✅ Add this task" : "✅ Generate FLHA"}
           </button>
 
+          {genError && (
+            <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={continueWithoutAI}>
+              Continue without AI — I'll add hazards myself
+            </button>
+          )}
+
           <button style={{ ...styles.btn("#F3F4F6", "#374151"), marginTop: 10 }} onClick={() => setStep("company")}>
             ← Back
           </button>
@@ -803,6 +1179,11 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
       {step === "review" && flha && (
         <>
+          {flha.ai_assisted === false && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-reviewed — this hazard list was not cross-referenced against your company's SOPs. Check it carefully before submitting.
+            </div>
+          )}
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
@@ -1019,23 +1400,55 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             <button style={styles.btn((crewName.trim() && crewHasSig) ? "#1E3A5F" : "#94A3B8")} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}>+ Add This Crew Member</button>
           </div>
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this FLHA — it has NOT reached your supervisor's dashboard. Check your connection and try again.
+            </div>
+          )}
+
           {amendingId ? (
             <button style={styles.btn(signed ? "#16A34A" : "#F97316")}
-              disabled={signed}
-              onClick={() => { setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-              {signed ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
+              disabled={signed && !saveError}
+              onClick={async () => {
+                setSigned(true);
+                const result = await saveFLHA();
+                if (result === true) setTimeout(() => setStep("done"), 600);
+                else if (result === "queued") setStep("queued");
+                else setSigned(false);
+              }}>
+              {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Saved" : `Confirm & Update FLHA${crew.length > 0 ? ` (+${crew.length} crew)` : ""}`}
             </button>
           ) : (
             <>
               <button style={styles.btn(signed ? "#16A34A" : hasSignature ? "#F97316" : "#9CA3AF")}
-                disabled={!hasSignature || signed}
-                onClick={() => { setSignName(workerName); setSigned(true); saveFLHA(); setTimeout(() => setStep("done"), 600); }}>
-                {signed ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
+                disabled={!hasSignature || (signed && !saveError)}
+                onClick={async () => {
+                  setSignName(workerName);
+                  setSigned(true);
+                  const result = await saveFLHA();
+                  if (result === true) setTimeout(() => setStep("done"), 600);
+                  else if (result === "queued") setStep("queued");
+                  else setSigned(false);
+                }}>
+                {savingFLHA ? "Saving…" : signed && !saveError ? "✓ Signed" : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
               </button>
               <button style={styles.ghost} onClick={() => setStep("review")}>← Back to review</button>
             </>
           )}
         </>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={styles.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E3A5F", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 8 }}>{jobSite} · {workerName}</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 20 }}>This FLHA is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            {onLogout && <button style={styles.btn("#F97316")} onClick={onLogout}>Back to menu</button>}
+          </div>
+        </div>
       )}
 
       {step === "done" && (
@@ -1068,7 +1481,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center"
             }}>View Dashboard →</a>
-            <button style={styles.btn("#1E3A5F")} onClick={() => { setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.btn("#1E3A5F")} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>

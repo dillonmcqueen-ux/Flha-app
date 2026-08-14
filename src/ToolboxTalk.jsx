@@ -1,11 +1,63 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (PDF upload + the final POST) from plain
+// input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Only covers
+// the "new talk" flow, not sign-late (see the matching note on the
+// autosave restore logic above — sign-late updates an existing record
+// fetched live, it isn't a fresh queueable submission).
+export async function resubmitToolboxTalk(payload, clientSubmissionId, tokenForRequest) {
+  const { presenter, meetingType, site, topic, points, attendees, customFields, companyName, companyLogo } = payload;
+  const pdfUrl = await generateAndUploadToolbox({
+    presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "toolbox",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          presenter_name: presenter,
+          meeting_type: meetingType,
+          site,
+          topic,
+          talking_points_json: { ...points, customFields },
+          attendees_json: attendees,
+          pdf_url: pdfUrl || null,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const MEETING_TYPES = ["Pre-Job", "Daily", "Weekly", "Monthly", "After Incident"];
 
 export default function ToolboxTalk({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("choice"); // choice | setup | topic | review | signoff | findtalk | latesign | done
+  const [step, setStep] = useState("choice"); // choice | setup | topic | manualtalk | review | signoff | findtalk | latesign | done
   const [presenter, setPresenter] = useState(loginUserName);
   const [meetingType, setMeetingType] = useState("Pre-Job");
   const [site, setSite] = useState("");
@@ -14,8 +66,12 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const [topic, setTopic] = useState("");
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
-  const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[] }
+  const [points, setPoints] = useState(null); // { summary, sections: [{heading, bullets:[]}], discussion:[], ai_assisted }
+  const [manualNotes, setManualNotes] = useState(""); // docs/scope-offline-capability.md Phase 2 — plain fallback notes when AI is unreachable
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "toolbox", token);
 
   // Attendees
@@ -26,6 +82,7 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const drawingRef = useRef(false);
   const [presenterSigned, setPresenterSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Sign-later — for crew who missed the talk and are coming back to sign
   const [openTalks, setOpenTalks] = useState([]);
@@ -63,9 +120,44 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Only the "new talk" flow (setup/topic/review/signoff) is restorable —
+  // "Sign Late" depends on fetching a specific existing record live
+  // (lateSignTarget), which isn't something to cache locally.
+  const RESTORABLE_STEPS = ["setup", "topic", "manualtalk", "review", "signoff"];
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("toolbox", companyId);
+    if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
+      if (draft.presenter) setPresenter(draft.presenter);
+      if (draft.meetingType) setMeetingType(draft.meetingType);
+      if (draft.site) setSite(draft.site);
+      if (draft.siteMode) setSiteMode(draft.siteMode);
+      if (draft.topic) setTopic(draft.topic);
+      if (draft.points) setPoints(draft.points);
+      if (draft.manualNotes) setManualNotes(draft.manualNotes);
+      if (draft.attendees) setAttendees(draft.attendees);
+      if (draft.presenterSigned) setPresenterSigned(draft.presenterSigned);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "toolbox",
+    companyId,
+    { step, presenter, meetingType, site, siteMode, topic, points, manualNotes, attendees, presenterSigned },
+    draftRestored && !!companyId && RESTORABLE_STEPS.includes(step)
+  );
 
   // ── signature pad ────────────────────────────────────────
   const getPos = (e) => {
@@ -92,7 +184,7 @@ INSTRUCTIONS:
 - Cover: the key hazards for this task, safe work practices, and how to prevent injuries/incidents.
 - Include a few discussion prompts — open questions the presenter can ask the crew to encourage participation.
 - This is a talk, not a document to read silently. Write for the ear.
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
   "summary": "one sentence describing what this toolbox talk covers",
@@ -113,12 +205,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       const a = text.indexOf("{"), b = text.lastIndexOf("}");
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
-      setPoints(parsed);
+      setPoints({ ...parsed, ai_assisted: true });
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: unlike the other 6 forms,
+  // ToolboxTalk's review step renders generated content as plain text with
+  // no edit path at all — a presenter can't currently fix a single word of
+  // an AI talk, let alone build one from scratch by hand. Rather than
+  // retrofit that whole screen, the fallback is a single plain-text step:
+  // type your talking points/notes, presented from memory instead of a
+  // structured AI breakdown — which is how a real presenter runs a talk
+  // without AI help anyway.
+  const goManualTalk = () => {
+    setGenError(false);
+    setStep("manualtalk");
+  };
+
+  const confirmManualTalk = () => {
+    setPoints({ summary: manualNotes.trim(), sections: [], discussion: [], ai_assisted: false });
+    setStep("signoff");
   };
 
   const addAttendee = () => {
@@ -183,6 +293,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         companyName: company?.name || "", companyLogo: company?.logo_url || "",
         points: record.talking_points_json || {}, attendees: updatedAttendees,
         customFields: record.talking_points_json?.customFields || [],
+        token,
       });
     } catch (e) { /* keep the existing pdf if regeneration fails */ }
 
@@ -202,35 +313,40 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setStep("done");
   };
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the talk; a real server-side rejection shows an error and
+  // lets the presenter retry manually.
   const submit = async () => {
-    setSaving(true);
-    const pdfUrl = await generateAndUploadToolbox({
-      presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields: cf.entries(),
-    });
-    try {
-      await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "toolbox",
-          action: "submit",
-          token,
-          record: {
-            presenter_name: presenter,
-            meeting_type: meetingType,
-            site,
-            topic,
-            talking_points_json: { ...points, customFields: cf.entries() },
-            attendees_json: attendees,
-            pdf_url: pdfUrl || null,
-          },
-        }),
-      });
-    } catch (e) {
-      console.error("Toolbox talk save failed:", e);
+    setSaving(true); setSaveError(false);
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { presenter, meetingType, site, topic, points, attendees, customFields: cf.entries(), companyName, companyLogo };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("toolbox", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("toolbox", companyId);
+      setStep("queued");
+      return;
     }
-    setSaving(false);
-    setStep("done");
+
+    try {
+      await resubmitToolboxTalk(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("toolbox", companyId);
+      setStep("done");
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Toolbox talk save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+      } else {
+        await enqueueSubmission("toolbox", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("toolbox", companyId);
+        setStep("queued");
+      }
+    }
   };
 
   const s = {
@@ -313,11 +429,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What's the talk about?</div>
           <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the task, job, or safety focus. The AI will generate talking points for a 5-10 minute talk.</div>
           <textarea style={{ ...s.input, minHeight: 120, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Today we're pouring concrete near the road — I want to cover traffic control, silica dust, and manual lifting" value={topic} onChange={e => setTopic(e.target.value)} />
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the talk. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the talk. Check your connection and try again, or run it from your own notes.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : topic.trim() ? "#7C3AED" : "#94A3B8")} disabled={loading || !topic.trim()} onClick={generateTalk}>
             {loading ? "⏳ Preparing talk…" : "Generate Talking Points"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={goManualTalk}>Continue without AI — I'll present from my own notes</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
+        </div>
+      )}
+
+      {/* MANUAL TALK — docs/scope-offline-capability.md Phase 2 fallback when AI is unreachable */}
+      {step === "manualtalk" && (
+        <div style={s.card}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Your talking points</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>No AI structuring this time — jot down what you plan to cover. This becomes the record of the talk.</div>
+          <textarea style={{ ...s.input, minHeight: 160, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Reviewed traffic control plan, flaggers positioned before any lane closure. Silica dust — wet-cutting only, respirators on hand. No manual lifting over 50 lbs without a second person." value={manualNotes} onChange={e => setManualNotes(e.target.value)} />
+          <button style={s.btn(manualNotes.trim() ? "#7C3AED" : "#94A3B8")} disabled={!manualNotes.trim()} onClick={confirmManualTalk}>Continue to Sign-Off →</button>
+          <button style={s.ghost} onClick={() => setStep("topic")}>← Back</button>
         </div>
       )}
 
@@ -412,9 +546,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             )}
           </div>
 
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this talk. Check your connection and try again.
+            </div>
+          )}
           {presenterSigned && (
             <button style={s.btn(saving ? "#94A3B8" : "#16A34A")} disabled={saving} onClick={submit}>
-              {saving ? "Saving…" : `Finish & Save (${attendees.length} signed)`}
+              {saving ? "Saving…" : saveError ? "Try Again" : `Finish & Save (${attendees.length} signed)`}
             </button>
           )}
         </>
@@ -479,6 +618,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {signingLate ? "Saving…" : "Sign & Submit"}
           </button>
           <button style={s.ghost} onClick={() => setStep("findtalk")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This talk is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#7C3AED")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

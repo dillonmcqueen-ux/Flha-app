@@ -115,30 +115,33 @@ function TrendBars({ buckets, series, emptyLabel = "Not enough data yet." }) {
   );
 }
 
-export default function AnalyticsPanel({
+// ── Safety Analytics — FLHAs, toolbox talks, near misses, incidents,
+// corrective actions, and monthly site inspections. Mirrors the Safety
+// menu group and generateSafetyAnalyticsPDF.js's section split exactly,
+// so the on-screen tab and its PDF export always agree on what counts as
+// "safety" data.
+export function SafetyAnalyticsPanel({
   tier, companyName,
-  flhas = [], inspections = [], toolbox = [], nearMisses = [], incidents = [],
-  daily = [], monthlyRecords = [], monthlyActions = [], customDocs = [], maintenanceStatus = [],
+  flhas = [], toolbox = [], nearMisses = [], incidents = [],
+  daily = [], monthlyRecords = [], monthlyActions = [], customDocs = [],
 }) {
   const isAdvanced = tier === "advanced";
 
   const sev = severityBreakdown(nearMisses, incidents);
   const ratio = nearMissIncidentRatio(nearMisses, incidents);
-  const maintenance = maintenanceSummary(maintenanceStatus);
   const backlog = reviewBacklog(nearMisses, incidents);
   const riskRate = highRiskFlhaRate(flhas);
-  const equipStats = equipmentIssueStats(inspections);
   const fieldSites = fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents);
   const openActionsCount = monthlyActions.filter(a => a.status !== "resolved").length;
   const attendance = toolboxAvgAttendance(toolbox);
+  const passRate = monthlyPassRate(monthlyRecords);
 
   const severityItems = ["Critical", "High", "Medium", "Low"].map(k => ({ label: k, count: sev[k], color: SEV_COLOR[k] }));
-  const topEquipment = equipStats.slice(0, 5).map(e => ({ label: e.label, count: e.defective + e.monitor }));
   const topFieldSites = fieldSites.slice(0, 5).map(s => ({ label: s.site, count: s.nearMisses + s.incidents }));
 
   return (
     <div>
-      <SectionCard title={`📊 Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
+      <SectionCard title={`🦺 Safety Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <StatTile label="Total FLHAs" value={flhas.length} />
           <StatTile label="Incidents" value={incidents.length} tone={incidents.length > 0 ? "bad" : "good"} />
@@ -146,16 +149,13 @@ export default function AnalyticsPanel({
           <StatTile label="Near-Miss : Incident" value={ratio.ratioLabel} />
           <StatTile label="Open Corrective Actions" value={openActionsCount} tone={openActionsCount > 0 ? "warn" : "good"} />
           <StatTile label="Toolbox Talks" value={toolbox.length} sub={attendance.count > 0 ? `avg ${attendance.avg} attendees` : null} />
-          <StatTile label="Daily Reports" value={daily.length} />
+          <StatTile label="Monthly Site Inspections" value={monthlyRecords.length} />
+          <StatTile label="Custom Safety Docs" value={customDocs.length} />
         </div>
       </SectionCard>
 
       <SectionCard title="Severity Mix" subtitle="Near misses + incidents combined, by potential/actual severity">
         <RankedBarList items={severityItems} emptyLabel="No near misses or incidents reported yet." />
-      </SectionCard>
-
-      <SectionCard title="Top Equipment Issues" subtitle="Pretrip inspections flagged Defective or Monitor">
-        <RankedBarList items={topEquipment} emptyLabel="No equipment issues flagged yet." barColor="#B45309" />
       </SectionCard>
 
       <SectionCard title="Top Sites — Near Misses & Incidents">
@@ -190,10 +190,10 @@ export default function AnalyticsPanel({
         )}
       </SectionCard>
 
-      {isAdvanced && <AdvancedSections
-        nearMisses={nearMisses} incidents={incidents} equipStats={equipStats} fieldSites={fieldSites}
+      {isAdvanced && <SafetyAdvancedSections
+        nearMisses={nearMisses} incidents={incidents} fieldSites={fieldSites}
         monthlyRecords={monthlyRecords} monthlyActions={monthlyActions} customDocs={customDocs}
-        flhas={flhas} inspections={inspections} toolbox={toolbox} maintenance={maintenance}
+        flhas={flhas} toolbox={toolbox} passRate={passRate}
       />}
 
       {!isAdvanced && (
@@ -205,12 +205,11 @@ export default function AnalyticsPanel({
   );
 }
 
-function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, monthlyRecords, monthlyActions, customDocs, flhas, inspections, toolbox, maintenance }) {
+function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyRecords, monthlyActions, customDocs, flhas, toolbox, passRate }) {
   const trend = monthlyTrend(nearMisses, incidents);
   const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs);
   const aging = correctiveActionAging(monthlyActions);
-  const leaderboard = reporterLeaderboard(flhas, inspections, toolbox);
-  const passRate = monthlyPassRate(monthlyRecords);
+  const leaderboard = reporterLeaderboard(flhas, [], toolbox);
 
   const agingItems = [
     { label: "Open < 30 days", count: aging.buckets.under30, color: "#16A34A" },
@@ -228,30 +227,6 @@ function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, month
         />
       </SectionCard>
 
-      <SectionCard title="Equipment Issue Detail" subtitle="All equipment with pretrip inspection history">
-        <SimpleTable
-          emptyLabel="No pretrip inspections yet."
-          columns={[
-            { key: "label", label: "Equipment" },
-            { key: "defective", label: "Defective", align: "right" },
-            { key: "monitor", label: "Monitor", align: "right" },
-            { key: "pretripCount", label: "Pretrips", align: "right" },
-            { key: "lastFlaggedAt", label: "Last Flagged", render: r => r.lastFlaggedAt ? new Date(r.lastFlaggedAt).toLocaleDateString("en-CA") : "—" },
-          ]}
-          rows={equipStats}
-        />
-      </SectionCard>
-
-      {maintenance.total > 0 && (
-        <SectionCard title="Preventative Maintenance" subtitle="Tracked equipment, by usage since last service">
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <StatTile label="Tracked Equipment" value={maintenance.total} />
-            <StatTile label="Overdue" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
-            <StatTile label="Due Soon" value={maintenance.dueSoon} tone={maintenance.dueSoon > 0 ? "warn" : "good"} />
-          </div>
-        </SectionCard>
-      )}
-
       <SectionCard title="Field Site Activity" subtitle="FLHAs, toolbox talks, daily reports, near misses & incidents by site">
         <SimpleTable
           emptyLabel="No site-tagged records yet."
@@ -267,9 +242,9 @@ function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, month
         />
       </SectionCard>
 
-      <SectionCard title="Scheduled Inspection Sites" subtitle="Monthly inspections, open corrective actions, and custom document submissions by site">
+      <SectionCard title="Scheduled Inspection Sites" subtitle="Monthly site inspections, open corrective actions, and custom document submissions by site">
         <SimpleTable
-          emptyLabel="No monthly inspections or custom documents submitted yet."
+          emptyLabel="No monthly site inspections or custom documents submitted yet."
           columns={[
             { key: "site", label: "Site" },
             { key: "monthly", label: "Monthly Submissions", align: "right" },
@@ -295,13 +270,13 @@ function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, month
         )}
       </SectionCard>
 
-      <SectionCard title="Most Active Safety Reporters" subtitle="FLHAs, inspections, and toolbox talks by name">
+      <SectionCard title="Most Active Safety Reporters" subtitle="FLHAs and toolbox talks by name">
         <RankedBarList items={leaderboard} emptyLabel="No reports submitted yet." barColor="#4338CA" />
       </SectionCard>
 
-      <SectionCard title="Monthly Inspection Pass Rate" subtitle="Share of monthly inspections with no items flagged">
+      <SectionCard title="Monthly Site Inspection Pass Rate" subtitle="Share of monthly site inspections with no items flagged">
         {passRate.total === 0 ? (
-          <div style={{ color: "#9CA3AF", fontSize: 13 }}>No monthly inspections submitted yet.</div>
+          <div style={{ color: "#9CA3AF", fontSize: 13 }}>No monthly site inspections submitted yet.</div>
         ) : (
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <div style={{ fontSize: 28, fontWeight: 800, color: passRate.pct >= 90 ? "#16A34A" : passRate.pct >= 70 ? "#D97706" : "#DC2626" }}>{passRate.pct}%</div>
@@ -310,5 +285,70 @@ function AdvancedSections({ nearMisses, incidents, equipStats, fieldSites, month
         )}
       </SectionCard>
     </>
+  );
+}
+
+// ── Equipment Analytics — pretrip/posttrip inspection issues and
+// preventative maintenance. Mirrors the Operations menu group and
+// generateEquipmentAnalyticsPDF.js's section split.
+export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [], customDocs = [] }) {
+  const isAdvanced = tier === "advanced";
+
+  const equipStats = equipmentIssueStats(inspections);
+  const maintenance = maintenanceSummary(maintenanceStatus);
+  const pretripCount = inspections.filter(i => i.trip_type === "pretrip").length;
+  const topEquipment = equipStats.slice(0, 5).map(e => ({ label: e.label, count: e.defective + e.monitor }));
+
+  return (
+    <div>
+      <SectionCard title={`🔧 Equipment Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <StatTile label="Pretrip Inspections" value={pretripCount} />
+          <StatTile label="Daily Reports" value={daily.length} />
+          <StatTile label="Equipment Tracked (Maintenance)" value={maintenance.total} />
+          <StatTile label="Overdue Maintenance" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
+          <StatTile label="Maintenance Due Soon" value={maintenance.dueSoon} tone={maintenance.dueSoon > 0 ? "warn" : "good"} />
+          <StatTile label="Custom Operations Docs" value={customDocs.length} />
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Top Equipment Issues" subtitle="Pretrip inspections flagged Defective or Monitor">
+        <RankedBarList items={topEquipment} emptyLabel="No equipment issues flagged yet." barColor="#B45309" />
+      </SectionCard>
+
+      {isAdvanced && (
+        <>
+          <SectionCard title="Equipment Issue Detail" subtitle="All equipment with pretrip inspection history">
+            <SimpleTable
+              emptyLabel="No pretrip inspections yet."
+              columns={[
+                { key: "label", label: "Equipment" },
+                { key: "defective", label: "Defective", align: "right" },
+                { key: "monitor", label: "Monitor", align: "right" },
+                { key: "pretripCount", label: "Pretrips", align: "right" },
+                { key: "lastFlaggedAt", label: "Last Flagged", render: r => r.lastFlaggedAt ? new Date(r.lastFlaggedAt).toLocaleDateString("en-CA") : "—" },
+              ]}
+              rows={equipStats}
+            />
+          </SectionCard>
+
+          {maintenance.total > 0 && (
+            <SectionCard title="Preventative Maintenance" subtitle="Tracked equipment, by usage since last service">
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <StatTile label="Tracked Equipment" value={maintenance.total} />
+                <StatTile label="Overdue" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
+                <StatTile label="Due Soon" value={maintenance.dueSoon} tone={maintenance.dueSoon > 0 ? "warn" : "good"} />
+              </div>
+            </SectionCard>
+          )}
+        </>
+      )}
+
+      {!isAdvanced && (
+        <div style={{ textAlign: "center", fontSize: 12, color: "#9CA3AF", padding: "10px 4px" }}>
+          Ask your admin to enable Advanced Analytics for equipment issue detail and preventative maintenance tracking.
+        </div>
+      )}
+    </div>
   );
 }

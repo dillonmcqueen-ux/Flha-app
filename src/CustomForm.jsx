@@ -1,12 +1,59 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes the entire submission (PDF generation + upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. Exported so
+// WorkerMenu.jsx can drain this form's queue without the component
+// mounted. formType for the queue is a single shared "customform" bucket
+// covering every custom document type a company runs — formId in the
+// payload is what routes a queued item back to the right one.
+export async function resubmitCustomForm(payload, clientSubmissionId, tokenForRequest) {
+  const { formTitle, accentColor, siteId, formId, siteNameStr, companyName, companyLogo, submittedBy, aiSummary, aiAssisted, items, sig } = payload;
+
+  const pdfUrl = await generateAndUploadCustomForm({
+    formTitle, accentColor, siteName: siteNameStr, companyName, companyLogo,
+    submittedBy, aiSummary, items, signatureDataUrl: sig, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/customforms", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "submit_custom", token: tokenForRequest, clientSubmissionId,
+        siteId, formId, submittedBy, aiSummary, aiAssisted, pdfUrl,
+        answers: items.map(it => ({ questionId: it.questionId, answer: it.answer, note: it.note || "" })),
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 export default function CustomForm({ companyId, companyName, userName: loginUserName = "", formId, onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("site"); // site | questions | review | sign | done
+  const [step, setStep] = useState("site"); // site | questions | review | sign | queued | done
   const [sites, setSites] = useState([]);
   const [siteId, setSiteId] = useState("");
   const [checking, setChecking] = useState(false);
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
 
   const [form, setForm] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -16,7 +63,9 @@ export default function CustomForm({ companyId, companyName, userName: loginUser
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
+  const [aiAssisted, setAiAssisted] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
 
   useEffect(() => {
@@ -41,9 +90,42 @@ export default function CustomForm({ companyId, companyName, userName: loginUser
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Scoped by companyId + formId, not just companyId — a company can have
+  // several custom document types active at once, each needs its own slot.
+  const draftScope = companyId && formId ? `${companyId}::${formId}` : null;
+  const RESTORABLE_STEPS = ["questions", "review", "sign"];
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!draftScope) return;
+    const draft = loadDraft("customform", draftScope);
+    if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
+      if (draft.siteId) setSiteId(draft.siteId);
+      if (draft.form) setForm(draft.form);
+      if (draft.questions) setQuestions(draft.questions);
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.answers) setAnswers(draft.answers);
+      if (draft.aiSummary) setAiSummary(draft.aiSummary);
+      if (typeof draft.aiAssisted === "boolean") setAiAssisted(draft.aiAssisted);
+      setStep(draft.step);
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftScope]);
+
+  useDraftAutosave(
+    "customform",
+    draftScope,
+    { step, siteId, form, questions, workerName, answers, aiSummary, aiAssisted },
+    draftRestored && !!draftScope && RESTORABLE_STEPS.includes(step)
+  );
 
   const siteName = () => sites.find(s => String(s.id) === String(siteId))?.name || "";
 
@@ -96,7 +178,7 @@ INSTRUCTIONS:
 - If any items were flagged "NO", mention them factually.
 - If everything passed, say so plainly.
 - Do not invent details beyond what's given.
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 { "summary": "professional summary text" }`;
 
@@ -112,11 +194,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
       setAiSummary(parsed.summary || "");
+      setAiAssisted(true);
       setStep("review");
     } catch (e) {
       setGenError(true);
     }
     setLoading(false);
+  };
+
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — the actual
+  // answers already exist before the AI call ever runs, so the fallback
+  // just builds a plain, non-AI summary sentence client-side and drops into
+  // the same already-editable review textarea. ai_assisted:false flags the
+  // record so a supervisor knows it wasn't AI-summarized.
+  const continueWithoutAI = () => {
+    const flagged = questions.filter(q => answers[q.id]?.answer === false);
+    const summary = flagged.length === 0
+      ? `All ${questions.length} item${questions.length === 1 ? "" : "s"} passed.`
+      : `${questions.length - flagged.length} of ${questions.length} items passed. Flagged: ${flagged.map(q => q.question_text).join("; ")}.`;
+    setAiSummary(summary);
+    setAiAssisted(false);
+    setGenError(false);
+    setStep("review");
   };
 
   // ── signature pad ────────────────────────────────────────
@@ -132,35 +232,55 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const endDraw = () => { drawingRef.current = false; };
   const clearSig = () => { if (canvasEl) canvasEl.getContext("2d").clearRect(0, 0, canvasEl.width, canvasEl.height); setHasSignature(false); };
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the document; a real server-side rejection shows an error
+  // and lets the worker retry manually. Full auto-queue now that the
+  // server side is idempotent (client_submission_id + a unique index on
+  // custom_form_records, added earlier this session) — a blind background
+  // retry can no longer create a duplicate record.
   const submit = async () => {
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const sig = hasSignature && canvasEl ? canvasEl.toDataURL("image/png") : null;
 
     const items = questions.map(q => ({
+      questionId: q.id,
       question: q.question_text,
       answer: answers[q.id]?.answer,
       note: answers[q.id]?.note || "",
     }));
 
-    const pdfUrl = await generateAndUploadCustomForm({
-      formTitle: form.title, accentColor: form.accent_color, siteName: siteName(), companyName, companyLogo,
-      submittedBy: workerName, aiSummary, items, signatureDataUrl: sig,
-    });
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      formTitle: form.title, accentColor: form.accent_color, siteId, formId: form.id, siteNameStr: siteName(),
+      companyName, companyLogo, submittedBy: workerName, aiSummary, aiAssisted, items, sig,
+    };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("customform", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("customform", draftScope);
+      setStep("queued");
+      return;
+    }
 
     try {
-      await fetch("/api/customforms", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "submit_custom", token,
-          siteId, formId: form.id, submittedBy: workerName, aiSummary, pdfUrl,
-          answers: questions.map(q => ({ questionId: q.id, answer: answers[q.id]?.answer, note: answers[q.id]?.note || "" })),
-        }),
-      });
+      await resubmitCustomForm(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("customform", draftScope);
+      setStep("done");
     } catch (e) {
-      console.error("Custom form save failed:", e);
+      if (e.isServerError) {
+        console.error("Custom form save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+      } else {
+        await enqueueSubmission("customform", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("customform", draftScope);
+        setStep("queued");
+      }
     }
-    setSaving(false);
-    setStep("done");
   };
 
   const s = {
@@ -238,10 +358,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             );
           })}
 
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the summary. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the summary. Check your connection and try again, or continue without one.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : (workerName && allAnswered && notesComplete) ? accent : "#94A3B8")} disabled={loading || !workerName || !allAnswered || !notesComplete} onClick={generateSummary}>
             {loading ? "⏳ Writing summary…" : "Generate Summary"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI summary</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("site")}>← Back</button>
         </>
       )}
@@ -249,6 +376,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* STEP: review */}
       {step === "review" && (
         <>
+          {!aiAssisted && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-summarized — feel free to edit the summary below before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>{form.title}</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{siteName()} · By {workerName}</div>
@@ -293,10 +425,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
             <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this document. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : hasSignature ? "#16A34A" : "#94A3B8")} disabled={saving || !hasSignature} onClick={submit}>
-            {saving ? "Submitting…" : "Sign & Submit"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : "Sign & Submit"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{siteName()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This document is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

@@ -8,6 +8,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
+import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -117,8 +118,12 @@ function genPin() {
   return String(Math.floor(Math.random() * 10000)).padStart(4, '0');
 }
 
-// ── Time Clock helpers (kept in this file, not a separate api/timeclock.js,
-// to stay under Vercel's serverless function count) ──────────────────────
+// ── Time Clock helpers ────────────────────────────────────────────────
+// mondayOf/toISODate/isUniqueViolation stay here — the client-facing
+// time-clock actions below (clock in/out, get_timeclock_report, etc.) use
+// them directly. buildTimeClockReportForCompanyWeek moved to
+// api/timeclockreports.js (imported above) since both this file's
+// generate_time_report_now action and the weekly cron need it.
 
 // Monday of the week containing `d` (ISO week, Monday start).
 function mondayOf(d) {
@@ -136,61 +141,6 @@ function toISODate(d) {
 
 function isUniqueViolation(error) {
   return error && error.code === '23505';
-}
-
-// Builds the report_json for one company + week: total + per-day hours for
-// every roster member with at least one punch that week. Exported so the
-// weekly cron (api/cron-equipment-reports.js) can reuse it.
-async function buildTimeClockReportForCompanyWeek(companyId, weekStartFullISO, weekEndExclusiveFullISO) {
-  const { data: entries, error } = await supabaseAdmin
-    .from('time_clock_entries')
-    .select('id, roster_id, clock_in, clock_out, edited_at')
-    .eq('company_id', companyId)
-    .gte('clock_in', weekStartFullISO)
-    .lt('clock_in', weekEndExclusiveFullISO)
-    .order('clock_in', { ascending: true });
-  if (error) throw new Error('Could not load time clock entries: ' + error.message);
-
-  const weekStart = toISODate(new Date(weekStartFullISO));
-  const weekEnd = toISODate(new Date(new Date(weekEndExclusiveFullISO).getTime() - 86400000));
-
-  if (!entries || entries.length === 0) {
-    return { weekStart, weekEnd, entries: [] };
-  }
-
-  const rosterIds = [...new Set(entries.map(e => e.roster_id))];
-  const { data: rosterRows, error: rosterErr } = await supabaseAdmin
-    .from('roster')
-    .select('id, name, role')
-    .in('id', rosterIds);
-  if (rosterErr) throw new Error('Could not load roster: ' + rosterErr.message);
-  const rosterById = Object.fromEntries((rosterRows || []).map(r => [r.id, r]));
-
-  const byRoster = {};
-  entries.forEach(e => {
-    const person = byRoster[e.roster_id] || (byRoster[e.roster_id] = {
-      rosterId: e.roster_id,
-      name: rosterById[e.roster_id]?.name || 'Unknown',
-      role: rosterById[e.roster_id]?.role || 'worker',
-      totalHours: 0,
-      days: [],
-    });
-    const clockInDate = new Date(e.clock_in);
-    const date = clockInDate.toISOString().slice(0, 10);
-    let hours = null;
-    const openAtReportTime = !e.clock_out;
-    if (e.clock_out) {
-      hours = (new Date(e.clock_out) - clockInDate) / 3600000;
-      person.totalHours += hours;
-    }
-    person.days.push({ date, clockIn: e.clock_in, clockOut: e.clock_out, hours, edited: !!e.edited_at, openAtReportTime });
-  });
-
-  const entriesOut = Object.values(byRoster)
-    .map(p => ({ ...p, totalHours: Math.round(p.totalHours * 100) / 100 }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  return { weekStart, weekEnd, entries: entriesOut };
 }
 
 export default async function handler(req, res) {
@@ -529,6 +479,26 @@ export default async function handler(req, res) {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      // inspections.equipment_id is a real FK to this table (see the note
+      // in api/maintenance.js). Deleting the equipment row out from under
+      // it would either fail outright (FK violation, blocking the delete
+      // entirely) or cascade-delete every inspection ever recorded against
+      // this unit, depending on how the constraint is set up — neither is
+      // acceptable, since a submitted inspection is a signed safety record
+      // that must stay retrievable regardless of whether the equipment is
+      // still in the fleet. Detach it explicitly first: each inspection
+      // already carries its own equipment_label text snapshot (set at
+      // submission time), so nulling the FK loses nothing the worker or
+      // supervisor would see on that record, PDF, or in weekly reports.
+      const { error: detachErr } = await supabaseAdmin.from('inspections').update({ equipment_id: null }).eq('equipment_id', id);
+      if (detachErr) return res.status(500).json({ error: "Couldn't remove equipment." });
+
+      // Maintenance log entries are meaningless without the equipment they
+      // were serviced against and carry no equivalent label snapshot, so
+      // remove them along with the unit rather than leave them stranded.
+      await supabaseAdmin.from('equipment_maintenance_log').delete().eq('equipment_id', id);
+
       const { error } = await supabaseAdmin.from('equipment').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove equipment." });
       return res.status(200).json({ ok: true });
@@ -619,6 +589,97 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin.from('custom_fields').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove field." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ══ COMPANY PROFILE (docs/scope-company-brain.md, Phase 1) ═════════
+    // company_profiles is written by two paths: the (not-yet-built) Phase 2
+    // onboarding research pass, staged as status: 'draft'; and an admin's
+    // own edit here, which is always authoritative and marks the row
+    // 'confirmed'. Neither path may write hazard_emphasis directly to
+    // anything that changes risk-rating logic — see the migration's column
+    // comment and the Phase 4 note in the scope doc; this endpoint only
+    // stores what it's given, the "never lowers the safety floor" rule is
+    // enforced by how Phase 5's generation prompt consumes the field, not
+    // here.
+
+    if (action === 'get_company_profile') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin
+        .from('company_profiles')
+        .select('status, industry_inference, equipment_summary, terminology_notes, hazard_emphasis, last_summarized_at, updated_at')
+        .eq('company_id', companyId)
+        .limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load company profile.' });
+      return res.status(200).json({ profile: (data && data[0]) || null });
+    }
+
+    if (action === 'update_company_profile') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      const { industryInference, equipmentSummary, terminologyNotes } = req.body;
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { error } = await supabaseAdmin
+        .from('company_profiles')
+        .upsert({
+          company_id: companyId,
+          status: 'confirmed',
+          industry_inference: (industryInference || '').trim(),
+          equipment_summary: (equipmentSummary || '').trim(),
+          terminology_notes: (terminologyNotes || '').trim(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'company_id' });
+      if (error) return res.status(500).json({ error: "Couldn't save company profile: " + error.message });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Phase 6 (docs/scope-company-brain.md) — a read-only aggregation of
+    // company_signals for the Admin Panel's "Brain" tab: reuses the exact
+    // same rows Phase 3 writes and Phase 4 reads, no separate pipeline.
+    // Admin/supervisor only, like the other dashboard "list" actions in
+    // this file — workers never see this (unlike get_company_profile
+    // above, which worker-facing generation prompts also read).
+    if (action === 'get_company_signal_trends') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data, error } = await supabaseAdmin
+        .from('company_signals')
+        .select('source_type, signal_json, created_at')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (error) return res.status(500).json({ error: 'Could not load signal trends.' });
+
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0 };
+      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {} };
+      const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
+      (data || []).forEach((row) => {
+        const j = row.signal_json || {};
+        if (bySourceType[row.source_type] !== undefined) bySourceType[row.source_type] += 1;
+        if (row.source_type === 'flha_edit') {
+          (j.added || []).forEach((h) => bump(tally.addedHazards, h));
+          (j.removed || []).forEach((h) => bump(tally.removedHazards, h));
+        } else if (row.source_type === 'toolbox_talk') {
+          bump(tally.toolboxTopics, j.topic);
+        } else if (row.source_type === 'incident') {
+          bump(tally.incidentCategories, j.category);
+        } else if (row.source_type === 'near_miss') {
+          bump(tally.nearMissInvolved, j.involved);
+        }
+      });
+      const topN = (map, n = 8) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
+
+      return res.status(200).json({
+        totalSignals: (data || []).length,
+        bySourceType,
+        topAddedHazards: topN(tally.addedHazards),
+        topRemovedHazards: topN(tally.removedHazards),
+        topToolboxTopics: topN(tally.toolboxTopics),
+        topIncidentCategories: topN(tally.incidentCategories),
+        topNearMissInvolved: topN(tally.nearMissInvolved),
+      });
     }
 
     // ── Time Clock: self-service (any registered roster user) ───────────
@@ -791,17 +852,31 @@ export default async function handler(req, res) {
       return res.status(200).json({ report, company });
     }
 
+    // Optional `pullUntil`: a "request a manual pull" cutoff — see the
+    // matching comment on equipmentreports.js's generate_now. Same rules:
+    // must fall inside the resolved week, and the standard automated
+    // Sunday-11:59pm pull (cron-equipment-reports.js) still overwrites this
+    // once the week actually closes (same company_id+week_start upsert key).
     if (action === 'generate_time_report_now') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { weekStart } = req.body;
+      const { weekStart, pullUntil } = req.body;
 
       const anchor = weekStart ? new Date(weekStart) : new Date();
       const monday = weekStart ? mondayOf(anchor) : mondayOf(new Date(anchor.getTime() - 7 * 86400000));
       const nextMonday = new Date(monday); nextMonday.setDate(nextMonday.getDate() + 7);
 
-      const reportJson = await buildTimeClockReportForCompanyWeek(companyId, monday.toISOString(), nextMonday.toISOString());
+      let weekEndExclusiveISO = nextMonday.toISOString();
+      if (pullUntil) {
+        const until = new Date(pullUntil);
+        if (isNaN(until.getTime())) return res.status(400).json({ error: 'Invalid pull-until time.' });
+        if (until < monday || until > nextMonday) return res.status(400).json({ error: "Requested time must fall within that report's week." });
+        weekEndExclusiveISO = until.toISOString();
+      }
+
+      const reportJson = await buildTimeClockReportForCompanyWeek(companyId, monday.toISOString(), weekEndExclusiveISO);
+      reportJson.pulledUntil = pullUntil ? weekEndExclusiveISO : null;
 
       const { data, error } = await supabaseAdmin
         .from('timeclock_reports')
@@ -825,6 +900,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server error. Please try again.' });
   }
 }
-
-// Exported so the weekly cron (api/cron-equipment-reports.js) can reuse it.
-export { buildTimeClockReportForCompanyWeek };

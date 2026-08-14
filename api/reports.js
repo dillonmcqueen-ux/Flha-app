@@ -5,6 +5,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -65,18 +67,15 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
   return error ? null : data.signedUrl;
 }
 
-async function signStoredUrls(urls, bucket, ttlSeconds = 3600) {
-  if (!urls || urls.length === 0) return urls || [];
-  return Promise.all(urls.map(u => signStoredUrl(u, bucket, ttlSeconds)));
-}
-
 const TABLES = {
   incident: {
     name: 'incidents',
+    jsonColumn: 'report_json',
     listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
   nearmiss: {
     name: 'near_misses',
+    jsonColumn: 'report_json',
     listColumns: 'id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
 };
@@ -85,13 +84,25 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { type, action, token } = req.body || {};
-  const table = TABLES[type];
-  if (!table) return res.status(400).json({ error: 'Unknown report type.' });
 
   const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Photo/signature/PDF uploads for incident + near-miss reports ────
+    if (action === 'create_upload_url') {
+      const { bucket, filename } = req.body;
+      if (!['incident-photos', 'signatures', 'flha-reports'].includes(bucket)) {
+        return res.status(400).json({ error: 'Invalid bucket.' });
+      }
+      const result = await createUploadUrl(supabaseAdmin, bucket, filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
+    const table = TABLES[type];
+    if (!table) return res.status(400).json({ error: 'Unknown report type.' });
+
     // ── Worker: submit a new report ─────────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
@@ -99,15 +110,63 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { record } = req.body;
+      const { record, clientSubmissionId } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
+
+      // Idempotency (docs/scope-offline-capability.md Phase 1): a queued
+      // offline submission gets retried, possibly more than once. If an
+      // earlier attempt actually reached the database but the client never
+      // saw the response (dropped connection right after), retrying it
+      // blindly would create a duplicate report. There's no dedicated
+      // column for this — every table here already has a jsonb column, so
+      // the id rides along inside that instead of a schema migration.
+      if (clientSubmissionId && table.jsonColumn) {
+        const { data: existingRows } = await supabaseAdmin
+          .from(table.name)
+          .select('id')
+          .eq('company_id', session.companyId)
+          .eq(`${table.jsonColumn}->>client_submission_id`, clientSubmissionId)
+          .limit(1);
+        if (existingRows && existingRows.length > 0) {
+          return res.status(200).json({ id: existingRows[0].id });
+        }
+      }
+
+      const recordToInsert = { ...record };
+      if (clientSubmissionId && table.jsonColumn) {
+        recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
+      }
+
       const { data, error } = await supabaseAdmin
         .from(table.name)
-        .insert({ ...record, company_id: session.companyId })
+        .insert({ ...recordToInsert, company_id: session.companyId })
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-      return res.status(200).json({ id: data?.[0]?.id || null });
+      const newId = data?.[0]?.id || null;
+
+      // docs/scope-company-brain.md Phase 3 — log the category/topic of
+      // every incident and near-miss as a company_signals row, same
+      // best-effort discipline as api/flhas.js's FLHA-edit signal: never
+      // allowed to affect the report submission itself, which is already
+      // saved by the time this runs.
+      if (newId && (type === 'incident' || type === 'nearmiss')) {
+        const shortStr = (v) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 200) : null;
+        const signalJson = type === 'incident'
+          ? { category: shortStr(record.incident_type) }
+          : { involved: shortStr(record.involved), severity: shortStr(record.report_json?.severity) };
+        if (Object.values(signalJson).some((v) => v !== null)) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: type === 'incident' ? 'incident' : 'near_miss',
+            source_id: String(newId),
+            signal_json: signalJson,
+          });
+          if (signalErr) console.error('company_signals insert failed for', type, newId, signalErr.message);
+        }
+      }
+
+      return res.status(200).json({ id: newId });
     }
 
     // ── Supervisor / Admin: load reports for the dashboard ──────────
@@ -117,12 +176,11 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      const records = await Promise.all((data || []).map(async r => ({
-        ...r,
-        pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports'),
-        signature_url: r.signature_url ? await signStoredUrl(r.signature_url, 'signatures') : r.signature_url,
-        photo_urls: r.photo_urls ? await signStoredUrls(r.photo_urls, 'incident-photos') : r.photo_urls,
-      })));
+      const records = await signRows(supabaseAdmin, data, [
+        { key: 'pdf_url', bucket: 'flha-reports' },
+        { key: 'signature_url', bucket: 'signatures' },
+        { key: 'photo_urls', bucket: 'incident-photos' },
+      ]);
       return res.status(200).json({ records });
     }
 

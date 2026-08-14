@@ -1,7 +1,113 @@
 import { useState, useRef, useEffect } from "react";
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes } from "./offlineQueue.js";
+import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// docs/scope-offline-capability.md Phase 3: caps total pending offline
+// photo storage so a multi-day offline stretch on a remote site can't
+// silently exhaust device storage. ~25-30MB is roughly 15-20 phone photos —
+// a fixed number is simpler to reason about and test than querying actual
+// device storage via navigator.storage.estimate().
+const PHOTO_BUDGET_BYTES = 28 * 1024 * 1024;
+
+// Uploads a single pending (offline-stored) photo now that there's
+// connectivity, and cleans up its local blob once confirmed-uploaded.
+// Shared by the live component (when a "queued" photo gets its own retry)
+// and resubmitIncident (when the whole record was queued and is now being
+// drained). Throws on failure so the caller can tell success from failure —
+// deliberately doesn't delete the blob on failure, so it stays available
+// for the next attempt.
+async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
+  const stored = await getPhoto(pendingPhotoId);
+  if (!stored) return null; // already uploaded and cleaned up, or never existed — nothing to do
+  const ext = (stored.contentType || "").split("/")[1] || "jpg";
+  const filename = `incident_${companyId}_${pendingPhotoId}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+  const { publicUrl } = await uploadViaSignedUrl({
+    endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
+    bucket: "incident-photos", filename, file: stored.blob, contentType: stored.contentType,
+  });
+  await deletePhoto(pendingPhotoId);
+  return publicUrl || null;
+}
+
+// Redoes the entire submission (signature + PDF upload + the final POST)
+// from plain input data — used both by a live online submit() below and by
+// offlineQueue's drainQueue() to resend a queued one later. `photoUrls`
+// carries already-uploaded photo URLs (strings); `pendingPhotoIds` carries
+// local IDs of photos whose upload couldn't complete earlier (offline, or a
+// bad moment for the connection) — resubmitIncident uploads each of those
+// now that there's connectivity, before assembling the final photo list.
+// `sig` is a data: URL string, not a File/Blob, so it's plain JSON and safe
+// to persist in the queue.
+export async function resubmitIncident(payload, clientSubmissionId, tokenForRequest) {
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, pendingPhotoIds } = payload;
+
+  const uploadedPending = [];
+  for (const id of (pendingPhotoIds || [])) {
+    const url = await uploadPendingPhoto(id, companyId, tokenForRequest);
+    if (url) uploadedPending.push(url);
+  }
+  const allPhotoUrls = [...(photoUrls || []), ...uploadedPending];
+
+  let signatureUrl = null;
+  if (sig) {
+    try {
+      const blob = await (await fetch(sig)).blob();
+      const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      const { publicUrl } = await uploadViaSignedUrl({
+        endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
+        bucket: "signatures", filename, file: blob, contentType: "image/png",
+      });
+      signatureUrl = publicUrl || null;
+    } catch (e) { /* signature upload failure shouldn't block submission */ }
+  }
+
+  const pdfUrl = await generateAndUploadIncident({
+    reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields,
+    report, companyName, companyLogo, signatureDataUrl: sig, photoUrls: allPhotoUrls, token: tokenForRequest,
+  });
+
+  let res;
+  try {
+    res = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "incident",
+        action: "submit",
+        token: tokenForRequest,
+        clientSubmissionId,
+        record: {
+          reporter_name: reporter,
+          site, occurred_at: occurredAt, incident_type: incidentType,
+          injured_person: injuredPerson, body_part: bodyPart, treatment,
+          medical_attention: medicalAttention, witnesses, evidence,
+          report_json: { ...report, customFields },
+          signed_by: reporter,
+          pdf_url: pdfUrl || null,
+          photo_urls: allPhotoUrls,
+          signature_url: signatureUrl,
+        },
+      }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const INCIDENT_TYPES = [
   "Injury / Illness",
@@ -35,14 +141,18 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [witnesses, setWitnesses] = useState("");
   const [evidence, setEvidence] = useState("");
 
-  const [photos, setPhotos] = useState([]); // [{ file, previewUrl, uploading, uploadedUrl }]
+  const [photos, setPhotos] = useState([]); // [{ id, file, previewUrl, uploading, uploadedUrl, pending, pendingPhotoId, error }]
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [photoBudgetError, setPhotoBudgetError] = useState("");
 
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [genError, setGenError] = useState(false);
   const [report, setReport] = useState(null);
   const [companyLogo, setCompanyLogo] = useState("");
+  // docs/scope-company-brain.md Phase 5 — null (cold start) is handled
+  // gracefully by buildCompanyContextBlock.
+  const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "incident", token);
 
   const canvasRef = useRef(null);
@@ -50,6 +160,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [hasSignature, setHasSignature] = useState(false);
   const [signed, setSigned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -79,9 +190,77 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
         const logoData = await logoRes.json();
         if (logoRes.ok) setCompanyLogo(logoData.logo_url || "");
       } catch (e) { /* leave logo blank if the request fails */ }
+
+      // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
+      setCompanyProfile(await fetchCompanyProfile(token, companyId));
     }
     load();
   }, [companyId, token]);
+
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0/3) ──
+  // Photos: only metadata is saved to the draft (never the File object —
+  // it doesn't survive JSON.stringify, and its blob: preview URL doesn't
+  // survive a reload either). A `pending` photo's actual blob lives
+  // separately in offlineQueue.js's IndexedDB `photos` store (Phase 3),
+  // keyed by pendingPhotoId — restoring one means loading that blob back
+  // and regenerating a fresh previewUrl via URL.createObjectURL. An
+  // already-`uploadedUrl` photo just needs its remote URL back — that
+  // already works fine as an <img> src, no blob needed. A hard `error`
+  // entry (upload failed AND storing the blob failed too — IndexedDB
+  // itself unavailable) has nothing left to restore and is dropped.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    async function restore() {
+      const draft = loadDraft("incident", companyId);
+      if (draft && draft.step && draft.step !== "done") {
+        if (draft.reporter) setReporter(draft.reporter);
+        if (draft.site) setSite(draft.site);
+        if (draft.siteMode) setSiteMode(draft.siteMode);
+        if (draft.occurredAt) setOccurredAt(draft.occurredAt);
+        if (draft.incidentType) setIncidentType(draft.incidentType);
+        if (draft.injuredPerson) setInjuredPerson(draft.injuredPerson);
+        if (draft.bodyPart) setBodyPart(draft.bodyPart);
+        if (draft.treatment) setTreatment(draft.treatment);
+        if (draft.medicalAttention) setMedicalAttention(draft.medicalAttention);
+        if (draft.witnesses) setWitnesses(draft.witnesses);
+        if (draft.evidence) setEvidence(draft.evidence);
+        if (draft.description) setDescription(draft.description);
+        if (draft.report) setReport(draft.report);
+        if (draft.photosMeta && draft.photosMeta.length > 0) {
+          const restoredPhotos = [];
+          for (const meta of draft.photosMeta) {
+            if (meta.uploadedUrl) {
+              restoredPhotos.push({ id: meta.id, file: null, previewUrl: meta.uploadedUrl, uploading: false, uploadedUrl: meta.uploadedUrl, pending: false, pendingPhotoId: null, error: false });
+            } else if (meta.pending && meta.pendingPhotoId) {
+              const stored = await getPhoto(meta.pendingPhotoId);
+              if (stored) {
+                restoredPhotos.push({ id: meta.id, file: null, previewUrl: URL.createObjectURL(stored.blob), uploading: false, uploadedUrl: null, pending: true, pendingPhotoId: meta.pendingPhotoId, error: false });
+              }
+              // if the blob is missing (cleared storage, etc.) there's nothing to restore — skip silently
+            }
+          }
+          if (!cancelled && restoredPhotos.length > 0) setPhotos(restoredPhotos);
+        }
+        setStep(draft.step);
+      }
+      if (!cancelled) setDraftRestored(true);
+    }
+    restore();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "incident",
+    companyId,
+    {
+      step, reporter, site, siteMode, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, description, report,
+      photosMeta: photos.map(p => ({ id: p.id, uploadedUrl: p.uploadedUrl, pending: p.pending, pendingPhotoId: p.pendingPhotoId })),
+    },
+    draftRestored && !!companyId
+  );
 
   const getPos = (e) => {
     const c = canvasRef.current, r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
@@ -96,6 +275,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const handlePhotoSelect = async (fileList) => {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
+    setPhotoBudgetError("");
 
     const newEntries = files.map(file => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -103,6 +283,8 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
       previewUrl: URL.createObjectURL(file),
       uploading: true,
       uploadedUrl: null,
+      pending: false,
+      pendingPhotoId: null,
       error: false,
     }));
     setPhotos(prev => [...prev, ...newEntries]);
@@ -112,12 +294,32 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
       try {
         const ext = (entry.file.name.split(".").pop() || "jpg").toLowerCase();
         const filename = `incident_${companyId}_${entry.id}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { error } = await supabase.storage.from("incident-photos").upload(filename, entry.file, { contentType: entry.file.type, upsert: false });
-        if (error) throw error;
-        const { data } = supabase.storage.from("incident-photos").getPublicUrl(filename);
-        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: data?.publicUrl || null } : p));
+        const { publicUrl } = await uploadViaSignedUrl({
+          endpoint: "/api/reports", action: "create_upload_url", token,
+          bucket: "incident-photos", filename, file: entry.file, contentType: entry.file.type,
+        });
+        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: publicUrl || null } : p));
       } catch (e) {
-        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+        // docs/scope-offline-capability.md Phase 3: an immediate upload
+        // failure (offline, or just a bad moment for the connection) used
+        // to silently drop the photo entirely — nothing blocked the worker
+        // from submitting without it, and it was gone. Now the blob is
+        // persisted locally instead, so submit() -> resubmitIncident can
+        // upload it for real once the incident is actually submitted (or,
+        // if the whole record ends up queued too, once that gets drained).
+        const budgetUsed = await totalPhotoBytes();
+        if (budgetUsed + entry.file.size > PHOTO_BUDGET_BYTES) {
+          setPhotoBudgetError("Photo storage on this device is full from previously queued photos — reconnect to let them sync before adding more.");
+          setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+        } else {
+          try {
+            const pendingPhotoId = await storePhoto(entry.file, entry.file.type);
+            setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, pending: true, pendingPhotoId } : p));
+          } catch (storeErr) {
+            // IndexedDB itself unavailable (private browsing, quota) — genuinely nothing left to fall back to.
+            setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, error: true } : p));
+          }
+        }
       }
       setUploadingCount(prev => Math.max(0, prev - 1));
     }
@@ -127,11 +329,13 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
     setPhotos(prev => {
       const target = prev.find(p => p.id === id);
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      if (target?.pendingPhotoId) deletePhoto(target.pendingPhotoId).catch(() => {});
       return prev.filter(p => p.id !== id);
     });
   };
 
   const uploadedPhotoUrls = () => photos.filter(p => p.uploadedUrl).map(p => p.uploadedUrl);
+  const pendingPhotoIds = () => photos.filter(p => p.pending && p.pendingPhotoId).map(p => p.pendingPhotoId);
 
   const generateReport = async () => {
     setLoading(true); setGenError(false);
@@ -160,7 +364,7 @@ INSTRUCTIONS:
 - "rootCause": the underlying root cause, one or two sentences.
 - "immediateActions": what was done right away in response (2-3 short points).
 - "correctiveActions": longer-term actions to prevent recurrence (2-4 short points).
-
+${buildCompanyContextBlock(companyProfile)}
 Respond ONLY with valid JSON (no markdown, no backticks):
 {
   "severity": "Low|Medium|High|Critical",
@@ -184,7 +388,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       const a = text.indexOf("{"), b = text.lastIndexOf("}");
       if (a === -1 || b === -1) throw new Error("bad response");
       const parsed = JSON.parse(text.slice(a, b + 1));
-      setReport(parsed);
+      setReport({ ...parsed, ai_assisted: true });
       setStep("review");
     } catch (e) {
       setGenError(true);
@@ -192,58 +396,67 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setLoading(false);
   };
 
+  // docs/scope-offline-capability.md Phase 2: if /api/generate-flha can't be
+  // reached, let the worker continue instead of getting stuck — review is
+  // already fully editable (add/edit/remove every list item via
+  // ListEditor), so the fallback just needs an empty skeleton to fill in by
+  // hand. ai_assisted:false flags the record so a supervisor knows it
+  // wasn't AI-structured.
+  const continueWithoutAI = () => {
+    setReport({
+      severity: "Medium", severityReason: "", summary: description,
+      sequenceOfEvents: [], contributingFactors: [], rootCause: "",
+      immediateActions: [], correctiveActions: [],
+      ai_assisted: false,
+    });
+    setGenError(false);
+    setStep("review");
+  };
+
   const updateList = (field, idx, val) => setReport(prev => ({ ...prev, [field]: prev[field].map((x, i) => i === idx ? val : x) }));
   const removeListItem = (field, idx) => setReport(prev => ({ ...prev, [field]: prev[field].filter((_, i) => i !== idx) }));
   const addListItem = (field) => setReport(prev => ({ ...prev, [field]: [...(prev[field] || []), ""] }));
   const updateText = (field, val) => setReport(prev => ({ ...prev, [field]: val }));
 
+  // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+  // queued and retried automatically once back online instead of silently
+  // discarding the report; a real server-side rejection shows an error and
+  // lets the worker retry manually.
   const submit = async () => {
     setSigned(true);
-    setSaving(true);
+    setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
-
-    let signatureUrl = null;
-    if (sig) {
-      try {
-        const blob = await (await fetch(sig)).blob();
-        const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { error } = await supabase.storage.from("signatures").upload(filename, blob, { contentType: "image/png", upsert: false });
-        if (!error) {
-          const { data } = supabase.storage.from("signatures").getPublicUrl(filename);
-          signatureUrl = data?.publicUrl || null;
-        }
-      } catch (e) { /* signature upload failure shouldn't block submission */ }
-    }
-
-    const meta = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries() };
     const photoUrls = uploadedPhotoUrls();
-    const pdfUrl = await generateAndUploadIncident({ ...meta, report, companyName, companyLogo, signatureDataUrl: sig, photoUrls });
-    try {
-      await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "incident",
-          action: "submit",
-          token,
-          record: {
-            reporter_name: reporter,
-            site, occurred_at: occurredAt, incident_type: incidentType,
-            injured_person: injuredPerson, body_part: bodyPart, treatment,
-            medical_attention: medicalAttention, witnesses, evidence,
-            report_json: { ...report, customFields: cf.entries() },
-            signed_by: reporter,
-            pdf_url: pdfUrl || null,
-            photo_urls: photoUrls,
-            signature_url: signatureUrl,
-          },
-        }),
-      });
-    } catch (e) {
-      console.error("Incident save failed:", e);
+    const pendingIds = pendingPhotoIds();
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, pendingPhotoIds: pendingIds };
+
+    if (!navigator.onLine) {
+      await enqueueSubmission("incident", clientSubmissionId, payload);
+      setSaving(false);
+      clearDraft("incident", companyId);
+      setStep("queued");
+      return;
     }
-    setSaving(false);
-    setStep("done");
+
+    try {
+      await resubmitIncident(payload, clientSubmissionId, token);
+      setSaving(false);
+      clearDraft("incident", companyId);
+      setStep("done");
+    } catch (e) {
+      if (e.isServerError) {
+        console.error("Incident save failed:", e.message);
+        setSaveError(true);
+        setSaving(false);
+        setSigned(false);
+      } else {
+        await enqueueSubmission("incident", clientSubmissionId, payload);
+        setSaving(false);
+        clearDraft("incident", companyId);
+        setStep("queued");
+      }
+    }
   };
 
   const s = {
@@ -347,6 +560,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   {p.uploading && (
                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#475569" }}>⏳</div>
                   )}
+                  {p.pending && (
+                    <div style={{ position: "absolute", inset: 0, background: "#FFFBEB99", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#92400E", textAlign: "center", padding: 4 }}>📶 Queued</div>
+                  )}
                   {p.error && (
                     <div style={{ position: "absolute", inset: 0, background: "#FEF2F2CC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#991B1B" }}>Failed</div>
                   )}
@@ -354,6 +570,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 </div>
               ))}
             </div>
+          )}
+
+          {photos.some(p => p.pending) && (
+            <div style={{ fontSize: 12, color: "#92400E", marginBottom: 10 }}>📶 Queued photos will upload automatically once you're back online — no need to redo them.</div>
+          )}
+          {photoBudgetError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>{photoBudgetError}</div>
           )}
 
           <label style={{ display: "block", background: "#F1F5F9", color: "#334155", border: "1.5px dashed #CBD5E1", borderRadius: 9, padding: "14px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center", marginBottom: 14 }}>
@@ -380,10 +603,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What happened?</div>
           <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the incident in your own words — what led up to it, what happened, and what was done. The AI will structure it into a formal report.</div>
           <textarea style={{ ...s.input, minHeight: 150, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Worker was carrying a sheet of plywood when a gust of wind caught it. He lost his grip and the edge struck his forearm, causing a deep cut. We stopped work, applied first aid, and drove him to the clinic for stitches." value={description} onChange={e => setDescription(e.target.value)} />
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the report. Check your connection and try again.</div>}
+          {genError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't generate the report. Check your connection and try again, or continue and write it up yourself.
+            </div>
+          )}
           <button style={s.btn(loading ? "#94A3B8" : description.trim() ? "#DC2626" : "#94A3B8")} disabled={loading || !description.trim()} onClick={generateReport}>
             {loading ? "⏳ Structuring report…" : "Generate Report"}
           </button>
+          {genError && (
+            <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — I'll fill this in myself</button>
+          )}
           <button style={s.ghost} onClick={() => setStep("details")}>← Back</button>
         </div>
       )}
@@ -391,6 +621,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* REVIEW */}
       {step === "review" && report && (
         <>
+          {report.ai_assisted === false && (
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
+              ⚠️ Not AI-structured — fill in the details below yourself before submitting.
+            </div>
+          )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5 }}>{incidentType} — Incident Report</div>
             <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{reporter} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
@@ -462,10 +697,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: "#475569" }}>Reported by: <strong>{reporter}</strong></div>
             <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
+          {saveError && (
+            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+              Couldn't save this report. Check your connection and try again.
+            </div>
+          )}
           <button style={s.btn(saving ? "#94A3B8" : hasSignature ? "#16A34A" : "#94A3B8")} disabled={saving || !hasSignature} onClick={submit}>
-            {saving ? "Submitting…" : "Sign & Submit Report"}
+            {saving ? "Submitting…" : saveError ? "Try Again" : "Sign & Submit Report"}
           </button>
           <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+        </div>
+      )}
+
+      {/* QUEUED — offline at submit time (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{incidentType} · {site} · {reporter}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#DC2626")} onClick={onBack}>Back to menu</button>
+          </div>
         </div>
       )}
 

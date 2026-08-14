@@ -1,5 +1,6 @@
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
+import { getForaLogoDataUrl } from "./foraLogo.js";
 
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
@@ -18,7 +19,7 @@ function wrap(doc, text, x, y, maxW, lh, footerLimit = 276) {
   return y;
 }
 
-export async function generateAndUploadToolbox({ presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields }) {
+export async function generateAndUploadToolbox({ presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields, token }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -124,22 +125,35 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
   if (col === 1) y += 28;
 
   // footer
+  const foraLogo = await getForaLogoDataUrl();
   const H = 297; const pageCount = doc.internal.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
     doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2); doc.line(margin, H - 12, W - margin, H - 12);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(91, 33, 182);
-    doc.text("FORA", margin, H - 7);
-    doc.setFont("helvetica", "normal"); doc.setTextColor(148, 163, 184);
-    doc.text("AI-generated field safety documentation", margin + 11, H - 7);
+    if (foraLogo) {
+      try { doc.addImage(foraLogo, "PNG", margin, H - 10, 16, 6.55); } catch (e) {}
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(148, 163, 184);
+      doc.text("AI-generated field safety documentation", margin + 19, H - 7);
+    } else {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(91, 33, 182);
+      doc.text("FORA", margin, H - 7);
+      doc.setFont("helvetica", "normal"); doc.setTextColor(148, 163, 184);
+      doc.text("AI-generated field safety documentation", margin + 11, H - 7);
+    }
     doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 7, { align: "right" });
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `TOOLBOX_${companyName || "co"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
-  const { error } = await supabase.storage.from("flha-reports").upload(filename, blob, { contentType: "application/pdf", upsert: false });
-  if (error) { console.error("toolbox pdf upload failed", error.message); return null; }
-  const { data } = supabase.storage.from("flha-reports").getPublicUrl(filename);
-  return data?.publicUrl || null;
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/logs", action: "create_upload_url", token,
+      bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (e) {
+    console.error("toolbox pdf upload failed", e.message);
+    return null;
+  }
 }

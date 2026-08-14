@@ -4,15 +4,25 @@ import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 
-// Session storage — kept in memory for the browser session
+// Session storage — localStorage, not window.name. window.name survives a
+// reload but not a fully closed-and-reopened tab, which is exactly the
+// case that matters most for a worker relaunching the app from a home-
+// screen icon on a jobsite with no signal (docs/scope-offline-capability.md
+// Phase 0). localStorage survives that. Server-side sessions already carry
+// their own 7-day TTL (SESSION_TTL_MS in api/*.js) — a stale local copy
+// just fails on the next API call, same as before.
+const SESSION_STORAGE_KEY = "fora_session";
 function saveSession(session) {
-  try { window.name = JSON.stringify(session); } catch (e) {}
+  try { localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)); } catch (e) {}
 }
 function loadSession() {
-  try { return window.name ? JSON.parse(window.name) : null; } catch (e) { return null; }
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
 }
 function clearSession() {
-  try { window.name = ""; } catch (e) {}
+  try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
 }
 
 export default function Login() {
@@ -294,11 +304,11 @@ export default function Login() {
       <div style={styles.card}>
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <img
-            src="https://wzyvbtzxxdcxgvbkcqmt.supabase.co/storage/v1/object/public/company-logos/IMG_0125.png"
+            src="/fora-logo.png"
             alt="FORA"
             style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
           />
-          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field safety documentation</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field documentation portal</div>
         </div>
 
         {!role ? (

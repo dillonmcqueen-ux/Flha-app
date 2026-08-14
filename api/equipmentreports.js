@@ -128,7 +128,7 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   const byEquipment = {};
   const ensure = (label) => {
     if (!byEquipment[label]) {
-      byEquipment[label] = { equipmentLabel: label, unit: null, usage: 0, endingReading: null, endingReadingDate: null, issues: [], noPostTripCount: 0 };
+      byEquipment[label] = { equipmentLabel: label, unit: null, usage: 0, endingReading: null, endingReadingDate: null, issues: [], noPostTripCount: 0, attachments: [] };
     }
     return byEquipment[label];
   };
@@ -161,8 +161,16 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
     } else {
       // pretrip
       const items = (r.results_json?.items) || [];
+      const attached = r.results_json?.attachedTrailer;
       items.filter(it => it.condition === 'Defective' || it.condition === 'Monitor').forEach(it => {
-        entry.issues.push({
+        // A tow unit's pretrip can carry a combined checklist (its own
+        // items plus an attached trailer's, tagged by `unit` — see
+        // Inspection.jsx's generateInspection). A trailer defect must land
+        // on the TRAILER's own report entry, never the tow vehicle's, and
+        // vice versa — otherwise a bad trailer tire reads as a defect on
+        // the truck that happened to be pulling it that day.
+        const targetEntry = (it.unit === 'trailer' && attached?.label) ? ensure(attached.label) : entry;
+        targetEntry.issues.push({
           date: r.created_at,
           worker: r.worker_name,
           type: it.condition,
@@ -173,6 +181,30 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
       const hasPosttrip = (records || []).some(p => p.trip_type === 'posttrip' && p.linked_inspection_id === r.id);
       if (!hasPosttrip) entry.noPostTripCount += 1;
     }
+  });
+
+  // Trailers have no engine and no reading of their own (see
+  // Inspection.jsx's isTrailerTemplate), so their usage for the week comes
+  // entirely from whatever towed them: a pretrip on a tow-capable unit can
+  // carry results_json.attachedTrailer = { id, label }, and the distance
+  // credited to the trailer is the SAME distance the towing unit logged on
+  // its own linked posttrip for that trip.
+  (records || []).forEach(r => {
+    if (r.trip_type !== 'pretrip') return;
+    const attached = r.results_json?.attachedTrailer;
+    if (!attached || !attached.label) return;
+    const posttrip = (records || []).find(p => p.trip_type === 'posttrip' && p.linked_inspection_id === r.id);
+    if (!posttrip) return; // only credit completed trips
+    const start = parseFloat(r.start_reading);
+    const end = parseFloat(posttrip.end_reading);
+    if (isNaN(start) || isNaN(end) || end < start) return;
+    const trailerEntry = ensure(attached.label);
+    trailerEntry.attachments.push({
+      towUnit: r.equipment_label || 'Unknown equipment',
+      distance: end - start,
+      unit: r.reading_unit || 'km',
+      date: posttrip.created_at,
+    });
   });
 
   const equipment = Object.values(byEquipment).sort((a, b) => a.equipmentLabel.localeCompare(b.equipmentLabel));
@@ -223,18 +255,36 @@ export default async function handler(req, res) {
     // Manual on-demand generation for a specific company + week (defaults to
     // last completed week if no dates given). Overwrites any existing report
     // for that company+week (upsert), clearing a stale pdf_url so it regenerates.
+    //
+    // Optional `pullUntil`: a "request a manual pull" cutoff — instead of the
+    // full Monday-to-Monday week, pull everything from that week's Monday up
+    // to this exact timestamp (e.g. mid-week, or partway through the current
+    // week). Must fall inside the resolved week or it's rejected — this
+    // action pulls ONE week's worth of data, not an arbitrary range. The
+    // standard automated Sunday-11:59pm pull (cron-equipment-reports.js)
+    // upserts on the same company_id+week_start key, so once the week
+    // actually closes, the automatic full-week pull overwrites any earlier
+    // manual partial pull for that week.
     if (action === 'generate_now') {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { weekStart } = req.body;
+      const { weekStart, pullUntil } = req.body;
 
       const anchor = weekStart ? new Date(weekStart) : new Date();
       const monday = weekStart ? mondayOf(anchor) : mondayOf(new Date(anchor.getTime() - 7 * 86400000));
       const weekStartISO = toISODate(monday);
       const nextMonday = new Date(monday); nextMonday.setDate(nextMonday.getDate() + 7);
-      const weekEndExclusiveISO = nextMonday.toISOString();
+
+      let weekEndExclusiveISO = nextMonday.toISOString();
+      if (pullUntil) {
+        const until = new Date(pullUntil);
+        if (isNaN(until.getTime())) return res.status(400).json({ error: 'Invalid pull-until time.' });
+        if (until < monday || until > nextMonday) return res.status(400).json({ error: "Requested time must fall within that report's week." });
+        weekEndExclusiveISO = until.toISOString();
+      }
 
       const reportJson = await buildReportForCompanyWeek(companyId, monday.toISOString(), weekEndExclusiveISO);
+      reportJson.pulledUntil = pullUntil ? weekEndExclusiveISO : null;
 
       const { data, error } = await supabaseAdmin
         .from('equipment_reports')

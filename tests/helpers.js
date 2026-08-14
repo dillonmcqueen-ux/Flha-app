@@ -199,6 +199,15 @@ export async function mockExternalServices(page) {
                 if (prop === 'output') return () => new Blob(['pdf'], { type: 'application/pdf' });
                 if (prop === 'internal') return { getNumberOfPages: () => 1 };
                 if (prop === 'then') return undefined;
+                // Real jsPDF methods like getTextWidth() return a number that
+                // callers do arithmetic on (e.g. "doc.getTextWidth(x) + 8").
+                // Without this, Symbol.toPrimitive falls through to the
+                // catch-all below, which returns a function — and a
+                // Symbol.toPrimitive method that doesn't return a primitive
+                // throws "Cannot convert object to primitive value" the
+                // moment any code tries to use the result as a number/string.
+                if (prop === Symbol.toPrimitive) return (hint) => (hint === 'number' ? 0 : '');
+                if (prop === 'getTextWidth') return () => 10;
                 return () => proxy;
               },
             };
@@ -225,6 +234,11 @@ export async function loginAsWorker(page) {
 
 export async function signCanvas(page) {
   const canvas = page.locator('canvas').first();
+  // Raw page.mouse coordinates are viewport-relative and don't auto-scroll
+  // the way locator.click() does — on a long form (e.g. a full equipment
+  // checklist) the canvas can start out below the fold, so scroll it into
+  // view first or the drag lands on nothing and the signature never registers.
+  await canvas.scrollIntoViewIfNeeded();
   const box = await canvas.boundingBox();
   await page.mouse.move(box.x + 20, box.y + box.height / 2);
   await page.mouse.down();

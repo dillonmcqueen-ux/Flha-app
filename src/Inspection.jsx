@@ -1,24 +1,97 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
+import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { enqueueSubmission } from "./offlineQueue.js";
+
+function newClientSubmissionId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+// Redoes an entire inspection submission (PDF generation + upload + the
+// final POST) from plain input data, covering both pre-trip and post-trip —
+// used both by a live online submit below and by offlineQueue's
+// drainQueue() to resend a queued one later. Throws on any failure so the
+// caller can tell success from failure. Exported so WorkerMenu.jsx can
+// drain this form's queue without the Inspection component mounted.
+export async function resubmitInspection(payload, clientSubmissionId, tokenForRequest) {
+  const {
+    tripType, label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit, equipmentId,
+    resultsJson, startReading,
+    endReading, hasChanges, changeCondition, changeNotes,
+    linkedPretripId, linkedPretripStartReading, linkedPretripReadingUnit,
+  } = payload;
+
+  const pdfUrl = await generateAndUploadInspection({
+    equipmentLabel: label, workerName, companyName, companyLogo,
+    results: tripType === "pretrip" ? resultsJson : undefined,
+    signatureDataUrl: sig,
+    tripType,
+    startReading: isTrailer ? null : (tripType === "pretrip" ? startReading : linkedPretripStartReading),
+    endReading: tripType === "posttrip" ? (isTrailer ? null : endReading) : undefined,
+    readingUnit: isTrailer ? null : readingUnit,
+    hasChanges: tripType === "posttrip" ? !!hasChanges : undefined,
+    changeCondition: tripType === "posttrip" ? changeCondition : undefined,
+    changeNotes: tripType === "posttrip" ? changeNotes : undefined,
+    linkedPretrip: tripType === "posttrip" ? { id: linkedPretripId, start_reading: linkedPretripStartReading, reading_unit: linkedPretripReadingUnit } : undefined,
+    token: tokenForRequest,
+  });
+
+  const record = tripType === "pretrip" ? {
+    worker_name: workerName, equipment_label: label, equipment_id: equipmentId,
+    results_json: resultsJson, signed_by: workerName, pdf_url: pdfUrl || null,
+    trip_type: "pretrip", linked_inspection_id: null,
+    start_reading: isTrailer ? null : startReading, end_reading: null,
+    reading_unit: isTrailer ? null : readingUnit, has_changes: null,
+  } : {
+    worker_name: workerName, equipment_label: label, equipment_id: equipmentId,
+    results_json: resultsJson, signed_by: workerName, pdf_url: pdfUrl || null,
+    trip_type: "posttrip", linked_inspection_id: linkedPretripId,
+    start_reading: isTrailer ? null : linkedPretripStartReading,
+    end_reading: isTrailer ? null : endReading,
+    reading_unit: isTrailer ? null : (linkedPretripReadingUnit || readingUnit),
+    has_changes: !!hasChanges,
+  };
+
+  let res;
+  try {
+    res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "inspection", action: "submit", token: tokenForRequest, clientSubmissionId, record }),
+    });
+  } catch (networkErr) {
+    networkErr.isNetworkFailure = true;
+    throw networkErr;
+  }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true;
+    throw err;
+  }
+}
 
 const CONDITIONS = [
   { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
   { key: "Monitor", color: "#D97706", bg: "#FFFBEB", border: "#FCD34D" },
   { key: "Defective", color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5" },
+  { key: "N/A", color: "#64748B", bg: "#F1F5F9", border: "#CBD5E1" },
 ];
 
 export default function Inspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
-  const [step, setStep] = useState("equipment"); // equipment | choice | worker | inspect | posttrip | done
+  const [step, setStep] = useState("equipment"); // equipment | choice | worker | inspect | posttrip | queued | done
   const [equipment, setEquipment] = useState([]);
   const [eqMode, setEqMode] = useState("list"); // list | other
   const [selectedEq, setSelectedEq] = useState("");
   const [selectedEqId, setSelectedEqId] = useState("");
-  const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "" });
+  const [freeEq, setFreeEq] = useState({ year: "", make: "", model: "", type: "", unit_number: "" });
   const [workerName, setWorkerName] = useState(loginUserName);
-  const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [genError, setGenError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [savingInspection, setSavingInspection] = useState(false);
   const [items, setItems] = useState([]);        // [{ item, condition, note }]
   const [inspectionMeta, setInspectionMeta] = useState({});
   const [companyLogo, setCompanyLogo] = useState("");
@@ -38,6 +111,10 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const [hasChanges, setHasChanges] = useState(null); // null until chosen
   const [changeCondition, setChangeCondition] = useState("Monitor");
   const [changeNotes, setChangeNotes] = useState("");
+
+  // ── trailer attachment (tow-capable units only) ────────────
+  const [attachedTrailerId, setAttachedTrailerId] = useState("");
+  const [attachedTrailerText, setAttachedTrailerText] = useState("");
 
   // Load equipment registry + logo
   useEffect(() => {
@@ -72,12 +149,86 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     load();
   }, [companyId, token]);
 
+  // ── Offline resilience: local draft autosave (docs/scope-offline-capability.md Phase 0) ──
+  // Equipment selection restores unconditionally, but the step only jumps
+  // back into "worker" or "inspect" — "choice" and "posttrip" depend on
+  // openPretrip/lastInspection, which are always re-fetched live rather
+  // than cached (a stale cached "open pre-trip today" could be actively
+  // wrong if it's since been closed out or superseded), so there's nothing
+  // safe to restore into those two steps. A worker mid-post-trip who loses
+  // connection just re-picks the equipment and re-checks it.
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    const draft = loadDraft("inspection", companyId);
+    if (draft) {
+      if (draft.eqMode) setEqMode(draft.eqMode);
+      if (draft.selectedEq) setSelectedEq(draft.selectedEq);
+      if (draft.selectedEqId) setSelectedEqId(draft.selectedEqId);
+      if (draft.freeEq) setFreeEq(draft.freeEq);
+      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.attachedTrailerId) setAttachedTrailerId(draft.attachedTrailerId);
+      if (draft.attachedTrailerText) setAttachedTrailerText(draft.attachedTrailerText);
+      if (draft.step === "worker" || draft.step === "inspect") {
+        if (draft.readingUnit) setReadingUnit(draft.readingUnit);
+        if (draft.startReading) setStartReading(draft.startReading);
+        if (draft.items && draft.items.length > 0) setItems(draft.items);
+        if (draft.inspectionMeta) setInspectionMeta(draft.inspectionMeta);
+        setStep(draft.step);
+      }
+    }
+    setDraftRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  useDraftAutosave(
+    "inspection",
+    companyId,
+    { step, eqMode, selectedEq, selectedEqId, freeEq, workerName, attachedTrailerId, attachedTrailerText, readingUnit, startReading, items, inspectionMeta },
+    draftRestored && !!companyId
+  );
+
   const labelFor = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
+
+  // Concise text for the equipment picker's dropdown options — a worker who
+  // knows their unit number shouldn't have to scan full year/make/model
+  // text to find it. Falls back to the full descriptive label when there's
+  // no unit number to key off of.
+  const menuLabelFor = (eq) => {
+    if (eq.unit_number) return `UNIT ${eq.unit_number}${eq.type ? `, ${eq.type}` : ""}`;
+    return labelFor(eq);
+  };
 
   const equipmentLabel = () => {
     if (eqMode === "list" && selectedEq) return selectedEq;
-    const { year, make, model, type } = freeEq;
-    return [year, make, model, type].filter(Boolean).join(" ");
+    const { year, make, model, type, unit_number } = freeEq;
+    return [year, make, model, type].filter(Boolean).join(" ") + (unit_number ? ` (Unit ${unit_number})` : "");
+  };
+
+  // { type, make, model } for whichever equipment is currently selected —
+  // feeds the keyword match that picks an inspection template.
+  const currentEquipmentFields = () => {
+    if (eqMode === "list") {
+      const eq = equipment.find(e => String(e.id) === String(selectedEqId));
+      return { type: eq?.type || "", make: eq?.make || "", model: eq?.model || "" };
+    }
+    return { type: freeEq.type, make: freeEq.make, model: freeEq.model };
+  };
+
+  const { type: currentType, make: currentMake, model: currentModel } = currentEquipmentFields();
+  const isTrailer = isTrailerTemplate(currentType, currentMake, currentModel);
+  const isTowCapable = isTowCapableTemplate(currentType, currentMake, currentModel);
+  const trailerFleet = equipment.filter(eq => isTrailerTemplate(eq.type, eq.make, eq.model));
+
+  // { id, label } for whatever trailer (if any) was selected to go with
+  // this trip, or null if none — fleet selection wins over free text.
+  const selectedAttachedTrailer = () => {
+    if (attachedTrailerId) {
+      const eq = trailerFleet.find(e => String(e.id) === String(attachedTrailerId));
+      return eq ? { id: eq.id, label: menuLabelFor(eq) } : null;
+    }
+    if (attachedTrailerText.trim()) return { id: null, label: attachedTrailerText.trim() };
+    return null;
   };
 
   const lastHadIssues = (insp) => {
@@ -134,46 +285,39 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     setStep("worker");
   };
 
-  const generateInspection = async () => {
-    setLoading(true); setGenError(false);
-    const label = equipmentLabel();
-    const prompt = `You are a heavy equipment safety inspector. Generate a pre-use inspection checklist specific to this machine.
+  // Picks a fixed, real inspection checklist by matching the equipment's
+  // type/make/model against known keywords (see equipmentInspectionTemplates.js)
+  // instead of asking an LLM to improvise one — a truck and a grader should
+  // never get the same checklist, and shouldn't vary run to run either.
+  const generateInspection = () => {
+    const { type, make, model } = currentEquipmentFields();
+    const template = getEquipmentTemplate(type, make, model);
+    const truckLabel = equipmentLabel();
+    const truckItems = template.items.map(it => ({ item: it.item, category: it.category || "", unit: "truck", unitLabel: truckLabel, condition: "Good", note: "" }));
 
-Machine: ${label}
-Company: ${companyName}
-
-INSTRUCTIONS:
-- Generate inspection items specific to THIS type of machine. A skid steer, excavator, boom lift, and pickup truck each have different critical inspection points.
-- Focus on safety-critical and function-critical items an operator checks before use.
-- Include the categories relevant to this machine (e.g. fluids, hydraulics, tires/tracks, controls, safety devices, structure, attachments).
-- 10-18 items. Each item should be a short, specific check an operator can assess as Good, Monitor, or Defective.
-
-Respond ONLY with valid JSON (no markdown, no backticks):
-{
-  "machineSummary": "one line describing the machine and inspection type",
-  "items": [
-    { "item": "specific thing to inspect", "category": "category name" }
-  ]
-}`;
-
-    try {
-      const res = await fetch("/api/generate-flha", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, token }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      const text = data.content?.map(b => b.text || "").join("") || "";
-      const a = text.indexOf("{"), b = text.lastIndexOf("}");
-      if (a === -1 || b === -1) throw new Error("bad response");
-      const parsed = JSON.parse(text.slice(a, b + 1));
-      setInspectionMeta({ machineSummary: parsed.machineSummary });
-      setItems((parsed.items || []).map(it => ({ item: it.item, category: it.category || "", condition: "Good", note: "" })));
-      setStep("inspect");
-    } catch (e) {
-      setGenError(true);
+    // A trailer attached to a tow-capable unit gets its OWN checklist
+    // appended, tagged by unit — the trailer is a completely different
+    // machine with different failure points, and a defect on it must never
+    // read as a defect on the tow vehicle (or vice versa) on this record,
+    // in the PDF, or in the weekly report's issue list.
+    const trailer = isTowCapable ? selectedAttachedTrailer() : null;
+    let trailerTemplateLabel = null;
+    let allItems = truckItems;
+    if (trailer) {
+      const trailerEq = attachedTrailerId ? trailerFleet.find(e => String(e.id) === String(attachedTrailerId)) : null;
+      const trailerTemplate = trailerEq
+        ? getEquipmentTemplate(trailerEq.type, trailerEq.make, trailerEq.model)
+        : getEquipmentTemplate(trailer.label, "", "");
+      trailerTemplateLabel = trailerTemplate.label;
+      const trailerItems = trailerTemplate.items.map(it => ({ item: it.item, category: it.category || "", unit: "trailer", unitLabel: trailer.label, condition: "Good", note: "" }));
+      allItems = [...truckItems, ...trailerItems];
     }
-    setLoading(false);
+
+    setInspectionMeta({
+      machineSummary: trailer ? `${template.label} + ${trailerTemplateLabel} (trailer attached)` : `${template.label} — pre-trip inspection`,
+    });
+    setItems(allItems);
+    setStep("inspect");
   };
 
   const setCondition = (i, cond) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, condition: cond } : it));
@@ -185,24 +329,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // ── Submit: Pre-Trip (full checklist) ───────────────────────
   const submitPretrip = async () => {
     setSigned(true);
+    setSaveError(false);
+    setSavingInspection(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
-    const resultsJson = { machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries() };
+    const resultsJson = {
+      machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries(),
+      attachedTrailer: isTowCapable ? selectedAttachedTrailer() : null,
+    };
 
-    // Auto-save a free-typed rental to the fleet, via the protected endpoint.
-    const typedSomething = (freeEq.make || freeEq.model || freeEq.type || freeEq.year).trim();
-    if (typedSomething) {
-      const typedLabel = [freeEq.year, freeEq.make, freeEq.model, freeEq.type].filter(v => v && v.trim()).join(" ").trim().toLowerCase();
-      const alreadyInFleet = equipment.some(eq =>
-        [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ").trim().toLowerCase() === typedLabel
-      );
+    // Auto-save a free-typed rental to the fleet, via the protected
+    // endpoint — only when a unit number was given. Matching by
+    // year/make/model/type TEXT used to silently create a duplicate "unit"
+    // every time it was typed even slightly differently (extra word,
+    // different capitalization/order, abbreviation) — exactly the problem a
+    // unit number exists to solve, so use that as the dedup key instead,
+    // and skip auto-adding entirely when there's no reliable identifier to
+    // key off of (a genuine one-off rental with no company asset tag).
+    const typedUnit = freeEq.unit_number.trim();
+    if (typedUnit) {
+      const alreadyInFleet = equipment.some(eq => (eq.unit_number || "").trim().toLowerCase() === typedUnit.toLowerCase());
       if (!alreadyInFleet) {
         try {
           await fetch("/api/companydata", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "add_equipment", token, companyId,
-              year: freeEq.year, make: freeEq.make, model: freeEq.model, type: freeEq.type, unitNumber: "",
+              year: freeEq.year, make: freeEq.make, model: freeEq.model, type: freeEq.type, unitNumber: typedUnit,
             }),
           });
         } catch (e) {
@@ -211,45 +364,51 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       }
     }
 
-    const pdfUrl = await generateAndUploadInspection({
-      equipmentLabel: label, workerName, companyName, companyLogo,
-      results: resultsJson, signatureDataUrl: sig,
-      tripType: "pretrip", startReading, readingUnit,
-    });
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      tripType: "pretrip", label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit,
+      equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
+      resultsJson, startReading,
+    };
+
+    // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+    // queued and retried automatically once back online instead of leaving
+    // the submit button stuck; a real server-side rejection shows an error
+    // and lets the worker retry manually.
+    if (!navigator.onLine) {
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
+      setSavingInspection(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
+      return;
+    }
 
     try {
-      await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "inspection",
-          action: "submit",
-          token,
-          record: {
-            worker_name: workerName,
-            equipment_label: label,
-            equipment_id: eqMode === "list" ? (selectedEqId || null) : null,
-            results_json: resultsJson,
-            signed_by: workerName,
-            pdf_url: pdfUrl || null,
-            trip_type: "pretrip",
-            linked_inspection_id: null,
-            start_reading: startReading,
-            end_reading: null,
-            reading_unit: readingUnit,
-            has_changes: null,
-          },
-        }),
-      });
+      await resubmitInspection(payload, clientSubmissionId, token);
     } catch (e) {
-      console.error("Inspection save failed:", e);
+      if (e.isServerError) {
+        console.error("Inspection save failed:", e.message);
+        setSaveError(true);
+        setSavingInspection(false);
+        setSigned(false);
+        return;
+      }
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
+      setSavingInspection(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
+      return;
     }
+    setSavingInspection(false);
+    clearDraft("inspection", companyId);
     setTimeout(() => setStep("done"), 500);
   };
 
   // ── Submit: Post-Trip (short flow) ──────────────────────────
   const submitPosttrip = async () => {
     setSigned(true);
+    setSaveError(false);
+    setSavingInspection(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
     const resultsJson = {
@@ -260,42 +419,44 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       monitorCount: hasChanges && changeCondition === "Monitor" ? 1 : 0,
     };
 
-    const pdfUrl = await generateAndUploadInspection({
-      equipmentLabel: label, workerName, companyName, companyLogo,
-      signatureDataUrl: sig,
-      tripType: "posttrip",
-      startReading: openPretrip.start_reading, endReading, readingUnit,
-      hasChanges: !!hasChanges, changeCondition, changeNotes,
-      linkedPretrip: openPretrip,
-    });
+    const clientSubmissionId = newClientSubmissionId();
+    const payload = {
+      tripType: "posttrip", label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit,
+      equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
+      resultsJson, endReading, hasChanges: !!hasChanges, changeCondition, changeNotes,
+      linkedPretripId: openPretrip.id, linkedPretripStartReading: openPretrip.start_reading, linkedPretripReadingUnit: openPretrip.reading_unit,
+    };
+
+    // docs/scope-offline-capability.md Phase 1: a network-level failure gets
+    // queued and retried automatically once back online instead of leaving
+    // the submit button stuck; a real server-side rejection shows an error
+    // and lets the worker retry manually.
+    if (!navigator.onLine) {
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
+      setSavingInspection(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
+      return;
+    }
 
     try {
-      await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "inspection",
-          action: "submit",
-          token,
-          record: {
-            worker_name: workerName,
-            equipment_label: label,
-            equipment_id: eqMode === "list" ? (selectedEqId || null) : null,
-            results_json: resultsJson,
-            signed_by: workerName,
-            pdf_url: pdfUrl || null,
-            trip_type: "posttrip",
-            linked_inspection_id: openPretrip.id,
-            start_reading: openPretrip.start_reading,
-            end_reading: endReading,
-            reading_unit: openPretrip.reading_unit || readingUnit,
-            has_changes: !!hasChanges,
-          },
-        }),
-      });
+      await resubmitInspection(payload, clientSubmissionId, token);
     } catch (e) {
-      console.error("Post-trip save failed:", e);
+      if (e.isServerError) {
+        console.error("Post-trip save failed:", e.message);
+        setSaveError(true);
+        setSavingInspection(false);
+        setSigned(false);
+        return;
+      }
+      await enqueueSubmission("inspection", clientSubmissionId, payload);
+      setSavingInspection(false);
+      clearDraft("inspection", companyId);
+      setStep("queued");
+      return;
     }
+    setSavingInspection(false);
+    clearDraft("inspection", companyId);
     setTimeout(() => setStep("done"), 500);
   };
 
@@ -363,7 +524,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               }}>
                 <option value="">Select a machine…</option>
                 {equipment.map(eq => (
-                  <option key={eq.id} value={eq.id}>{labelFor(eq)}</option>
+                  <option key={eq.id} value={eq.id}>{menuLabelFor(eq)}</option>
                 ))}
                 <option value="__other__">＋ Other / rental (enter details)</option>
               </select>
@@ -378,8 +539,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <input style={s.input} placeholder="e.g. 320" value={freeEq.model} onChange={e => setFreeEq(p => ({ ...p, model: e.target.value }))} />
               <label style={s.label}>Type</label>
               <input style={s.input} placeholder="e.g. Excavator" value={freeEq.type} onChange={e => setFreeEq(p => ({ ...p, type: e.target.value }))} />
+              <label style={s.label}>Unit / asset number (optional)</label>
+              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: -6, marginBottom: 6, lineHeight: 1.4 }}>If your company tags this machine with a unit number, enter it here — it's what lets this get added to the fleet correctly instead of as a duplicate.</div>
+              <input style={s.input} placeholder="e.g. 56" value={freeEq.unit_number} onChange={e => setFreeEq(p => ({ ...p, unit_number: e.target.value }))} />
               {equipment.length > 0 && (
-                <button onClick={() => { setEqMode("list"); setFreeEq({ year: "", make: "", model: "", type: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}>← Choose from fleet</button>
+                <button onClick={() => { setEqMode("list"); setFreeEq({ year: "", make: "", model: "", type: "", unit_number: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}>← Choose from fleet</button>
               )}
             </>
           )}
@@ -430,24 +594,49 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               readOnly={!!loginUserName}
             />
 
-            <label style={s.label}>Reading type</label>
-            <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
-              {["Hours", "KM"].map(u => (
-                <button key={u} onClick={() => setReadingUnit(u)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${readingUnit === u ? "#0369A1" : "#E2E8F0"}`, background: readingUnit === u ? "#F0F9FF" : "#fff", color: readingUnit === u ? "#0369A1" : "#94A3B8" }}>{u}</button>
-              ))}
-            </div>
+            {!isTrailer && (
+              <>
+                <label style={s.label}>Reading type</label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
+                  {["Hours", "KM"].map(u => (
+                    <button key={u} onClick={() => setReadingUnit(u)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${readingUnit === u ? "#0369A1" : "#E2E8F0"}`, background: readingUnit === u ? "#F0F9FF" : "#fff", color: readingUnit === u ? "#0369A1" : "#94A3B8" }}>{u}</button>
+                  ))}
+                </div>
 
-            <label style={s.label}>Starting reading</label>
-            <input style={s.input} type="number" inputMode="decimal" placeholder={`e.g. 1245.3`} value={startReading} onChange={e => setStartReading(e.target.value)} />
+                <label style={s.label}>Starting reading</label>
+                <input style={s.input} type="number" inputMode="decimal" placeholder={`e.g. 1245.3`} value={startReading} onChange={e => setStartReading(e.target.value)} />
+              </>
+            )}
+
+            {isTowCapable && (
+              <>
+                <label style={s.label}>Attach a trailer? (optional)</label>
+                {trailerFleet.length > 0 && (
+                  <select style={s.input} value={attachedTrailerId} onChange={e => { setAttachedTrailerId(e.target.value); setAttachedTrailerText(""); }}>
+                    <option value="">No trailer attached</option>
+                    {trailerFleet.map(eq => (
+                      <option key={eq.id} value={eq.id}>{menuLabelFor(eq)}</option>
+                    ))}
+                  </select>
+                )}
+                {!attachedTrailerId && (
+                  <input
+                    style={{ ...s.input, marginTop: trailerFleet.length > 0 ? -3 : 0 }}
+                    placeholder={trailerFleet.length > 0 ? "Or type a trailer not in your fleet" : "e.g. 5x10 Dump Trailer (Unit 7)"}
+                    value={attachedTrailerText}
+                    onChange={e => setAttachedTrailerText(e.target.value)}
+                  />
+                )}
+              </>
+            )}
 
             <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
-            {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't generate the inspection. Check your connection and try again.</div>}
-            <button style={s.btn(loading ? "#94A3B8" : (workerName && startReading) ? "#0369A1" : "#94A3B8")} disabled={loading || !workerName || !startReading} onClick={() => {
+            <button style={s.btn((workerName && (isTrailer || startReading)) ? "#0369A1" : "#94A3B8")} disabled={!workerName || (!isTrailer && !startReading)} onClick={() => {
               const missing = cf.missingRequired();
               if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
               generateInspection();
             }}>
-              {loading ? "⏳ Building inspection…" : "Generate Inspection"}
+              Start Inspection
             </button>
             <button style={s.ghost} onClick={() => setStep("equipment")}>← Back</button>
           </div>
@@ -460,7 +649,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={s.card}>
             <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{equipmentLabel()}</div>
             {inspectionMeta.machineSummary && <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{inspectionMeta.machineSummary}</div>}
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>
+            {!isTrailer && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>}
+            {isTowCapable && selectedAttachedTrailer() && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Trailer attached: {selectedAttachedTrailer().label}</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               {defectiveCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "4px 10px", borderRadius: 20 }}>{defectiveCount} defective</span>}
               {monitorCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "4px 10px", borderRadius: 20 }}>{monitorCount} monitor</span>}
@@ -469,14 +659,25 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           {items.map((it, i) => {
             const cond = CONDITIONS.find(c => c.key === it.condition);
+            const isNewUnit = it.unit && it.unit !== items[i - 1]?.unit;
             return (
-              <div key={i} style={{ ...s.card, borderLeft: `4px solid ${cond.color}`, marginBottom: 10 }}>
+              <div key={i}>
+                {isNewUnit && (
+                  <div style={{
+                    background: it.unit === "trailer" ? "#EDE9FE" : "#DBEAFE", borderRadius: 9,
+                    padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
+                    color: it.unit === "trailer" ? "#5B21B6" : "#1E40AF",
+                  }}>
+                    {it.unit === "trailer" ? "TRAILER" : "TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
+                  </div>
+                )}
+              <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
                 {it.category && <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 3 }}>{it.category}</div>}
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 10 }}>{it.item}</div>
-                <div style={{ display: "flex", gap: 6, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 10 : 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 8 }}>{it.item}</div>
+                <div style={{ display: "flex", gap: 5, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 8 : 0 }}>
                   {CONDITIONS.map(c => (
                     <button key={c.key} onClick={() => setCondition(i, c.key)} style={{
-                      flex: 1, padding: "9px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                      flex: 1, padding: "6px 4px", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer",
                       border: `1.5px solid ${it.condition === c.key ? c.color : "#E2E8F0"}`,
                       background: it.condition === c.key ? c.bg : "#fff",
                       color: it.condition === c.key ? c.color : "#94A3B8",
@@ -484,8 +685,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   ))}
                 </div>
                 {(it.condition === "Defective" || it.condition === "Monitor") && (
-                  <input style={{ ...s.input, marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
+                  <input style={{ ...s.input, padding: "8px 10px", marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
                 )}
+              </div>
               </div>
             );
           })}
@@ -505,8 +707,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
               <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
             </div>
-            <button style={s.btn(signed ? "#16A34A" : hasSignature ? "#0369A1" : "#94A3B8")} disabled={!hasSignature || signed} onClick={submitPretrip}>
-              {signed ? "✓ Submitting…" : "Sign & Submit Pre-Trip Inspection"}
+            {saveError && (
+              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+                Couldn't save this inspection. Check your connection and try again.
+              </div>
+            )}
+            <button style={s.btn(signed && !saveError ? "#16A34A" : hasSignature ? "#0369A1" : "#94A3B8")} disabled={!hasSignature || (signed && !saveError)} onClick={submitPretrip}>
+              {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Pre-Trip Inspection"}
             </button>
           </div>
         </>
@@ -520,7 +727,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>
               Linked to Pre-Trip by {openPretrip.worker_name} · {new Date(openPretrip.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
             </div>
-            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>
+            {!isTrailer && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
           </div>
 
           <div style={s.card}>
@@ -552,8 +759,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
             />
-            <label style={s.label}>Ending reading ({openPretrip.reading_unit || readingUnit})</label>
-            <input style={{ ...s.input, marginBottom: 0 }} type="number" inputMode="decimal" placeholder="e.g. 1251.8" value={endReading} onChange={e => setEndReading(e.target.value)} />
+            {!isTrailer && (
+              <>
+                <label style={s.label}>Ending reading ({openPretrip.reading_unit || readingUnit})</label>
+                <input style={{ ...s.input, marginBottom: 0 }} type="number" inputMode="decimal" placeholder="e.g. 1251.8" value={endReading} onChange={e => setEndReading(e.target.value)} />
+              </>
+            )}
           </div>
 
           <div style={s.card}>
@@ -570,16 +781,34 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
               <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
             </div>
+            {saveError && (
+              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
+                Couldn't save this inspection. Check your connection and try again.
+              </div>
+            )}
             {(() => {
-              const ready = hasSignature && workerName && endReading && hasChanges !== null && (!hasChanges || changeNotes.trim());
+              const ready = hasSignature && workerName && (isTrailer || endReading) && hasChanges !== null && (!hasChanges || changeNotes.trim());
               return (
-                <button style={s.btn(signed ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || signed} onClick={submitPosttrip}>
-                  {signed ? "✓ Submitting…" : "Sign & Submit Post-Trip"}
+                <button style={s.btn(signed && !saveError ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
+                  {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Post-Trip"}
                 </button>
               );
             })()}
           </div>
         </>
+      )}
+
+      {/* QUEUED — offline at submit time; queued locally and will send automatically once back online (docs/scope-offline-capability.md Phase 1) */}
+      {step === "queued" && (
+        <div style={s.card}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{equipmentLabel()}</div>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn("#0369A1")} onClick={onBack}>Back to menu</button>
+          </div>
+        </div>
       )}
 
       {/* STEP: done */}

@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
-import AnalyticsPanel from "./Analytics";
+import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
+import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
+import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -720,6 +722,51 @@ function CustomDocCard({ data, onClose }) {
   );
 }
 
+function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1E3A5F" }}>📄 This Week's Documents</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
+          </div>
+          <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+        </div>
+
+        {docs.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+            No documents submitted yet this week.
+          </div>
+        ) : (
+          docs.map(({ type, doc }, i) => {
+            const m = meta[type];
+            return (
+              <div
+                key={`${type}-${doc.id}`}
+                onClick={() => onOpen(type, doc)}
+                style={{ padding: "12px 4px", borderBottom: i < docs.length - 1 ? "1px solid #F3F4F680" : "none", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "#EEF2FF", padding: "2px 8px", borderRadius: 20 }}>{m.icon} {m.label}</span>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{m.primary(doc)}</div>
+                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{m.secondary(doc)}</div>
+                </div>
+                <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0, textAlign: "right" }}>
+                  {new Date(doc.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })} →
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CorrectiveActionRow({ ca, onUpdate }) {
   const [responsibleName, setResponsibleName] = useState(ca.responsible_name || "");
   const [targetDate, setTargetDate] = useState(ca.target_date || "");
@@ -769,6 +816,11 @@ function EquipmentReportCard({ data, onClose, error }) {
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#0369A1" }}>Weekly Equipment Usage</div>
             <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name}</div>
+            {rj.pulledUntil && (
+              <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
+                ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {report.pdf_url ? (
@@ -785,13 +837,33 @@ function EquipmentReportCard({ data, onClose, error }) {
         {equipment.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No equipment activity recorded this week.</div>
         ) : (
-          equipment.map((eq, i) => (
+          equipment.map((eq, i) => {
+            // Trailers have no reading of their own — their usage for the
+            // week is whatever towed them, summed per tow unit.
+            let attachmentLines = [];
+            if (eq.attachments && eq.attachments.length > 0) {
+              const byTow = {};
+              eq.attachments.forEach(a => {
+                if (!byTow[a.towUnit]) byTow[a.towUnit] = { distance: 0, unit: a.unit };
+                byTow[a.towUnit].distance += a.distance;
+              });
+              attachmentLines = Object.entries(byTow).map(([towUnit, v]) => `Attached to ${towUnit} for ${v.distance.toFixed(1)} ${v.unit}`);
+            }
+            return (
             <div key={i} style={{ border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B", marginBottom: 6 }}>{eq.equipmentLabel}</div>
-              <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
-                <div style={{ fontSize: 13, color: "#374151" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
-                <div style={{ fontSize: 13, color: "#374151" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
-              </div>
+              {attachmentLines.length > 0 ? (
+                <div style={{ marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
+                  {attachmentLines.map((line, li) => (
+                    <div key={li} style={{ fontSize: 13, color: "#374151" }}>{line}</div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
+                  <div style={{ fontSize: 13, color: "#374151" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
+                  <div style={{ fontSize: 13, color: "#374151" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
+                </div>
+              )}
               {eq.noPostTripCount > 0 && (
                 <div style={{ fontSize: 12, color: "#D97706", fontWeight: 700, marginBottom: 4 }}>⚠ Currently checked out — no post-trip logged</div>
               )}
@@ -801,7 +873,8 @@ function EquipmentReportCard({ data, onClose, error }) {
                 </div>
               ))}
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -822,6 +895,11 @@ function TimeClockReportCard({ data, onClose, error }) {
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#0891B2" }}>Weekly Time Clock Report</div>
             <div style={{ fontSize: 13, color: "#6B7280" }}>{rj.weekStart} to {rj.weekEnd} · {company?.name} · {grandTotal.toFixed(1)} hrs total</div>
+            {rj.pulledUntil && (
+              <div style={{ fontSize: 11, color: "#B45309", fontWeight: 700, marginTop: 2 }}>
+                ⚡ Manual pull — data through {new Date(rj.pulledUntil).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {report.pdf_url ? (
@@ -881,6 +959,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
   const [equipmentPdfError, setEquipmentPdfError] = useState("");
   const [generatingNewReport, setGeneratingNewReport] = useState(false);
+  const [generatingSafetyAnalyticsPdf, setGeneratingSafetyAnalyticsPdf] = useState(false);
+  const [generatingEquipmentAnalyticsPdf, setGeneratingEquipmentAnalyticsPdf] = useState(false);
+  const [analyticsPdfError, setAnalyticsPdfError] = useState("");
+  const [showManualPull, setShowManualPull] = useState(false);
+  const [manualPullUntil, setManualPullUntil] = useState("");
+  const [requestingManualPull, setRequestingManualPull] = useState(false);
+  const [manualPullError, setManualPullError] = useState("");
   const [docSettings, setDocSettings] = useState([]);
   const [equipmentSortBy, setEquipmentSortBy] = useState("newest");
   const [customDocRecords, setCustomDocRecords] = useState([]);
@@ -913,6 +998,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedTimeClockReport, setSelectedTimeClockReport] = useState(null);
   const [timeClockPdfError, setTimeClockPdfError] = useState("");
   const [generatingNewTimeClockReport, setGeneratingNewTimeClockReport] = useState(false);
+  const [showTimeClockManualPull, setShowTimeClockManualPull] = useState(false);
+  const [timeClockPullUntil, setTimeClockPullUntil] = useState("");
+  const [requestingTimeClockPull, setRequestingTimeClockPull] = useState(false);
+  const [timeClockPullError, setTimeClockPullError] = useState("");
 
   // ── Roster: view the company's roster and reset an individual PIN ─────
   const [rosterList, setRosterList] = useState([]);
@@ -924,42 +1013,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [showWorkerForms, setShowWorkerForms] = useState(false);
   const [selectedFlha, setSelectedFlha] = useState(null);
+  const [showThisWeekModal, setShowThisWeekModal] = useState(false);
   const [activeTab, setActiveTab] = useState("flhas");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState("newest");
   const [dateFilter, setDateFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [groupBy, setGroupBy] = useState("none");
+  const [groupBy, setGroupBy] = useState("site");
 
   // ── Inspections tab: search/sort/group state ──────────────
   const [inspSearch, setInspSearch] = useState("");
   const [inspSortBy, setInspSortBy] = useState("newest");
-  const [inspGroupBy, setInspGroupBy] = useState("none");
+  const [inspGroupBy, setInspGroupBy] = useState("equipment");
 
   // ── Toolbox tab: search/sort/group state ──────────────────
   const [tbtSearch, setTbtSearch] = useState("");
   const [tbtSortBy, setTbtSortBy] = useState("newest");
-  const [tbtGroupBy, setTbtGroupBy] = useState("none");
+  const [tbtGroupBy, setTbtGroupBy] = useState("site");
 
   // ── Near Miss tab: search/sort/group state ─────────────────
   const [nmSearch, setNmSearch] = useState("");
   const [nmSortBy, setNmSortBy] = useState("newest");
-  const [nmGroupBy, setNmGroupBy] = useState("none");
+  const [nmGroupBy, setNmGroupBy] = useState("site");
 
   // ── Incidents tab: search/sort/group state ─────────────────
   const [incSearch, setIncSearch] = useState("");
   const [incSortBy, setIncSortBy] = useState("newest");
-  const [incGroupBy, setIncGroupBy] = useState("none");
+  const [incGroupBy, setIncGroupBy] = useState("site");
 
   // ── Daily tab: search/sort/group state ─────────────────────
   const [dailySearch, setDailySearch] = useState("");
   const [dailySortBy, setDailySortBy] = useState("newest");
-  const [dailyGroupBy, setDailyGroupBy] = useState("none");
+  const [dailyGroupBy, setDailyGroupBy] = useState("site");
 
   // ── Monthly Submissions tab: search/sort/group state ────────
   const [moSearch, setMoSearch] = useState("");
   const [moSortBy, setMoSortBy] = useState("newest");
-  const [moGroupBy, setMoGroupBy] = useState("none");
+  const [moGroupBy, setMoGroupBy] = useState("site");
 
   // ── Monthly Corrective Actions tab: search state ────────────
   const [moaSearch, setMoaSearch] = useState("");
@@ -967,7 +1057,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // ── Custom Documents tab: search/sort/group state ───────────
   const [cdSearch, setCdSearch] = useState("");
   const [cdSortBy, setCdSortBy] = useState("newest");
-  const [cdGroupBy, setCdGroupBy] = useState("none");
+  const [cdGroupBy, setCdGroupBy] = useState("site");
 
   // ── Collapsible group-by sections: which groups (per tab) are expanded ──
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
@@ -1073,16 +1163,40 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   useEffect(() => {
-    async function loadAll() {
-      let cos = [];
+    // Each fetch below used to run one after another — total load time was
+    // the SUM of every request's latency. None of these 10 lists actually
+    // depend on each other (the server scopes each by the caller's session,
+    // not by anything the client computed), so they can all fire at once;
+    // only the SOPs call genuinely depends on knowing which companies are
+    // visible, so it's the one call that has to wait. safeFetch never
+    // rejects — same "fall back to empty array on any error" behavior as
+    // before, just safe to use inside Promise.all.
+    async function safeFetch(url, body, extract, fallback) {
       try {
-        const cosRes = await fetch("/api/companydata", {
+        const res = await fetch(url, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_companies_brief", token }),
+          body: JSON.stringify(body),
         });
-        const cosData = await cosRes.json();
-        if (cosRes.ok) cos = cosData.companies || [];
-      } catch (e) { /* leave companies empty if the request fails */ }
+        const data = await res.json();
+        return res.ok ? extract(data) : fallback;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    async function loadAll() {
+      const [cos, fs, nm, inc, insp, tbt, dr, mr, ma, cd] = await Promise.all([
+        safeFetch("/api/companydata", { action: "list_companies_brief", token }, d => d.companies || [], []),
+        safeFetch("/api/flhas", { action: "list", token }, d => d.flhas || [], []),
+        safeFetch("/api/reports", { type: "nearmiss", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/reports", { type: "incident", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/logs", { type: "inspection", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/logs", { type: "toolbox", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/logs", { type: "daily", action: "list", token }, d => d.records || [], []),
+        safeFetch("/api/monthly", { action: "list_records", token }, d => d.records || [], []),
+        safeFetch("/api/monthly", { action: "list_corrective_actions", token }, d => d.actions || [], []),
+        safeFetch("/api/customforms", { action: "list_records", token }, d => d.records || [], []),
+      ]);
 
       const visibleCompaniesRaw = forcedCompanyId
         ? (cos || []).filter(c => c.id === forcedCompanyId)
@@ -1105,96 +1219,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         }));
         ss = sopResults.flat();
       } catch (e) { /* leave ss empty if the request fails */ }
-
-      let fs = [];
-      try {
-        const flhaRes = await fetch("/api/flhas", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list", token }),
-        });
-        const flhaData = await flhaRes.json();
-        if (flhaRes.ok) fs = flhaData.flhas || [];
-      } catch (e) { /* leave fs empty if the request fails */ }
-
-      let nm = [];
-      try {
-        const nmRes = await fetch("/api/reports", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "nearmiss", action: "list", token }),
-        });
-        const nmData = await nmRes.json();
-        if (nmRes.ok) nm = nmData.records || [];
-      } catch (e) { /* leave nm empty if the request fails */ }
-
-      let inc = [];
-      try {
-        const incRes = await fetch("/api/reports", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "incident", action: "list", token }),
-        });
-        const incData = await incRes.json();
-        if (incRes.ok) inc = incData.records || [];
-      } catch (e) { /* leave inc empty if the request fails */ }
-
-      let insp = [];
-      try {
-        const inspRes = await fetch("/api/logs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "inspection", action: "list", token }),
-        });
-        const inspData = await inspRes.json();
-        if (inspRes.ok) insp = inspData.records || [];
-      } catch (e) { /* leave insp empty if the request fails */ }
-
-      let tbt = [];
-      try {
-        const tbtRes = await fetch("/api/logs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "toolbox", action: "list", token }),
-        });
-        const tbtData = await tbtRes.json();
-        if (tbtRes.ok) tbt = tbtData.records || [];
-      } catch (e) { /* leave tbt empty if the request fails */ }
-
-      let dr = [];
-      try {
-        const drRes = await fetch("/api/logs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "daily", action: "list", token }),
-        });
-        const drData = await drRes.json();
-        if (drRes.ok) dr = drData.records || [];
-      } catch (e) { /* leave dr empty if the request fails */ }
-
-      let mr = [];
-      try {
-        const mrRes = await fetch("/api/monthly", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_records", token }),
-        });
-        const mrData = await mrRes.json();
-        if (mrRes.ok) mr = mrData.records || [];
-      } catch (e) { /* leave mr empty if the request fails */ }
-
-      let ma = [];
-      try {
-        const maRes = await fetch("/api/monthly", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_corrective_actions", token }),
-        });
-        const maData = await maRes.json();
-        if (maRes.ok) ma = maData.actions || [];
-      } catch (e) { /* leave ma empty if the request fails */ }
-
-      let cd = [];
-      try {
-        const cdRes = await fetch("/api/customforms", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_records", token }),
-        });
-        const cdData = await cdRes.json();
-        if (cdRes.ok) cd = cdData.records || [];
-      } catch (e) { /* leave cd empty if the request fails */ }
 
       setCompanies(visibleCompaniesRaw);
       setFlhas(fs);
@@ -1310,7 +1334,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     return entry ? entry.isActive : true; // not loaded yet / unknown key → default to shown
   };
   const equipmentReportsEnabled = isDocActive("equipment_reports");
-  const hasActiveCustomForm = docSettings.some(d => d.isCustom && d.isActive);
+  // Each custom form now carries a `category` (safety/operations/workforce,
+  // set by the admin when creating it) — a separate "Custom Docs" tab per
+  // category, only shown when that company has at least one active custom
+  // form assigned there.
+  const hasActiveCustomFormIn = (category) => docSettings.some(d => d.isCustom && d.isActive && (d.category || "operations") === category);
 
   const TAB_VISIBLE = {
     flhas: isDocActive("flha"),
@@ -1321,19 +1349,29 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     daily: isDocActive("daily"),
     monthly: isDocActive("monthly"),
     equipment: equipmentReportsEnabled,
-    customdocs: hasActiveCustomForm,
+    customdocs: hasActiveCustomFormIn("operations"),
+    safetycustomdocs: hasActiveCustomFormIn("safety"),
+    workforcecustomdocs: hasActiveCustomFormIn("workforce"),
     maintenance: isDocActive("maintenance"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    safetyanalytics: true,
     analytics: true,
     sops: true,
   };
 
+  // Split by who's actually looking for it — a mechanic isn't hunting for
+  // an FLHA, a supervisor reviewing safety compliance isn't hunting for a
+  // maintenance log. Toolbox talks and site/monthly inspections live in
+  // Safety, equipment inspections in Operations, roster/time clock get
+  // their own Workforce group, and everything else sorted into whichever
+  // group it serves. Analytics is split the same way — two separate
+  // dashboards, not one page mixing both audiences' numbers together.
+  // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
-    { key: "submissions", label: "📋 Submissions", tabs: ["flhas", "inspections", "toolbox", "nearmiss", "incident", "daily", "monthly", "customdocs"] },
-    { key: "equipment", label: "🔧 Equipment", tabs: ["equipment", "maintenance"] },
-    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster"] },
-    { key: "insights", label: "📊 Insights", tabs: ["analytics", "sops"] },
+    { key: "safety", label: "🦺 Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
+    { key: "operations", label: "🔧 Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
+    { key: "workforce", label: "👥 Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
   const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
@@ -1403,6 +1441,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       }
     } catch (e) { /* ignore */ }
     setGeneratingNewReport(false);
+  };
+
+  // Pulls the week CONTAINING the requested cutoff time (not last week —
+  // that's what "Generate This Week" is for), with data limited to up to
+  // that moment. Does not touch the standard automated Sunday 11:59pm pull;
+  // that cron job runs regardless and its full-week result overwrites this
+  // once the week actually closes.
+  const requestManualPull = async () => {
+    if (!selectedCompany) return;
+    const until = manualPullUntil ? new Date(manualPullUntil) : new Date();
+    if (isNaN(until.getTime())) { setManualPullError("Pick a valid date and time."); return; }
+    setManualPullError("");
+    setRequestingManualPull(true);
+    try {
+      const untilISO = until.toISOString();
+      const res = await fetch("/api/equipmentreports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_now", token, companyId: selectedCompany, weekStart: untilISO, pullUntil: untilISO }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEquipmentReports(prev => {
+          const filtered = prev.filter(r => r.week_start !== data.report.week_start);
+          return [{ id: data.report.id, week_start: data.report.week_start, week_end: data.report.week_end, pdf_url: data.report.pdf_url, generated_by: data.report.generated_by, created_at: data.report.created_at }, ...filtered]
+            .sort((a, b) => new Date(b.week_start) - new Date(a.week_start));
+        });
+        setShowManualPull(false);
+        setManualPullUntil("");
+      } else {
+        setManualPullError(data.error || "Couldn't pull that report.");
+      }
+    } catch (e) {
+      setManualPullError("Couldn't pull that report.");
+    }
+    setRequestingManualPull(false);
   };
 
   // ── Time Clock: my own status ────────────────────────────────────────
@@ -1612,6 +1685,69 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setGeneratingNewTimeClockReport(false);
   };
 
+  // Same "pull the week containing this cutoff, up to this moment" flow as
+  // requestManualPull for equipment reports — see that function's comment.
+  const requestTimeClockManualPull = async () => {
+    if (!selectedCompany) return;
+    const until = timeClockPullUntil ? new Date(timeClockPullUntil) : new Date();
+    if (isNaN(until.getTime())) { setTimeClockPullError("Pick a valid date and time."); return; }
+    setTimeClockPullError("");
+    setRequestingTimeClockPull(true);
+    try {
+      const untilISO = until.toISOString();
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_time_report_now", token, companyId: selectedCompany, weekStart: untilISO, pullUntil: untilISO }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTimeClockReports(prev => {
+          const filtered = prev.filter(r => r.week_start !== data.report.week_start);
+          return [{ id: data.report.id, week_start: data.report.week_start, week_end: data.report.week_end, pdf_url: data.report.pdf_url, generated_by: data.report.generated_by, created_at: data.report.created_at }, ...filtered]
+            .sort((a, b) => new Date(b.week_start) - new Date(a.week_start));
+        });
+        setShowTimeClockManualPull(false);
+        setTimeClockPullUntil("");
+      } else {
+        setTimeClockPullError(data.error || "Couldn't pull that report.");
+      }
+    } catch (e) {
+      setTimeClockPullError("Couldn't pull that report.");
+    }
+    setRequestingTimeClockPull(false);
+  };
+
+  const downloadSafetyAnalyticsPdf = async () => {
+    setAnalyticsPdfError("");
+    setGeneratingSafetyAnalyticsPdf(true);
+    try {
+      await generateSafetyAnalyticsPDF({
+        companyName: company?.name, companyLogo: company?.logo_url,
+        flhas: companyFlhas, toolbox: companyToolbox, nearMisses: companyNearMisses, incidents: companyIncidents,
+        daily: companyDaily, monthlyActions: companyMonthlyActions,
+        monthlyRecords: companyMonthlyRecords, customDocs: companySafetyCustomDocs,
+      });
+    } catch (e) {
+      setAnalyticsPdfError("Couldn't generate the safety analytics PDF.");
+    }
+    setGeneratingSafetyAnalyticsPdf(false);
+  };
+
+  const downloadEquipmentAnalyticsPdf = async () => {
+    setAnalyticsPdfError("");
+    setGeneratingEquipmentAnalyticsPdf(true);
+    try {
+      await generateEquipmentAnalyticsPDF({
+        companyName: company?.name, companyLogo: company?.logo_url,
+        inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
+        customDocs: companyOperationsCustomDocs,
+      });
+    } catch (e) {
+      setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
+    }
+    setGeneratingEquipmentAnalyticsPdf(false);
+  };
+
   const company = companies.find(c => c.id === selectedCompany);
   const companyFlhas = flhas.filter(f => f.company_id === selectedCompany);
   const companyInspections = inspections.filter(i => i.company_id === selectedCompany);
@@ -1622,6 +1758,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const companyMonthlyRecords = monthlyRecords.filter(r => r.company_id === selectedCompany);
   const companyMonthlyActions = monthlyActions.filter(a => a.company_id === selectedCompany);
   const companyCustomDocs = customDocRecords.filter(r => r.company_id === selectedCompany);
+  const companySafetyCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "safety");
+  const companyOperationsCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "operations");
+  const companyWorkforceCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "workforce");
 
   const deleteDaily = async (id) => {
     if (!window.confirm("Delete this daily report? This cannot be undone.")) return;
@@ -1676,9 +1815,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
-  const docsThisWeek = [
-    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses, ...companyIncidents, ...companyDaily, ...companyMonthlyRecords,
-  ].filter(x => x.created_at && new Date(x.created_at) >= startOfWeek).length;
+  const docsThisWeekList = [
+    ...companyFlhas.map(doc => ({ type: "flha", doc })),
+    ...companyInspections.map(doc => ({ type: "inspection", doc })),
+    ...companyToolbox.map(doc => ({ type: "toolbox", doc })),
+    ...companyNearMisses.map(doc => ({ type: "nearmiss", doc })),
+    ...companyIncidents.map(doc => ({ type: "incident", doc })),
+    ...companyDaily.map(doc => ({ type: "daily", doc })),
+    ...companyMonthlyRecords.map(doc => ({ type: "monthly", doc })),
+    ...companyCustomDocs.map(doc => ({ type: "customdoc", doc })),
+  ].filter(x => x.doc.created_at && new Date(x.doc.created_at) >= startOfWeek)
+   .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at));
+  const docsThisWeek = docsThisWeekList.length;
+
+  const DOC_TYPE_META = {
+    flha: { icon: "📋", label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
+    inspection: { icon: "🚜", label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
+    toolbox: { icon: "🧰", label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
+    nearmiss: { icon: "⚠️", label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    incident: { icon: "🚑", label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    daily: { icon: "📋", label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    monthly: { icon: "🗓️", label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
+    customdoc: { icon: "🗂️", label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
+  };
+
+  const openWeekDoc = (type, doc) => {
+    setShowThisWeekModal(false);
+    if (type === "flha") setSelectedFlha(doc);
+    else if (type === "inspection") setSelectedInspection(doc);
+    else if (type === "toolbox") setSelectedToolbox(doc);
+    else if (type === "nearmiss") setSelectedNearMiss(doc);
+    else if (type === "incident") setSelectedIncident(doc);
+    else if (type === "daily") setSelectedDaily(doc);
+    else if (type === "monthly") openMonthlyRecord(doc);
+    else if (type === "customdoc") openCustomDocRecord(doc);
+  };
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
   const reviewNearMiss = async (id, notes, reviewerName) => {
@@ -1704,6 +1875,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           signatureDataUrl: record.signature_url || null,
           customFields: record.report_json?.customFields || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
+          token,
         });
       } catch (e) { /* keep old pdf if regen fails */ }
     }
@@ -1752,6 +1924,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           customFields: record.report_json?.customFields || [],
           photoUrls: record.photo_urls || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
+          token,
         });
       } catch (e) { /* keep old pdf if regen fails */ }
     }
@@ -2081,7 +2254,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     });
   }
 
-  // ── Custom Documents: search/sort/group processing ──
+  // ── Custom Documents: search/sort/group processing ── shared across the
+  // three category-scoped Custom Docs tabs (Safety/Operations/Workforce) —
+  // only one is ever visible at a time, so one set of search/sort/group
+  // controls is plenty.
   const cdMatchesSearch = (r) => {
     if (!cdSearch.trim()) return true;
     const q = cdSearch.toLowerCase();
@@ -2090,29 +2266,113 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
            (r.form_title || "").toLowerCase().includes(q);
   };
 
-  let processedCustomDocs = companyCustomDocs.filter(cdMatchesSearch);
-
-  processedCustomDocs = [...processedCustomDocs].sort((a, b) => {
-    switch (cdSortBy) {
-      case "oldest": return new Date(a.created_at) - new Date(b.created_at);
-      case "site": return (a.site_name || "").localeCompare(b.site_name || "");
-      case "submitter": return (a.submitted_by || "").localeCompare(b.submitted_by || "");
-      case "form": return (a.form_title || "").localeCompare(b.form_title || "");
-      case "newest":
-      default: return new Date(b.created_at) - new Date(a.created_at);
-    }
-  });
-
-  const groupedCustomDocs = {};
-  if (cdGroupBy === "none") {
-    groupedCustomDocs["All Submissions"] = processedCustomDocs;
-  } else {
-    processedCustomDocs.forEach(r => {
-      const key = cdGroupBy === "site" ? (r.site_name || "Unknown site") : (r.form_title || "Unknown form");
-      if (!groupedCustomDocs[key]) groupedCustomDocs[key] = [];
-      groupedCustomDocs[key].push(r);
+  const buildCustomDocsView = (docs) => {
+    let processed = docs.filter(cdMatchesSearch);
+    processed = [...processed].sort((a, b) => {
+      switch (cdSortBy) {
+        case "oldest": return new Date(a.created_at) - new Date(b.created_at);
+        case "site": return (a.site_name || "").localeCompare(b.site_name || "");
+        case "submitter": return (a.submitted_by || "").localeCompare(b.submitted_by || "");
+        case "form": return (a.form_title || "").localeCompare(b.form_title || "");
+        case "newest":
+        default: return new Date(b.created_at) - new Date(a.created_at);
+      }
     });
-  }
+    const grouped = {};
+    if (cdGroupBy === "none") {
+      grouped["All Submissions"] = processed;
+    } else {
+      processed.forEach(r => {
+        const key = cdGroupBy === "site" ? (r.site_name || "Unknown site") : (r.form_title || "Unknown form");
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(r);
+      });
+    }
+    return { processed, grouped };
+  };
+
+  // Same list UI for all three category-scoped Custom Docs tabs — only the
+  // underlying doc subset and the group-key prefix (so CollapsibleGroup's
+  // expand/collapse state doesn't collide across tabs) differ.
+  const renderCustomDocsTab = (docs, groupPrefix) => {
+    const { processed, grouped } = buildCustomDocsView(docs);
+    return (
+      <div style={styles.card}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
+          {company?.name} — Custom Document Submissions
+        </div>
+        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+          {processed.length} of {docs.length} shown — tap any submission to view.
+        </div>
+
+        <input
+          style={styles.searchInput}
+          placeholder="🔍 Search document, site, or submitted by…"
+          value={cdSearch}
+          onChange={e => setCdSearch(e.target.value)}
+        />
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="form">Document (A–Z)</option>
+            <option value="site">Site (A–Z)</option>
+            <option value="submitter">Submitted by (A–Z)</option>
+          </select>
+          <select value={cdGroupBy} onChange={e => setCdGroupBy(e.target.value)} style={styles.select}>
+            <option value="none">No grouping</option>
+            <option value="site">Group by site</option>
+            <option value="form">Group by document</option>
+          </select>
+        </div>
+
+        {processed.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+            {docs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
+          </div>
+        ) : (
+          Object.entries(grouped).map(([groupName, groupItems]) => {
+            const renderRows = () => groupItems.map((r, i) => (
+              <div key={r.id} style={{
+                padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
+                cursor: "pointer"
+              }} onClick={() => openCustomDocRecord(r)}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, paddingRight: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
+                    {r.pdf_url ? "📄 PDF" : ""} →
+                  </div>
+                </div>
+              </div>
+            ));
+            if (cdGroupBy === "none") {
+              return <div key={groupName}>{renderRows()}</div>;
+            }
+            const key = `${groupPrefix}:${groupName}`;
+            return (
+              <CollapsibleGroup
+                key={groupName}
+                icon={cdGroupBy === "site" ? "📍" : "🗂️"}
+                label={groupName}
+                count={groupItems.length}
+                colorPreset="indigo"
+                open={expandedGroups.has(key)}
+                onToggle={() => toggleGroup(key)}
+              >
+                {renderRows()}
+              </CollapsibleGroup>
+            );
+          })
+        )}
+      </div>
+    );
+  };
 
   // ── Monthly Corrective Actions: search processing ──
   const moaMatchesSearch = (a) => {
@@ -2188,6 +2448,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} error={equipmentPdfError} />}
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} />}
+      {showThisWeekModal && (
+        <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
+      )}
 
       <div style={styles.header}>
         <div>
@@ -2252,7 +2515,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             <div style={{ fontSize: 26, fontWeight: 800, color: openCorrectiveCount > 0 ? "#fff" : "#94A3B8" }}>{openCorrectiveCount}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: openCorrectiveCount > 0 ? "#E0E7FF" : "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>🗓️ Open Corrective Actions</div>
           </div>
-          <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
+          <div onClick={() => setShowThisWeekModal(true)} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", cursor: "pointer", boxShadow: "0 1px 3px #0f172a12", border: "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: "#1E3A5F" }}>{docsThisWeek}</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3 }}>📄 Docs This Week</div>
           </div>
@@ -2272,43 +2535,55 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         </div>
 
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && activeCategory === "submissions" && (
+          {TAB_VISIBLE.flhas && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "flhas")} onClick={() => setActiveTab("flhas")}>📋 FLHAs</button>
           )}
-          {TAB_VISIBLE.inspections && activeCategory === "submissions" && (
-            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
-          )}
-          {TAB_VISIBLE.toolbox && activeCategory === "submissions" && (
+          {TAB_VISIBLE.toolbox && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "toolbox")} onClick={() => setActiveTab("toolbox")}>🧰 Toolbox Talks</button>
           )}
-          {TAB_VISIBLE.nearmiss && activeCategory === "submissions" && (
+          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "nearmiss")} onClick={() => setActiveTab("nearmiss")}>
               ⚠️ Near Misses{companyNearMisses.filter(n => !n.reviewed).length > 0 ? ` (${companyNearMisses.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.incident && activeCategory === "submissions" && (
+          {TAB_VISIBLE.incident && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "incident")} onClick={() => setActiveTab("incident")}>
               🚑 Incidents{companyIncidents.filter(n => !n.reviewed).length > 0 ? ` (${companyIncidents.filter(n => !n.reviewed).length})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.daily && activeCategory === "submissions" && (
-            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
-          )}
-          {TAB_VISIBLE.monthly && activeCategory === "submissions" && (
+          {TAB_VISIBLE.monthly && activeCategory === "safety" && (
             <button style={styles.tab(activeTab === "monthly")} onClick={() => setActiveTab("monthly")}>
               🗓️ Monthly{openCorrectiveCount > 0 ? ` (${openCorrectiveCount})` : ""}
             </button>
           )}
-          {TAB_VISIBLE.customdocs && activeCategory === "submissions" && (
-            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          {activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
           )}
-          {TAB_VISIBLE.equipment && activeCategory === "equipment" && (
+          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "safetycustomdocs")} onClick={() => setActiveTab("safetycustomdocs")}>🗂️ Custom Docs</button>
+          )}
+          {activeCategory === "safety" && (
+            <button style={styles.tab(activeTab === "safetyanalytics")} onClick={() => setActiveTab("safetyanalytics")}>📊 Safety Analytics</button>
+          )}
+          {TAB_VISIBLE.inspections && activeCategory === "operations" && (
+            <button style={styles.tab(activeTab === "inspections")} onClick={() => setActiveTab("inspections")}>🚜 Inspections</button>
+          )}
+          {TAB_VISIBLE.daily && activeCategory === "operations" && (
+            <button style={styles.tab(activeTab === "daily")} onClick={() => setActiveTab("daily")}>📋 Daily</button>
+          )}
+          {TAB_VISIBLE.equipment && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "equipment")} onClick={() => setActiveTab("equipment")}>🔧 Equipment</button>
           )}
-          {TAB_VISIBLE.maintenance && activeCategory === "equipment" && (
+          {TAB_VISIBLE.maintenance && activeCategory === "operations" && (
             <button style={styles.tab(activeTab === "maintenance")} onClick={() => setActiveTab("maintenance")}>
               🛠️ Maintenance{maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? ` (${maintenanceStatus.filter(e => e.status === "overdue").length})` : ""}
             </button>
+          )}
+          {TAB_VISIBLE.customdocs && activeCategory === "operations" && (
+            <button style={styles.tab(activeTab === "customdocs")} onClick={() => setActiveTab("customdocs")}>🗂️ Custom Docs</button>
+          )}
+          {activeCategory === "operations" && (
+            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Equipment Analytics</button>
           )}
           {TAB_VISIBLE.timeclock && activeCategory === "workforce" && (
             <button style={styles.tab(activeTab === "timeclock")} onClick={() => setActiveTab("timeclock")}>⏱️ Time Clock</button>
@@ -2316,11 +2591,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           {TAB_VISIBLE.roster && activeCategory === "workforce" && (
             <button style={styles.tab(activeTab === "roster")} onClick={() => setActiveTab("roster")}>🔑 Roster</button>
           )}
-          {activeCategory === "insights" && (
-            <button style={styles.tab(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
-          )}
-          {activeCategory === "insights" && (
-            <button style={styles.tab(activeTab === "sops")} onClick={() => setActiveTab("sops")}>📄 SOPs</button>
+          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && (
+            <button style={styles.tab(activeTab === "workforcecustomdocs")} onClick={() => setActiveTab("workforcecustomdocs")}>🗂️ Custom Docs</button>
           )}
         </div>
 
@@ -3020,114 +3292,106 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </>
         )}
 
-        {activeTab === "customdocs" && TAB_VISIBLE.customdocs && (
-          <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F", marginBottom: 4 }}>
-              {company?.name} — Custom Document Submissions
-            </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
-              {processedCustomDocs.length} of {companyCustomDocs.length} shown — tap any submission to view.
+        {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
+        {activeTab === "safetycustomdocs" && TAB_VISIBLE.safetycustomdocs && renderCustomDocsTab(companySafetyCustomDocs, "safetycustomdocs")}
+        {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
+
+        {activeTab === "safetyanalytics" && (
+          <>
+            <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+              <button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
+                background: generatingSafetyAnalyticsPdf ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 8,
+                padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+              }}>
+                {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
+              </button>
+              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
             </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search document, site, or submitted by…"
-              value={cdSearch}
-              onChange={e => setCdSearch(e.target.value)}
+            <SafetyAnalyticsPanel
+              tier={company?.plan_tier || "basic"}
+              companyName={company?.name}
+              flhas={companyFlhas}
+              toolbox={companyToolbox}
+              nearMisses={companyNearMisses}
+              incidents={companyIncidents}
+              daily={companyDaily}
+              monthlyRecords={companyMonthlyRecords}
+              monthlyActions={companyMonthlyActions}
+              customDocs={companySafetyCustomDocs}
             />
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-              <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="form">Document (A–Z)</option>
-                <option value="site">Site (A–Z)</option>
-                <option value="submitter">Submitted by (A–Z)</option>
-              </select>
-              <select value={cdGroupBy} onChange={e => setCdGroupBy(e.target.value)} style={styles.select}>
-                <option value="none">No grouping</option>
-                <option value="site">Group by site</option>
-                <option value="form">Group by document</option>
-              </select>
-            </div>
-
-            {processedCustomDocs.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
-                {companyCustomDocs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
-              </div>
-            ) : (
-              Object.entries(groupedCustomDocs).map(([groupName, groupItems]) => {
-                const renderRows = () => groupItems.map((r, i) => (
-                  <div key={r.id} style={{
-                    padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #F3F4F6" : "none",
-                    cursor: "pointer"
-                  }} onClick={() => openCustomDocRecord(r)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, paddingRight: 10 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1E3A5F" }}>{r.form_icon} {r.form_title}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>👷 {r.submitted_by}</div>
-                      </div>
-                      <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
-                        {r.pdf_url ? "📄 PDF" : ""} →
-                      </div>
-                    </div>
-                  </div>
-                ));
-                if (cdGroupBy === "none") {
-                  return <div key={groupName}>{renderRows()}</div>;
-                }
-                const key = `customdocs:${groupName}`;
-                return (
-                  <CollapsibleGroup
-                    key={groupName}
-                    icon={cdGroupBy === "site" ? "📍" : "🗂️"}
-                    label={groupName}
-                    count={groupItems.length}
-                    colorPreset="indigo"
-                    open={expandedGroups.has(key)}
-                    onToggle={() => toggleGroup(key)}
-                  >
-                    {renderRows()}
-                  </CollapsibleGroup>
-                );
-              })
-            )}
-          </div>
+          </>
         )}
 
         {activeTab === "analytics" && (
-          <AnalyticsPanel
-            tier={company?.plan_tier || "basic"}
-            companyName={company?.name}
-            flhas={companyFlhas}
-            inspections={companyInspections}
-            toolbox={companyToolbox}
-            nearMisses={companyNearMisses}
-            incidents={companyIncidents}
-            daily={companyDaily}
-            monthlyRecords={companyMonthlyRecords}
-            monthlyActions={companyMonthlyActions}
-            customDocs={companyCustomDocs}
-            maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
-          />
+          <>
+            <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E3A5F", marginRight: "auto" }}>Export a snapshot:</div>
+              <button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
+                background: generatingEquipmentAnalyticsPdf ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+              }}>
+                {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
+              </button>
+              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+            </div>
+
+            <EquipmentAnalyticsPanel
+              tier={company?.plan_tier || "basic"}
+              companyName={company?.name}
+              inspections={companyInspections}
+              daily={companyDaily}
+              maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
+              customDocs={companyOperationsCustomDocs}
+            />
+          </>
         )}
 
         {activeTab === "equipment" && equipmentReportsEnabled && (
           <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
                 {company?.name} — Weekly Equipment Usage
               </div>
-              <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
-                background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
-                padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0
-              }}>
-                {generatingNewReport ? "Generating…" : "+ Generate This Week"}
-              </button>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => { setShowManualPull(s => !s); setManualPullError(""); }} style={{
+                  background: "#fff", color: "#0369A1", border: "1.5px solid #0369A1", borderRadius: 8,
+                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                }}>
+                  🕐 Request Manual Pull
+                </button>
+                <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
+                  background: generatingNewReport ? "#94A3B8" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                }}>
+                  {generatingNewReport ? "Generating…" : "+ Generate This Week"}
+                </button>
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+
+            {showManualPull && (
+              <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>Pull this week's data up to:</div>
+                <input
+                  type="datetime-local"
+                  value={manualPullUntil}
+                  onChange={e => setManualPullUntil(e.target.value)}
+                  style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #E2E8F0", fontSize: 13 }}
+                />
+                <button onClick={requestManualPull} disabled={requestingManualPull} style={{
+                  background: requestingManualPull ? "#94A3B8" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                }}>
+                  {requestingManualPull ? "Pulling…" : "Pull Now"}
+                </button>
+                <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
+                  Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
+                </div>
+                {manualPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {manualPullError}</div>}
+              </div>
+            )}
 
             {equipmentReports.length > 1 && (
               <div style={{ marginBottom: 14 }}>
@@ -3403,18 +3667,48 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             <div style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 700, fontSize: 15, color: "#1E3A5F" }}>
                   {company?.name} — Weekly Time Clock Reports
                 </div>
-                <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
-                  background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
-                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0
-                }}>
-                  {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
-                </button>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => { setShowTimeClockManualPull(s => !s); setTimeClockPullError(""); }} style={{
+                    background: "#fff", color: "#0891B2", border: "1.5px solid #0891B2", borderRadius: 8,
+                    padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    🕐 Request Manual Pull
+                  </button>
+                  <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
+                    background: generatingNewTimeClockReport ? "#94A3B8" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
+                  </button>
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Monday for the prior week. Tap any report to view or download.</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+
+              {showTimeClockManualPull && (
+                <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>Pull this week's data up to:</div>
+                  <input
+                    type="datetime-local"
+                    value={timeClockPullUntil}
+                    onChange={e => setTimeClockPullUntil(e.target.value)}
+                    style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #E2E8F0", fontSize: 13 }}
+                  />
+                  <button onClick={requestTimeClockManualPull} disabled={requestingTimeClockPull} style={{
+                    background: requestingTimeClockPull ? "#94A3B8" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    {requestingTimeClockPull ? "Pulling…" : "Pull Now"}
+                  </button>
+                  <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
+                    Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
+                  </div>
+                  {timeClockPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {timeClockPullError}</div>}
+                </div>
+              )}
 
               {loadingTimeClockReports ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
