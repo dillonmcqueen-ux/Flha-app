@@ -3546,7 +3546,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ marginTop: 10, background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
                           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                             <input type="number" placeholder="Interval (e.g. 250)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={pmSetupForm.interval} onChange={e => setPmSetupForm(p => ({ ...p, interval: e.target.value }))} />
-                            <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 90 }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
+                            <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 90, background: C.panelInset, color: C.text.body, cursor: "pointer" }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
                               <option value="Hours">Hours</option>
                               <option value="KM">KM</option>
                             </select>
@@ -3565,7 +3565,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                           <input type="date" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={logServiceForm.serviceDate} onChange={e => setLogServiceForm(p => ({ ...p, serviceDate: e.target.value }))} />
                           <input type="number" placeholder="Reading (optional if today)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={logServiceForm.serviceReading} onChange={e => setLogServiceForm(p => ({ ...p, serviceReading: e.target.value }))} />
-                          <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 80 }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
+                          <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 80, background: C.panelInset, color: C.text.body, cursor: "pointer" }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
                             <option value="Hours">Hours</option>
                             <option value="KM">KM</option>
                           </select>
@@ -3641,7 +3641,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
               {addEntryOpen && (
                 <div style={{ background: "#1A1A1A", borderRadius: 8, padding: 10, marginBottom: 14 }}>
-                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }}>
+                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box", background: C.panelInset, color: C.text.body, cursor: "pointer" }}>
                     <option value="">Select person…</option>
                     {timeClockRoster.filter(m => m.active).map(m => <option key={m.id} value={m.id}>{m.name} ({m.role})</option>)}
                   </select>

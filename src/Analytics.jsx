@@ -4,15 +4,16 @@ import {
   correctiveActionAging, reporterLeaderboard, monthlyPassRate, toolboxAvgAttendance,
   maintenanceSummary,
 } from "./analyticsUtils";
+import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
 
-const TONE = { neutral: "#1E3A5F", good: "#16A34A", warn: "#D97706", bad: "#DC2626" };
-const SEV_COLOR = { Low: "#16A34A", Medium: "#D97706", High: "#DC2626", Critical: "#7F1D1D" };
+const TONE = { neutral: C.orange, good: C.status.success.solid, warn: C.status.warning.solid, bad: C.status.danger.solid };
+const SEV_COLOR = { Low: C.risk.low.solid, Medium: C.risk.medium.solid, High: C.risk.high.solid, Critical: C.risk.extreme.solid };
 
 function SectionCard({ title, subtitle, children }) {
   return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px #0001" }}>
-      <div style={{ fontWeight: 800, fontSize: 15, color: "#1E3A5F", marginBottom: subtitle ? 2 : 10 }}>{title}</div>
-      {subtitle && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>{subtitle}</div>}
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: 16, marginBottom: 12, boxShadow: SHAD.md }}>
+      <div style={{ fontWeight: 800, fontSize: 15, color: C.text.primary, marginBottom: subtitle ? 2 : 10 }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 12 }}>{subtitle}</div>}
       {children}
     </div>
   );
@@ -21,28 +22,28 @@ function SectionCard({ title, subtitle, children }) {
 function StatTile({ label, value, sub, tone = "neutral" }) {
   const color = TONE[tone] || TONE.neutral;
   return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", borderLeft: `4px solid ${color}`, boxShadow: "0 1px 4px #0001", minWidth: 128, flex: "1 1 128px" }}>
+    <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: "14px 16px", borderLeft: `4px solid ${color}`, border: `1px solid ${C.line}`, borderLeftWidth: 4, borderLeftColor: color, minWidth: 128, flex: "1 1 128px" }}>
       <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3, marginTop: 2 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{sub}</div>}
+      <div style={{ fontSize: 11, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.3, marginTop: 2 }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
 
-function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barColor = "#1E3A5F" }) {
+function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barColor = C.orange }) {
   const list = limit ? items.slice(0, limit) : items;
   const hasData = list.some(it => it.count > 0);
-  if (!hasData) return <div style={{ color: "#9CA3AF", fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
+  if (!hasData) return <div style={{ color: C.text.faint, fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
   const max = Math.max(...list.map(it => it.count), 1);
   return (
     <div>
       {list.map((it, i) => (
         <div key={i} style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
-            <span style={{ color: "#334155", fontWeight: 600 }}>{it.label}</span>
-            <span style={{ color: "#6B7280", fontWeight: 700 }}>{it.count}</span>
+            <span style={{ color: C.text.body, fontWeight: 600 }}>{it.label}</span>
+            <span style={{ color: C.text.muted, fontWeight: 700 }}>{it.count}</span>
           </div>
-          <div style={{ background: "#F1F5F9", borderRadius: 6, height: 8 }}>
+          <div style={{ background: C.panelInset, borderRadius: 6, height: 8 }}>
             <div style={{ width: `${it.count > 0 ? Math.max((it.count / max) * 100, 4) : 0}%`, background: it.color || barColor, height: 8, borderRadius: 6, transition: "width .2s" }} />
           </div>
         </div>
@@ -52,14 +53,14 @@ function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barC
 }
 
 function SimpleTable({ columns, rows, emptyLabel = "Not enough data yet." }) {
-  if (rows.length === 0) return <div style={{ color: "#9CA3AF", fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
+  if (rows.length === 0) return <div style={{ color: C.text.faint, fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr>
             {columns.map(c => (
-              <th key={c.key} style={{ textAlign: c.align || "left", padding: "6px 8px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.3, borderBottom: "1.5px solid #E5E7EB", whiteSpace: "nowrap" }}>{c.label}</th>
+              <th key={c.key} style={{ textAlign: c.align || "left", padding: "6px 8px", fontSize: 11, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.5px solid ${C.line}`, whiteSpace: "nowrap" }}>{c.label}</th>
             ))}
           </tr>
         </thead>
@@ -67,7 +68,7 @@ function SimpleTable({ columns, rows, emptyLabel = "Not enough data yet." }) {
           {rows.map((row, i) => (
             <tr key={i}>
               {columns.map((c, ci) => (
-                <td key={c.key} style={{ textAlign: c.align || "left", padding: "7px 8px", borderBottom: "1px solid #F3F4F6", color: "#334155", fontWeight: ci === 0 ? 700 : 500, whiteSpace: "nowrap" }}>
+                <td key={c.key} style={{ textAlign: c.align || "left", padding: "7px 8px", borderBottom: `1px solid ${C.line}`, color: C.text.body, fontWeight: ci === 0 ? 700 : 500, whiteSpace: "nowrap" }}>
                   {c.render ? c.render(row) : (row[c.key] ?? "—")}
                 </td>
               ))}
@@ -81,13 +82,13 @@ function SimpleTable({ columns, rows, emptyLabel = "Not enough data yet." }) {
 
 function TrendBars({ buckets, series, emptyLabel = "Not enough data yet." }) {
   const hasData = buckets.some(b => series.some(s => (b[s.key] || 0) > 0));
-  if (!hasData) return <div style={{ color: "#9CA3AF", fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
+  if (!hasData) return <div style={{ color: C.text.faint, fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
   const max = Math.max(...buckets.flatMap(b => series.map(s => b[s.key] || 0)), 1);
   return (
     <div>
       <div style={{ display: "flex", gap: 14, marginBottom: 10, flexWrap: "wrap" }}>
         {series.map(s => (
-          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#6B7280" }}>
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: C.text.muted }}>
             <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
             {s.label}
           </div>
@@ -107,7 +108,7 @@ function TrendBars({ buckets, series, emptyLabel = "Not enough data yet." }) {
                 );
               })}
             </div>
-            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>{b.label}</div>
+            <div style={{ fontSize: 10, color: C.text.faint, marginTop: 4 }}>{b.label}</div>
           </div>
         ))}
       </div>
@@ -159,21 +160,21 @@ export function SafetyAnalyticsPanel({
       </SectionCard>
 
       <SectionCard title="Top Sites — Near Misses & Incidents">
-        <RankedBarList items={topFieldSites} emptyLabel="No near misses or incidents reported yet." barColor="#991B1B" />
+        <RankedBarList items={topFieldSites} emptyLabel="No near misses or incidents reported yet." barColor={C.status.danger.solid} />
       </SectionCard>
 
       <SectionCard title="Review Backlog" subtitle="Near misses + incidents reviewed vs outstanding">
         {backlog.total === 0 ? (
-          <div style={{ color: "#9CA3AF", fontSize: 13 }}>No reports to review yet.</div>
+          <div style={{ color: C.text.faint, fontSize: 13 }}>No reports to review yet.</div>
         ) : backlog.caughtUp ? (
-          <div style={{ color: "#16A34A", fontWeight: 700, fontSize: 14 }}>✓ All {backlog.total} reports reviewed</div>
+          <div style={{ color: C.status.success.solid, fontWeight: 700, fontSize: 14 }}>✓ All {backlog.total} reports reviewed</div>
         ) : (
           <>
-            <div style={{ fontSize: 13, color: "#334155", marginBottom: 6 }}>
-              <strong>{backlog.reviewed}</strong> reviewed · <strong style={{ color: "#B45309" }}>{backlog.outstanding}</strong> outstanding ({backlog.pct}% caught up)
+            <div style={{ fontSize: 13, color: C.text.body, marginBottom: 6 }}>
+              <strong>{backlog.reviewed}</strong> reviewed · <strong style={{ color: C.status.warning.text }}>{backlog.outstanding}</strong> outstanding ({backlog.pct}% caught up)
             </div>
-            <div style={{ background: "#F1F5F9", borderRadius: 6, height: 8 }}>
-              <div style={{ width: `${backlog.pct}%`, background: "#16A34A", height: 8, borderRadius: 6 }} />
+            <div style={{ background: C.panelInset, borderRadius: 6, height: 8 }}>
+              <div style={{ width: `${backlog.pct}%`, background: C.status.success.solid, height: 8, borderRadius: 6 }} />
             </div>
           </>
         )}
@@ -181,11 +182,11 @@ export function SafetyAnalyticsPanel({
 
       <SectionCard title="High-Risk FLHA Rate" subtitle="Share of FLHAs with at least one High-risk hazard">
         {riskRate.total === 0 ? (
-          <div style={{ color: "#9CA3AF", fontSize: 13 }}>No FLHAs submitted yet.</div>
+          <div style={{ color: C.text.faint, fontSize: 13 }}>No FLHAs submitted yet.</div>
         ) : (
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: riskRate.pct > 0 ? "#DC2626" : "#16A34A" }}>{riskRate.pct}%</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{riskRate.highRisk} of {riskRate.total} FLHAs flagged High risk</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: riskRate.pct > 0 ? C.status.danger.solid : C.status.success.solid }}>{riskRate.pct}%</div>
+            <div style={{ fontSize: 13, color: C.text.muted }}>{riskRate.highRisk} of {riskRate.total} FLHAs flagged High risk</div>
           </div>
         )}
       </SectionCard>
@@ -197,7 +198,7 @@ export function SafetyAnalyticsPanel({
       />}
 
       {!isAdvanced && (
-        <div style={{ textAlign: "center", fontSize: 12, color: "#9CA3AF", padding: "10px 4px" }}>
+        <div style={{ textAlign: "center", fontSize: 12, color: C.text.faint, padding: "10px 4px" }}>
           Ask your admin to enable Advanced Analytics for trend charts, site scorecards, corrective-action aging, and more.
         </div>
       )}
@@ -212,9 +213,9 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
   const leaderboard = reporterLeaderboard(flhas, [], toolbox);
 
   const agingItems = [
-    { label: "Open < 30 days", count: aging.buckets.under30, color: "#16A34A" },
-    { label: "Open 30–60 days", count: aging.buckets.days30to60, color: "#D97706" },
-    { label: "Open 60+ days", count: aging.buckets.over60, color: "#DC2626" },
+    { label: "Open < 30 days", count: aging.buckets.under30, color: C.status.success.solid },
+    { label: "Open 30–60 days", count: aging.buckets.days30to60, color: C.status.warning.solid },
+    { label: "Open 60+ days", count: aging.buckets.over60, color: C.status.danger.solid },
   ];
 
   return (
@@ -222,7 +223,7 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
       <SectionCard title="6-Month Trend" subtitle="Near misses and incidents per month">
         <TrendBars
           buckets={trend}
-          series={[{ key: "nearMiss", label: "Near Miss", color: "#D97706" }, { key: "incident", label: "Incident", color: "#DC2626" }]}
+          series={[{ key: "nearMiss", label: "Near Miss", color: C.status.warning.solid }, { key: "incident", label: "Incident", color: C.status.danger.solid }]}
           emptyLabel="No near misses or incidents in the last 6 months."
         />
       </SectionCard>
@@ -257,7 +258,7 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
 
       <SectionCard title="Corrective Action Aging">
         {aging.openCount === 0 && aging.resolvedCount === 0 ? (
-          <div style={{ color: "#9CA3AF", fontSize: 13 }}>No corrective actions logged yet.</div>
+          <div style={{ color: C.text.faint, fontSize: 13 }}>No corrective actions logged yet.</div>
         ) : (
           <>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
@@ -271,16 +272,16 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
       </SectionCard>
 
       <SectionCard title="Most Active Safety Reporters" subtitle="FLHAs and toolbox talks by name">
-        <RankedBarList items={leaderboard} emptyLabel="No reports submitted yet." barColor="#4338CA" />
+        <RankedBarList items={leaderboard} emptyLabel="No reports submitted yet." barColor={C.status.info.solid} />
       </SectionCard>
 
       <SectionCard title="Monthly Site Inspection Pass Rate" subtitle="Share of monthly site inspections with no items flagged">
         {passRate.total === 0 ? (
-          <div style={{ color: "#9CA3AF", fontSize: 13 }}>No monthly site inspections submitted yet.</div>
+          <div style={{ color: C.text.faint, fontSize: 13 }}>No monthly site inspections submitted yet.</div>
         ) : (
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: passRate.pct >= 90 ? "#16A34A" : passRate.pct >= 70 ? "#D97706" : "#DC2626" }}>{passRate.pct}%</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{passRate.passed} of {passRate.total} inspections passed clean</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: passRate.pct >= 90 ? C.status.success.solid : passRate.pct >= 70 ? C.status.warning.solid : C.status.danger.solid }}>{passRate.pct}%</div>
+            <div style={{ fontSize: 13, color: C.text.muted }}>{passRate.passed} of {passRate.total} inspections passed clean</div>
           </div>
         )}
       </SectionCard>
@@ -313,7 +314,7 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
       </SectionCard>
 
       <SectionCard title="Top Equipment Issues" subtitle="Pretrip inspections flagged Defective or Monitor">
-        <RankedBarList items={topEquipment} emptyLabel="No equipment issues flagged yet." barColor="#B45309" />
+        <RankedBarList items={topEquipment} emptyLabel="No equipment issues flagged yet." barColor={C.status.warning.solid} />
       </SectionCard>
 
       {isAdvanced && (
@@ -345,7 +346,7 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
       )}
 
       {!isAdvanced && (
-        <div style={{ textAlign: "center", fontSize: 12, color: "#9CA3AF", padding: "10px 4px" }}>
+        <div style={{ textAlign: "center", fontSize: 12, color: C.text.faint, padding: "10px 4px" }}>
           Ask your admin to enable Advanced Analytics for equipment issue detail and preventative maintenance tracking.
         </div>
       )}
