@@ -208,6 +208,42 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, reviewed_by: reviewedBy, reviewed_at: now, pdfUrl: signedPdfUrl });
     }
 
+    // ── Supervisor / Admin: correct the submitted content of a report ──
+    // General "fix a mistake" edit — distinct from `review` (which only
+    // ever touches reviewed/reviewed_by/reviewed_at/review_notes). Only
+    // the fields that actually feed the PDF are whitelisted per type, so a
+    // client can never smuggle company_id, reviewed status, etc. through
+    // `fields`. Same tenant-ownership re-check as `review`/`delete` above.
+    if (action === 'update') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, fields, pdfUrl } = req.body;
+      if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
+
+      if (session.role === 'supervisor') {
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
+          return res.status(403).json({ error: 'Not allowed to edit this record.' });
+        }
+      }
+
+      const EDITABLE_FIELDS = {
+        incident: ['reporter_name', 'site', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json'],
+        nearmiss: ['reporter_name', 'is_anonymous', 'site', 'occurred_at', 'involved', 'report_json'],
+      };
+      const allowed = EDITABLE_FIELDS[type] || [];
+      const update = {};
+      for (const key of allowed) {
+        if (Object.prototype.hasOwnProperty.call(fields, key)) update[key] = fields[key];
+      }
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
+      if (pdfUrl) update.pdf_url = pdfUrl;
+
+      const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
+      if (error) return res.status(500).json({ error: 'Update failed.' });
+      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+    }
+
     // ── Supervisor / Admin: delete a report ──────────────────────────
     if (action === 'delete') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
