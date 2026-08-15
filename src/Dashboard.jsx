@@ -2,6 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
+import { generateAndUploadInspection } from "./generateInspectionPDF";
+import { generateAndUploadToolbox } from "./generateToolboxPDF";
+import { generateAndUploadDaily } from "./generateDailyPDF";
+import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
+import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
 import WorkerMenu from "./WorkerMenu";
@@ -69,7 +74,47 @@ function RiskBadge({ risk }) {
   );
 }
 
-function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
+// ── Shared "supervisor/admin edit" UI, reused by every detail card below ──
+// Dark-theme inputs matching this file's existing card palette (#1D1D1D
+// input bg, #242424 border, #F5F5F4 text) — never the light EFF6FF/#fff
+// styling other parts of these cards use for read-only info blocks.
+const EDIT_INPUT_STYLE = { width: "100%", padding: "9px 11px", borderRadius: 8, border: "1.5px solid #242424", background: "#1D1D1D", color: "#F5F5F4", fontSize: 13, boxSizing: "border-box", outline: "none", fontFamily: "inherit" };
+const EDIT_TEXTAREA_STYLE = { ...EDIT_INPUT_STYLE, minHeight: 64, resize: "vertical", lineHeight: 1.5 };
+const EDIT_LABEL_STYLE = { display: "block", fontWeight: 700, fontSize: 11, color: "#A1A1AA", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.3 };
+
+function EditField({ label, children }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <label style={EDIT_LABEL_STYLE}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function EditPanel({ title, onCancel, onSave, saving, children }) {
+  return (
+    <div style={{ background: "rgba(249,115,22,0.08)", border: "1.5px solid rgba(249,115,22,0.35)", borderRadius: 10, padding: "14px", marginBottom: 16 }}>
+      <div style={{ fontWeight: 800, fontSize: 13, color: "#FB923C", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>{title || "Editing"}</div>
+      {children}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button onClick={onSave} disabled={saving} style={{ flex: 1, background: saving ? "#71717A" : "#F97316", color: "#0A0A0A", border: "none", borderRadius: 8, padding: "10px", fontWeight: 800, fontSize: 13, cursor: saving ? "default" : "pointer" }}>
+          {saving ? "Saving…" : "✓ Save Changes"}
+        </button>
+        <button onClick={onCancel} disabled={saving} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "10px 16px", fontWeight: 700, fontSize: 13, color: "#D4D4D8", cursor: saving ? "default" : "pointer" }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditToggleButton({ onClick }) {
+  return (
+    <button onClick={onClick} style={{ background: "#1D1D1D", color: "#F5F5F4", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✏️ Edit</button>
+  );
+}
+
+function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSupName = "" }) {
   const h = flha.hazards_json || {};
   const isPending = flha.status === "pending_approval";
   const canvasRef = useRef(null);
@@ -77,6 +122,31 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
   const [hasSignature, setHasSignature] = useState(false);
   const [supName, setSupName] = useState(defaultSupName);
   const [approving, setApproving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editWorkerName, setEditWorkerName] = useState(flha.worker_name || "");
+  const [editJobSite, setEditJobSite] = useState(flha.job_site || "");
+  const [editTaskSummary, setEditTaskSummary] = useState(h.taskSummary || "");
+  const [editHazards, setEditHazards] = useState((h.hazards || []).map(hz => ({ ...hz })));
+
+  const startEdit = () => {
+    setEditWorkerName(flha.worker_name || "");
+    setEditJobSite(flha.job_site || "");
+    setEditTaskSummary(h.taskSummary || "");
+    setEditHazards((h.hazards || []).map(hz => ({ ...hz })));
+    setEditing(true);
+  };
+  const updateHazard = (i, key, val) => setEditHazards(prev => prev.map((hz, idx) => idx === i ? { ...hz, [key]: val } : hz));
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(flha.id, {
+      worker_name: editWorkerName,
+      job_site: editJobSite,
+      hazards_json: { ...h, taskSummary: editTaskSummary, hazards: editHazards },
+    });
+    setSaving(false);
+    setEditing(false);
+  };
 
   const getPos = (e) => {
     const c = canvasRef.current, r = c.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
@@ -126,12 +196,40 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
                 padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
               }}>🗑 Delete</button>
             )}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{
               background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8,
               padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer"
             }}>✕ Close</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit FLHA" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Worker Name">
+              <input style={EDIT_INPUT_STYLE} value={editWorkerName} onChange={e => setEditWorkerName(e.target.value)} />
+            </EditField>
+            <EditField label="Job Site">
+              <input style={EDIT_INPUT_STYLE} value={editJobSite} onChange={e => setEditJobSite(e.target.value)} />
+            </EditField>
+            <EditField label="Task Summary">
+              <textarea style={EDIT_TEXTAREA_STYLE} value={editTaskSummary} onChange={e => setEditTaskSummary(e.target.value)} />
+            </EditField>
+            {editHazards.length > 0 && (
+              <EditField label="Hazards & Controls">
+                {editHazards.map((hz, i) => (
+                  <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                    <input style={{ ...EDIT_INPUT_STYLE, marginBottom: 6 }} placeholder="Hazard" value={hz.hazard || ""} onChange={e => updateHazard(i, "hazard", e.target.value)} />
+                    <input style={{ ...EDIT_INPUT_STYLE, marginBottom: 6 }} placeholder="Control" value={hz.control || ""} onChange={e => updateHazard(i, "control", e.target.value)} />
+                    <select style={EDIT_INPUT_STYLE} value={hz.risk || "Low"} onChange={e => updateHazard(i, "risk", e.target.value)}>
+                      {["Low", "Medium", "High", "Extreme"].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </EditField>
+            )}
+          </EditPanel>
+        )}
 
         {isPending && (
           <div style={{ background: "#DC2626", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
@@ -261,12 +359,46 @@ function FLHACard({ flha, onClose, onDelete, onApprove, defaultSupName = "" }) {
   );
 }
 
-function InspectionCard({ insp, onClose, onDelete }) {
+function InspectionCard({ insp, onClose, onDelete, onSave }) {
   const r = insp.results_json || {};
   const items = r.items || [];
   const isPost = insp.trip_type === "posttrip";
   const condColor = { Good: "#16A34A", Monitor: "#D97706", Defective: "#DC2626" };
   const condBg = { Good: "rgba(34,197,94,0.14)", Monitor: "rgba(245,158,11,0.14)", Defective: "rgba(239,68,68,0.14)" };
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editItems, setEditItems] = useState(items.map(it => ({ ...it })));
+  const [editStart, setEditStart] = useState(insp.start_reading ?? "");
+  const [editEnd, setEditEnd] = useState(insp.end_reading ?? "");
+  const [editHasChanges, setEditHasChanges] = useState(!!insp.has_changes);
+  const [editChangeCondition, setEditChangeCondition] = useState(r.changeCondition || "Monitor");
+  const [editChangeNotes, setEditChangeNotes] = useState(r.changeNotes || "");
+
+  const startEdit = () => {
+    setEditItems(items.map(it => ({ ...it })));
+    setEditStart(insp.start_reading ?? "");
+    setEditEnd(insp.end_reading ?? "");
+    setEditHasChanges(!!insp.has_changes);
+    setEditChangeCondition(r.changeCondition || "Monitor");
+    setEditChangeNotes(r.changeNotes || "");
+    setEditing(true);
+  };
+  const updateItem = (i, key, val) => setEditItems(prev => prev.map((it, idx) => idx === i ? { ...it, [key]: val } : it));
+  const saveEdit = async () => {
+    setSaving(true);
+    const newResultsJson = isPost
+      ? { ...r, changeCondition: editHasChanges ? editChangeCondition : null, changeNotes: editHasChanges ? editChangeNotes : null }
+      : { ...r, items: editItems };
+    await onSave(insp.id, {
+      results_json: newResultsJson,
+      start_reading: editStart === "" ? null : editStart,
+      end_reading: editEnd === "" ? null : editEnd,
+      has_changes: isPost ? editHasChanges : insp.has_changes,
+    });
+    setSaving(false);
+    setEditing(false);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -285,9 +417,56 @@ function InspectionCard({ insp, onClose, onDelete }) {
             {onDelete && (
               <button onClick={() => onDelete(insp.id, insp.worker_name)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Inspection" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            {!isPost && (
+              <EditField label="Odometer / Hour-Meter Start Reading">
+                <input style={EDIT_INPUT_STYLE} value={editStart} onChange={e => setEditStart(e.target.value)} placeholder={insp.reading_unit || ""} />
+              </EditField>
+            )}
+            {isPost && (
+              <EditField label="Odometer / Hour-Meter End Reading">
+                <input style={EDIT_INPUT_STYLE} value={editEnd} onChange={e => setEditEnd(e.target.value)} placeholder={insp.reading_unit || ""} />
+              </EditField>
+            )}
+            {!isPost && editItems.map((it, i) => (
+              <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginBottom: 6 }}>{it.item}</div>
+                <select style={{ ...EDIT_INPUT_STYLE, marginBottom: 6 }} value={it.condition || "Good"} onChange={e => updateItem(i, "condition", e.target.value)}>
+                  {["Good", "Monitor", "Defective", "N/A"].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+                <input style={EDIT_INPUT_STYLE} placeholder="Note" value={it.note || ""} onChange={e => updateItem(i, "note", e.target.value)} />
+              </div>
+            ))}
+            {isPost && (
+              <>
+                <EditField label="Change reported since Pre-Trip?">
+                  <select style={EDIT_INPUT_STYLE} value={editHasChanges ? "yes" : "no"} onChange={e => setEditHasChanges(e.target.value === "yes")}>
+                    <option value="no">No changes</option>
+                    <option value="yes">Yes — change reported</option>
+                  </select>
+                </EditField>
+                {editHasChanges && (
+                  <>
+                    <EditField label="Condition">
+                      <select style={EDIT_INPUT_STYLE} value={editChangeCondition} onChange={e => setEditChangeCondition(e.target.value)}>
+                        {["Monitor", "Defective"].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    </EditField>
+                    <EditField label="Change Notes">
+                      <textarea style={EDIT_TEXTAREA_STYLE} value={editChangeNotes} onChange={e => setEditChangeNotes(e.target.value)} />
+                    </EditField>
+                  </>
+                )}
+              </>
+            )}
+          </EditPanel>
+        )}
 
         <div style={{ background: "rgba(56,189,248,0.12)", border: "1px solid rgba(56,189,248,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#F5F5F4" }}>{insp.equipment_label}</div>
@@ -331,9 +510,44 @@ function InspectionCard({ insp, onClose, onDelete }) {
   );
 }
 
-function ToolboxCard({ talk, onClose, onDelete }) {
+function ToolboxCard({ talk, onClose, onDelete, onSave }) {
   const p = talk.talking_points_json || {};
   const attendees = talk.attendees_json || [];
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editPresenter, setEditPresenter] = useState(talk.presenter_name || "");
+  const [editMeetingType, setEditMeetingType] = useState(talk.meeting_type || "");
+  const [editSite, setEditSite] = useState(talk.site || "");
+  const [editTopic, setEditTopic] = useState(talk.topic || "");
+  const [editSummary, setEditSummary] = useState(p.summary || "");
+  const [editDiscussion, setEditDiscussion] = useState((p.discussion || []).join("\n"));
+
+  const startEdit = () => {
+    setEditPresenter(talk.presenter_name || "");
+    setEditMeetingType(talk.meeting_type || "");
+    setEditSite(talk.site || "");
+    setEditTopic(talk.topic || "");
+    setEditSummary(p.summary || "");
+    setEditDiscussion((p.discussion || []).join("\n"));
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(talk.id, {
+      presenter_name: editPresenter,
+      meeting_type: editMeetingType,
+      site: editSite,
+      topic: editTopic,
+      talking_points_json: {
+        ...p,
+        summary: editSummary,
+        discussion: editDiscussion.split("\n").map(s => s.trim()).filter(Boolean),
+      },
+    });
+    setSaving(false);
+    setEditing(false);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -349,9 +563,21 @@ function ToolboxCard({ talk, onClose, onDelete }) {
             {onDelete && (
               <button onClick={() => onDelete(talk.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Toolbox Talk" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Presenter Name"><input style={EDIT_INPUT_STYLE} value={editPresenter} onChange={e => setEditPresenter(e.target.value)} /></EditField>
+            <EditField label="Meeting Type"><input style={EDIT_INPUT_STYLE} value={editMeetingType} onChange={e => setEditMeetingType(e.target.value)} /></EditField>
+            <EditField label="Site"><input style={EDIT_INPUT_STYLE} value={editSite} onChange={e => setEditSite(e.target.value)} /></EditField>
+            <EditField label="Topic"><input style={EDIT_INPUT_STYLE} value={editTopic} onChange={e => setEditTopic(e.target.value)} /></EditField>
+            <EditField label="Summary"><textarea style={EDIT_TEXTAREA_STYLE} value={editSummary} onChange={e => setEditSummary(e.target.value)} /></EditField>
+            <EditField label="Discussion Points (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editDiscussion} onChange={e => setEditDiscussion(e.target.value)} /></EditField>
+          </EditPanel>
+        )}
 
         <div style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#F5F5F4" }}>{p.summary || talk.topic}</div>
@@ -428,10 +654,57 @@ function ReportRow({ rec, last, onClick, kind }) {
   );
 }
 
-function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "" }) {
+function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewerName = "" }) {
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewerName, setReviewerName] = useState(defaultReviewerName);
   const r = nm.report_json || {};
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editReporterName, setEditReporterName] = useState(nm.reporter_name || "");
+  const [editIsAnonymous, setEditIsAnonymous] = useState(!!nm.is_anonymous);
+  const [editSite, setEditSite] = useState(nm.site || "");
+  const [editOccurredAt, setEditOccurredAt] = useState(nm.occurred_at || "");
+  const [editInvolved, setEditInvolved] = useState(nm.involved || "");
+  const [editWhatHappened, setEditWhatHappened] = useState(r.whatHappened || "");
+  const [editPotentialOutcome, setEditPotentialOutcome] = useState(r.potentialOutcome || "");
+  const [editContributing, setEditContributing] = useState((r.contributingFactors || []).join("\n"));
+  const [editImmediate, setEditImmediate] = useState((r.immediateActions || []).join("\n"));
+  const [editNextSteps, setEditNextSteps] = useState((r.nextSteps || []).join("\n"));
+
+  const startEdit = () => {
+    setEditReporterName(nm.reporter_name || "");
+    setEditIsAnonymous(!!nm.is_anonymous);
+    setEditSite(nm.site || "");
+    setEditOccurredAt(nm.occurred_at || "");
+    setEditInvolved(nm.involved || "");
+    setEditWhatHappened(r.whatHappened || "");
+    setEditPotentialOutcome(r.potentialOutcome || "");
+    setEditContributing((r.contributingFactors || []).join("\n"));
+    setEditImmediate((r.immediateActions || []).join("\n"));
+    setEditNextSteps((r.nextSteps || []).join("\n"));
+    setEditing(true);
+  };
+  const listFrom = (s) => s.split("\n").map(x => x.trim()).filter(Boolean);
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(nm.id, {
+      reporter_name: editReporterName,
+      is_anonymous: editIsAnonymous,
+      site: editSite,
+      occurred_at: editOccurredAt,
+      involved: editInvolved,
+      report_json: {
+        ...r,
+        whatHappened: editWhatHappened,
+        potentialOutcome: editPotentialOutcome,
+        contributingFactors: listFrom(editContributing),
+        immediateActions: listFrom(editImmediate),
+        nextSteps: listFrom(editNextSteps),
+      },
+    });
+    setSaving(false);
+    setEditing(false);
+  };
   const sevColors = {
     Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
     High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
@@ -466,9 +739,30 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
             {onDelete && (
               <button onClick={() => onDelete(nm.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Near Miss Report" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Reported by">
+              <input style={EDIT_INPUT_STYLE} value={editReporterName} onChange={e => setEditReporterName(e.target.value)} disabled={editIsAnonymous} />
+            </EditField>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+              <input type="checkbox" id="nmAnon" checked={editIsAnonymous} onChange={e => setEditIsAnonymous(e.target.checked)} />
+              <label htmlFor="nmAnon" style={{ fontSize: 12, color: "#D4D4D8" }}>Reported anonymously</label>
+            </div>
+            <EditField label="Site"><input style={EDIT_INPUT_STYLE} value={editSite} onChange={e => setEditSite(e.target.value)} /></EditField>
+            <EditField label="When it occurred"><input style={EDIT_INPUT_STYLE} value={editOccurredAt} onChange={e => setEditOccurredAt(e.target.value)} /></EditField>
+            <EditField label="Who / what was involved"><input style={EDIT_INPUT_STYLE} value={editInvolved} onChange={e => setEditInvolved(e.target.value)} /></EditField>
+            <EditField label="What Happened"><textarea style={EDIT_TEXTAREA_STYLE} value={editWhatHappened} onChange={e => setEditWhatHappened(e.target.value)} /></EditField>
+            <EditField label="Potential Outcome"><textarea style={EDIT_TEXTAREA_STYLE} value={editPotentialOutcome} onChange={e => setEditPotentialOutcome(e.target.value)} /></EditField>
+            <EditField label="Contributing Factors (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editContributing} onChange={e => setEditContributing(e.target.value)} /></EditField>
+            <EditField label="Immediate Actions Taken (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editImmediate} onChange={e => setEditImmediate(e.target.value)} /></EditField>
+            <EditField label="Recommended Next Steps (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editNextSteps} onChange={e => setEditNextSteps(e.target.value)} /></EditField>
+          </EditPanel>
+        )}
 
         <div style={{ background: sc.bg, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: sc.c }}>POTENTIAL SEVERITY: {sev.toUpperCase()}</div>
@@ -522,10 +816,75 @@ function NearMissCard({ nm, onClose, onDelete, onReview, defaultReviewerName = "
   );
 }
 
-function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = "" }) {
+function IncidentCard({ inc, onClose, onDelete, onReview, onSave, defaultReviewerName = "" }) {
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewerName, setReviewerName] = useState(defaultReviewerName);
   const r = inc.report_json || {};
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editReporterName, setEditReporterName] = useState(inc.reporter_name || "");
+  const [editSite, setEditSite] = useState(inc.site || "");
+  const [editOccurredAt, setEditOccurredAt] = useState(inc.occurred_at || "");
+  const [editIncidentType, setEditIncidentType] = useState(inc.incident_type || "");
+  const [editInjuredPerson, setEditInjuredPerson] = useState(inc.injured_person || "");
+  const [editBodyPart, setEditBodyPart] = useState(inc.body_part || "");
+  const [editTreatment, setEditTreatment] = useState(inc.treatment || "");
+  const [editMedicalAttention, setEditMedicalAttention] = useState(inc.medical_attention || "");
+  const [editWitnesses, setEditWitnesses] = useState(inc.witnesses || "");
+  const [editEvidence, setEditEvidence] = useState(inc.evidence || "");
+  const [editSummary, setEditSummary] = useState(r.summary || "");
+  const [editRootCause, setEditRootCause] = useState(r.rootCause || "");
+  const [editSequence, setEditSequence] = useState((r.sequenceOfEvents || []).join("\n"));
+  const [editContributing, setEditContributing] = useState((r.contributingFactors || []).join("\n"));
+  const [editImmediate, setEditImmediate] = useState((r.immediateActions || []).join("\n"));
+  const [editCorrective, setEditCorrective] = useState((r.correctiveActions || []).join("\n"));
+
+  const startEdit = () => {
+    setEditReporterName(inc.reporter_name || "");
+    setEditSite(inc.site || "");
+    setEditOccurredAt(inc.occurred_at || "");
+    setEditIncidentType(inc.incident_type || "");
+    setEditInjuredPerson(inc.injured_person || "");
+    setEditBodyPart(inc.body_part || "");
+    setEditTreatment(inc.treatment || "");
+    setEditMedicalAttention(inc.medical_attention || "");
+    setEditWitnesses(inc.witnesses || "");
+    setEditEvidence(inc.evidence || "");
+    setEditSummary(r.summary || "");
+    setEditRootCause(r.rootCause || "");
+    setEditSequence((r.sequenceOfEvents || []).join("\n"));
+    setEditContributing((r.contributingFactors || []).join("\n"));
+    setEditImmediate((r.immediateActions || []).join("\n"));
+    setEditCorrective((r.correctiveActions || []).join("\n"));
+    setEditing(true);
+  };
+  const listFrom = (s) => s.split("\n").map(x => x.trim()).filter(Boolean);
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(inc.id, {
+      reporter_name: editReporterName,
+      site: editSite,
+      occurred_at: editOccurredAt,
+      incident_type: editIncidentType,
+      injured_person: editInjuredPerson,
+      body_part: editBodyPart,
+      treatment: editTreatment,
+      medical_attention: editMedicalAttention,
+      witnesses: editWitnesses,
+      evidence: editEvidence,
+      report_json: {
+        ...r,
+        summary: editSummary,
+        rootCause: editRootCause,
+        sequenceOfEvents: listFrom(editSequence),
+        contributingFactors: listFrom(editContributing),
+        immediateActions: listFrom(editImmediate),
+        correctiveActions: listFrom(editCorrective),
+      },
+    });
+    setSaving(false);
+    setEditing(false);
+  };
   const sevColors = {
     Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
     High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
@@ -556,9 +915,31 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
           <div style={{ display: "flex", gap: 8 }}>
             {inc.pdf_url && <a href={inc.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#DC2626", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
             {onDelete && <button onClick={() => onDelete(inc.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Incident Report" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Reported by"><input style={EDIT_INPUT_STYLE} value={editReporterName} onChange={e => setEditReporterName(e.target.value)} /></EditField>
+            <EditField label="Site"><input style={EDIT_INPUT_STYLE} value={editSite} onChange={e => setEditSite(e.target.value)} /></EditField>
+            <EditField label="When it occurred"><input style={EDIT_INPUT_STYLE} value={editOccurredAt} onChange={e => setEditOccurredAt(e.target.value)} /></EditField>
+            <EditField label="Incident Type"><input style={EDIT_INPUT_STYLE} value={editIncidentType} onChange={e => setEditIncidentType(e.target.value)} /></EditField>
+            <EditField label="Injured Person"><input style={EDIT_INPUT_STYLE} value={editInjuredPerson} onChange={e => setEditInjuredPerson(e.target.value)} /></EditField>
+            <EditField label="Body Part"><input style={EDIT_INPUT_STYLE} value={editBodyPart} onChange={e => setEditBodyPart(e.target.value)} /></EditField>
+            <EditField label="Treatment"><input style={EDIT_INPUT_STYLE} value={editTreatment} onChange={e => setEditTreatment(e.target.value)} /></EditField>
+            <EditField label="Medical Attention"><input style={EDIT_INPUT_STYLE} value={editMedicalAttention} onChange={e => setEditMedicalAttention(e.target.value)} /></EditField>
+            <EditField label="Witnesses"><input style={EDIT_INPUT_STYLE} value={editWitnesses} onChange={e => setEditWitnesses(e.target.value)} /></EditField>
+            <EditField label="Evidence"><input style={EDIT_INPUT_STYLE} value={editEvidence} onChange={e => setEditEvidence(e.target.value)} /></EditField>
+            <EditField label="Summary"><textarea style={EDIT_TEXTAREA_STYLE} value={editSummary} onChange={e => setEditSummary(e.target.value)} /></EditField>
+            <EditField label="Root Cause"><textarea style={EDIT_TEXTAREA_STYLE} value={editRootCause} onChange={e => setEditRootCause(e.target.value)} /></EditField>
+            <EditField label="Sequence of Events (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editSequence} onChange={e => setEditSequence(e.target.value)} /></EditField>
+            <EditField label="Contributing Factors (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editContributing} onChange={e => setEditContributing(e.target.value)} /></EditField>
+            <EditField label="Immediate Actions Taken (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editImmediate} onChange={e => setEditImmediate(e.target.value)} /></EditField>
+            <EditField label="Corrective Actions (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editCorrective} onChange={e => setEditCorrective(e.target.value)} /></EditField>
+          </EditPanel>
+        )}
 
         <div style={{ background: sc.bg, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: sc.c }}>SEVERITY: {sev.toUpperCase()}</div>
@@ -630,8 +1011,54 @@ function IncidentCard({ inc, onClose, onDelete, onReview, defaultReviewerName = 
   );
 }
 
-function DailyCard({ dr, onClose, onDelete }) {
+const DAILY_WEATHER_OPTIONS = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
+
+function DailyCard({ dr, onClose, onDelete, onSave }) {
   const r = dr.report_json || {};
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editReporterName, setEditReporterName] = useState(dr.reporter_name || "");
+  const [editSite, setEditSite] = useState(dr.site || "");
+  const [editReportDate, setEditReportDate] = useState(dr.report_date || "");
+  const [editWeather, setEditWeather] = useState(dr.weather || DAILY_WEATHER_OPTIONS[0]);
+  const [editTemperature, setEditTemperature] = useState(dr.temperature || "");
+  const [editCrew, setEditCrew] = useState(dr.crew || "");
+  const [editEquipment, setEditEquipment] = useState(dr.equipment || "");
+  const [editVisitors, setEditVisitors] = useState(dr.visitors || "");
+  const [editWorkSummary, setEditWorkSummary] = useState(r.workSummary || "");
+  const [editDelaysSummary, setEditDelaysSummary] = useState(r.delaysSummary || "");
+  const [editTomorrowPlan, setEditTomorrowPlan] = useState(r.tomorrowPlan || "");
+
+  const startEdit = () => {
+    setEditReporterName(dr.reporter_name || "");
+    setEditSite(dr.site || "");
+    setEditReportDate(dr.report_date || "");
+    setEditWeather(dr.weather || DAILY_WEATHER_OPTIONS[0]);
+    setEditTemperature(dr.temperature || "");
+    setEditCrew(dr.crew || "");
+    setEditEquipment(dr.equipment || "");
+    setEditVisitors(dr.visitors || "");
+    setEditWorkSummary(r.workSummary || "");
+    setEditDelaysSummary(r.delaysSummary || "");
+    setEditTomorrowPlan(r.tomorrowPlan || "");
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(dr.id, {
+      reporter_name: editReporterName,
+      site: editSite,
+      report_date: editReportDate,
+      weather: editWeather,
+      temperature: editTemperature,
+      crew: editCrew,
+      equipment: editEquipment,
+      visitors: editVisitors,
+      report_json: { ...r, workSummary: editWorkSummary, delaysSummary: editDelaysSummary, tomorrowPlan: editTomorrowPlan },
+    });
+    setSaving(false);
+    setEditing(false);
+  };
   const Block = ({ title, body }) => (
     body ? (
       <div style={{ marginBottom: 14 }}>
@@ -651,9 +1078,30 @@ function DailyCard({ dr, onClose, onDelete }) {
           <div style={{ display: "flex", gap: 8 }}>
             {dr.pdf_url && <a href={dr.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#16A34A", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
             {onDelete && <button onClick={() => onDelete(dr.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑</button>}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Daily Report" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Prepared by"><input style={EDIT_INPUT_STYLE} value={editReporterName} onChange={e => setEditReporterName(e.target.value)} /></EditField>
+            <EditField label="Site"><input style={EDIT_INPUT_STYLE} value={editSite} onChange={e => setEditSite(e.target.value)} /></EditField>
+            <EditField label="Report Date"><input type="date" style={EDIT_INPUT_STYLE} value={editReportDate} onChange={e => setEditReportDate(e.target.value)} /></EditField>
+            <EditField label="Weather">
+              <select style={EDIT_INPUT_STYLE} value={editWeather} onChange={e => setEditWeather(e.target.value)}>
+                {DAILY_WEATHER_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </EditField>
+            <EditField label="Temperature"><input style={EDIT_INPUT_STYLE} value={editTemperature} onChange={e => setEditTemperature(e.target.value)} /></EditField>
+            <EditField label="Crew"><input style={EDIT_INPUT_STYLE} value={editCrew} onChange={e => setEditCrew(e.target.value)} /></EditField>
+            <EditField label="Equipment"><input style={EDIT_INPUT_STYLE} value={editEquipment} onChange={e => setEditEquipment(e.target.value)} /></EditField>
+            <EditField label="Visitors"><input style={EDIT_INPUT_STYLE} value={editVisitors} onChange={e => setEditVisitors(e.target.value)} /></EditField>
+            <EditField label="Work Completed"><textarea style={EDIT_TEXTAREA_STYLE} value={editWorkSummary} onChange={e => setEditWorkSummary(e.target.value)} /></EditField>
+            <EditField label="Delays / Issues"><textarea style={EDIT_TEXTAREA_STYLE} value={editDelaysSummary} onChange={e => setEditDelaysSummary(e.target.value)} /></EditField>
+            <EditField label="Plan for Tomorrow"><textarea style={EDIT_TEXTAREA_STYLE} value={editTomorrowPlan} onChange={e => setEditTomorrowPlan(e.target.value)} /></EditField>
+          </EditPanel>
+        )}
 
         <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, color: "#D4D4D8" }}>Weather: <strong>{dr.weather}{dr.temperature ? `, ${dr.temperature}` : ""}</strong></div>
@@ -671,9 +1119,27 @@ function DailyCard({ dr, onClose, onDelete }) {
   );
 }
 
-function MonthlyRecordCard({ data, onClose }) {
+function MonthlyRecordCard({ data, onClose, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editItems, setEditItems] = useState([]);
+  const [editAiSummary, setEditAiSummary] = useState("");
   if (!data) return null;
   const { record, form, site, items } = data;
+
+  const startEdit = () => {
+    setEditItems(items.map(it => ({ id: it.id, question_id: it.question_id, question_text: it.question_text, answer: it.answer, note: it.notes || "" })));
+    setEditAiSummary(record.ai_summary || "");
+    setEditing(true);
+  };
+  const updateItem = (i, key, val) => setEditItems(prev => prev.map((it, idx) => idx === i ? { ...it, [key]: val } : it));
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(record.id, editItems, editAiSummary);
+    setSaving(false);
+    setEditing(false);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -684,9 +1150,26 @@ function MonthlyRecordCard({ data, onClose }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#4338CA", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Monthly Inspection" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Summary"><textarea style={EDIT_TEXTAREA_STYLE} value={editAiSummary} onChange={e => setEditAiSummary(e.target.value)} /></EditField>
+            {editItems.map((it, i) => (
+              <div key={it.id} style={{ border: "1px solid #242424", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginBottom: 6 }}>{i + 1}. {it.question_text}</div>
+                <select style={{ ...EDIT_INPUT_STYLE, marginBottom: 6 }} value={it.answer ? "yes" : "no"} onChange={e => updateItem(i, "answer", e.target.value === "yes")}>
+                  <option value="yes">YES</option>
+                  <option value="no">NO</option>
+                </select>
+                <input style={EDIT_INPUT_STYLE} placeholder="Note" value={it.note || ""} onChange={e => updateItem(i, "note", e.target.value)} />
+              </div>
+            ))}
+          </EditPanel>
+        )}
 
         {record.ai_summary && (
           <div style={{ background: "rgba(99,102,241,0.12)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
@@ -717,10 +1200,28 @@ function MonthlyRecordCard({ data, onClose }) {
   );
 }
 
-function CustomDocCard({ data, onClose }) {
+function CustomDocCard({ data, onClose, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editItems, setEditItems] = useState([]);
+  const [editAiSummary, setEditAiSummary] = useState("");
   if (!data) return null;
   const { record, form, site, items } = data;
   const accent = form?.accent_color || "#4338CA";
+
+  const startEdit = () => {
+    setEditItems(items.map(it => ({ id: it.id, question_id: it.question_id, question_text: it.question_text, answer: it.answer, note: it.notes || "" })));
+    setEditAiSummary(record.ai_summary || "");
+    setEditing(true);
+  };
+  const updateItem = (i, key, val) => setEditItems(prev => prev.map((it, idx) => idx === i ? { ...it, [key]: val } : it));
+  const saveEdit = async () => {
+    setSaving(true);
+    await onSave(record.id, editItems, editAiSummary);
+    setSaving(false);
+    setEditing(false);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -731,9 +1232,26 @@ function CustomDocCard({ data, onClose }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
+
+        {editing && (
+          <EditPanel title="Edit Document" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
+            <EditField label="Summary"><textarea style={EDIT_TEXTAREA_STYLE} value={editAiSummary} onChange={e => setEditAiSummary(e.target.value)} /></EditField>
+            {editItems.map((it, i) => (
+              <div key={it.id} style={{ border: "1px solid #242424", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginBottom: 6 }}>{i + 1}. {it.question_text}</div>
+                <select style={{ ...EDIT_INPUT_STYLE, marginBottom: 6 }} value={it.answer ? "yes" : "no"} onChange={e => updateItem(i, "answer", e.target.value === "yes")}>
+                  <option value="yes">YES</option>
+                  <option value="no">NO</option>
+                </select>
+                <input style={EDIT_INPUT_STYLE} placeholder="Note" value={it.note || ""} onChange={e => updateItem(i, "note", e.target.value)} />
+              </div>
+            ))}
+          </EditPanel>
+        )}
 
         {record.ai_summary && (
           <div style={{ background: "#1A1A1A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
@@ -1179,6 +1697,45 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setFlhas(prev => prev.map(f => f.id === record.id
       ? { ...f, status: "complete", supervisor_signed_by: supName, supervisor_signed_at: now.toISOString(), pdf_url: signedPdfUrl }
       : f));
+    setSelectedFlha(null);
+  };
+
+  // ── Supervisor/Admin: fix a mistake in an already-submitted FLHA ────────
+  // Calls api/flhas.js's `update` action (distinct from the worker-only,
+  // same-day `amendingId` path inside `submit` — untouched by this).
+  // record.pdf_url/signature here are already signed/loaded values — never
+  // persist them back, only ever pass null to mean "leave alone" server-side.
+  const saveFlhaEdit = async (id, edited) => {
+    const record = flhas.find(f => f.id === id);
+    if (!record) return;
+    const co = companies.find(c => c.id === record.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadFLHA({
+        flha: edited.hazards_json,
+        workerName: edited.worker_name,
+        jobSite: edited.job_site,
+        signName: record.signed_by,
+        companyName: co?.name || "",
+        signatureDataUrl: record.worker_signature || null,
+        companyLogo: co?.logo_url || "",
+        amendedNote: null,
+        pendingApproval: record.status === "pending_approval",
+        supervisorApproval: record.supervisor_signed_by
+          ? { name: record.supervisor_signed_by, date: record.supervisor_signed_at, signature: null }
+          : undefined,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    try {
+      const res = await fetch("/api/flhas", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update", token, id, fields: edited, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFlhas(prev => prev.map(f => f.id === id ? { ...f, ...edited, pdf_url: data.pdfUrl || f.pdf_url } : f));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
     setSelectedFlha(null);
   };
 
@@ -1809,6 +2366,33 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setSelectedDaily(null);
   };
 
+  // ── Supervisor/Admin: fix a mistake in an already-submitted daily report ─
+  const saveDailyEdit = async (id, edited) => {
+    const record = dailyReports.find(d => d.id === id);
+    if (!record) return;
+    const co = companies.find(c => c.id === record.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadDaily({
+        reporter: edited.reporter_name, site: edited.site, reportDate: edited.report_date,
+        weather: edited.weather, temperature: edited.temperature, crew: edited.crew,
+        equipment: edited.equipment, visitors: edited.visitors, report: edited.report_json,
+        companyName: co?.name || "", companyLogo: co?.logo_url || "", token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "daily", action: "update", token, id, fields: edited, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDailyReports(prev => prev.map(d => d.id === id ? { ...d, ...edited, pdf_url: data.pdfUrl || d.pdf_url } : d));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
+    setSelectedDaily(null);
+  };
+
   const openMonthlyRecord = async (record) => {
     try {
       const res = await fetch("/api/monthly", {
@@ -1820,6 +2404,46 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { /* ignore */ }
   };
 
+  // ── Supervisor/Admin: fix a mistake in an already-submitted monthly ──────
+  // inspection record's checklist answers (references inspection_answers row
+  // ids, not question ids — see api/monthly.js's update_record handler).
+  const saveMonthlyRecordEdit = async (recordId, editItems, aiSummary) => {
+    const detail = selectedMonthlyRecord;
+    if (!detail) return;
+    const { record, form, site } = detail;
+    const co = companies.find(c => c.id === form?.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadMonthlyInspection({
+        formTitle: form?.title, siteName: site?.name, companyName: co?.name || "", companyLogo: co?.logo_url || "",
+        monthLabel: record.period_month, submittedBy: record.submitted_by, aiSummary,
+        items: editItems.map(it => ({ questionId: it.question_id, question: it.question_text, answer: it.answer, note: it.note })),
+        signatureDataUrl: null, token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    const answers = editItems.map(it => ({ id: it.id, answer: it.answer, note: it.note }));
+    try {
+      const res = await fetch("/api/monthly", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_record", token, recordId, answers, aiSummary, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const newPdfUrl = data.pdfUrl || record.pdf_url;
+        setMonthlyRecords(prev => prev.map(r => r.id === recordId ? { ...r, ai_summary: aiSummary || null, pdf_url: newPdfUrl } : r));
+        setSelectedMonthlyRecord(prev => prev ? {
+          ...prev,
+          record: { ...prev.record, ai_summary: aiSummary || null, pdf_url: newPdfUrl },
+          items: prev.items.map(it => {
+            const e = editItems.find(x => x.id === it.id);
+            return e ? { ...it, answer: e.answer, notes: e.note } : it;
+          }),
+        } : prev);
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
+    setSelectedMonthlyRecord(null);
+  };
+
   const openCustomDocRecord = async (record) => {
     try {
       const res = await fetch("/api/customforms", {
@@ -1829,6 +2453,45 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       const data = await res.json();
       if (res.ok) setSelectedCustomDocRecord(data);
     } catch (e) { /* ignore */ }
+  };
+
+  // ── Supervisor/Admin: fix a mistake in an already-submitted custom ───────
+  // document record's answers (references custom_form_answers row ids).
+  const saveCustomDocRecordEdit = async (recordId, editItems, aiSummary) => {
+    const detail = selectedCustomDocRecord;
+    if (!detail) return;
+    const { record, form, site } = detail;
+    const co = companies.find(c => c.id === form?.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadCustomForm({
+        formTitle: form?.title, accentColor: form?.accent_color, siteName: site?.name,
+        companyName: co?.name || "", companyLogo: co?.logo_url || "", submittedBy: record.submitted_by, aiSummary,
+        items: editItems.map(it => ({ questionId: it.question_id, question: it.question_text, answer: it.answer, note: it.note })),
+        signatureDataUrl: null, token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    const answers = editItems.map(it => ({ id: it.id, answer: it.answer, note: it.note }));
+    try {
+      const res = await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_record", token, recordId, answers, aiSummary, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const newPdfUrl = data.pdfUrl || record.pdf_url;
+        setCustomDocRecords(prev => prev.map(r => r.id === recordId ? { ...r, ai_summary: aiSummary || null, pdf_url: newPdfUrl } : r));
+        setSelectedCustomDocRecord(prev => prev ? {
+          ...prev,
+          record: { ...prev.record, ai_summary: aiSummary || null, pdf_url: newPdfUrl },
+          items: prev.items.map(it => {
+            const e = editItems.find(x => x.id === it.id);
+            return e ? { ...it, answer: e.answer, notes: e.note } : it;
+          }),
+        } : prev);
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
+    setSelectedCustomDocRecord(null);
   };
 
   const updateCorrectiveAction = async (actionId, { responsibleName, targetDate, status }) => {
@@ -1990,6 +2653,39 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setSelectedIncident(null);
   };
 
+  // ── Supervisor/Admin: fix a mistake in an already-submitted incident ─────
+  const saveIncidentEdit = async (id, edited) => {
+    const record = incidents.find(n => n.id === id);
+    if (!record) return;
+    const co = companies.find(c => c.id === record.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadIncident({
+        reporter: edited.reporter_name, site: edited.site, occurredAt: edited.occurred_at,
+        incidentType: edited.incident_type, injuredPerson: edited.injured_person, bodyPart: edited.body_part,
+        treatment: edited.treatment, medicalAttention: edited.medical_attention, witnesses: edited.witnesses,
+        evidence: edited.evidence, report: edited.report_json,
+        companyName: co?.name || "", companyLogo: co?.logo_url || "",
+        signatureDataUrl: record.signature_url || null,
+        customFields: record.report_json?.customFields || [],
+        photoUrls: record.photo_urls || [],
+        reviewed: record.reviewed ? { by: record.reviewed_by, at: record.reviewed_at, notes: record.review_notes } : undefined,
+        token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "incident", action: "update", token, id, fields: edited, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIncidents(prev => prev.map(n => n.id === id ? { ...n, ...edited, pdf_url: data.pdfUrl || n.pdf_url } : n));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
+    setSelectedIncident(null);
+  };
+
   const companySops = sops.filter(s => s.company_id === selectedCompany);
 
   const deleteInspection = async (id, workerName) => {
@@ -2001,6 +2697,50 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
     } catch (e) { /* leave list as-is if the request fails */ }
     setInspections(prev => prev.filter(i => i.id !== id));
+    setSelectedInspection(null);
+  };
+
+  // ── Supervisor/Admin: fix a mistake in an already-submitted inspection ───
+  // Posttrip regen needs the linked pretrip's checklist items — pulled from
+  // the already-loaded inspections list (mirrors what a fresh posttrip
+  // submission does), not fetched again.
+  const saveInspectionEdit = async (id, edited) => {
+    const record = inspections.find(i => i.id === id);
+    if (!record) return;
+    const merged = { ...record, ...edited };
+    const co = companies.find(c => c.id === record.company_id);
+    const isPost = merged.trip_type === "posttrip";
+    let pdfUrl = null;
+    try {
+      const linkedPretrip = isPost ? inspections.find(i => i.id === merged.linked_inspection_id) : undefined;
+      pdfUrl = await generateAndUploadInspection({
+        equipmentLabel: merged.equipment_label,
+        workerName: merged.worker_name,
+        companyName: co?.name || "",
+        companyLogo: co?.logo_url || "",
+        results: isPost ? undefined : merged.results_json,
+        signatureDataUrl: null,
+        tripType: merged.trip_type,
+        startReading: merged.start_reading,
+        endReading: isPost ? merged.end_reading : undefined,
+        readingUnit: merged.reading_unit,
+        hasChanges: isPost ? !!merged.has_changes : undefined,
+        changeCondition: isPost ? merged.results_json?.changeCondition : undefined,
+        changeNotes: isPost ? merged.results_json?.changeNotes : undefined,
+        linkedPretrip,
+        token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "inspection", action: "update", token, id, fields: edited, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setInspections(prev => prev.map(i => i.id === id ? { ...i, ...edited, pdf_url: data.pdfUrl || i.pdf_url } : i));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
     setSelectedInspection(null);
   };
 
@@ -2016,6 +2756,34 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setSelectedToolbox(null);
   };
 
+  // ── Supervisor/Admin: fix a mistake in an already-submitted toolbox talk ─
+  const saveToolboxEdit = async (id, edited) => {
+    const record = toolboxTalks.find(t => t.id === id);
+    if (!record) return;
+    const co = companies.find(c => c.id === record.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadToolbox({
+        presenter: edited.presenter_name, meetingType: edited.meeting_type, site: edited.site, topic: edited.topic,
+        companyName: co?.name || "", companyLogo: co?.logo_url || "",
+        points: edited.talking_points_json, attendees: record.attendees_json || [],
+        customFields: edited.talking_points_json?.customFields || [],
+        token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "toolbox", action: "update", token, id, fields: edited, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setToolboxTalks(prev => prev.map(t => t.id === id ? { ...t, ...edited, pdf_url: data.pdfUrl || t.pdf_url } : t));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
+    setSelectedToolbox(null);
+  };
+
   const deleteNearMiss = async (id) => {
     if (!window.confirm("Delete this near miss report? This cannot be undone.")) return;
     try {
@@ -2025,6 +2793,36 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
     } catch (e) { /* leave list as-is if the request fails */ }
     setNearMisses(prev => prev.filter(n => n.id !== id));
+    setSelectedNearMiss(null);
+  };
+
+  // ── Supervisor/Admin: fix a mistake in an already-submitted near miss ────
+  const saveNearMissEdit = async (id, edited) => {
+    const record = nearMisses.find(n => n.id === id);
+    if (!record) return;
+    const co = companies.find(c => c.id === record.company_id);
+    let pdfUrl = null;
+    try {
+      pdfUrl = await generateAndUploadNearMiss({
+        reporter: edited.is_anonymous ? "Anonymous" : edited.reporter_name,
+        site: edited.site, occurredAt: edited.occurred_at, involved: edited.involved, report: edited.report_json,
+        companyName: co?.name || "", companyLogo: co?.logo_url || "",
+        signatureDataUrl: record.signature_url || null,
+        customFields: record.report_json?.customFields || [],
+        reviewed: record.reviewed ? { by: record.reviewed_by, at: record.reviewed_at, notes: record.review_notes } : undefined,
+        token,
+      });
+    } catch (e) { /* keep old pdf if regen fails */ }
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "nearmiss", action: "update", token, id, fields: edited, pdfUrl }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNearMisses(prev => prev.map(n => n.id === id ? { ...n, ...edited, pdf_url: data.pdfUrl || n.pdf_url } : n));
+      }
+    } catch (e) { /* leave as-is if the request fails */ }
     setSelectedNearMiss(null);
   };
 
@@ -2502,16 +3300,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   return (
     <div style={styles.wrap}>
-      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} defaultSupName={userName} />}
-      {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} />}
-      {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} />}
-      {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} defaultReviewerName={userName} />}
-      {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} defaultReviewerName={userName} />}
-      {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} />}
-      {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} />}
+      {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} onSave={saveFlhaEdit} defaultSupName={userName} />}
+      {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} onSave={saveInspectionEdit} />}
+      {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} onSave={saveToolboxEdit} />}
+      {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} onSave={saveNearMissEdit} defaultReviewerName={userName} />}
+      {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} onSave={saveIncidentEdit} defaultReviewerName={userName} />}
+      {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} onSave={saveDailyEdit} />}
+      {selectedMonthlyRecord && <MonthlyRecordCard data={selectedMonthlyRecord} onClose={() => setSelectedMonthlyRecord(null)} onSave={saveMonthlyRecordEdit} />}
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} error={equipmentPdfError} />}
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
-      {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} />}
+      {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} onSave={saveCustomDocRecordEdit} />}
       {showThisWeekModal && (
         <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}

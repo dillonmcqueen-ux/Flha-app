@@ -8,11 +8,12 @@ import DailyReport, { resubmitDaily } from "./DailyReport.jsx";
 import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
+import MyDocuments from "./MyDocuments.jsx";
 import { drainQueue } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   ClipboardList, ClipboardCheck, Hammer, AlertTriangle, Siren, CalendarClock,
-  Clock, LogOut, ChevronRight, FileText, Inbox,
+  Clock, LogOut, ChevronRight, FileText, Inbox, FolderClock,
 } from "lucide-react";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
@@ -49,6 +50,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [customFormId, setCustomFormId] = useState(null);
   const [builtinActive, setBuiltinActive] = useState(null); // null = loading
   const [customForms, setCustomForms] = useState([]);
+  const [showMyDocs, setShowMyDocs] = useState(false);
 
   useEffect(() => {
     async function loadDocs() {
@@ -93,6 +95,23 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     window.addEventListener("online", drainAll);
     return () => window.removeEventListener("online", drainAll);
   }, [token]);
+
+  if (showMyDocs) {
+    return (
+      <MyDocuments
+        companyId={companyId}
+        userName={userName}
+        userId={userId}
+        token={token}
+        onBack={() => setShowMyDocs(false)}
+        onResume={(type, formId) => {
+          setShowMyDocs(false);
+          if (type === "customform") { setCustomFormId(formId); setDoc("custom"); }
+          else setDoc(type);
+        }}
+      />
+    );
+  }
 
   if (doc === "flha") {
     return <App forcedCompanyId={companyId} companyName={companyName} userName={userName} onLogout={() => setDoc(null)} token={token} />;
@@ -206,6 +225,25 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
               Pick a document to fill out below.
             </div>
           </div>
+        </div>
+
+        <div
+          onClick={() => setShowMyDocs(true)}
+          style={{
+            display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+            background: `linear-gradient(160deg, ${C.panelRaised} 0%, ${C.panel} 100%)`,
+            border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px",
+            boxShadow: SHAD.md, marginBottom: 16, minHeight: 64, boxSizing: "border-box",
+          }}
+        >
+          <div style={s.iconTile(C.orange)}>
+            <FolderClock size={22} color={C.orange} strokeWidth={2.25} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>My Forms</div>
+            <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>Unfinished drafts &amp; what you've submitted before</div>
+          </div>
+          <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
         </div>
 
         <div style={{ display: "grid", gap: 12 }}>

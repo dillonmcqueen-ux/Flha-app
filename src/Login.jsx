@@ -4,25 +4,55 @@ import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 
-// Session storage — localStorage, not window.name. window.name survives a
-// reload but not a fully closed-and-reopened tab, which is exactly the
-// case that matters most for a worker relaunching the app from a home-
-// screen icon on a jobsite with no signal (docs/scope-offline-capability.md
-// Phase 0). localStorage survives that. Server-side sessions already carry
-// their own 7-day TTL (SESSION_TTL_MS in api/*.js) — a stale local copy
-// just fails on the next API call, same as before.
+// Session storage — split by role. window.name survives a reload but not a
+// fully closed-and-reopened tab, which is exactly the case that matters most
+// for a worker relaunching the app from a home-screen icon on a jobsite with
+// no signal (docs/scope-offline-capability.md Phase 0), so worker sessions
+// still go in localStorage, which survives that.
+//
+// Supervisor and (especially) admin sessions are a different risk profile —
+// an admin session can reach every company's data, so leaving it in
+// localStorage means it's still logged in the next time anyone opens that
+// browser, indefinitely (bounded only by the server's 7-day TTL), even after
+// Chrome is fully closed and reopened. That's the exact bug reported: closed
+// Chrome while logged in as admin, reopened later, still logged in. Elevated
+// roles now go in sessionStorage instead, which Chrome clears when the
+// browser's last window/tab closes — the offline-worker case doesn't apply
+// to a supervisor/admin, who are on the portal, not the field app. Server-
+// side sessions still carry their own 7-day TTL (SESSION_TTL_MS in
+// api/*.js) — a stale local copy just fails on the next API call either way.
 const SESSION_STORAGE_KEY = "fora_session";
+function storageFor(role) {
+  return role === "worker" ? localStorage : sessionStorage;
+}
 function saveSession(session) {
-  try { localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)); } catch (e) {}
+  try { storageFor(session?.role).setItem(SESSION_STORAGE_KEY, JSON.stringify(session)); } catch (e) {}
 }
 function loadSession() {
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const fromSession = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (fromSession) return JSON.parse(fromSession);
+
+    const fromLocal = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!fromLocal) return null;
+    const session = JSON.parse(fromLocal);
+    // A supervisor/admin session found in localStorage is either a leftover
+    // from before this fix, or (impossible under the current saveSession,
+    // but checked defensively) otherwise misplaced — either way, elevated
+    // roles are never meant to persist past a closed browser. Clear it and
+    // sign the user out rather than silently restoring an admin session.
+    if (session && session.role !== "worker") {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    return session;
   } catch (e) { return null; }
 }
 function clearSession() {
-  try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (e) {}
 }
 
 export default function Login() {

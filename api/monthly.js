@@ -449,6 +449,69 @@ export default async function handler(req, res) {
       return res.status(200).json({ record, form, site: siteRows && siteRows[0], items });
     }
 
+    // ── Supervisor / Admin: correct the submitted content of a record ──
+    // General "fix a mistake" edit — corrects the actual answers (and the
+    // optional AI summary) that feed the PDF, distinct from
+    // `update_corrective_action` below (which only ever touches the
+    // separate corrective_actions tracking row). Tenant ownership is
+    // re-checked the same way as `get_record_detail` above: walk
+    // record -> form -> company_id, never trust a client-supplied company.
+    if (action === 'update_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId, answers, aiSummary, pdfUrl } = req.body;
+      if (!recordId || !Array.isArray(answers)) return res.status(400).json({ error: 'Missing details.' });
+
+      const { data: recordRows, error: recErr } = await supabaseAdmin.from('inspection_records').select('id, form_id').eq('id', recordId).limit(1);
+      if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
+      const record = recordRows[0];
+
+      const { data: formRows } = await supabaseAdmin.from('inspection_forms').select('id, company_id').eq('id', record.form_id).limit(1);
+      const form = formRows && formRows[0];
+      if (!form) return res.status(404).json({ error: 'Form not found.' });
+      if (session.role === 'supervisor' && form.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed to edit this record.' });
+      }
+
+      // Only ever touch answer rows that actually belong to this record —
+      // never trust a client-supplied answer id blindly.
+      const { data: existingAnswers } = await supabaseAdmin.from('inspection_answers').select('id').eq('record_id', recordId);
+      const validAnswerIds = new Set((existingAnswers || []).map(a => a.id));
+
+      for (const a of answers) {
+        if (!a || !validAnswerIds.has(a.id)) continue;
+        const { error: ansErr } = await supabaseAdmin
+          .from('inspection_answers')
+          .update({ answer: !!a.answer, notes: a.note || null })
+          .eq('id', a.id);
+        if (ansErr) continue;
+        // An item corrected to "no" that has no corrective action yet gets
+        // one opened — same as a fresh submission would. An item corrected
+        // to "yes" keeps any existing corrective action row as-is (an
+        // audit trail, not something a content edit should silently erase).
+        if (!a.answer) {
+          const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id').eq('answer_id', a.id).limit(1);
+          if (!caRows || caRows.length === 0) {
+            await supabaseAdmin.from('corrective_actions').insert({
+              answer_id: a.id,
+              description: (a.note || '').trim() || 'No description provided.',
+              status: 'open',
+            });
+          }
+        }
+      }
+
+      const recordUpdate = {};
+      if (aiSummary !== undefined) recordUpdate.ai_summary = aiSummary || null;
+      if (pdfUrl) recordUpdate.pdf_url = pdfUrl;
+      if (Object.keys(recordUpdate).length > 0) {
+        const { error: updErr } = await supabaseAdmin.from('inspection_records').update(recordUpdate).eq('id', recordId);
+        if (updErr) return res.status(500).json({ error: 'Update failed.' });
+      }
+
+      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+    }
+
     if (action === 'list_corrective_actions') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
 

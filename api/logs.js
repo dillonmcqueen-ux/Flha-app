@@ -225,6 +225,44 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ── Supervisor / Admin: correct the submitted content of a record ──
+    // General "fix a mistake" edit, distinct from the toolbox-only
+    // sign_late_toolbox action below (which only ever appends a signature).
+    // Only the fields that actually feed the PDF are whitelisted per type,
+    // so a client can never smuggle company_id, attendees_json (signatures),
+    // etc. through `fields`. Same tenant-ownership re-check as
+    // `delete`/`sign_late_toolbox`.
+    if (action === 'update') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, fields, pdfUrl } = req.body;
+      if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
+
+      if (session.role === 'supervisor') {
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
+          return res.status(403).json({ error: 'Not allowed to edit this record.' });
+        }
+      }
+
+      const EDITABLE_FIELDS = {
+        inspection: ['results_json', 'start_reading', 'end_reading', 'has_changes'],
+        toolbox: ['presenter_name', 'meeting_type', 'site', 'topic', 'talking_points_json'],
+        daily: ['reporter_name', 'site', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json'],
+      };
+      const allowed = EDITABLE_FIELDS[type] || [];
+      const update = {};
+      for (const key of allowed) {
+        if (Object.prototype.hasOwnProperty.call(fields, key)) update[key] = fields[key];
+      }
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
+      if (pdfUrl) update.pdf_url = pdfUrl;
+
+      const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
+      if (error) return res.status(500).json({ error: 'Update failed.' });
+      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+    }
+
     // ── Toolbox Talk: list recent talks someone can still sign ──────
     // Anyone who missed a talk (or a supervisor helping them find it) picks
     // from the last two weeks for their own company — no pre-registered

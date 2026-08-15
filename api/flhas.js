@@ -207,6 +207,40 @@ export default async function handler(req, res) {
       return res.status(200).json({ flhas });
     }
 
+    // ── Supervisor / Admin: correct an existing FLHA's content ──────────
+    // Distinct from the `submit` + `amendingId` path above, which is the
+    // worker-only, same-day, additive "amend" flow (restricted only by the
+    // client only ever offering today's own-name matches — see `resume`).
+    // This is the general fix-a-mistake tool: any supervisor/admin, any
+    // record in their company, any day. Only the fields that actually feed
+    // the PDF are whitelisted, so a client can't smuggle company_id,
+    // status, or supervisor sign-off fields through `fields`.
+    if (action === 'update') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, fields, pdfUrl } = req.body;
+      if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
+
+      if (session.role === 'supervisor') {
+        const { data: existing, error: findErr } = await supabaseAdmin.from('flhas').select('id, company_id').eq('id', id).limit(1);
+        if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
+          return res.status(403).json({ error: 'Not allowed to edit this record.' });
+        }
+      }
+
+      const EDITABLE_FIELDS = ['worker_name', 'job_site', 'hazards_json'];
+      const update = {};
+      for (const key of EDITABLE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(fields, key)) update[key] = fields[key];
+      }
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
+      if (pdfUrl) update.pdf_url = pdfUrl;
+
+      const { error } = await supabaseAdmin.from('flhas').update(update).eq('id', id);
+      if (error) return res.status(500).json({ error: 'Update failed.' });
+      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+    }
+
     // ── Supervisor / Admin: delete one or more FLHAs ────────────────────
     if (action === 'delete') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
