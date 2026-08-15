@@ -322,6 +322,80 @@ export default async function handler(req, res) {
       return res.status(200).json({ builtinActive, customForms: activeCustoms });
     }
 
+    // ── Worker: find MY OWN past submissions across every document type ──
+    // "A worker who submits a form should be able to see forms they've
+    // submitted before" — including after an accidental logout, on a fresh
+    // login. Roster (individually-identified) logins get this for free —
+    // session.userName is server-verified, embedded in the signed token at
+    // login (api/login.js). Shared-code companies have no per-person
+    // identity to check server-side (same limitation the FLHA "resume"
+    // action and useDraftAutosave.js already document), so for those the
+    // client supplies the name the worker types into the form fields
+    // anyway — matched the same case-insensitive-trim way api/flhas.js's
+    // "resume" action already matches worker_name, not treated as an
+    // authorization boundary since it only ever narrows this company's own
+    // already-company-scoped data down to a name, never widens it.
+    if (action === 'get_my_documents') {
+      if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { workerName } = req.body;
+      const effectiveName = (session.userId && session.userName)
+        ? session.userName.trim()
+        : (typeof workerName === 'string' && workerName.trim() ? workerName.trim() : '');
+      if (!effectiveName) return res.status(200).json({ documents: [], needsName: true });
+      const nameMatches = (v) => (v || '').trim().toLowerCase() === effectiveName.toLowerCase();
+      const FETCH_LIMIT = 300;
+
+      const [flhaRows, inspectionRows, toolboxRows, dailyRows, incidentRows, nearMissRows] = await Promise.all([
+        supabaseAdmin.from('flhas').select('id, worker_name, job_site, created_at, pdf_url')
+          .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
+        supabaseAdmin.from('inspections').select('id, worker_name, equipment_label, created_at, pdf_url')
+          .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
+        supabaseAdmin.from('toolbox_talks').select('id, presenter_name, topic, created_at, pdf_url')
+          .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
+        supabaseAdmin.from('daily_reports').select('id, reporter_name, site, created_at, pdf_url')
+          .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
+        supabaseAdmin.from('incidents').select('id, reporter_name, site, created_at, pdf_url')
+          .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
+        supabaseAdmin.from('near_misses').select('id, reporter_name, is_anonymous, site, created_at, pdf_url')
+          .eq('company_id', session.companyId).eq('is_anonymous', false).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
+      ]);
+
+      // Monthly inspections and custom form records have no company_id
+      // column of their own — scoped through their parent form, same as
+      // their existing list_records actions above.
+      const { data: monthlyForms } = await supabaseAdmin.from('inspection_forms').select('id, title').eq('company_id', session.companyId);
+      const monthlyFormIds = (monthlyForms || []).map(f => f.id);
+      const monthlyFormMap = {}; (monthlyForms || []).forEach(f => { monthlyFormMap[f.id] = f.title; });
+      const { data: monthlyRows } = monthlyFormIds.length
+        ? await supabaseAdmin.from('inspection_records').select('id, submitted_by, created_at, pdf_url, form_id')
+            .in('form_id', monthlyFormIds).order('created_at', { ascending: false }).limit(FETCH_LIMIT)
+        : { data: [] };
+
+      const { data: customForms } = await supabaseAdmin.from('custom_forms').select('id, title').eq('company_id', session.companyId);
+      const customFormIds = (customForms || []).map(f => f.id);
+      const customFormMap = {}; (customForms || []).forEach(f => { customFormMap[f.id] = f.title; });
+      const { data: customRows } = customFormIds.length
+        ? await supabaseAdmin.from('custom_form_records').select('id, submitted_by, created_at, pdf_url, form_id')
+            .in('form_id', customFormIds).order('created_at', { ascending: false }).limit(FETCH_LIMIT)
+        : { data: [] };
+
+      const documents = [
+        ...(flhaRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(inspectionRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(toolboxRows.data || []).filter(r => nameMatches(r.presenter_name)).map(r => ({ id: r.id, type: 'toolbox', title: 'Toolbox Talk', subtitle: r.topic || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(dailyRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'daily', title: 'Daily Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(incidentRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(nearMissRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(monthlyRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(customRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+      ];
+
+      documents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const signed = await signRows(supabaseAdmin, documents.slice(0, 100), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+
+      return res.status(200).json({ documents: signed });
+    }
+
     if (action === 'get_active_form') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { siteId, formId } = req.body;
