@@ -170,6 +170,45 @@ never commits or pushes to the repo — it has no "safe to fix directly"
 tier the way the security audits do, since a business-intel report isn't
 an infrastructure toggle.
 
+## Prospect pitch decks
+
+`prospect-pitch-builder` builds one-off outbound sales decks — a short
+(~2 minute), heavy-hitting `.pptx` for a named prospect company, not a
+generic template with the name swapped in. The first one was built for
+NXL Technologies (coiled tubing / wireline pressure control equipment,
+Blackfalds AB): a 9-slide deck covering the hook, the Big 5, the
+"consolidate everything, not just five forms" pitch, a concrete
+company-specific custom-build mockup, the "brain that learns" framing,
+audit-readiness, pricing, and a soft CTA. See
+`.claude/agents/prospect-pitch-builder.md` for the full skeleton and the
+five intake questions it asks before building (target company's actual
+business, desired CTA, the opening hook, brand styling, and whether a
+companion pricing document is needed).
+
+Two environment gotchas discovered building the first deck, documented
+in the agent file so they don't need rediscovering: `pptxgenjs` and
+LibreOffice Impress/`poppler-utils` aren't actually preinstalled despite
+skill docs assuming they are, and uploading a finished deck to Google
+Drive via the base64 `create_file` path is impractically expensive
+(~100K+ tokens for a small file) — decks get delivered as `.pptx`
+directly, which Google Slides opens and edits natively without any
+conversion step.
+
+Custom Build pricing for these decks (and for real quotes generally)
+comes from `docs/marketing/custom-builds-pricing-guide.md` — the
+versioned source for tier structure, 20 priced examples, and quoting
+notes. It's rendered to a branded internal PDF via a `reportlab` script
+when needed rather than committing the PDF itself. This is a *pricing
+reference*, not a policy: an agent building a deck reads numbers from
+it, it doesn't invent them.
+
+This agent doesn't commit the decks or pricing PDFs it produces — those
+are one-off sales deliverables sent directly to whoever asked, same as
+the competitive-intel reports aren't committed. The only repo change it
+should ever make is editing `custom-builds-pricing-guide.md` itself, and
+that goes through branch → commit → push → draft PR like everywhere
+else.
+
 ## Daily standup log
 
 Two more agents keep a running, plain-English record of what's happening on this project,
