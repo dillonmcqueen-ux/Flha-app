@@ -1,14 +1,17 @@
 import { useState } from "react";
 
-// Hex/typography ported verbatim from Dashboard.jsx's styles.groupHeaderPurple/Amber/Red/Green/Indigo,
-// plus a new "blue" preset naming the Inspections tab's previously inline-only header color.
+// Translucent-on-dark versions of the original light-mode pastel presets
+// (Dashboard.jsx's old styles.groupHeaderPurple/Amber/Red/Green/Indigo) —
+// the near-white fills read as jarring bright rectangles against the app's
+// dark theme (src/theme.js), so these use a soft rgba fill over the dark
+// surface instead, same pattern as theme.js's status/risk badge colors.
 const PRESETS = {
-  purple: { color: "#7C3AED", bg: "#F5F3FF" },
-  amber: { color: "#B45309", bg: "#FFFBEB" },
-  red: { color: "#991B1B", bg: "#FEF2F2" },
-  green: { color: "#15803D", bg: "#F0FDF4" },
-  indigo: { color: "#4338CA", bg: "#EEF2FF" },
-  blue: { color: "#0369A1", bg: "#EFF6FF" },
+  purple: { color: "#C4B5FD", bg: "rgba(124,58,237,0.16)" },
+  amber: { color: "#FCD34D", bg: "rgba(245,158,11,0.16)" },
+  red: { color: "#FCA5A5", bg: "rgba(239,68,68,0.16)" },
+  green: { color: "#86EFAC", bg: "rgba(34,197,94,0.16)" },
+  indigo: { color: "#A5B4FC", bg: "rgba(99,102,241,0.16)" },
+  blue: { color: "#38BDF8", bg: "rgba(56,189,248,0.16)" },
 };
 
 export default function CollapsibleGroup({
