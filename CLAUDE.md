@@ -165,10 +165,12 @@ both `.md` files rather than invoking them as subagents), delivered as a
 Slack DM. Sundays 10:00am Mountain time (16:00 UTC during MDT / 17:00 UTC
 during MST — cron is UTC-fixed, so the actual delivery time drifts by an
 hour across the DST boundary; adjust the trigger's `cron_expression` twice
-a year, or accept the hour drift). This pipeline is research-only and
-never commits or pushes to the repo — it has no "safe to fix directly"
-tier the way the security audits do, since a business-intel report isn't
-an infrastructure toggle.
+a year, or accept the hour drift). The research itself never edits product
+code — but the session's stop hook requires a clean working tree, so the
+finished report gets committed (just the report file, not the researcher's
+scratch findings file) via the same branch → commit → push → draft-PR
+pattern as everywhere else in this repo, rather than left untracked. See
+`docs/marketing/reports/`.
 
 ## Daily standup log
 
