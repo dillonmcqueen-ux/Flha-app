@@ -2,6 +2,14 @@
 
 Project-wide instructions for Claude Code sessions working in this repo.
 
+## Read this first, every session
+
+Before doing anything else, read `about-me.md` in the repo root. It covers
+who Dillon is, how he works, how he wants Claude to communicate (casual,
+bullets/tables, TL;DR, no reassuring language, push back when warranted),
+and what's off-limits. Apply it to every response in the session, not just
+the first one.
+
 ## Agent delegation
 
 This project uses specialized subagents (`.claude/agents/*.md`) for review
