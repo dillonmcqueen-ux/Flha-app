@@ -1259,10 +1259,13 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: flha.ai_assisted ? 2 : 10 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>Hazard / Control Checklist</div>
               <button onClick={openNewHazard} style={{ display: "flex", alignItems: "center", gap: 5, background: C.panelInset, color: C.text.primary, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", minHeight: 36 }}><Plus size={14} color={C.orange} /> Add hazard</button>
             </div>
+            {flha.ai_assisted && (
+              <div style={{ fontSize: 11.5, color: C.text.muted, marginBottom: 10 }}>AI-suggested hazards and risk levels — review each one and correct anything that's wrong or missing before you sign off.</div>
+            )}
 
             {editingHazard === "new" && (
               <div style={{ border: `1.5px dashed ${C.orange}`, borderRadius: RAD.md, padding: "14px 16px", marginBottom: 10, background: C.panelInset }}>
