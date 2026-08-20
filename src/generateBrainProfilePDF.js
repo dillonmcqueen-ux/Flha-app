@@ -28,11 +28,12 @@ export async function generateBrainProfilePDF({ companyName, companyLogo, profil
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const logoDataUrl = await loadLogoDataUrl(companyLogo);
 
-  let y = drawBanner(doc, {
+  const redrawHeader = () => drawBanner(doc, {
     title: "Company Brain — Learning Snapshot",
     subtitle: `${companyName || "Company"} · ${new Date().toLocaleDateString("en-CA")}`,
     color: AMBER, logoDataUrl,
   });
+  let y = redrawHeader();
 
   y = drawSectionTitle(doc, y, "What FORA has learned about your company", "Built from your own SOPs, equipment, and real usage — never from another company's data or outside research.", AMBER);
 
@@ -74,7 +75,7 @@ export async function generateBrainProfilePDF({ companyName, companyLogo, profil
     });
   }
 
-  if (y > 250) { doc.addPage(); y = 20; }
+  if (y > 250) { doc.addPage(); y = redrawHeader(); }
   y += 4;
   doc.setDrawColor(253, 230, 138); doc.setFillColor(255, 251, 235);
   doc.roundedRect(PAGE.margin, y, PAGE.W - PAGE.margin * 2, 22, 2, 2, "FD");
