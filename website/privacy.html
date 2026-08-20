@@ -76,11 +76,11 @@
     This Privacy Policy applies to FORA (the "<strong>Service</strong>"), operated by FORA Field Solutions
     ("<strong>FORA</strong>," "<strong>we</strong>," "<strong>us</strong>"). FORA is provided to companies on a
     business-to-business basis. Each company that subscribes (a "<strong>Customer</strong>") controls its own
-    workers', supervisors', and administrators' access via company login codes or an individual roster of names
+    workers' and supervisors' access via company login codes or an individual roster of names
     and PINs.
   </p>
   <p>
-    If you are a worker, supervisor, or admin using FORA through your employer's account, your employer is the
+    If you are a worker or supervisor using FORA through your employer's account, your employer is the
     data controller for the information you submit, and this policy describes how FORA, as processor/service
     provider, handles that data on your employer's behalf. Questions about your specific employer's use of FORA
     should first go to your employer.
@@ -91,7 +91,7 @@
   <ul>
     <li>Company name, contact name, email address, phone number, and business address, collected during onboarding.</li>
     <li>Company login code(s), or (for companies using individual roster login) each worker's and supervisor's name and 4-digit PIN.</li>
-    <li>Role (worker, supervisor, admin) and plan tier (Basic or Advanced).</li>
+    <li>Role (worker or supervisor) and plan tier (Basic or Advanced).</li>
   </ul>
   <h3>2.2 Content you submit</h3>
   <ul>
@@ -114,7 +114,7 @@
 
   <h2>3. How we use information</h2>
   <ul>
-    <li>To provide the Service: authenticate logins, generate AI-assisted safety documents, store and display submissions, and power the Supervisor Dashboard and Admin Panel.</li>
+    <li>To provide the Service: authenticate logins, generate AI-assisted safety documents, store and display submissions, and power the Supervisor Dashboard and our internal account-management tools.</li>
     <li>To cross-reference task descriptions against a company's own uploaded SOPs and equipment so that generated documents reflect that company's actual procedures.</li>
     <li>To operate, maintain, and secure the Service, including detecting misuse of login codes and auditing master-code access.</li>
     <li>To communicate with Customers about their account, billing, onboarding, and support.</li>
@@ -141,7 +141,7 @@
     <li><strong>Stripe</strong>: payment processing for subscription billing.</li>
   </ul>
   <p>
-    Within a Customer's own account, submissions are visible to that Customer's supervisors and admins as
+    Within a Customer's own account, submissions are visible to that Customer's supervisors as
     intended by the Service's design (e.g., the Supervisor Dashboard). Data is walled off between companies:
     one Customer's data, forms, and users are isolated from every other Customer's.
   </p>
@@ -155,8 +155,8 @@
   <ul>
     <li>Every request to our serverless functions is checked against a signed, server-verified session before it can touch any data.</li>
     <li>Row Level Security is enabled on every database table as a deny-by-default backstop. There are no bypass policies, so direct access with a public key is refused.</li>
-    <li>Login codes and PINs are used to authenticate Users; Customers are responsible for managing their own roster and code confidentiality, and can deactivate a person's access immediately from the Admin Panel.</li>
-    <li>Master-code logins (used for administrative support) are logged and auditable.</li>
+    <li>Login codes and PINs are used to authenticate Users; Customers are responsible for managing their own roster and code confidentiality, and can request that FORA deactivate a person's access immediately.</li>
+    <li>Master-code logins (used for account support) are logged and auditable.</li>
   </ul>
   <p>
     No method of transmission or storage is 100% secure. We work to protect information using the measures
@@ -188,8 +188,8 @@
     other privacy laws (such as the EU/UK GDPR or U.S. state privacy laws) may also give you rights to access,
     correct, export, or request deletion of personal information, or to object to or restrict certain
     processing. Because FORA is provided on a business-to-business basis, workers and supervisors should
-    generally direct these requests to their employer (the Customer, who controls the account); Customers and
-    admins can also contact us directly at
+    generally direct these requests to their employer (the Customer, who controls the account); Customers
+    can also contact us directly at
     <a href="mailto:forafieldsolutions@gmail.com">forafieldsolutions@gmail.com</a> and we will respond within a
     reasonable time, and in any event within any timeframe required by applicable law.
   </p>
