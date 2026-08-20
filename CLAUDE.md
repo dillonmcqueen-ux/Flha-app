@@ -198,3 +198,21 @@ like everything else.
 The 9am firing time is stored in UTC and will drift by an hour across the
 Mountain-time DST boundary (~early Nov, ~early Mar) until the trigger's cron expression is
 manually adjusted.
+
+## Daily inbox organizer
+
+`gmail-inbox-organizer` fires once a day at 2:00am Mountain time via a scheduled Routine
+(fresh session each time, pointed at `.claude/agents/gmail-inbox-organizer.md` per the
+Agent-tool limitation noted above). It labels every read, unstarred message sitting in the
+Gmail inbox by sender (reusing the existing `Notifications/<Service>` and `Database` label
+taxonomy, falling back to `Notifications/Other` for unrecognized automated senders), then
+archives it out of the inbox. Unread mail, starred mail, and anything already filed outside
+the inbox are left untouched. Real person-to-person correspondence gets archived but not
+force-labeled into the automated-notifications taxonomy.
+
+This agent has nothing to do with the flha-app codebase or repo — it only uses the Gmail MCP
+tools, never touches git or application code.
+
+Like the standup routines, the 2am firing time is stored in UTC and will drift by an hour
+across the Mountain-time DST boundary until the trigger's cron expression is manually
+adjusted.
