@@ -37,7 +37,11 @@ Deployed at the `fora-website` Vercel project, connected to this repo's
 
 ## Editing
 
-Shared styles — colors, layout, components — live in `style.css`. Each page
+Shared styles (colors, layout, components) live in `style.css`. Each page
 is its own self-contained HTML file with a small amount of inline JS
 (scroll-reveal, sticky nav). Brand colors match the app: black `#0A0A0A`
 background, orange `#F97316` accent.
+
+**Style rule: no em dashes.** Don't use `—` in any copy on this site. Use a
+period, comma, colon, or parentheses instead. This applies to every page,
+not just the ones already cleaned up.
