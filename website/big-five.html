@@ -19,12 +19,12 @@
   <nav class="wrap">
     <a href="index.html" class="logo"><span class="dot"></span>FORA</a>
     <div class="navlinks">
-      <a href="index.html">Home</a>
+      <a href="what-is-fora.html">What is FORA</a>
       <a href="big-five.html" class="active">The Big 5</a>
       <a href="custom-builds.html">Custom Builds</a>
+      <a href="the-brain.html">The Brain</a>
       <a href="pricing.html">Pricing</a>
-      <a href="index.html#different">Why FORA</a>
-      <a href="index.html#about">About</a>
+      <a href="about.html">About</a>
     </div>
     <a href="pricing.html" class="cta-btn">Get started</a>
   </nav>
@@ -43,6 +43,24 @@
   </div>
 </section>
 
+<section id="demo">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">See it work</div>
+      <h2>Pick a task. Watch FORA build the FLHA.</h2>
+      <p>These are pre-built examples so you can see the format and depth of a real FLHA without an account. Pick one below.</p>
+    </div>
+    <div class="demo-chips" id="demoChips" data-reveal>
+      <button class="demo-chip" data-id="trenching"><span>🚧</span>Trenching near utilities</button>
+      <button class="demo-chip" data-id="scaffolding"><span>🪜</span>Working at height on scaffolding</button>
+      <button class="demo-chip" data-id="forklift"><span>🏭</span>Forklift at a loading dock</button>
+      <button class="demo-chip" data-id="confined-space"><span>🛢️</span>Confined space tank entry</button>
+      <button class="demo-chip" data-id="hot-work"><span>🔥</span>Welding in a shop</button>
+    </div>
+    <div class="demo-panel" id="demoPanel" hidden data-reveal></div>
+  </div>
+</section>
+
 <section id="what">
   <div class="wrap">
     <div class="split">
@@ -51,7 +69,7 @@
         <h2 style="font-size:36px; font-weight:700; margin-bottom:22px; line-height:1.15;">Paperwork that already knows your company.</h2>
         <p>Describe what happened, or what you're about to do, by voice or text. FORA cross-references it against your own SOPs, your own equipment, and your own site, then hands back a complete, properly formatted document in seconds.</p>
         <p>Nothing generic gets handed back. The hazards, the controls, the checklist items: all of it reflects your company's actual procedures, because that's what FORA was given to work from.</p>
-        <p>Every document lands on the <a href="index.html#platform" style="color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim);">Supervisor Dashboard</a>, ready for sign-off, review, and export, right alongside anything built for you as a <a href="custom-builds.html" style="color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim);">Custom Build</a>.</p>
+        <p>Every document lands on the <a href="what-is-fora.html#platform" style="color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim);">Supervisor Dashboard</a>, ready for sign-off, review, and export, right alongside anything built for you as a <a href="custom-builds.html" style="color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim);">Custom Build</a>.</p>
       </div>
       <div class="mock" data-reveal>
         <div class="flow-title">How it works</div>
@@ -143,10 +161,12 @@
     <div class="logo"><span class="dot"></span>FORA</div>
     <div class="foot-links">
       <a href="index.html">Home</a>
+      <a href="what-is-fora.html">What is FORA</a>
       <a href="big-five.html">The Big 5</a>
       <a href="custom-builds.html">Custom Builds</a>
+      <a href="the-brain.html">The Brain</a>
       <a href="pricing.html">Pricing</a>
-      <a href="index.html#about">About</a>
+      <a href="about.html">About</a>
       <a href="privacy.html">Privacy Policy</a>
       <a href="terms.html">Terms of Use</a>
     </div>
@@ -167,6 +187,9 @@
   }, { threshold: 0.15 });
   document.querySelectorAll('[data-reveal]').forEach(el => io.observe(el));
 </script>
+
+<script src="demo-data.js"></script>
+<script src="demo.js"></script>
 
 </body>
 </html>
