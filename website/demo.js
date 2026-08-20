@@ -1,4 +1,4 @@
-// FORA marketing site — interactive FLHA demo behavior.
+// FORA marketing site: interactive FLHA demo behavior.
 // No network requests: renders pre-authored scenarios from demo-data.js
 // with a staged "generating" animation to show the pace of a real FLHA.
 (function () {
@@ -93,7 +93,7 @@
       '    <tbody>' + hazardRows + '</tbody>' +
       '  </table></div>' +
       '  <div class="demo-ppe"><span class="demo-ppe-label">PPE required:</span> <div class="chips">' + ppeChips + '</div></div>' +
-      '  <p class="demo-disclaimer">This demo shows general hazard identification. On your account, FORA also cross-references your company’s own SOPs — that’s the part that’s different for every company.</p>' +
+      '  <p class="demo-disclaimer">This demo shows general hazard identification. On your account, FORA also cross-references your company’s own SOPs. That’s the part that’s different for every company.</p>' +
       '  <div class="demo-cta">' +
       '    <p>That’s what your crew gets in under a minute.</p>' +
       '    <a href="pricing.html" class="cta-btn">See pricing</a>' +

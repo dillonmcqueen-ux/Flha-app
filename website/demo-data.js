@@ -1,5 +1,5 @@
-// FORA marketing site — interactive FLHA demo content.
-// Static, hand-authored scenarios (no live API call — see website/demo.js).
+// FORA marketing site: interactive FLHA demo content.
+// Static, hand-authored scenarios (no live API call, see website/demo.js).
 const FLHA_DEMO_SCENARIOS = [
   {
     id: "trenching",
@@ -13,13 +13,13 @@ const FLHA_DEMO_SCENARIOS = [
       { hazard: "Struck-by excavator swing radius", risk: "High", control: "Establish and mark a swing radius exclusion zone; no ground crew inside it while the machine is operating." },
       { hazard: "Falls into open trench", risk: "Medium", control: "Barricade or flag the trench edge; place spoil pile at least 2ft back from the edge." },
       { hazard: "Struck-by falling spoil or backfill material", risk: "Medium", control: "Keep spoil piles set back from the trench edge and workers clear of the drop zone during backfill." },
-      { hazard: "Underground utility strike (other than gas — power, telecom)", risk: "High", control: "Confirm a current utility locate covers the full dig footprint before any excavation begins." },
+      { hazard: "Underground utility strike (other than gas: power, telecom)", risk: "High", control: "Confirm a current utility locate covers the full dig footprint before any excavation begins." },
       { hazard: "Excavator operator visibility of ground crew", risk: "Medium", control: "Maintain radio or hand-signal contact between operator and ground crew at all times; no blind-spot work." },
       { hazard: "Noise exposure from excavator engine", risk: "Low", control: "Hearing protection for anyone working within close range of the running machine." },
       { hazard: "Dust/silica exposure from disturbed soil", risk: "Low", control: "Dust mask available for dry, dusty conditions; water down the area if dust becomes visible." },
       { hazard: "Pinch points during trench box or shoring placement", risk: "Medium", control: "Keep hands clear of box edges during placement; use tag lines to guide, not hands." },
       { hazard: "Ground disturbance affecting nearby structures or pavement", risk: "Low", control: "Visually monitor adjacent surfaces for cracking or settling as the trench opens." },
-      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm crew is fit for duty before starting — rested, unimpaired, no undisclosed medical concerns." },
+      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm crew is fit for duty before starting, rested, unimpaired, no undisclosed medical concerns." },
       { hazard: "Awareness of muster point and emergency response", risk: "Low", control: "Confirm site muster point and that 911/emergency services access to the site is unobstructed before work begins." }
     ],
     ppeRequired: ["Hard hat", "Safety glasses", "High-visibility vest", "Steel-toe boots", "Hearing protection (near running equipment)"],
@@ -38,7 +38,7 @@ const FLHA_DEMO_SCENARIOS = [
       { hazard: "Overturning of scaffold due to inadequate footing or bracing", risk: "High", control: "Confirm base plates/mud sills on stable, level ground and all required bracing and ties to the structure are installed per the manufacturer's configuration." },
       { hazard: "Falling tools or material striking someone below", risk: "Medium", control: "Toe boards on all platforms, tool lanyards, and a barricaded exclusion zone at ground level beneath the work." },
       { hazard: "Access ladder to scaffold platform improperly secured", risk: "Medium", control: "Ladder access secured and extending at least 3ft above the landing platform, or use a built-in scaffold stair/ladder system." },
-      { hazard: "Weather — wind affecting scaffold stability or worker balance", risk: "Medium", control: "Stop work at height if sustained wind exceeds the scaffold manufacturer's rated limit or conditions feel unsafe." },
+      { hazard: "Weather: wind affecting scaffold stability or worker balance", risk: "Medium", control: "Stop work at height if sustained wind exceeds the scaffold manufacturer's rated limit or conditions feel unsafe." },
       { hazard: "Overloading scaffold platform with material", risk: "Medium", control: "Stage siding material in small batches per the scaffold's rated load capacity, not stacked in bulk on the platform." },
       { hazard: "Power line proximity to scaffold or material handling", risk: "High", control: "Maintain minimum regulated clearance from any overhead power line; do not erect or work scaffold within that clearance without the utility de-energizing or shielding the line." },
       { hazard: "Cuts or lacerations from siding panel edges and cutting tools", risk: "Low", control: "Cut-resistant gloves when handling raw panel edges; guards in place on all cutting tools." },
@@ -47,7 +47,7 @@ const FLHA_DEMO_SCENARIOS = [
       { hazard: "Awareness of muster point and emergency response", risk: "Low", control: "Confirm muster point and that emergency access to the building exterior is clear before starting." }
     ],
     ppeRequired: ["Hard hat", "Fall-arrest harness and lanyard", "Non-slip footwear", "Safety glasses", "Cut-resistant gloves"],
-    additionalNotes: "Overhead power line hazard was included because the task explicitly describes work on a building exterior at height — confirm actual line presence and clearance on site before relying on this control."
+    additionalNotes: "Overhead power line hazard was included because the task explicitly describes work on a building exterior at height. Confirm actual line presence and clearance on site before relying on this control."
   },
   {
     id: "forklift",
@@ -66,7 +66,7 @@ const FLHA_DEMO_SCENARIOS = [
       { hazard: "Exhaust exposure in an enclosed dock area", risk: "Low", control: "Ensure adequate ventilation in the dock area or use a propane/electric unit suited for enclosed spaces." },
       { hazard: "Pinch points at pallet or load contact points", risk: "Low", control: "Keep hands clear of pallet and load edges during placement; guide with tools or tag lines, not hands." },
       { hazard: "Musculoskeletal strain from manual box handling on/off the forklift", risk: "Low", control: "Use proper lifting technique for any manual handling; team-lift boxes over a manageable single-person weight." },
-      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm operator and dock crew are fit for duty — rested, unimpaired, no undisclosed medical concerns." },
+      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm operator and dock crew are fit for duty, rested, unimpaired, no undisclosed medical concerns." },
       { hazard: "Awareness of muster point and emergency response", risk: "Low", control: "Confirm muster point and that emergency access to the dock area is unobstructed before starting." }
     ],
     ppeRequired: ["Hard hat (if overhead racking present)", "High-visibility vest", "Steel-toe boots", "Safety glasses"],
@@ -79,10 +79,10 @@ const FLHA_DEMO_SCENARIOS = [
     taskDescription: "Entering a drained storage tank through a top manway to clean residue with a scraper and shop vac, one entrant plus an attendant outside.",
     taskSummary: "Confined space entry into a drained storage tank via a top manway to manually clean residue, with one entrant and one attendant.",
     hazards: [
-      { hazard: "Atmospheric hazard — oxygen deficiency, toxic vapors, or flammable atmosphere inside the tank", risk: "Extreme", control: "Test the atmosphere (O2, LEL, toxics) before entry and continuously monitor throughout; do not enter if readings are outside safe limits." },
+      { hazard: "Atmospheric hazard: oxygen deficiency, toxic vapors, or flammable atmosphere inside the tank", risk: "Extreme", control: "Test the atmosphere (O2, LEL, toxics) before entry and continuously monitor throughout; do not enter if readings are outside safe limits." },
       { hazard: "Entry without a confined space permit and attendant in place", risk: "Extreme", control: "Complete a confined space entry permit and confirm a trained attendant is stationed at the entry point for the full duration of entry." },
       { hazard: "Engulfment or entrapment by residual product/sludge", risk: "High", control: "Confirm the tank is fully drained and residue depth is inspected before entry; do not enter if pooled liquid or unstable sludge remains." },
-      { hazard: "Inability to rescue entrant quickly if incident occurs", risk: "High", control: "Entrant wears a retrieval harness connected to a tripod/winch at the manway, and a written rescue plan is in place before entry — attendant does not enter to rescue." },
+      { hazard: "Inability to rescue entrant quickly if incident occurs", risk: "High", control: "Entrant wears a retrieval harness connected to a tripod/winch at the manway, and a written rescue plan is in place before entry. Attendant does not enter to rescue." },
       { hazard: "Loss of communication between entrant and attendant", risk: "High", control: "Maintain continuous visual, voice, or radio contact between entrant and attendant throughout entry." },
       { hazard: "Static discharge or ignition source igniting residual vapors", risk: "High", control: "Use non-sparking tools and bond/ground the tank and equipment if any flammable residue is possible." },
       { hazard: "Slips on residue-coated interior surfaces", risk: "Medium", control: "Use slip-resistant footwear and proceed carefully on cleaned vs. uncleaned sections of the tank floor." },
@@ -90,7 +90,7 @@ const FLHA_DEMO_SCENARIOS = [
       { hazard: "Poor lighting inside the tank", risk: "Medium", control: "Use intrinsically safe lighting rated for the atmosphere present." },
       { hazard: "Skin or eye contact with residue during scraping", risk: "Low", control: "Chemical-resistant gloves and splash-rated eye protection while scraping and vacuuming residue." },
       { hazard: "Awareness of muster point and emergency response, including 911/emergency service availability", risk: "Low", control: "Confirm site muster point and that emergency responders can reach and access the tank location before entry begins." },
-      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm entrant and attendant are fit for duty — rested, unimpaired, no undisclosed medical concerns, and not claustrophobic-restricted from confined entry." }
+      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm entrant and attendant are fit for duty, rested, unimpaired, no undisclosed medical concerns, and not claustrophobic-restricted from confined entry." }
     ],
     ppeRequired: ["Confined space retrieval harness", "Atmospheric gas monitor", "Chemical-resistant gloves", "Eye protection", "Intrinsically safe lighting", "Respiratory protection (if indicated by air monitoring)"],
     additionalNotes: null
@@ -112,7 +112,7 @@ const FLHA_DEMO_SCENARIOS = [
       { hazard: "Struck-by or trip hazard from welding leads/hoses across shop floor", risk: "Low", control: "Route leads and hoses away from other trades' walkways or cover/flag them where they cross a path." },
       { hazard: "Noise from grinding or fit-up work before welding", risk: "Low", control: "Hearing protection during any grinding or hammering steps of the repair." },
       { hazard: "Musculoskeletal strain from positioning the equipment frame", risk: "Low", control: "Use shop lifting equipment or a team lift to position the frame rather than manual handling alone." },
-      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm welder and nearby trades are fit for duty — rested, unimpaired, no undisclosed medical concerns." },
+      { hazard: "Worker fitness for duty", risk: "Low", control: "Confirm welder and nearby trades are fit for duty, rested, unimpaired, no undisclosed medical concerns." },
       { hazard: "Awareness of muster point and emergency response", risk: "Low", control: "Confirm shop muster point and that emergency access/exits remain clear during the task." }
     ],
     ppeRequired: ["Welding helmet (correct shade)", "Flame-resistant clothing", "Welding gloves", "Safety glasses (under helmet)", "Hearing protection (during grinding/fit-up)"],
