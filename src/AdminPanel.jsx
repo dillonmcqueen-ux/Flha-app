@@ -5,6 +5,7 @@ import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
+import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -121,6 +122,18 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       setMsg("Couldn't save company profile.");
     }
     setSavingBrain(false);
+  };
+
+  const downloadBrainPDF = async () => {
+    try {
+      await generateBrainProfilePDF({
+        companyName: activeCompany?.name,
+        companyLogo: profile.logo_url,
+        profile: brainProfile,
+      });
+    } catch (e) {
+      setMsg("Couldn't generate Brain snapshot PDF.");
+    }
   };
 
   const loadDocSettings = async (companyId) => {
@@ -1574,12 +1587,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink }}>🧠 Company profile</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, flex: 1 }}>🧠 Company profile</div>
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
                   background: brainProfile?.status === "confirmed" ? "#DCFCE7" : "#FEF3C7",
                   color: brainProfile?.status === "confirmed" ? "#166534" : "#92400E",
                 }}>{brainProfile?.status === "confirmed" ? "Confirmed" : "Draft — AI-generated, not yet reviewed"}</span>
+                <button
+                  onClick={downloadBrainPDF}
+                  title="Download a snapshot PDF of what FORA has learned about this company, to share with the client"
+                  style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff", color: C.inkSoft, cursor: "pointer", whiteSpace: "nowrap" }}
+                >📄 Generate PDF</button>
               </div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
                 What FORA has learned about this company — inferred at onboarding, and refined over time from this company's own FLHA edits, toolbox talks, incidents, and near misses. Feeds into document generation as additional context; edit anything below to correct it.
