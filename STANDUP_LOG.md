@@ -43,6 +43,16 @@ this file stays short and easy to scan.
   contradiction was fixed and merged (PR #33). Two more small PRs also merged since: a QA
   walkthrough script for the company brain feature (PR #27) and a quiet-mode fix for the
   standup logger itself (PR #25).
+- New-signup notifications: `RESEND_API_KEY` was missing on the `flha-app` Vercel project
+  (it only existed on the separate `fora-website` project), so real onboarding-notification
+  emails to forafieldsolutions@gmail.com were silently never sending — PR #52 (merged) added
+  logging so this is now visible in Vercel logs instead of failing silently. A fresh scoped
+  Resend API key was generated and needs to be pasted into `flha-app`'s Vercel env vars as
+  `RESEND_API_KEY` (Production) — not yet done. Separately, a `#onboarding-alerts` Slack
+  channel was created, but the Incoming Webhook to post to it still needs to be set up by
+  hand at api.slack.com/apps (blocked on mobile — that page redirects to the Slack app/App
+  Store instead of loading; needs a desktop browser) and the resulting URL added as
+  `SLACK_ONBOARDING_WEBHOOK_URL`. On hold until a computer is available.
 
 ## Repeating Issues
 
