@@ -8,7 +8,10 @@
 // per-function budget.
 
 export async function sendEmail({ to, subject, text, from = 'FORA Onboarding <onboarding@resend.dev>' }) {
-  if (!process.env.RESEND_API_KEY) return;
+  if (!process.env.RESEND_API_KEY) {
+    console.warn(`sendEmail skipped (RESEND_API_KEY not set): "${subject}" to ${to}`);
+    return;
+  }
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {

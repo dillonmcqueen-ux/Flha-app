@@ -9,7 +9,10 @@
 
 export async function sendSlackNotification(text) {
   const url = process.env.SLACK_ONBOARDING_WEBHOOK_URL;
-  if (!url) return;
+  if (!url) {
+    console.warn('sendSlackNotification skipped (SLACK_ONBOARDING_WEBHOOK_URL not set)');
+    return;
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
