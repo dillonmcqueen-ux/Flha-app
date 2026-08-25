@@ -17,11 +17,14 @@ tool rather than reviewing it inline.
 | A new file under `api/`, `vercel.json`, `api/cron-equipment-reports.js`, or `api/stripe-webhook.js` | `vercel-function-budget-guardian` | `api/` is on Vercel's Pro-plan serverless function cap (far higher than the old Hobby-plan 12, but not infinite — see `.claude/agents/vercel-function-budget-guardian.md`). |
 | `website/pricing.html`, `terms.html`, `index.html`, or `custom-builds.html` when pricing, plans, or Stripe links are involved | `pricing-legal-consistency-reviewer` | This exact drift (displayed price ↔ actual Stripe amount ↔ fee disclosure ↔ Terms language) took 5 separate follow-up PRs to fully resolve once (PRs #2–#6) — see `.claude/agents/pricing-legal-consistency-reviewer.md`. |
 | Any wording change to `website/*.html` | `admin-access-copy-guard` | Customers only ever have a worker or supervisor login — there is no customer "admin" role, and the Admin Panel (`AdminPanel.jsx`) is founder-only, gated by a single global `ADMIN_CODE`. The site previously claimed clients could access "the Admin Panel" and self-serve the Brain profile; both were false. This checklist exists so that mistake can never silently reappear — see `.claude/agents/admin-access-copy-guard.md`. **Always run this one, even when another row above also matches the same diff.** |
+| Substantive text changes to `website/privacy.html` or `website/terms.html` | `legal-revision-date-updater` | The "Last updated" date on both pages was set once at creation (July 28, 2026) and then silently went stale through three later commits that changed real legal text without bumping it. Unlike the other rows, this agent edits — it bumps the "Last updated" date on whichever of the two files actually changed (never "Effective date", never the legal wording itself). `src/Onboarding.jsx`/`src/Login.jsx` link straight to the live pages rather than embedding a copy, so there's nothing else to update — see `.claude/agents/legal-revision-date-updater.md`. |
 
 ### How to delegate
 
-- Run the matching subagent automatically — no need to ask first. It's
-  read-only and reports findings; it never blocks or edits anything.
+- Run the matching subagent automatically — no need to ask first. Every
+  row is read-only and reports findings except `legal-revision-date-updater`,
+  which is deliberately allowed to edit — narrowly, only the "Last
+  updated" date line, never legal wording.
 - Treat its findings as high-signal: resolve them before considering the
   change done, the same way you'd treat a failing test.
 - If a change doesn't match any row above, just do the work yourself.
