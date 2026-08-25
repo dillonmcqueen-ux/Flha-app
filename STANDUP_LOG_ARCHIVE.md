@@ -3,6 +3,33 @@
 Completed days move here from `STANDUP_LOG.md` each morning after the 9am summary is sent.
 Newest day on top.
 
+## 2026-08-13 through 2026-08-24 (backfilled, rolled in from the previous "Today" section)
+
+_The automated logger had stopped firing after 2026-08-13 (see the 2026-08-25 review entry in
+STANDUP_LOG.md's Outstanding Items for how this was found and fixed), so this stretch never got
+its own daily entries. Backfilled here from the commit history instead of leaving it blank:_
+
+- Scoped a big future feature (this was the original "Today" entry, never archived): an AI
+  "company brain" that learns each company's own habits and terminology over time from their own
+  safety paperwork, never the outside internet, so generated documents fit that company better —
+  with a ground rule that it can never lower the safety bar.
+- Gave the logged-in app a real visual identity (black/orange/white FORA branding, replacing the
+  generic default look) across the Dashboard, Worker Menu, the FLHA form, and Onboarding.
+- Fixed a couple of legal/marketing accuracy issues: Terms wording clarified on IP and generated-
+  content ownership, and a place where marketing copy contradicted the Terms' liability language.
+- Fixed some real bugs: deleting a company could fail with a database error, and some admin input
+  text was invisible (white-on-white); also added Slack notifications for new signups and fixed
+  white-on-light dropdown text/harsh white headers.
+- Cleaned up the public marketing website: consolidated it down to 5 pages, moved the live demo
+  to a more prominent spot, rewrote the "About FORA" section as a personal bio, and removed every
+  place the site incorrectly implied a customer could access "the Admin Panel" (that panel is
+  founder-only).
+- Added a daily Gmail inbox-organizing helper (labels and archives routine automated mail every
+  morning, leaves real correspondence and unread/starred mail alone).
+- Added logging so a silently-failing new-signup notification (missing API key/webhook config)
+  now shows up in Vercel's logs instead of just vanishing — see STANDUP_LOG.md's Outstanding
+  Items for the two manual steps still needed to actually turn those notifications on.
+
 ## 2026-08-13 (rolled in from the previous "Today" section)
 
 - Fixed the hourly notes checker itself: it had been running on schedule all day but never
