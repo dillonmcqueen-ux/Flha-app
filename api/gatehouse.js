@@ -248,15 +248,20 @@ export default async function handler(req, res) {
 
     let tierLabel = null;
     let amount = null;
+    let singleTierId = null; // set only when the cart is exactly one distinct tier — see the gatehouse_transactions.tier_id note below
     if (!redirected) {
       // A visit can be more than one of the same charge (two minimum fees
       // on one load, two fridges, etc.), so pricing is a cart: any number
       // of {tierId, quantity} line items — not one base tier plus a set of
       // add-ons. Still exactly one receipt number for the whole visit.
+      // Quantity is clamped to [1, 50] — 0/negative/NaN/missing all become
+      // 1 rather than being silently dropped or going negative, and 50 is
+      // a sanity ceiling against a malformed value producing a nonsensical
+      // total (no real visit needs more than 50 of one line item).
       const cleanItems = Array.isArray(items)
         ? items
             .filter(it => it && it.tierId)
-            .map(it => ({ tierId: it.tierId, quantity: Math.max(1, Math.floor(Number(it.quantity) || 1)) }))
+            .map(it => ({ tierId: it.tierId, quantity: Math.min(50, Math.max(1, Math.floor(Number(it.quantity) || 1))) }))
         : [];
       if (cleanItems.length === 0) return res.status(400).json({ error: 'Select at least one price.' });
 
@@ -275,6 +280,12 @@ export default async function handler(req, res) {
         .map(it => { const t = tierById[it.tierId]; return it.quantity > 1 ? `${t.label} x${it.quantity}` : t.label; })
         .join(' + ');
       amount = cleanItems.reduce((sum, it) => sum + Number(tierById[it.tierId].price) * it.quantity, 0);
+      // gatehouse_transactions.tier_id is a single nullable FK, predating
+      // the cart — it can't represent a multi-item visit, so it's only
+      // populated when the cart resolves to exactly one distinct tier
+      // (any quantity), and left null otherwise. tier_label/amount above
+      // are the source of truth for what was actually charged either way.
+      if (tierIds.length === 1) singleTierId = tierIds[0];
 
       if (paymentMethod !== 'cash' && paymentMethod !== 'cheque') {
         return res.status(400).json({ error: 'Payment method must be cash or cheque.' });
@@ -327,7 +338,7 @@ export default async function handler(req, res) {
           station_id: stationId,
           receipt_number: candidate,
           business_date: businessDate,
-          tier_id: redirected ? null : tierId,
+          tier_id: redirected ? null : singleTierId,
           tier_label: tierLabel,
           amount,
           payment_method: redirected ? null : paymentMethod,
