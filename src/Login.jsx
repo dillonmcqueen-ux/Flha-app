@@ -3,6 +3,8 @@ import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
+import GatehouseBooth from "./GatehouseBooth.jsx";
+import GatehouseDashboard from "./GatehouseDashboard.jsx";
 
 // Session storage — split by role. window.name survives a reload but not a
 // fully closed-and-reopened tab, which is exactly the case that matters most
@@ -235,6 +237,17 @@ export default function Login() {
 
   // ── Authenticated views ──────────────────────────────────
   if (session) {
+    // Gatehouse companies (transfer-station receipts) get an entirely
+    // different UI at the worker/supervisor level — same login/session
+    // machinery, none of the safety-document screens. See
+    // docs/schema/gatehouse-migration.sql / companies.app_type.
+    if (session.appType === "gatehouse" && session.role !== "admin") {
+      if (session.role === "worker") {
+        return <GatehouseBooth companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} token={session.token} />;
+      }
+      return <GatehouseDashboard companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} token={session.token} />;
+    }
+
     if (session.role === "worker") {
       return <WorkerMenu companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} userId={session.userId || null} onLogout={logout} token={session.token} />;
     }

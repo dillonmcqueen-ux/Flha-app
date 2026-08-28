@@ -92,8 +92,8 @@ function signSession(payload) {
 // granting any of the access a real session would — every other protected
 // endpoint in this app gates on session.role, which a ticket never has, so
 // it can never be replayed as a session even within its 5-minute window.
-function signTicket(companyId, companyName) {
-  return signSession({ purpose: 'roster', companyId, companyName, issuedAt: Date.now() });
+function signTicket(companyId, companyName, appType) {
+  return signSession({ purpose: 'roster', companyId, companyName, appType, issuedAt: Date.now() });
 }
 
 function verifyTicket(ticket) {
@@ -335,6 +335,7 @@ export default async function handler(req, res) {
       role: member.role,
       companyId: ticket.companyId,
       companyName: ticket.companyName,
+      appType: ticket.appType || 'safety',
       userId: member.id,
       userName: member.name,
       suspended,
@@ -353,7 +354,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing details.' });
     }
 
-    const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('id, name').eq('id', companyId).limit(1);
+    const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('id, name, app_type').eq('id', companyId).limit(1);
     if (coErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
@@ -368,6 +369,7 @@ export default async function handler(req, res) {
       role: pickedRole,
       companyId: company.id,
       companyName: company.name,
+      appType: company.app_type || 'safety',
       suspended: false,
       issuedAt: Date.now(),
     };
@@ -713,7 +715,7 @@ export default async function handler(req, res) {
   const legacyColumn = role === 'supervisor' ? 'supervisor_code' : 'worker_code';
   const { data: legacyRows, error: legacyErr } = await supabaseAdmin
     .from('companies')
-    .select('id, name, suspended, roster_enabled')
+    .select('id, name, suspended, roster_enabled, app_type')
     .eq(legacyColumn, entered)
     .limit(1);
   if (legacyErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
@@ -722,7 +724,7 @@ export default async function handler(req, res) {
   if (!company) {
     const { data: codeRows, error: codeErr } = await supabaseAdmin
       .from('companies')
-      .select('id, name, suspended, roster_enabled')
+      .select('id, name, suspended, roster_enabled, app_type')
       .eq('company_code', entered)
       .limit(1);
     if (codeErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
@@ -743,6 +745,7 @@ export default async function handler(req, res) {
       role,
       companyId: company.id,
       companyName: company.name,
+      appType: company.app_type || 'safety',
       suspended: !!company.suspended,
       issuedAt: Date.now(),
     };
@@ -752,6 +755,6 @@ export default async function handler(req, res) {
 
   // Roster path — hand back a ticket instead of a session; the client moves
   // on to the name picker (list_roster_names) and then the PIN (roster_login).
-  const companyTicket = signTicket(company.id, company.name);
+  const companyTicket = signTicket(company.id, company.name, company.app_type || 'safety');
   return res.status(200).json({ stage: 'need_identity', companyTicket, companyName: company.name });
 }
