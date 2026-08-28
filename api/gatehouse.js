@@ -507,6 +507,7 @@ export default async function handler(req, res) {
     try {
       await sendEmail({
         to: recipientEmail,
+        from: 'FORA Reports <reports@reports.forafieldsolutions.com>',
         subject: `Gatehouse daily report — ${report.stationName} — ${businessDate}`,
         text: `Attached: ${report.stationName}'s report for ${businessDate}. ${report.transactions.length} loads logged, ${report.redirectedCount} redirected, grand total $${report.grandTotal.toFixed(2)}.`,
         attachments: [{ filename: gatehouseReportFilename(report), content: pdfBase64 }],
