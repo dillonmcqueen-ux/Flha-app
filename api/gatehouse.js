@@ -140,10 +140,58 @@ export default async function handler(req, res) {
   if (action === 'get_config') {
     const [{ data: stations, error: stErr }, { data: tiers, error: tierErr }] = await Promise.all([
       supabaseAdmin.from('gatehouse_stations').select('id, name, active').eq('company_id', companyId).eq('active', true).order('name', { ascending: true }),
-      supabaseAdmin.from('gatehouse_price_tiers').select('id, label, price').eq('company_id', companyId).eq('active', true).order('sort_order', { ascending: true }),
+      supabaseAdmin.from('gatehouse_price_tiers').select('id, label, price, is_addon').eq('company_id', companyId).eq('active', true).order('sort_order', { ascending: true }),
     ]);
     if (stErr || tierErr) return res.status(500).json({ error: 'Could not load station configuration.' });
     return res.status(200).json({ stations: stations || [], tiers: tiers || [] });
+  }
+
+  // ── Price-tier management — admin only. The county itself never gets an
+  // admin login (per this project's model: customers only ever have a
+  // worker or supervisor role), so this is deliberately gated to FORA's
+  // own founder-only Admin Panel rather than exposed to the company. ────
+  if (action === 'admin_list_price_tiers') {
+    if (session.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
+    const { data, error } = await supabaseAdmin
+      .from('gatehouse_price_tiers')
+      .select('id, label, price, sort_order, is_addon, active')
+      .eq('company_id', companyId)
+      .order('sort_order', { ascending: true });
+    if (error) return res.status(500).json({ error: 'Could not load price tiers.' });
+    return res.status(200).json({ tiers: data || [] });
+  }
+
+  if (action === 'admin_upsert_price_tier') {
+    if (session.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
+    const { id, label, price, sortOrder, isAddon } = req.body;
+    if (!label || price === undefined || price === null || isNaN(Number(price))) {
+      return res.status(400).json({ error: 'A label and a valid price are required.' });
+    }
+    const row = { company_id: companyId, label: String(label).trim(), price: Number(price), sort_order: sortOrder ?? 0, is_addon: !!isAddon };
+    if (id) {
+      // Ownership-checked by the .eq('company_id', ...) in the same update
+      // — an id belonging to a different company simply matches nothing.
+      const { error } = await supabaseAdmin.from('gatehouse_price_tiers').update(row).eq('id', id).eq('company_id', companyId);
+      if (error) return res.status(500).json({ error: 'Could not save the price tier.' });
+    } else {
+      const { error } = await supabaseAdmin.from('gatehouse_price_tiers').insert(row);
+      if (error) return res.status(500).json({ error: 'Could not save the price tier.' });
+    }
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'admin_delete_price_tier') {
+    if (session.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Missing price tier.' });
+    // Deactivate rather than hard-delete: existing transactions snapshot
+    // tier_label/amount at write time, but tier_id still references this
+    // row, so removing it outright would need to either cascade through
+    // history or be blocked by the FK — deactivating just drops it from
+    // get_config's active-only booth list without touching either.
+    const { error } = await supabaseAdmin.from('gatehouse_price_tiers').update({ active: false }).eq('id', id).eq('company_id', companyId);
+    if (error) return res.status(500).json({ error: 'Could not remove the price tier.' });
+    return res.status(200).json({ ok: true });
   }
 
   // ── Plate memory lookup ────────────────────────────────────────────────
@@ -176,7 +224,7 @@ export default async function handler(req, res) {
   // the fraud pattern this whole system exists to catch).
   if (action === 'log_transaction') {
     const {
-      stationId, businessDate, tierId, redirected, plate, vehicleEmail,
+      stationId, businessDate, tierId, addonTierIds, redirected, plate, vehicleEmail,
       paymentMethod, chequePhotoPath, clientSubmissionId, operatorName,
     } = req.body;
 
@@ -201,15 +249,38 @@ export default async function handler(req, res) {
     let tierLabel = null;
     let amount = null;
     if (!redirected) {
-      const { data: tierRows, error: tierErr } = await supabaseAdmin
+      const { data: baseRows, error: baseErr } = await supabaseAdmin
         .from('gatehouse_price_tiers')
-        .select('id, label, price')
+        .select('id, label, price, is_addon')
         .eq('id', tierId)
         .eq('company_id', companyId)
         .limit(1);
-      if (tierErr || !tierRows || tierRows.length === 0) return res.status(400).json({ error: 'Invalid price tier.' });
-      tierLabel = tierRows[0].label;
-      amount = tierRows[0].price;
+      if (baseErr || !baseRows || baseRows.length === 0 || baseRows[0].is_addon) {
+        return res.status(400).json({ error: 'Invalid price tier.' });
+      }
+
+      // Add-ons (fridges/freezers, an untarped load, etc.) stack onto the
+      // base fee in the same transaction — one receipt number per visit,
+      // not one per line item. Validated the same way as the base tier:
+      // company-scoped, and must actually be flagged is_addon (a plain
+      // base tier can't be smuggled in as an "add-on").
+      const cleanAddonIds = Array.isArray(addonTierIds) ? [...new Set(addonTierIds.filter(Boolean))] : [];
+      let addonRows = [];
+      if (cleanAddonIds.length > 0) {
+        const { data, error: addonErr } = await supabaseAdmin
+          .from('gatehouse_price_tiers')
+          .select('id, label, price, is_addon')
+          .in('id', cleanAddonIds)
+          .eq('company_id', companyId);
+        if (addonErr || !data || data.length !== cleanAddonIds.length || data.some(t => !t.is_addon)) {
+          return res.status(400).json({ error: 'Invalid add-on selected.' });
+        }
+        addonRows = data;
+      }
+
+      tierLabel = [baseRows[0].label, ...addonRows.map(t => t.label)].join(' + ');
+      amount = Number(baseRows[0].price) + addonRows.reduce((sum, t) => sum + Number(t.price), 0);
+
       if (paymentMethod !== 'cash' && paymentMethod !== 'cheque') {
         return res.status(400).json({ error: 'Payment method must be cash or cheque.' });
       }

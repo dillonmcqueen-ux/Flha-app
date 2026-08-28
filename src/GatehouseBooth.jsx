@@ -69,7 +69,7 @@ export async function resubmitGatehouseTransaction(payload, clientSubmissionId, 
       body: JSON.stringify({
         action: "log_transaction", token, clientSubmissionId,
         stationId: payload.stationId, businessDate: payload.businessDate,
-        tierId: payload.tierId, redirected: payload.redirected,
+        tierId: payload.tierId, addonTierIds: payload.addonTierIds || [], redirected: payload.redirected,
         plate: payload.plate, vehicleEmail: payload.vehicleEmail,
         paymentMethod: payload.paymentMethod, chequePhotoPath,
         operatorName: payload.operatorName,
@@ -93,6 +93,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   const [stationId, setStationId] = useState(null);
   const [step, setStep] = useState("tier"); // tier | vehicle | payment | confirm
   const [tier, setTier] = useState(null);
+  const [selectedAddons, setSelectedAddons] = useState([]); // array of tier objects
   const [redirecting, setRedirecting] = useState(false);
   const [plate, setPlate] = useState("");
   const [email, setEmail] = useState("");
@@ -151,8 +152,12 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     setChequePhoto({ file, previewUrl });
   }
 
+  function toggleAddon(addonTier) {
+    setSelectedAddons((cur) => cur.some((t) => t.id === addonTier.id) ? cur.filter((t) => t.id !== addonTier.id) : [...cur, addonTier]);
+  }
+
   function resetForm() {
-    setStep("tier"); setTier(null); setRedirecting(false); setPlate(""); setEmail("");
+    setStep("tier"); setTier(null); setSelectedAddons([]); setRedirecting(false); setPlate(""); setEmail("");
     setLookedUp(false); setPaymentMethod(null); setChequePhoto(null); setError("");
   }
 
@@ -163,19 +168,20 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     if (paymentMethod === "cheque" && chequePhoto) {
       try { chequePhotoDataUrl = await fileToDataUrl(chequePhoto.file); } catch (e) { /* fall through, still allow offline queue without it is not ideal but don't block */ }
     }
+    const addonTierIds = redirecting ? [] : selectedAddons.map((t) => t.id);
     const payload = {
       stationId, businessDate: todayLocal(),
-      tierId: tier?.id || null, redirected: redirecting,
+      tierId: tier?.id || null, addonTierIds, redirected: redirecting,
       plate: plate.trim().toUpperCase() || null, vehicleEmail: email.trim() || null,
       paymentMethod: redirecting ? null : paymentMethod,
       chequePhotoDataUrl, chequePhotoPath: null,
       operatorName: userName || null,
-      // Client-side display only — snapshotted here since `tier` resets
-      // after this submission, before a queued item ever gets re-rendered.
-      // Ignored server-side; log_transaction always recomputes the real
-      // price from tierId.
-      displayLabel: tier?.label || null,
-      displayAmount: tier?.price || null,
+      // Client-side display only — snapshotted here since `tier`/
+      // `selectedAddons` reset after this submission, before a queued item
+      // ever gets re-rendered. Ignored server-side; log_transaction always
+      // recomputes the real price from tierId/addonTierIds.
+      displayLabel: [tier?.label, ...selectedAddons.map((t) => t.label)].filter(Boolean).join(" + ") || null,
+      displayAmount: redirecting ? null : Number(tier?.price || 0) + selectedAddons.reduce((s, t) => s + Number(t.price || 0), 0),
     };
 
     // Known offline up front — queue immediately rather than waiting out a
@@ -220,11 +226,15 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     wrap: { minHeight: "100vh", background: C.paper, color: C.ink, fontFamily: "'Segoe UI', system-ui, sans-serif" },
     header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${C.line}`, background: C.white },
     body: { maxWidth: 640, margin: "0 auto", padding: "24px 16px 80px" },
-    btn: { padding: "16px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.white, fontSize: 17, fontWeight: 600, cursor: "pointer", width: "100%", textAlign: "left" },
+    // Form controls (button/input/select) don't reliably inherit `color`
+    // from an ancestor the way a div does — the browser's own UA
+    // stylesheet wins unless color is set explicitly here, which is what
+    // was producing invisible white-on-white text.
+    btn: { padding: "16px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.white, color: C.ink, fontSize: 17, fontWeight: 600, cursor: "pointer", width: "100%", textAlign: "left" },
     btnActive: { border: `2px solid ${C.amber}`, background: C.amberDim },
     primary: { background: C.amber, color: "#fff", border: "none", borderRadius: 8, padding: "16px 20px", fontSize: 17, fontWeight: 700, cursor: "pointer", width: "100%" },
-    ghost: { background: "transparent", border: `1px solid ${C.line}`, borderRadius: 8, padding: "12px 16px", fontSize: 15, cursor: "pointer" },
-    input: { width: "100%", padding: "14px", fontSize: 17, borderRadius: 8, border: `1px solid ${C.line}`, boxSizing: "border-box" },
+    ghost: { background: "transparent", border: `1px solid ${C.line}`, color: C.ink, borderRadius: 8, padding: "12px 16px", fontSize: 15, cursor: "pointer" },
+    input: { width: "100%", padding: "14px", fontSize: 17, borderRadius: 8, border: `1px solid ${C.line}`, color: C.ink, background: C.white, boxSizing: "border-box" },
     label: { fontSize: 13, fontWeight: 700, color: C.slate, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8, display: "block" },
   };
 
@@ -271,7 +281,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
           <>
             <span style={styles.label}>Select the load</span>
             <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-              {(config.tiers || []).map((t) => (
+              {(config.tiers || []).filter((t) => !t.is_addon).map((t) => (
                 <button
                   key={t.id}
                   style={styles.btn}
@@ -313,6 +323,24 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
 
         {step === "payment" && (
           <>
+            {(config.tiers || []).some((t) => t.is_addon) && (
+              <div style={{ marginBottom: 24 }}>
+                <span style={styles.label}>Add-ons</span>
+                <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                  {(config.tiers || []).filter((t) => t.is_addon).map((t) => {
+                    const active = selectedAddons.some((a) => a.id === t.id);
+                    return (
+                      <button key={t.id} style={{ ...styles.btn, ...(active ? styles.btnActive : {}) }} onClick={() => toggleAddon(t)}>
+                        {active ? "✓ " : ""}{t.label} <span style={{ float: "right", color: C.amber }}>+${Number(t.price).toFixed(2)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 10, fontSize: 15, color: C.slate }}>
+                  Total: <strong style={{ color: C.ink }}>${(Number(tier?.price || 0) + selectedAddons.reduce((s, t) => s + Number(t.price || 0), 0)).toFixed(2)}</strong>
+                </div>
+              </div>
+            )}
             <span style={styles.label}>Payment — cash or cheque only</span>
             <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
               <button style={{ ...styles.btn, ...(paymentMethod === "cash" ? styles.btnActive : {}) }} onClick={() => setPaymentMethod("cash")}>Cash</button>
@@ -345,7 +373,13 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
               {redirecting ? (
                 <div><strong>Redirected load</strong> — no charge</div>
               ) : (
-                <div><strong>{tier?.label}</strong> — ${Number(tier?.price).toFixed(2)} ({paymentMethod})</div>
+                <>
+                  <div><strong>{tier?.label}</strong> — ${Number(tier?.price || 0).toFixed(2)}</div>
+                  {selectedAddons.map((a) => (
+                    <div key={a.id}>+ {a.label} — ${Number(a.price).toFixed(2)}</div>
+                  ))}
+                  <div><strong>Total: ${(Number(tier?.price || 0) + selectedAddons.reduce((s, t) => s + Number(t.price || 0), 0)).toFixed(2)}</strong> ({paymentMethod})</div>
+                </>
               )}
               {plate && <div>Plate: {plate.trim().toUpperCase()}</div>}
               {email && <div>Receipt to: {email}</div>}

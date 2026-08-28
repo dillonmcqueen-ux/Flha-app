@@ -100,10 +100,13 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
     body: { maxWidth: 920, margin: "0 auto", padding: "24px 16px 60px" },
     card: { background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18, marginBottom: 18 },
     label: { fontSize: 12.5, fontWeight: 700, color: C.slate, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6, display: "block" },
-    input: { padding: "10px 12px", fontSize: 15, borderRadius: 6, border: `1px solid ${C.line}` },
-    select: { padding: "10px 12px", fontSize: 15, borderRadius: 6, border: `1px solid ${C.line}`, background: C.white },
+    // Form controls don't reliably inherit `color` from an ancestor the
+    // way a div does — set it explicitly or the browser's own UA
+    // stylesheet can win, producing invisible white-on-white text.
+    input: { padding: "10px 12px", fontSize: 15, borderRadius: 6, border: `1px solid ${C.line}`, color: C.ink, background: C.white },
+    select: { padding: "10px 12px", fontSize: 15, borderRadius: 6, border: `1px solid ${C.line}`, color: C.ink, background: C.white },
     btn: { background: C.amber, color: "#fff", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" },
-    ghost: { background: "transparent", border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 14px", fontSize: 14, cursor: "pointer" },
+    ghost: { background: "transparent", border: `1px solid ${C.line}`, color: C.ink, borderRadius: 6, padding: "8px 14px", fontSize: 14, cursor: "pointer" },
     tile: { flex: 1, background: C.card, border: `1px solid ${C.line}`, borderRadius: 8, padding: 14 },
     table: { width: "100%", borderCollapse: "collapse", fontSize: 13.5 },
     th: { textAlign: "left", padding: "8px 10px", borderBottom: `2px solid ${C.line}`, color: C.slate, fontSize: 11.5, textTransform: "uppercase" },
