@@ -55,7 +55,8 @@ export function renderGatehouseDailyReportPdf(report) {
   if (report.reconciliation) {
     const r = report.reconciliation;
     const variance = Number(r.variance || 0);
-    const boxH = r.reason ? 22 : 16;
+    const signoffLine = `Counted by ${r.submitted_by || '—'}` + (r.reviewed_by ? `  ·  Reviewed by ${r.reviewed_by}` : '  ·  Not yet reviewed');
+    const boxH = r.reason ? 28 : 22;
     doc.setFillColor(variance === 0 ? 240 : 253, variance === 0 ? 250 : 237, variance === 0 ? 245 : 230);
     doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F');
     doc.setTextColor(24, 36, 32); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
@@ -63,6 +64,7 @@ export function renderGatehouseDailyReportPdf(report) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
     doc.text(`Expected ${money(r.expected_cash)}  ·  Counted ${money(r.cash_counted)}  ·  Variance ${money(r.variance)}`, margin + 4, y + 12);
     if (r.reason) doc.text(`Reason for difference: ${r.reason}`, margin + 4, y + 18);
+    doc.text(signoffLine, margin + 4, y + boxH - 4);
     y += boxH + 6;
   }
 

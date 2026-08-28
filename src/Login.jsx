@@ -245,7 +245,7 @@ export default function Login() {
       if (session.role === "worker") {
         return <GatehouseBooth companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} token={session.token} />;
       }
-      return <GatehouseDashboard companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} token={session.token} />;
+      return <GatehouseDashboard companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} role={session.role} onLogout={logout} token={session.token} />;
     }
 
     if (session.role === "worker") {

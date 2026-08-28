@@ -115,6 +115,14 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   const [queuedCount, setQueuedCount] = useState(0);
   const fileInputRef = useRef(null);
 
+  // ── End-of-day cash count — the operator's own signoff, separate from a
+  // supervisor's later "mark reviewed" on the dashboard (GatehouseDashboard.jsx).
+  const [showEndOfDay, setShowEndOfDay] = useState(false);
+  const [cashCounted, setCashCounted] = useState("");
+  const [reconReason, setReconReason] = useState("");
+  const [reconciliation, setReconciliation] = useState(null);
+  const [submittingRecon, setSubmittingRecon] = useState(false);
+
   useEffect(() => {
     fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -127,6 +135,17 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       })
       .catch(() => setError("Could not load station configuration."));
   }, [token, companyId]);
+
+  useEffect(() => {
+    if (!stationId) return;
+    fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get_reconciliation", token, companyId, stationId, businessDate: todayLocal() }),
+    })
+      .then((r) => r.json())
+      .then((data) => { if (data.reconciliation) setReconciliation(data.reconciliation); })
+      .catch(() => {});
+  }, [stationId, token, companyId]);
 
   const refreshQueueCount = () => {
     drainQueue("gatehouse", (payload, csid) => resubmitGatehouseTransaction(payload, csid, token))
@@ -159,6 +178,21 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     if (!file) return;
     const previewUrl = URL.createObjectURL(file);
     setChequePhoto({ file, previewUrl });
+  }
+
+  async function submitEndOfDay() {
+    setSubmittingRecon(true);
+    const res = await fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "submit_reconciliation", token, companyId, stationId,
+        businessDate: todayLocal(), cashCounted, reason: reconReason,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) setReconciliation(data.reconciliation);
+    else setError(data.error || "Could not submit cash count.");
+    setSubmittingRecon(false);
   }
 
   function addToCart(tier) {
@@ -437,6 +471,33 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
             </div>
           </div>
         )}
+
+        <div style={{ marginTop: 40 }}>
+          {!showEndOfDay && !reconciliation && (
+            <button style={styles.ghost} onClick={() => setShowEndOfDay(true)}>End of day — submit cash count</button>
+          )}
+          {(showEndOfDay || reconciliation) && (
+            <>
+              <span style={styles.label}>End of day — cash count</span>
+              {reconciliation ? (
+                <div style={{ marginTop: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 8, padding: 14, fontSize: 15 }}>
+                  <div>Counted: ${Number(reconciliation.cash_counted).toFixed(2)} — submitted</div>
+                  <div style={{ color: Math.abs(reconciliation.variance) < 0.005 ? C.good : C.bad, fontWeight: 700, marginTop: 4 }}>
+                    Variance: ${Number(reconciliation.variance).toFixed(2)} {Math.abs(reconciliation.variance) < 0.005 ? "— balanced" : "— flagged, a supervisor will review"}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
+                  <input style={styles.input} type="number" step="0.01" placeholder="Cash counted in the till" value={cashCounted} onChange={(e) => setCashCounted(e.target.value)} />
+                  <input style={styles.input} placeholder="Reason for any difference (optional)" value={reconReason} onChange={(e) => setReconReason(e.target.value)} />
+                  <button style={styles.primary} disabled={submittingRecon || !cashCounted} onClick={submitEndOfDay}>
+                    {submittingRecon ? "Submitting…" : "Submit cash count"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ function todayLocal() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export default function GatehouseDashboard({ companyId, companyName, userName, onLogout, token }) {
+export default function GatehouseDashboard({ companyId, companyName, userName, role, onLogout, token }) {
   const [config, setConfig] = useState(null);
   const [stationId, setStationId] = useState(null);
   const [businessDate, setBusinessDate] = useState(todayLocal());
@@ -19,7 +19,12 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
   const [loading, setLoading] = useState(false);
   const [cashCounted, setCashCounted] = useState("");
   const [reconReason, setReconReason] = useState("");
-  const [reconResult, setReconResult] = useState(null);
+  // The saved reconciliation row for this station/day, or null — carries
+  // submitted_by/reviewed_by/reviewed_at, not just the last submit's result,
+  // so a supervisor sees an operator's earlier submission without needing
+  // to resubmit it themselves first.
+  const [reconciliation, setReconciliation] = useState(null);
+  const [markingReviewed, setMarkingReviewed] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState("");
   const [sendStatus, setSendStatus] = useState("");
   const [trailersOut, setTrailersOut] = useState("");
@@ -49,7 +54,22 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
       .catch(() => setLoading(false));
   }
 
-  useEffect(() => { loadDay(); setReconResult(null); setReconReason(""); setSendStatus(""); }, [stationId, businessDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  function loadReconciliation() {
+    if (!stationId) return;
+    fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get_reconciliation", token, companyId, stationId, businessDate }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        setReconciliation(data.reconciliation || null);
+        setCashCounted(data.reconciliation ? String(data.reconciliation.cash_counted) : "");
+        setReconReason(data.reconciliation?.reason || "");
+      })
+      .catch(() => {});
+  }
+
+  useEffect(() => { loadDay(); loadReconciliation(); setSendStatus(""); }, [stationId, businessDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cashTotal = transactions.filter((t) => !t.redirected && t.payment_method === "cash").reduce((s, t) => s + Number(t.amount || 0), 0);
   const chequeTotal = transactions.filter((t) => !t.redirected && t.payment_method === "cheque").reduce((s, t) => s + Number(t.amount || 0), 0);
@@ -65,7 +85,18 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
       body: JSON.stringify({ action: "submit_reconciliation", token, companyId, stationId, businessDate, cashCounted, reason: reconReason }),
     });
     const data = await res.json();
-    if (res.ok) setReconResult(data);
+    if (res.ok) setReconciliation(data.reconciliation);
+  }
+
+  async function markReviewed() {
+    setMarkingReviewed(true);
+    const res = await fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_reconciliation_reviewed", token, companyId, stationId, businessDate }),
+    });
+    const data = await res.json();
+    if (res.ok) setReconciliation(data.reconciliation);
+    setMarkingReviewed(false);
   }
 
   async function sendReport() {
@@ -186,17 +217,30 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
               <input style={{ ...styles.input, flex: 1 }} type="number" step="0.01" placeholder="Cash counted" value={cashCounted} onChange={(e) => setCashCounted(e.target.value)} />
               <button style={styles.btn} onClick={submitReconciliation}>Submit</button>
             </div>
-            {reconResult && Math.abs(reconResult.variance) >= 0.005 && (
+            {reconciliation && Math.abs(reconciliation.variance) >= 0.005 && (
               <input
                 style={{ ...styles.input, marginTop: 8 }} placeholder="Reason for difference"
                 value={reconReason} onChange={(e) => setReconReason(e.target.value)}
                 onBlur={submitReconciliation}
               />
             )}
-            {reconResult && (
-              <div style={{ marginTop: 10, fontWeight: 700, color: Math.abs(reconResult.variance) < 0.005 ? C.good : C.bad }}>
-                Variance: ${reconResult.variance.toFixed(2)} {Math.abs(reconResult.variance) < 0.005 ? "— balanced" : "— flagged"}
-              </div>
+            {reconciliation && (
+              <>
+                <div style={{ marginTop: 10, fontWeight: 700, color: Math.abs(reconciliation.variance) < 0.005 ? C.good : C.bad }}>
+                  Variance: ${Number(reconciliation.variance).toFixed(2)} {Math.abs(reconciliation.variance) < 0.005 ? "— balanced" : "— flagged"}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 13, color: C.slate }}>
+                  Counted by {reconciliation.submitted_by || "—"}
+                  {reconciliation.reviewed_by
+                    ? ` · Reviewed by ${reconciliation.reviewed_by}`
+                    : " · Not yet reviewed"}
+                </div>
+                {!reconciliation.reviewed_by && (role === "supervisor" || role === "admin") && (
+                  <button style={{ ...styles.btn, marginTop: 8 }} onClick={markReviewed} disabled={markingReviewed}>
+                    {markingReviewed ? "Marking…" : "Mark reviewed"}
+                  </button>
+                )}
+              </>
             )}
           </div>
 

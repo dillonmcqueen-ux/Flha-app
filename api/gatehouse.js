@@ -393,6 +393,21 @@ export default async function handler(req, res) {
   }
 
   // ── Cash reconciliation ────────────────────────────────────────────────
+  if (action === 'get_reconciliation') {
+    const { stationId, businessDate } = req.body;
+    const station = await loadOwnedStation(companyId, stationId);
+    if (!station) return res.status(404).json({ error: 'Station not found.' });
+    const { data, error } = await supabaseAdmin
+      .from('gatehouse_reconciliations')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('station_id', stationId)
+      .eq('business_date', businessDate)
+      .limit(1);
+    if (error) return res.status(500).json({ error: 'Could not load reconciliation.' });
+    return res.status(200).json({ reconciliation: (data && data[0]) || null });
+  }
+
   if (action === 'submit_reconciliation') {
     const { stationId, businessDate, cashCounted, reason } = req.body;
     const station = await loadOwnedStation(companyId, stationId);
@@ -411,17 +426,44 @@ export default async function handler(req, res) {
       .reduce((s, t) => s + Number(t.amount || 0), 0);
     const variance = Number(cashCounted) - expectedCash;
 
-    const { error } = await supabaseAdmin.from('gatehouse_reconciliations').upsert(
+    const { data: savedRows, error } = await supabaseAdmin.from('gatehouse_reconciliations').upsert(
       {
         company_id: companyId, station_id: stationId, business_date: businessDate,
         expected_cash: expectedCash, cash_counted: Number(cashCounted), variance,
         reason: reason ? String(reason).trim() : null,
         submitted_by: session.userName || null,
+        // Any (re)submission clears a prior review — an edited count
+        // always needs a fresh look, never keeps a stale supervisor
+        // signoff from before the numbers changed.
+        reviewed_by: null, reviewed_at: null,
       },
       { onConflict: 'company_id,station_id,business_date' }
-    );
+    ).select('*').limit(1);
     if (error) return res.status(500).json({ error: 'Could not save reconciliation.' });
-    return res.status(200).json({ ok: true, expectedCash, variance });
+    return res.status(200).json({ ok: true, expectedCash, variance, reconciliation: savedRows && savedRows[0] });
+  }
+
+  // ── Supervisor review — a distinct action from submitting the count, so
+  // the operator who counted the till can't also be the one who marks it
+  // reviewed. Gated to supervisor/admin; workers get 403. ───────────────
+  if (action === 'mark_reconciliation_reviewed') {
+    if (session.role !== 'supervisor' && session.role !== 'admin') {
+      return res.status(403).json({ error: 'Only a supervisor can mark a reconciliation reviewed.' });
+    }
+    const { stationId, businessDate } = req.body;
+    const station = await loadOwnedStation(companyId, stationId);
+    if (!station) return res.status(404).json({ error: 'Station not found.' });
+    const { data, error } = await supabaseAdmin
+      .from('gatehouse_reconciliations')
+      .update({ reviewed_by: session.userName || 'Supervisor', reviewed_at: new Date().toISOString() })
+      .eq('company_id', companyId)
+      .eq('station_id', stationId)
+      .eq('business_date', businessDate)
+      .select('*')
+      .limit(1);
+    if (error) return res.status(500).json({ error: 'Could not mark reviewed.' });
+    if (!data || data.length === 0) return res.status(404).json({ error: 'No reconciliation logged for that day yet.' });
+    return res.status(200).json({ ok: true, reconciliation: data[0] });
   }
 
   // ── Daily PDF report: generate + email it now (demo trigger — a real
