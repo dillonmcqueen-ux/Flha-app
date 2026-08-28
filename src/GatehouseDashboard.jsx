@@ -25,6 +25,7 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   // to resubmit it themselves first.
   const [reconciliation, setReconciliation] = useState(null);
   const [markingReviewed, setMarkingReviewed] = useState(false);
+  const [reconError, setReconError] = useState("");
   const [recipientEmail, setRecipientEmail] = useState("");
   const [sendStatus, setSendStatus] = useState("");
   const [trailersOut, setTrailersOut] = useState("");
@@ -89,13 +90,14 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   }
 
   async function markReviewed() {
-    setMarkingReviewed(true);
+    setMarkingReviewed(true); setReconError("");
     const res = await fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "mark_reconciliation_reviewed", token, companyId, stationId, businessDate }),
     });
     const data = await res.json();
     if (res.ok) setReconciliation(data.reconciliation);
+    else setReconError(data.error || "Could not mark reviewed.");
     setMarkingReviewed(false);
   }
 
@@ -240,6 +242,7 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
                     {markingReviewed ? "Marking…" : "Mark reviewed"}
                   </button>
                 )}
+                {reconError && <div style={{ marginTop: 8, fontSize: 13, color: C.bad }}>{reconError}</div>}
               </>
             )}
           </div>

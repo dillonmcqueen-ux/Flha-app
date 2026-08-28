@@ -445,7 +445,14 @@ export default async function handler(req, res) {
 
   // ── Supervisor review — a distinct action from submitting the count, so
   // the operator who counted the till can't also be the one who marks it
-  // reviewed. Gated to supervisor/admin; workers get 403. ───────────────
+  // reviewed. Gated to supervisor/admin (workers get 403) AND, when the
+  // company has individually-identified logins, to a different person
+  // than whoever submitted it — a supervisor reviewing their own count
+  // isn't a real second look. That identity check only applies when
+  // submitted_by is actually a named person: this demo company logs in
+  // with one shared code per role, so userName is empty for everyone and
+  // there's no real identity to compare — enforcing it there would just
+  // block review outright, not add a control.
   if (action === 'mark_reconciliation_reviewed') {
     if (session.role !== 'supervisor' && session.role !== 'admin') {
       return res.status(403).json({ error: 'Only a supervisor can mark a reconciliation reviewed.' });
@@ -453,6 +460,20 @@ export default async function handler(req, res) {
     const { stationId, businessDate } = req.body;
     const station = await loadOwnedStation(companyId, stationId);
     if (!station) return res.status(404).json({ error: 'Station not found.' });
+
+    const { data: existingRows } = await supabaseAdmin
+      .from('gatehouse_reconciliations')
+      .select('submitted_by')
+      .eq('company_id', companyId)
+      .eq('station_id', stationId)
+      .eq('business_date', businessDate)
+      .limit(1);
+    const existing = existingRows && existingRows[0];
+    if (!existing) return res.status(404).json({ error: 'No reconciliation logged for that day yet.' });
+    if (existing.submitted_by && session.userName && existing.submitted_by === session.userName) {
+      return res.status(403).json({ error: "The person who counted the till can't also mark it reviewed — have someone else review it." });
+    }
+
     const { data, error } = await supabaseAdmin
       .from('gatehouse_reconciliations')
       .update({ reviewed_by: session.userName || 'Supervisor', reviewed_at: new Date().toISOString() })
