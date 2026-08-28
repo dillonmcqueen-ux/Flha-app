@@ -68,6 +68,27 @@ export function renderGatehouseDailyReportPdf(report) {
     y += boxH + 6;
   }
 
+  // ── Breakdown by charge type ────────────────────────────────────────────
+  // Counts per tier label (e.g. "12 x Minimum Fee, 3 x Fridge Surcharge"),
+  // parsed server-side from each transaction's tier_label — see
+  // buildTierBreakdown() in api/gatehouse.js.
+  if (report.tierBreakdown && report.tierBreakdown.length > 0) {
+    const rowH = 6.5;
+    const boxH = 10 + report.tierBreakdown.length * rowH;
+    if (y + boxH > 270) { doc.addPage(); y = 20; }
+    doc.setFillColor(246, 247, 243); doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F');
+    doc.setTextColor(24, 36, 32); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text('BREAKDOWN BY CHARGE TYPE', margin + 4, y + 6.5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    let by = y + 6.5;
+    report.tierBreakdown.forEach((row) => {
+      by += rowH;
+      doc.text(String(row.quantity), margin + 4, by);
+      doc.text(row.label, margin + 14, by);
+    });
+    y += boxH + 6;
+  }
+
   // ── Transactions table ─────────────────────────────────────────────────
   const cRcpt = margin, cRcptW = 22;
   const cTime = cRcpt + cRcptW, cTimeW = 20;

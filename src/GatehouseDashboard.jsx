@@ -80,6 +80,27 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   const receiptFrom = receiptNumbers.length ? Math.min(...receiptNumbers) : null;
   const receiptTo = receiptNumbers.length ? Math.max(...receiptNumbers) : null;
 
+  // tier_label is a snapshotted string like "Minimum Fee" or, for a
+  // multi-item cart, "Minimum Fee + Fridge x2" — parsed back into counts
+  // per charge type so the day can be read at a glance ("12 minimum
+  // charges, 3 fridges") instead of scanning every row. Mirrors
+  // parseTierLabelParts/buildTierBreakdown in api/gatehouse.js.
+  const tierBreakdown = (() => {
+    const counts = new Map();
+    for (const t of transactions) {
+      if (t.redirected || !t.tier_label) continue;
+      for (const part of t.tier_label.split(" + ")) {
+        const m = part.match(/^(.*) x(\d+)$/);
+        const label = m ? m[1] : part;
+        const qty = m ? Number(m[2]) : 1;
+        counts.set(label, (counts.get(label) || 0) + qty);
+      }
+    }
+    return [...counts.entries()]
+      .map(([label, quantity]) => ({ label, quantity }))
+      .sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label));
+  })();
+
   async function submitReconciliation() {
     const res = await fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -180,6 +201,20 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
           <div style={styles.tile}><div style={styles.label}>Cash total</div><div style={{ fontSize: 22, fontWeight: 700 }}>${cashTotal.toFixed(2)}</div></div>
           <div style={styles.tile}><div style={styles.label}>Grand total</div><div style={{ fontSize: 22, fontWeight: 700, color: C.amber }}>${grandTotal.toFixed(2)}</div></div>
         </div>
+
+        {tierBreakdown.length > 0 && (
+          <div style={styles.card}>
+            <div style={styles.label}>Breakdown by charge type — {businessDate}</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {tierBreakdown.map((row) => (
+                <div key={row.label} style={{ ...styles.tile, flex: "0 0 auto", padding: "10px 14px" }}>
+                  <div style={{ fontSize: 13.5 }}>{row.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{row.quantity}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={styles.card}>
           <div style={styles.label}>Transactions — {businessDate}</div>
