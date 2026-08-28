@@ -228,6 +228,7 @@ export default async function handler(req, res) {
         .from('gatehouse_stations')
         .select('next_receipt_number')
         .eq('id', stationId)
+        .eq('company_id', companyId) // defense-in-depth — station is already ownership-checked via loadOwnedStation above
         .limit(1);
       if (curErr || !cur || cur.length === 0) throw new Error('Could not read station counter.');
       const issued = cur[0].next_receipt_number;
@@ -235,6 +236,7 @@ export default async function handler(req, res) {
         .from('gatehouse_stations')
         .update({ next_receipt_number: issued + 1 })
         .eq('id', stationId)
+        .eq('company_id', companyId)
         .eq('next_receipt_number', issued) // only matches if nobody else already bumped it
         .select('id');
       if (bumpErr) throw new Error('Could not reserve a receipt number.');

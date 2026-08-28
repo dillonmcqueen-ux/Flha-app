@@ -54,7 +54,11 @@ export async function resubmitGatehouseTransaction(payload, clientSubmissionId, 
       endpoint: "/api/gatehouse", action: "create_cheque_upload_url", token,
       bucket: "gatehouse-uploads", filename, file: blob, contentType: blob.type,
     });
-    chequePhotoPath = uploaded.path;
+    // Store the "public"-shaped URL, not the raw storage path — that's the
+    // form api/gatehouse.js's signStoredUrl/pathFromStoredUrl (matching
+    // api/companydata.js's existing convention for private buckets) expect
+    // to find in cheque_photo_url later when re-signing it for viewing.
+    chequePhotoPath = uploaded.publicUrl;
   }
 
   let res;
