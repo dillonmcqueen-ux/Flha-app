@@ -122,6 +122,23 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   const [reconReason, setReconReason] = useState("");
   const [reconciliation, setReconciliation] = useState(null);
   const [submittingRecon, setSubmittingRecon] = useState(false);
+  const [dayTotals, setDayTotals] = useState(null); // { cash, cheque } expected for today, server-computed
+
+  function loadDayTotals() {
+    if (!stationId) return;
+    fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_transactions", token, companyId, stationId, businessDate: todayLocal() }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const list = data.transactions || [];
+        const cash = list.filter((t) => !t.redirected && t.payment_method === "cash").reduce((s, t) => s + Number(t.amount || 0), 0);
+        const cheque = list.filter((t) => !t.redirected && t.payment_method === "cheque").reduce((s, t) => s + Number(t.amount || 0), 0);
+        setDayTotals({ cash, cheque });
+      })
+      .catch(() => {});
+  }
 
   useEffect(() => {
     fetch("/api/gatehouse", {
@@ -474,7 +491,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
 
         <div style={{ marginTop: 40 }}>
           {!showEndOfDay && !reconciliation && (
-            <button style={styles.ghost} onClick={() => setShowEndOfDay(true)}>End of day — submit cash count</button>
+            <button style={styles.ghost} onClick={() => { loadDayTotals(); setShowEndOfDay(true); }}>End of day — submit cash count</button>
           )}
           {(showEndOfDay || reconciliation) && (
             <>
@@ -488,6 +505,11 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
                 </div>
               ) : (
                 <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
+                  {dayTotals && (
+                    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 14px", fontSize: 14 }}>
+                      <div>You should have <strong>${dayTotals.cash.toFixed(2)}</strong> in cash{dayTotals.cheque > 0 ? <> and <strong>${dayTotals.cheque.toFixed(2)}</strong> in cheques</> : ""} for today.</div>
+                    </div>
+                  )}
                   <input style={styles.input} type="number" step="0.01" placeholder="Cash counted in the till" value={cashCounted} onChange={(e) => setCashCounted(e.target.value)} />
                   <input style={styles.input} placeholder="Reason for any difference (optional)" value={reconReason} onChange={(e) => setReconReason(e.target.value)} />
                   <button style={styles.primary} disabled={submittingRecon || !cashCounted} onClick={submitEndOfDay}>
