@@ -224,7 +224,7 @@ export default async function handler(req, res) {
   // the fraud pattern this whole system exists to catch).
   if (action === 'log_transaction') {
     const {
-      stationId, businessDate, tierId, addonTierIds, redirected, plate, vehicleEmail,
+      stationId, businessDate, items, redirected, plate, vehicleEmail,
       paymentMethod, chequePhotoPath, clientSubmissionId, operatorName,
     } = req.body;
 
@@ -249,37 +249,32 @@ export default async function handler(req, res) {
     let tierLabel = null;
     let amount = null;
     if (!redirected) {
-      const { data: baseRows, error: baseErr } = await supabaseAdmin
+      // A visit can be more than one of the same charge (two minimum fees
+      // on one load, two fridges, etc.), so pricing is a cart: any number
+      // of {tierId, quantity} line items — not one base tier plus a set of
+      // add-ons. Still exactly one receipt number for the whole visit.
+      const cleanItems = Array.isArray(items)
+        ? items
+            .filter(it => it && it.tierId)
+            .map(it => ({ tierId: it.tierId, quantity: Math.max(1, Math.floor(Number(it.quantity) || 1)) }))
+        : [];
+      if (cleanItems.length === 0) return res.status(400).json({ error: 'Select at least one price.' });
+
+      const tierIds = [...new Set(cleanItems.map(it => it.tierId))];
+      const { data: tierRows, error: tierErr } = await supabaseAdmin
         .from('gatehouse_price_tiers')
-        .select('id, label, price, is_addon')
-        .eq('id', tierId)
-        .eq('company_id', companyId)
-        .limit(1);
-      if (baseErr || !baseRows || baseRows.length === 0 || baseRows[0].is_addon) {
-        return res.status(400).json({ error: 'Invalid price tier.' });
+        .select('id, label, price')
+        .in('id', tierIds)
+        .eq('company_id', companyId);
+      if (tierErr || !tierRows || tierRows.length !== tierIds.length) {
+        return res.status(400).json({ error: 'Invalid price selected.' });
       }
+      const tierById = Object.fromEntries(tierRows.map(t => [t.id, t]));
 
-      // Add-ons (fridges/freezers, an untarped load, etc.) stack onto the
-      // base fee in the same transaction — one receipt number per visit,
-      // not one per line item. Validated the same way as the base tier:
-      // company-scoped, and must actually be flagged is_addon (a plain
-      // base tier can't be smuggled in as an "add-on").
-      const cleanAddonIds = Array.isArray(addonTierIds) ? [...new Set(addonTierIds.filter(Boolean))] : [];
-      let addonRows = [];
-      if (cleanAddonIds.length > 0) {
-        const { data, error: addonErr } = await supabaseAdmin
-          .from('gatehouse_price_tiers')
-          .select('id, label, price, is_addon')
-          .in('id', cleanAddonIds)
-          .eq('company_id', companyId);
-        if (addonErr || !data || data.length !== cleanAddonIds.length || data.some(t => !t.is_addon)) {
-          return res.status(400).json({ error: 'Invalid add-on selected.' });
-        }
-        addonRows = data;
-      }
-
-      tierLabel = [baseRows[0].label, ...addonRows.map(t => t.label)].join(' + ');
-      amount = Number(baseRows[0].price) + addonRows.reduce((sum, t) => sum + Number(t.price), 0);
+      tierLabel = cleanItems
+        .map(it => { const t = tierById[it.tierId]; return it.quantity > 1 ? `${t.label} x${it.quantity}` : t.label; })
+        .join(' + ');
+      amount = cleanItems.reduce((sum, it) => sum + Number(tierById[it.tierId].price) * it.quantity, 0);
 
       if (paymentMethod !== 'cash' && paymentMethod !== 'cheque') {
         return res.status(400).json({ error: 'Payment method must be cash or cheque.' });

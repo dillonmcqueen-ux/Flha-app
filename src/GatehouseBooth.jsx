@@ -39,6 +39,16 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([arr], { type: contentType });
 }
 
+// Cart totals: `cart` is [{ id, label, price, quantity }, ...] — the same
+// tier can appear more than once in a visit (two minimum fees, two
+// fridges), so this is quantity-based, not a single pick.
+function cartTotal(cart) {
+  return cart.reduce((sum, it) => sum + Number(it.price) * it.quantity, 0);
+}
+function cartLabel(cart) {
+  return cart.map((it) => (it.quantity > 1 ? `${it.label} x${it.quantity}` : it.label)).join(" + ");
+}
+
 // Redoes a full transaction submission from plain data — used by a live
 // online submit and by offlineQueue's drainQueue() to resend a queued one
 // later, same pattern as App.jsx's resubmitFLHA. If the cheque photo was
@@ -69,7 +79,7 @@ export async function resubmitGatehouseTransaction(payload, clientSubmissionId, 
       body: JSON.stringify({
         action: "log_transaction", token, clientSubmissionId,
         stationId: payload.stationId, businessDate: payload.businessDate,
-        tierId: payload.tierId, addonTierIds: payload.addonTierIds || [], redirected: payload.redirected,
+        items: payload.items || [], redirected: payload.redirected,
         plate: payload.plate, vehicleEmail: payload.vehicleEmail,
         paymentMethod: payload.paymentMethod, chequePhotoPath,
         operatorName: payload.operatorName,
@@ -91,9 +101,8 @@ export async function resubmitGatehouseTransaction(payload, clientSubmissionId, 
 export default function GatehouseBooth({ companyId, companyName, userName, onLogout, token }) {
   const [config, setConfig] = useState(null); // { stations, tiers }
   const [stationId, setStationId] = useState(null);
-  const [step, setStep] = useState("tier"); // tier | vehicle | payment | confirm
-  const [tier, setTier] = useState(null);
-  const [selectedAddons, setSelectedAddons] = useState([]); // array of tier objects
+  const [step, setStep] = useState("cart"); // cart | vehicle | payment | confirm
+  const [cart, setCart] = useState([]); // [{ id, label, price, quantity }]
   const [redirecting, setRedirecting] = useState(false);
   const [plate, setPlate] = useState("");
   const [email, setEmail] = useState("");
@@ -152,12 +161,21 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     setChequePhoto({ file, previewUrl });
   }
 
-  function toggleAddon(addonTier) {
-    setSelectedAddons((cur) => cur.some((t) => t.id === addonTier.id) ? cur.filter((t) => t.id !== addonTier.id) : [...cur, addonTier]);
+  function addToCart(tier) {
+    setCart((cur) => {
+      const existing = cur.find((it) => it.id === tier.id);
+      if (existing) return cur.map((it) => (it.id === tier.id ? { ...it, quantity: it.quantity + 1 } : it));
+      return [...cur, { id: tier.id, label: tier.label, price: tier.price, quantity: 1 }];
+    });
+  }
+  function changeQuantity(tierId, delta) {
+    setCart((cur) => cur
+      .map((it) => (it.id === tierId ? { ...it, quantity: it.quantity + delta } : it))
+      .filter((it) => it.quantity > 0));
   }
 
   function resetForm() {
-    setStep("tier"); setTier(null); setSelectedAddons([]); setRedirecting(false); setPlate(""); setEmail("");
+    setStep("cart"); setCart([]); setRedirecting(false); setPlate(""); setEmail("");
     setLookedUp(false); setPaymentMethod(null); setChequePhoto(null); setError("");
   }
 
@@ -168,20 +186,20 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     if (paymentMethod === "cheque" && chequePhoto) {
       try { chequePhotoDataUrl = await fileToDataUrl(chequePhoto.file); } catch (e) { /* fall through, still allow offline queue without it is not ideal but don't block */ }
     }
-    const addonTierIds = redirecting ? [] : selectedAddons.map((t) => t.id);
+    const items = redirecting ? [] : cart.map((it) => ({ tierId: it.id, quantity: it.quantity }));
     const payload = {
       stationId, businessDate: todayLocal(),
-      tierId: tier?.id || null, addonTierIds, redirected: redirecting,
+      items, redirected: redirecting,
       plate: plate.trim().toUpperCase() || null, vehicleEmail: email.trim() || null,
       paymentMethod: redirecting ? null : paymentMethod,
       chequePhotoDataUrl, chequePhotoPath: null,
       operatorName: userName || null,
-      // Client-side display only — snapshotted here since `tier`/
-      // `selectedAddons` reset after this submission, before a queued item
-      // ever gets re-rendered. Ignored server-side; log_transaction always
-      // recomputes the real price from tierId/addonTierIds.
-      displayLabel: [tier?.label, ...selectedAddons.map((t) => t.label)].filter(Boolean).join(" + ") || null,
-      displayAmount: redirecting ? null : Number(tier?.price || 0) + selectedAddons.reduce((s, t) => s + Number(t.price || 0), 0),
+      // Client-side display only — snapshotted here since `cart` resets
+      // after this submission, before a queued item ever gets re-rendered.
+      // Ignored server-side; log_transaction always recomputes the real
+      // price from items.
+      displayLabel: redirecting ? null : cartLabel(cart),
+      displayAmount: redirecting ? null : cartTotal(cart),
     };
 
     // Known offline up front — queue immediately rather than waiting out a
@@ -221,6 +239,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   }
 
   const station = config?.stations?.find((s) => s.id === stationId);
+  const total = cartTotal(cart);
 
   const styles = {
     wrap: { minHeight: "100vh", background: C.paper, color: C.ink, fontFamily: "'Segoe UI', system-ui, sans-serif" },
@@ -236,6 +255,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
     ghost: { background: "transparent", border: `1px solid ${C.line}`, color: C.ink, borderRadius: 8, padding: "12px 16px", fontSize: 15, cursor: "pointer" },
     input: { width: "100%", padding: "14px", fontSize: 17, borderRadius: 8, border: `1px solid ${C.line}`, color: C.ink, background: C.white, boxSizing: "border-box" },
     label: { fontSize: 13, fontWeight: 700, color: C.slate, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8, display: "block" },
+    stepBtn: { width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.line}`, background: C.white, color: C.ink, fontSize: 18, fontWeight: 700, cursor: "pointer", lineHeight: 1 },
   };
 
   if (!config) {
@@ -277,26 +297,55 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       <div style={styles.body}>
         {error && <div style={{ color: C.bad, marginBottom: 16 }}>{error}</div>}
 
-        {step === "tier" && (
+        {step === "cart" && (
           <>
-            <span style={styles.label}>Select the load</span>
+            <span style={styles.label}>Tap to add — tap again for more than one</span>
             <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
               {(config.tiers || []).filter((t) => !t.is_addon).map((t) => (
-                <button
-                  key={t.id}
-                  style={styles.btn}
-                  onClick={() => { setTier(t); setRedirecting(false); setStep("vehicle"); }}
-                >
+                <button key={t.id} style={styles.btn} onClick={() => { setRedirecting(false); addToCart(t); }}>
                   {t.label} <span style={{ float: "right", color: C.amber }}>${Number(t.price).toFixed(2)}</span>
                 </button>
               ))}
-              <button
-                style={{ ...styles.btn, color: C.bad, borderColor: C.bad }}
-                onClick={() => { setTier(null); setRedirecting(true); setStep("vehicle"); }}
-              >
-                Redirect — not accepted here
-              </button>
             </div>
+            {(config.tiers || []).some((t) => t.is_addon) && (
+              <>
+                <span style={{ ...styles.label, marginTop: 20 }}>Add-ons</span>
+                <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                  {(config.tiers || []).filter((t) => t.is_addon).map((t) => (
+                    <button key={t.id} style={styles.btn} onClick={() => { setRedirecting(false); addToCart(t); }}>
+                      {t.label} <span style={{ float: "right", color: C.amber }}>+${Number(t.price).toFixed(2)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {cart.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <span style={styles.label}>This load</span>
+                <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                  {cart.map((it) => (
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, background: C.card, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 12px" }}>
+                      <div style={{ flex: 1, fontSize: 15 }}>{it.label} <span style={{ color: C.slate }}>· ${Number(it.price).toFixed(2)} each</span></div>
+                      <button style={styles.stepBtn} onClick={() => changeQuantity(it.id, -1)}>−</button>
+                      <span style={{ minWidth: 20, textAlign: "center", fontWeight: 700 }}>{it.quantity}</span>
+                      <button style={styles.stepBtn} onClick={() => changeQuantity(it.id, 1)}>+</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 12, fontSize: 17 }}>
+                  Total: <strong style={{ color: C.amber }}>${total.toFixed(2)}</strong>
+                </div>
+                <button style={{ ...styles.primary, marginTop: 16 }} onClick={() => setStep("vehicle")}>Continue</button>
+              </div>
+            )}
+
+            <button
+              style={{ ...styles.btn, color: C.bad, borderColor: C.bad, marginTop: 20 }}
+              onClick={() => { setCart([]); setRedirecting(true); setStep("vehicle"); }}
+            >
+              Redirect — not accepted here
+            </button>
           </>
         )}
 
@@ -315,7 +364,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
               />
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-              <button style={styles.ghost} onClick={() => setStep("tier")}>Back</button>
+              <button style={styles.ghost} onClick={() => setStep("cart")}>Back</button>
               <button style={styles.primary} onClick={() => setStep(redirecting ? "confirm" : "payment")}>Continue</button>
             </div>
           </>
@@ -323,24 +372,9 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
 
         {step === "payment" && (
           <>
-            {(config.tiers || []).some((t) => t.is_addon) && (
-              <div style={{ marginBottom: 24 }}>
-                <span style={styles.label}>Add-ons</span>
-                <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                  {(config.tiers || []).filter((t) => t.is_addon).map((t) => {
-                    const active = selectedAddons.some((a) => a.id === t.id);
-                    return (
-                      <button key={t.id} style={{ ...styles.btn, ...(active ? styles.btnActive : {}) }} onClick={() => toggleAddon(t)}>
-                        {active ? "✓ " : ""}{t.label} <span style={{ float: "right", color: C.amber }}>+${Number(t.price).toFixed(2)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div style={{ marginTop: 10, fontSize: 15, color: C.slate }}>
-                  Total: <strong style={{ color: C.ink }}>${(Number(tier?.price || 0) + selectedAddons.reduce((s, t) => s + Number(t.price || 0), 0)).toFixed(2)}</strong>
-                </div>
-              </div>
-            )}
+            <div style={{ marginBottom: 16, fontSize: 15, color: C.slate }}>
+              Total: <strong style={{ color: C.ink }}>${total.toFixed(2)}</strong>
+            </div>
             <span style={styles.label}>Payment — cash or cheque only</span>
             <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
               <button style={{ ...styles.btn, ...(paymentMethod === "cash" ? styles.btnActive : {}) }} onClick={() => setPaymentMethod("cash")}>Cash</button>
@@ -374,11 +408,10 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
                 <div><strong>Redirected load</strong> — no charge</div>
               ) : (
                 <>
-                  <div><strong>{tier?.label}</strong> — ${Number(tier?.price || 0).toFixed(2)}</div>
-                  {selectedAddons.map((a) => (
-                    <div key={a.id}>+ {a.label} — ${Number(a.price).toFixed(2)}</div>
+                  {cart.map((it) => (
+                    <div key={it.id}>{it.label}{it.quantity > 1 ? ` x${it.quantity}` : ""} — ${(Number(it.price) * it.quantity).toFixed(2)}</div>
                   ))}
-                  <div><strong>Total: ${(Number(tier?.price || 0) + selectedAddons.reduce((s, t) => s + Number(t.price || 0), 0)).toFixed(2)}</strong> ({paymentMethod})</div>
+                  <div><strong>Total: ${total.toFixed(2)}</strong> ({paymentMethod})</div>
                 </>
               )}
               {plate && <div>Plate: {plate.trim().toUpperCase()}</div>}
