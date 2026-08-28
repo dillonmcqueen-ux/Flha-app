@@ -164,6 +164,23 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       .catch(() => {});
   }, [stationId, token, companyId]);
 
+  // Logging back in mid-shift (a break, a dead phone, a handoff to another
+  // operator at the same station) must continue today's same batch of
+  // receipts, not present an empty log that looks like a fresh start —
+  // the receipt sequence itself never resets, but the operator's own view
+  // of "what's happened today" was previously only ever built client-side
+  // from this session's own submissions. Load it from the server instead.
+  useEffect(() => {
+    if (!stationId) return;
+    fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_transactions", token, companyId, stationId, businessDate: todayLocal() }),
+    })
+      .then((r) => r.json())
+      .then((data) => { setTodaysLog((data.transactions || []).slice().reverse()); })
+      .catch(() => {});
+  }, [stationId, token, companyId]);
+
   const refreshQueueCount = () => {
     drainQueue("gatehouse", (payload, csid) => resubmitGatehouseTransaction(payload, csid, token))
       .then((r) => setQueuedCount(r.remaining))
@@ -477,7 +494,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
 
         {todaysLog.length > 0 && (
           <div style={{ marginTop: 40 }}>
-            <span style={styles.label}>This session</span>
+            <span style={styles.label}>Today</span>
             <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
               {todaysLog.map((t) => (
                 <div key={t.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "8px 0", borderBottom: `1px solid ${C.line}` }}>
