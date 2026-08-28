@@ -18,6 +18,7 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [cashCounted, setCashCounted] = useState("");
+  const [reconReason, setReconReason] = useState("");
   const [reconResult, setReconResult] = useState(null);
   const [recipientEmail, setRecipientEmail] = useState("");
   const [sendStatus, setSendStatus] = useState("");
@@ -48,17 +49,20 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
       .catch(() => setLoading(false));
   }
 
-  useEffect(() => { loadDay(); setReconResult(null); setSendStatus(""); }, [stationId, businessDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadDay(); setReconResult(null); setReconReason(""); setSendStatus(""); }, [stationId, businessDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cashTotal = transactions.filter((t) => !t.redirected && t.payment_method === "cash").reduce((s, t) => s + Number(t.amount || 0), 0);
   const chequeTotal = transactions.filter((t) => !t.redirected && t.payment_method === "cheque").reduce((s, t) => s + Number(t.amount || 0), 0);
   const grandTotal = cashTotal + chequeTotal;
   const redirectedCount = transactions.filter((t) => t.redirected).length;
+  const receiptNumbers = transactions.map((t) => t.receipt_number).filter((n) => n != null);
+  const receiptFrom = receiptNumbers.length ? Math.min(...receiptNumbers) : null;
+  const receiptTo = receiptNumbers.length ? Math.max(...receiptNumbers) : null;
 
   async function submitReconciliation() {
     const res = await fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "submit_reconciliation", token, companyId, stationId, businessDate, cashCounted }),
+      body: JSON.stringify({ action: "submit_reconciliation", token, companyId, stationId, businessDate, cashCounted, reason: reconReason }),
     });
     const data = await res.json();
     if (res.ok) setReconResult(data);
@@ -136,6 +140,10 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
         <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
           <div style={styles.tile}><div style={styles.label}>Loads logged</div><div style={{ fontSize: 22, fontWeight: 700 }}>{transactions.length}</div></div>
           <div style={styles.tile}><div style={styles.label}>Redirected</div><div style={{ fontSize: 22, fontWeight: 700 }}>{redirectedCount}</div></div>
+          <div style={styles.tile}>
+            <div style={styles.label}>Receipt #s</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{receiptFrom != null ? `${receiptFrom}–${receiptTo}` : "—"}</div>
+          </div>
           <div style={styles.tile}><div style={styles.label}>Cash total</div><div style={{ fontSize: 22, fontWeight: 700 }}>${cashTotal.toFixed(2)}</div></div>
           <div style={styles.tile}><div style={styles.label}>Grand total</div><div style={{ fontSize: 22, fontWeight: 700, color: C.amber }}>${grandTotal.toFixed(2)}</div></div>
         </div>
@@ -178,6 +186,13 @@ export default function GatehouseDashboard({ companyId, companyName, userName, o
               <input style={{ ...styles.input, flex: 1 }} type="number" step="0.01" placeholder="Cash counted" value={cashCounted} onChange={(e) => setCashCounted(e.target.value)} />
               <button style={styles.btn} onClick={submitReconciliation}>Submit</button>
             </div>
+            {reconResult && Math.abs(reconResult.variance) >= 0.005 && (
+              <input
+                style={{ ...styles.input, marginTop: 8 }} placeholder="Reason for difference"
+                value={reconReason} onChange={(e) => setReconReason(e.target.value)}
+                onBlur={submitReconciliation}
+              />
+            )}
             {reconResult && (
               <div style={{ marginTop: 10, fontWeight: 700, color: Math.abs(reconResult.variance) < 0.005 ? C.good : C.bad }}>
                 Variance: ${reconResult.variance.toFixed(2)} {Math.abs(reconResult.variance) < 0.005 ? "— balanced" : "— flagged"}

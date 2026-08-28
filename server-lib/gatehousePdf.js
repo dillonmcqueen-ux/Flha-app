@@ -55,13 +55,15 @@ export function renderGatehouseDailyReportPdf(report) {
   if (report.reconciliation) {
     const r = report.reconciliation;
     const variance = Number(r.variance || 0);
+    const boxH = r.reason ? 22 : 16;
     doc.setFillColor(variance === 0 ? 240 : 253, variance === 0 ? 250 : 237, variance === 0 ? 245 : 230);
-    doc.roundedRect(margin, y, contentW, 16, 2, 2, 'F');
+    doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F');
     doc.setTextColor(24, 36, 32); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
     doc.text('CASH RECONCILIATION', margin + 4, y + 6);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
     doc.text(`Expected ${money(r.expected_cash)}  ·  Counted ${money(r.cash_counted)}  ·  Variance ${money(r.variance)}`, margin + 4, y + 12);
-    y += 22;
+    if (r.reason) doc.text(`Reason for difference: ${r.reason}`, margin + 4, y + 18);
+    y += boxH + 6;
   }
 
   // ── Transactions table ─────────────────────────────────────────────────

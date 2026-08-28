@@ -394,7 +394,7 @@ export default async function handler(req, res) {
 
   // ── Cash reconciliation ────────────────────────────────────────────────
   if (action === 'submit_reconciliation') {
-    const { stationId, businessDate, cashCounted } = req.body;
+    const { stationId, businessDate, cashCounted, reason } = req.body;
     const station = await loadOwnedStation(companyId, stationId);
     if (!station) return res.status(404).json({ error: 'Station not found.' });
     if (cashCounted === undefined || cashCounted === null || isNaN(Number(cashCounted))) {
@@ -415,6 +415,7 @@ export default async function handler(req, res) {
       {
         company_id: companyId, station_id: stationId, business_date: businessDate,
         expected_cash: expectedCash, cash_counted: Number(cashCounted), variance,
+        reason: reason ? String(reason).trim() : null,
         submitted_by: session.userName || null,
       },
       { onConflict: 'company_id,station_id,business_date' }
