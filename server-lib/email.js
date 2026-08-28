@@ -7,22 +7,28 @@
 // server-lib/uploadUrls.js) so it doesn't count against Vercel's
 // per-function budget.
 
-export async function sendEmail({ to, subject, text, from = 'FORA Onboarding <onboarding@resend.dev>' }) {
+// `attachments` (optional) is Resend's own shape: [{ filename, content }]
+// where content is a base64 string — used by Gatehouse's daily report
+// email (api/gatehouse.js) to attach the generated PDF directly rather
+// than linking out to it.
+export async function sendEmail({ to, subject, text, from = 'FORA Onboarding <onboarding@resend.dev>', attachments }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn(`sendEmail skipped (RESEND_API_KEY not set): "${subject}" to ${to}`);
     return;
   }
+  const body = { from, to, subject, text };
+  if (attachments && attachments.length > 0) body.attachments = attachments;
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
     },
-    body: JSON.stringify({ from, to, subject, text }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Resend API error: ${res.status} ${body}`);
+    const body2 = await res.text();
+    throw new Error(`Resend API error: ${res.status} ${body2}`);
   }
 }
 
