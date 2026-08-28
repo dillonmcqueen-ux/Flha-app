@@ -88,6 +88,32 @@ async function loadOwnedStation(companyId, stationId) {
   return data[0];
 }
 
+// tier_label is a snapshotted string like "Minimum Fee" or, for a
+// multi-item cart, "Minimum Fee + Fridge x2" (see log_transaction below) —
+// parsed back into {label, quantity} parts so the daily report can show
+// counts per charge type ("12 minimum charges, 3 fridges") without a
+// separate per-line-item table.
+function parseTierLabelParts(tierLabel) {
+  if (!tierLabel) return [];
+  return tierLabel.split(' + ').map(part => {
+    const m = part.match(/^(.*) x(\d+)$/);
+    return m ? { label: m[1], quantity: Number(m[2]) } : { label: part, quantity: 1 };
+  });
+}
+
+function buildTierBreakdown(transactions) {
+  const counts = new Map();
+  for (const t of transactions) {
+    if (t.redirected) continue;
+    for (const { label, quantity } of parseTierLabelParts(t.tier_label)) {
+      counts.set(label, (counts.get(label) || 0) + quantity);
+    }
+  }
+  return [...counts.entries()]
+    .map(([label, quantity]) => ({ label, quantity }))
+    .sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label));
+}
+
 async function buildDailyReport(companyId, companyName, station, businessDate) {
   const { data: txRows } = await supabaseAdmin
     .from('gatehouse_transactions')
@@ -120,6 +146,7 @@ async function buildDailyReport(companyId, companyName, station, businessDate) {
     cashTotal,
     chequeTotal,
     grandTotal,
+    tierBreakdown: buildTierBreakdown(transactions),
     reconciliation: (reconRows && reconRows[0]) || null,
   };
 }
