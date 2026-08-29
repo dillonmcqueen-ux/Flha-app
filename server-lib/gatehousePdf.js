@@ -90,12 +90,13 @@ export function renderGatehouseDailyReportPdf(report) {
   }
 
   // ── Transactions table ─────────────────────────────────────────────────
-  const cRcpt = margin, cRcptW = 22;
-  const cTime = cRcpt + cRcptW, cTimeW = 20;
-  const cTier = cTime + cTimeW, cTierW = 48;
-  const cPlate = cTier + cTierW, cPlateW = 28;
-  const cPay = cPlate + cPlateW, cPayW = 22;
-  const cAmt = cPay + cPayW, cAmtW = contentW - cRcptW - cTimeW - cTierW - cPlateW - cPayW;
+  const cRcpt = margin, cRcptW = 18;
+  const cTime = cRcpt + cRcptW, cTimeW = 16;
+  const cTier = cTime + cTimeW, cTierW = 38;
+  const cPlate = cTier + cTierW, cPlateW = 20;
+  const cOperator = cPlate + cPlateW, cOperatorW = 28;
+  const cPay = cOperator + cOperatorW, cPayW = 20;
+  const cAmt = cPay + cPayW, cAmtW = contentW - cRcptW - cTimeW - cTierW - cPlateW - cOperatorW - cPayW;
 
   const drawHeader = () => {
     doc.setFillColor(196, 118, 31); doc.rect(margin, y, contentW, 8, 'F');
@@ -104,6 +105,7 @@ export function renderGatehouseDailyReportPdf(report) {
     doc.text('TIME', cTime + 2, y + 5.5);
     doc.text('LOAD', cTier + 2, y + 5.5);
     doc.text('PLATE', cPlate + 2, y + 5.5);
+    doc.text('OPERATOR', cOperator + 2, y + 5.5);
     doc.text('PAYMENT', cPay + 2, y + 5.5);
     doc.text('AMOUNT', cAmt + 2, y + 5.5);
     y += 8;
@@ -126,6 +128,7 @@ export function renderGatehouseDailyReportPdf(report) {
       const tierLabel = t.redirected ? 'Redirected' : (t.tier_label || '—');
       doc.text(doc.splitTextToSize(tierLabel, cTierW - 4)[0] || '—', cTier + 2, y + 5.5);
       doc.text(t.plate || '—', cPlate + 2, y + 5.5);
+      doc.text(doc.splitTextToSize(t.operator_name || '—', cOperatorW - 4)[0] || '—', cOperator + 2, y + 5.5);
       doc.text(t.redirected ? '—' : (t.payment_method || '—'), cPay + 2, y + 5.5);
       doc.text(t.redirected ? '—' : money(t.amount), cAmt + 2, y + 5.5);
       y += 8;
