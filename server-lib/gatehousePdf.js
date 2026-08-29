@@ -140,7 +140,7 @@ export function renderGatehouseDailyReportPdf(report) {
   doc.setDrawColor(203, 209, 200); doc.setLineWidth(0.2); doc.line(margin, y, margin + contentW, y);
   y += 8;
   doc.setTextColor(87, 101, 95); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-  doc.text('Generated automatically by Gatehouse. Every receipt number above is issued strictly in sequence for this station.', margin, y);
+  doc.text('Generated automatically by Gatehouse. Every receipt number above is issued strictly in sequence for this station and day.', margin, y);
 
   return doc;
 }
