@@ -235,6 +235,25 @@ export default async function handler(req, res) {
     return res.status(200).json({ vehicle: (data && data[0]) || null });
   }
 
+  // ── Plate typeahead — as the operator types, offer the company's own
+  // previously-seen plates so they can tap one instead of retyping a plate
+  // (and its saved email) that's already on file. `%`/`_` are escaped
+  // before going into the ilike pattern since `prefix` is raw client text.
+  if (action === 'search_vehicles') {
+    const prefix = String(req.body.prefix || '').trim().toUpperCase();
+    if (!prefix) return res.status(200).json({ vehicles: [] });
+    const escaped = prefix.replace(/[%_\\]/g, (c) => `\\${c}`);
+    const { data, error } = await supabaseAdmin
+      .from('gatehouse_vehicles')
+      .select('plate, email')
+      .eq('company_id', companyId)
+      .ilike('plate', `${escaped}%`)
+      .order('updated_at', { ascending: false })
+      .limit(6);
+    if (error) return res.status(500).json({ error: 'Lookup failed.' });
+    return res.status(200).json({ vehicles: data || [] });
+  }
+
   // ── Cheque photo upload — fixed bucket, same signed-upload-token
   // pattern as every other upload flow in this app. ─────────────────────
   if (action === 'create_cheque_upload_url') {
