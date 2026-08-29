@@ -256,6 +256,15 @@ section{ position:relative; padding:120px 0; border-top:1px solid var(--line); }
 .about-box strong{ color:var(--text); font-weight:600; }
 .about-box a{ color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim); }
 
+.bio-card{ display:flex; gap:32px; align-items:flex-start; margin-bottom:32px; }
+.bio-card img{ width:160px; height:160px; border-radius:16px; object-fit:cover; border:1px solid var(--line); flex-shrink:0; }
+.bio-card .bio-name{ font-family:'Space Grotesk', sans-serif; font-size:20px; font-weight:600; color:var(--text); margin-bottom:8px; }
+.bio-card p{ color:var(--muted); font-size:17px; line-height:1.7; margin:0; }
+@media (max-width:560px){
+  .bio-card{ flex-direction:column; align-items:flex-start; }
+  .bio-card img{ width:120px; height:120px; }
+}
+
 /* doc chips */
 .chips{ display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
 .chip{
