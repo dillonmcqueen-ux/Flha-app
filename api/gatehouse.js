@@ -343,24 +343,55 @@ export default async function handler(req, res) {
 
     // Supabase-js has no "SET x = x + 1" helper, so do the increment as a
     // fetch-then-conditional-update guarded by the unique index on
-    // (company_id, station_id, receipt_number): if two requests raced and
-    // both read the same next_receipt_number, the second insert below
-    // fails the unique constraint and is retried once with a fresh read.
+    // (company_id, station_id, business_date, receipt_number): if two
+    // requests raced and both read the same next_receipt_number, the
+    // second insert below fails the unique constraint and is retried once
+    // with a fresh read.
+    //
+    // Receipt numbers reset to a fresh random 6-digit start
+    // (100000-999999) at the first transaction of each new business_date
+    // per station, tracked by counter_business_date, rather than counting
+    // up forever from 1 — then count up gap-free from there for the rest
+    // of that day exactly as before.
     async function claimNextReceiptNumber() {
       const { data: cur, error: curErr } = await supabaseAdmin
         .from('gatehouse_stations')
-        .select('next_receipt_number')
+        .select('next_receipt_number, counter_business_date')
         .eq('id', stationId)
         .eq('company_id', companyId) // defense-in-depth — station is already ownership-checked via loadOwnedStation above
         .limit(1);
       if (curErr || !cur || cur.length === 0) throw new Error('Could not read station counter.');
-      const issued = cur[0].next_receipt_number;
+      const row = cur[0];
+
+      if (row.counter_business_date !== businessDate) {
+        const start = 100000 + Math.floor(Math.random() * 900000);
+        let rollover = supabaseAdmin
+          .from('gatehouse_stations')
+          .update({ next_receipt_number: start + 1, counter_business_date: businessDate })
+          .eq('id', stationId)
+          .eq('company_id', companyId);
+        // Guard on the OLD counter_business_date (fresh station rows have
+        // it as null) so only one of any racing requests wins the
+        // rollover — the loser's update matches nothing, throws
+        // LOST_RACE, and the caller's retry re-reads and finds the day
+        // already rolled over.
+        rollover = row.counter_business_date === null
+          ? rollover.is('counter_business_date', null)
+          : rollover.eq('counter_business_date', row.counter_business_date);
+        const { data: bumped, error: bumpErr } = await rollover.select('id');
+        if (bumpErr) throw new Error('Could not reserve a receipt number.');
+        if (!bumped || bumped.length === 0) throw new Error('LOST_RACE');
+        return start;
+      }
+
+      const issued = row.next_receipt_number;
       const { data: bumped, error: bumpErr } = await supabaseAdmin
         .from('gatehouse_stations')
         .update({ next_receipt_number: issued + 1 })
         .eq('id', stationId)
         .eq('company_id', companyId)
         .eq('next_receipt_number', issued) // only matches if nobody else already bumped it
+        .eq('counter_business_date', businessDate) // only matches if nobody else already rolled the day over
         .select('id');
       if (bumpErr) throw new Error('Could not reserve a receipt number.');
       if (!bumped || bumped.length === 0) throw new Error('LOST_RACE'); // someone else claimed this number first — caller retries
