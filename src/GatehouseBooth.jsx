@@ -107,6 +107,9 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   const [plate, setPlate] = useState("");
   const [email, setEmail] = useState("");
   const [lookedUp, setLookedUp] = useState(false);
+  const [plateSuggestions, setPlateSuggestions] = useState([]);
+  const [showPlateSuggestions, setShowPlateSuggestions] = useState(false);
+  const plateSearchTimer = useRef(null);
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [chequePhoto, setChequePhoto] = useState(null); // { file, previewUrl }
   const [saving, setSaving] = useState(false);
@@ -202,6 +205,13 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   }, [token]);
 
   async function handlePlateBlur() {
+    // A short delay so a click on a suggestion (which itself blurs the
+    // input) has time to land and set showPlateSuggestions=false first —
+    // otherwise this exact-match fallback would fire on top of it.
+    setTimeout(() => { if (!showPlateSuggestions) doExactLookup(); }, 150);
+  }
+
+  async function doExactLookup() {
     const clean = plate.trim().toUpperCase();
     if (!clean || lookedUp) return;
     setLookedUp(true);
@@ -213,6 +223,37 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       const data = await res.json();
       if (data.vehicle && data.vehicle.email && !email) setEmail(data.vehicle.email);
     } catch (e) { /* best-effort — offline lookup just skips prefill */ }
+  }
+
+  // As the operator types a plate, offer previously-seen plates for this
+  // company so they can tap one instead of retyping a plate (and its saved
+  // email) already on file — debounced so it's one request per pause in
+  // typing, not one per keystroke.
+  function handlePlateChange(value) {
+    setPlate(value);
+    setLookedUp(false);
+    setShowPlateSuggestions(true);
+    if (plateSearchTimer.current) clearTimeout(plateSearchTimer.current);
+    const prefix = value.trim().toUpperCase();
+    if (!prefix) { setPlateSuggestions([]); return; }
+    plateSearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/gatehouse", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "search_vehicles", token, companyId, prefix }),
+        });
+        const data = await res.json();
+        setPlateSuggestions(data.vehicles || []);
+      } catch (e) { /* offline or a dropped request — just no suggestions this keystroke */ }
+    }, 250);
+  }
+
+  function pickPlateSuggestion(vehicle) {
+    setPlate(vehicle.plate);
+    setEmail(vehicle.email || "");
+    setLookedUp(true); // already have everything this plate has on file
+    setPlateSuggestions([]);
+    setShowPlateSuggestions(false);
   }
 
   async function handleChequePhoto(e) {
@@ -253,6 +294,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   function resetForm() {
     setStep("cart"); setCart([]); setRedirecting(false); setPlate(""); setEmail("");
     setLookedUp(false); setPaymentMethod(null); setChequePhoto(null); setError("");
+    setPlateSuggestions([]); setShowPlateSuggestions(false);
   }
 
   async function submit() {
@@ -437,11 +479,32 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
           <>
             <span style={styles.label}>Vehicle</span>
             <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
-              <input
-                style={styles.input} placeholder="Plate number" value={plate}
-                onChange={(e) => { setPlate(e.target.value); setLookedUp(false); }}
-                onBlur={handlePlateBlur} autoFocus
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  style={styles.input} placeholder="Plate number" value={plate}
+                  onChange={(e) => handlePlateChange(e.target.value)}
+                  onFocus={() => setShowPlateSuggestions(true)}
+                  onBlur={handlePlateBlur} autoFocus
+                />
+                {showPlateSuggestions && plateSuggestions.length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, marginTop: 4, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", overflow: "hidden" }}>
+                    {plateSuggestions.map((v) => (
+                      <div
+                        key={v.plate}
+                        // onMouseDown (not onClick) fires before the input's
+                        // onBlur, so preventDefault here stops the blur from
+                        // racing this selection and re-triggering the exact-
+                        // match lookup on top of it.
+                        onMouseDown={(e) => { e.preventDefault(); pickPlateSuggestion(v); }}
+                        style={{ padding: "10px 12px", fontSize: 15, cursor: "pointer", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", gap: 10 }}
+                      >
+                        <strong>{v.plate}</strong>
+                        {v.email && <span style={{ color: C.slate, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.email}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input
                 style={styles.input} placeholder="Customer email (for the receipt, optional)" value={email}
                 onChange={(e) => setEmail(e.target.value)} type="email"
