@@ -230,11 +230,15 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   // email) already on file — debounced so it's one request per pause in
   // typing, not one per keystroke.
   function handlePlateChange(value) {
-    setPlate(value);
+    // Uppercased as typed, not just on submit — plates are always stored
+    // and matched uppercase (see the submit payload and search_vehicles),
+    // so the operator should see exactly what's being saved/searched.
+    const upper = value.toUpperCase();
+    setPlate(upper);
     setLookedUp(false);
     setShowPlateSuggestions(true);
     if (plateSearchTimer.current) clearTimeout(plateSearchTimer.current);
-    const prefix = value.trim().toUpperCase();
+    const prefix = upper.trim();
     if (!prefix) { setPlateSuggestions([]); return; }
     plateSearchTimer.current = setTimeout(async () => {
       try {
