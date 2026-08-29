@@ -390,6 +390,30 @@ export default async function handler(req, res) {
       );
     }
 
+    // The booth's vehicle-email field is labelled "for the receipt" — this
+    // is that receipt. Best-effort (a failed send never fails a
+    // transaction that's already committed above) but awaited, not
+    // fire-and-forget — Vercel can freeze the function the instant the
+    // response is sent, which would silently kill an un-awaited send. The
+    // same flow this runs in (resubmitGatehouseTransaction) is also what
+    // fires when a queued offline transaction finally syncs, so a receipt
+    // still goes out once the operator is back online, not just for a
+    // live submission.
+    if (vehicleEmail) {
+      const lines = redirected
+        ? [`Your load at ${station.name} was redirected and not accepted at this station.`, `Receipt #${receiptNumber} — ${businessDate}`]
+        : [`Receipt #${receiptNumber} — ${station.name}, ${businessDate}`, tierLabel, `Amount: $${Number(amount).toFixed(2)} (${paymentMethod})`];
+      try {
+        await sendEmail({
+          to: vehicleEmail,
+          subject: `Your receipt — ${session.companyName || 'Gatehouse'} #${receiptNumber}`,
+          text: lines.join('\n'),
+        });
+      } catch (e) {
+        console.warn(`Gatehouse receipt email failed for receipt #${receiptNumber}:`, e.message);
+      }
+    }
+
     const { data: finalRows } = await supabaseAdmin
       .from('gatehouse_transactions')
       .select('*')

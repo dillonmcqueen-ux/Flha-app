@@ -223,16 +223,17 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
               <table style={styles.table}>
                 <thead><tr>
                   <th style={styles.th}>Receipt #</th><th style={styles.th}>Time</th><th style={styles.th}>Load</th>
-                  <th style={styles.th}>Plate</th><th style={styles.th}>Payment</th><th style={styles.th}>Amount</th>
+                  <th style={styles.th}>Plate</th><th style={styles.th}>Operator</th><th style={styles.th}>Payment</th><th style={styles.th}>Amount</th>
                 </tr></thead>
                 <tbody>
-                  {transactions.length === 0 && <tr><td style={styles.td} colSpan={6}>No transactions yet.</td></tr>}
+                  {transactions.length === 0 && <tr><td style={styles.td} colSpan={7}>No transactions yet.</td></tr>}
                   {transactions.map((t) => (
                     <tr key={t.id}>
                       <td style={styles.td}>{t.receipt_number}</td>
                       <td style={styles.td}>{new Date(t.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
                       <td style={styles.td}>{t.redirected ? "Redirected" : t.tier_label}</td>
                       <td style={styles.td}>{t.plate || "—"}</td>
+                      <td style={styles.td}>{t.operator_name || "—"}</td>
                       <td style={styles.td}>
                         {t.redirected ? "—" : t.payment_method}
                         {t.cheque_photo_url && <a href={t.cheque_photo_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, color: C.amber }}>photo</a>}

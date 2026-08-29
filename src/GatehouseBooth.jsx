@@ -115,6 +115,14 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   const [queuedCount, setQueuedCount] = useState(0);
   const fileInputRef = useRef(null);
 
+  // Who's actually working the booth right now. Defaults to the logged-in
+  // roster name, but this device is often shared and a station typically
+  // has one regular operator with the occasional guest covering a shift —
+  // so it's editable rather than hardcoded to the session's userName, and
+  // that edited value is what ends up on the receipt/report as who logged
+  // each ticket (operator_name on gatehouse_transactions).
+  const [operatorName, setOperatorName] = useState(userName || "");
+
   // ── End-of-day cash count — the operator's own signoff, separate from a
   // supervisor's later "mark reviewed" on the dashboard (GatehouseDashboard.jsx).
   const [showEndOfDay, setShowEndOfDay] = useState(false);
@@ -261,7 +269,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       plate: plate.trim().toUpperCase() || null, vehicleEmail: email.trim() || null,
       paymentMethod: redirecting ? null : paymentMethod,
       chequePhotoDataUrl, chequePhotoPath: null,
-      operatorName: userName || null,
+      operatorName: operatorName.trim() || null,
       // Client-side display only — snapshotted here since `cart` resets
       // after this submission, before a queued item ever gets re-rendered.
       // Ignored server-side; log_transaction always recomputes the real
@@ -354,7 +362,15 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       <div style={styles.header}>
         <div>
           <strong>{station?.name}</strong>
-          <div style={{ fontSize: 12, color: C.slate }}>{companyName}{userName ? ` · ${userName}` : ""}</div>
+          <div style={{ fontSize: 12, color: C.slate, display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+            {companyName} · Operator:
+            <input
+              value={operatorName}
+              onChange={(e) => setOperatorName(e.target.value)}
+              placeholder="Your name"
+              style={{ padding: "2px 6px", fontSize: 12, borderRadius: 4, border: `1px solid ${C.line}`, color: C.ink, background: C.white, width: 130 }}
+            />
+          </div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {queuedCount > 0 && <span style={{ fontSize: 12, color: C.bad, fontWeight: 700 }}>{queuedCount} saved offline, syncing…</span>}
