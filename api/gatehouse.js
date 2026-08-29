@@ -493,6 +493,35 @@ export default async function handler(req, res) {
     return res.status(200).json({ transactions: withSignedPhotos });
   }
 
+  // ── Receipt lookup by number — for the office to pull up a transaction
+  // when a customer calls about it. Receipt numbers reset to a fresh
+  // random start each business day per station (see claimNextReceiptNumber
+  // above), so a number alone isn't globally unique — this can return more
+  // than one match (same number issued at a different station, or on a
+  // different day) and leaves picking the right one to whoever's looking. ─
+  if (action === 'search_receipt') {
+    const receiptNumber = parseInt(req.body.receiptNumber, 10);
+    if (!receiptNumber || Number.isNaN(receiptNumber)) return res.status(400).json({ error: 'Enter a receipt number.' });
+    const [{ data, error }, { data: stations }] = await Promise.all([
+      supabaseAdmin
+        .from('gatehouse_transactions')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('receipt_number', receiptNumber)
+        .order('business_date', { ascending: false })
+        .limit(20),
+      supabaseAdmin.from('gatehouse_stations').select('id, name').eq('company_id', companyId),
+    ]);
+    if (error) return res.status(500).json({ error: 'Lookup failed.' });
+    const stationNameById = Object.fromEntries((stations || []).map(s => [s.id, s.name]));
+    const withDetails = await Promise.all((data || []).map(async (t) => ({
+      ...t,
+      station_name: stationNameById[t.station_id] || null,
+      cheque_photo_url: t.cheque_photo_url ? await signStoredUrl(t.cheque_photo_url, UPLOAD_BUCKET) : null,
+    })));
+    return res.status(200).json({ transactions: withDetails });
+  }
+
   // ── Cash reconciliation ────────────────────────────────────────────────
   if (action === 'get_reconciliation') {
     const { stationId, businessDate } = req.body;

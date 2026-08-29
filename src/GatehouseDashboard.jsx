@@ -31,6 +31,14 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   const [trailersOut, setTrailersOut] = useState("");
   const [trailerCheck, setTrailerCheck] = useState(null);
 
+  // Receipt lookup by number — for the office to pull up a transaction
+  // when a customer calls about it. Independent of the station/date
+  // pickers above since the caller may not know either.
+  const [receiptQuery, setReceiptQuery] = useState("");
+  const [receiptResults, setReceiptResults] = useState(null); // null = no search yet
+  const [receiptSearching, setReceiptSearching] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
+
   useEffect(() => {
     fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -133,6 +141,20 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
     setSendStatus(res.ok ? "Report sent." : (data.error || "Failed to send."));
   }
 
+  async function searchReceipt() {
+    const receiptNumber = receiptQuery.trim();
+    if (!receiptNumber) return;
+    setReceiptSearching(true); setReceiptError(""); setReceiptResults(null);
+    const res = await fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "search_receipt", token, companyId, receiptNumber }),
+    });
+    const data = await res.json();
+    if (res.ok) setReceiptResults(data.transactions || []);
+    else setReceiptError(data.error || "Lookup failed.");
+    setReceiptSearching(false);
+  }
+
   async function checkTrailers() {
     const res = await fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -189,6 +211,46 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
             {(config.stations || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <input style={styles.input} type="date" value={businessDate} onChange={(e) => setBusinessDate(e.target.value)} />
+        </div>
+
+        <div style={{ ...styles.card, marginBottom: 18 }}>
+          <div style={styles.label}>Look up a receipt</div>
+          <div style={{ fontSize: 13, color: C.slate, marginBottom: 10 }}>
+            Receipt numbers reset each day, so the same number can turn up more than once — pick the right one by date/station below.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input
+              style={{ ...styles.input, maxWidth: 200 }} placeholder="Receipt #" value={receiptQuery}
+              onChange={(e) => setReceiptQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") searchReceipt(); }}
+              inputMode="numeric"
+            />
+            <button style={styles.btn} onClick={searchReceipt} disabled={receiptSearching}>{receiptSearching ? "Searching…" : "Search"}</button>
+          </div>
+          {receiptError && <div style={{ color: C.bad, marginTop: 10, fontSize: 13.5 }}>{receiptError}</div>}
+          {receiptResults && (
+            receiptResults.length === 0 ? (
+              <div style={{ marginTop: 12, fontSize: 13.5, color: C.slate }}>No receipt #{receiptQuery.trim()} found.</div>
+            ) : (
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                {receiptResults.map((t) => (
+                  <div key={t.id} style={{ border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 12px", fontSize: 13.5 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                      <strong>#{t.receipt_number} — {t.station_name || "Unknown station"}, {t.business_date}</strong>
+                      <span style={{ fontWeight: 700, color: C.amber }}>{t.redirected ? "Redirected" : `$${Number(t.amount).toFixed(2)}`}</span>
+                    </div>
+                    <div style={{ color: C.slate, marginTop: 4 }}>
+                      {t.redirected ? "Redirected — not accepted" : t.tier_label}
+                      {t.plate ? ` · Plate ${t.plate}` : ""}
+                      {t.operator_name ? ` · Logged by ${t.operator_name}` : ""}
+                      {!t.redirected && t.payment_method ? ` · ${t.payment_method}` : ""}
+                    </div>
+                    {t.cheque_photo_url && <a href={t.cheque_photo_url} target="_blank" rel="noopener noreferrer" style={{ color: C.amber }}>View cheque photo</a>}
+                  </div>
+                ))}
+              </div>
+            )
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
