@@ -486,8 +486,17 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
 
   const activeCompany = companies.find(c => c.id === activeId);
 
-  // Completeness: 4 steps
+  // Completeness — 4 steps for a safety company (SOPs included), 3 for a
+  // Gatehouse company (SOPs don't exist there, so requiring them would
+  // mean a Gatehouse company can never reach ACTIVE).
   const steps = (c) => {
+    if (c.app_type === "gatehouse") {
+      return {
+        codes: !!c.company_code,
+        logo: !!c.logo_url,
+        contact: !!c.contact_email,
+      };
+    }
     const cnt = counts[c.id] || { sops: 0 };
     return {
       codes: !!c.company_code,
@@ -497,7 +506,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     };
   };
   const doneCount = (c) => Object.values(steps(c)).filter(Boolean).length;
-  const isActive = (c) => doneCount(c) === 4;
+  const isActive = (c) => doneCount(c) === Object.keys(steps(c)).length;
 
   const sortCompanies = (list) => {
     const arr = [...list];
@@ -1002,7 +1011,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // Completeness meter — the signature element
   const Meter = ({ c }) => {
     const stp = steps(c);
-    const order = [["codes", "Codes"], ["sops", "SOPs"], ["logo", "Logo"], ["contact", "Contact"]];
+    const order = c.app_type === "gatehouse"
+      ? [["codes", "Codes"], ["logo", "Logo"], ["contact", "Contact"]]
+      : [["codes", "Codes"], ["sops", "SOPs"], ["logo", "Logo"], ["contact", "Contact"]];
     return (
       <div>
         <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>
@@ -1038,7 +1049,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>
-              #{c.account_number || c.id} · {cnt.flhas} FLHAs · {cnt.sops} SOPs
+              #{c.account_number || c.id}
+              {c.app_type === "gatehouse" ? " · Gatehouse" : ` · ${cnt.flhas} FLHAs · ${cnt.sops} SOPs`}
               {" · "}{(rosterCounts[c.id]?.active || 0)}/{SEAT_CAP_BY_TIER[c.plan_tier] || SEAT_CAP_BY_TIER.basic} seats
             </div>
           </div>
@@ -1046,7 +1058,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             ? <span style={{ fontSize: 11, fontWeight: 800, color: "#DC2626", background: "#FEE2E2", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>SUSPENDED</span>
             : active
               ? <span style={{ fontSize: 11, fontWeight: 800, color: C.green, background: "#DCFCE7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>ACTIVE</span>
-              : <span style={{ fontSize: 11, fontWeight: 800, color: C.amberDark, background: "#FEF3C7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{doneCount(c)}/4</span>}
+              : <span style={{ fontSize: 11, fontWeight: 800, color: C.amberDark, background: "#FEF3C7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{doneCount(c)}/{Object.keys(steps(c)).length}</span>}
         </div>
         <Meter c={c} />
         <button

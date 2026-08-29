@@ -85,7 +85,7 @@ export default async function handler(req, res) {
     if (action === 'list_companies') {
       const { data, error } = await supabaseAdmin
         .from('companies')
-        .select('id, name, worker_code, supervisor_code, company_code, roster_enabled, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number, plan_tier')
+        .select('id, name, app_type, worker_code, supervisor_code, company_code, roster_enabled, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number, plan_tier')
         .order('id');
       if (error) return res.status(500).json({ error: 'Could not load companies.' });
       return res.status(200).json({ companies: data || [] });
