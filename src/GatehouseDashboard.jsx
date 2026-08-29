@@ -6,9 +6,68 @@ const C = {
   bad: "#B3452F", good: "#2E6E58",
 };
 
-function todayLocal() {
-  const d = new Date();
+function dateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function todayLocal() {
+  return dateStr(new Date());
+}
+function daysAgoLocal(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return dateStr(d);
+}
+
+// Stacked cash/cheque revenue-over-time bars — thin marks, a 2px surface
+// gap between the two stacked segments, a fixed-order 2-color legend
+// (cash always amber, cheque always the app's "good" green), and a total
+// label only when there are few enough bars for it to stay readable.
+function RevenueChart({ daily, C }) {
+  if (!daily || daily.length === 0) {
+    return <div style={{ color: C.slate, padding: "16px 0" }}>No transactions in this range yet.</div>;
+  }
+  const height = 190;
+  const baseline = height - 26;
+  const plotH = baseline - 18;
+  const maxVal = Math.max(1, ...daily.map((d) => d.cash + d.cheque));
+  const scale = plotH / maxVal;
+  const barGap = 6;
+  const barW = 26;
+  const chartW = Math.max(360, daily.length * (barW + barGap));
+  const showTotals = daily.length <= 16;
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <svg width={chartW} height={height} style={{ display: "block" }}>
+        <line x1={0} y1={baseline} x2={chartW} y2={baseline} stroke={C.line} strokeWidth={1} />
+        {daily.map((d, i) => {
+          const x = i * (barW + barGap);
+          const cashH = d.cash * scale;
+          const chequeH = d.cheque * scale;
+          const gap = chequeH > 0 && cashH > 0 ? 2 : 0;
+          const total = d.cash + d.cheque;
+          const topY = baseline - cashH - chequeH - gap;
+          return (
+            <g key={d.business_date}>
+              {cashH > 0 && <rect x={x} y={baseline - cashH} width={barW} height={cashH} rx={2} fill={C.amber} />}
+              {chequeH > 0 && <rect x={x} y={topY} width={barW} height={chequeH} rx={2} fill={C.good} />}
+              {total === 0 && <rect x={x} y={baseline - 2} width={barW} height={2} fill={C.line} />}
+              {showTotals && total > 0 && (
+                <text x={x + barW / 2} y={topY - 5} fontSize="8.5" textAnchor="middle" fill={C.slate}>${total.toFixed(0)}</text>
+              )}
+              <text x={x + barW / 2} y={baseline + 14} fontSize="8.5" textAnchor="middle" fill={C.slate}>
+                {d.business_date.slice(5)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12, color: C.slate }}>
+        <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.amber, borderRadius: 2, marginRight: 6, verticalAlign: -1 }} />Cash</span>
+        <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.good, borderRadius: 2, marginRight: 6, verticalAlign: -1 }} />Cheque</span>
+      </div>
+    </div>
+  );
 }
 
 export default function GatehouseDashboard({ companyId, companyName, userName, role, onLogout, token }) {
@@ -38,6 +97,14 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   const [receiptResults, setReceiptResults] = useState(null); // null = no search yet
   const [receiptSearching, setReceiptSearching] = useState(false);
   const [receiptError, setReceiptError] = useState("");
+
+  // Analytics tab — a date-range rollup, separate from the single-day view
+  // above. Supervisor/admin only (see the view toggle in the header).
+  const [view, setView] = useState("day"); // "day" | "analytics"
+  const [analyticsStationId, setAnalyticsStationId] = useState("all");
+  const [analyticsRangeDays, setAnalyticsRangeDays] = useState(30);
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/gatehouse", {
@@ -155,6 +222,23 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
     setReceiptSearching(false);
   }
 
+  function loadAnalytics() {
+    setAnalyticsLoading(true);
+    const periodStart = daysAgoLocal(analyticsRangeDays - 1);
+    const periodEnd = todayLocal();
+    fetch("/api/gatehouse", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get_analytics", token, companyId, stationId: analyticsStationId, periodStart, periodEnd }),
+    })
+      .then((r) => r.json())
+      .then((data) => { setAnalytics(data); setAnalyticsLoading(false); })
+      .catch(() => setAnalyticsLoading(false));
+  }
+  useEffect(() => {
+    if (view === "analytics") loadAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, analyticsStationId, analyticsRangeDays, companyId, token]);
+
   async function checkTrailers() {
     const res = await fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -202,10 +286,26 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
           <strong>Gatehouse</strong>
           <div style={{ fontSize: 12, color: C.slate }}>{companyName}{userName ? ` · ${userName}` : ""}</div>
         </div>
-        <button style={styles.ghost} onClick={onLogout}>Sign out</button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {(role === "supervisor" || role === "admin") && (
+            <div style={{ display: "flex", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden" }}>
+              <button
+                onClick={() => setView("day")}
+                style={{ border: "none", padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", background: view === "day" ? C.amber : C.white, color: view === "day" ? "#fff" : C.ink }}
+              >Today</button>
+              <button
+                onClick={() => setView("analytics")}
+                style={{ border: "none", padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", background: view === "analytics" ? C.amber : C.white, color: view === "analytics" ? "#fff" : C.ink }}
+              >Analytics</button>
+            </div>
+          )}
+          <button style={styles.ghost} onClick={onLogout}>Sign out</button>
+        </div>
       </div>
 
       <div style={styles.body}>
+      {view === "day" && (
+        <>
         <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
           <select style={styles.select} value={stationId || ""} onChange={(e) => setStationId(e.target.value)}>
             {(config.stations || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -371,6 +471,128 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
             )}
           </div>
         </div>
+        </>
+      )}
+
+      {view === "analytics" && (
+        <>
+        <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
+          <select style={styles.select} value={analyticsStationId} onChange={(e) => setAnalyticsStationId(e.target.value)}>
+            <option value="all">All stations</option>
+            {(config.stations || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          {[7, 30, 90].map((d) => (
+            <button
+              key={d}
+              style={analyticsRangeDays === d ? styles.btn : styles.ghost}
+              onClick={() => setAnalyticsRangeDays(d)}
+            >Last {d} days</button>
+          ))}
+        </div>
+
+        {analyticsLoading || !analytics ? <div style={{ padding: "20px 0" }}>Loading…</div> : (
+          <>
+            <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+              <div style={styles.tile}><div style={styles.label}>Total revenue</div><div style={{ fontSize: 22, fontWeight: 700, color: C.amber }}>${analytics.totals.grandTotal.toFixed(2)}</div></div>
+              <div style={styles.tile}><div style={styles.label}>Loads</div><div style={{ fontSize: 22, fontWeight: 700 }}>{analytics.totals.totalLoads}</div></div>
+              <div style={styles.tile}><div style={styles.label}>Redirected</div><div style={{ fontSize: 22, fontWeight: 700 }}>{analytics.totals.redirectedCount}</div></div>
+              <div style={styles.tile}>
+                <div style={styles.label}>Avg per load</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>
+                  ${(analytics.totals.totalLoads - analytics.totals.redirectedCount > 0
+                    ? analytics.totals.grandTotal / (analytics.totals.totalLoads - analytics.totals.redirectedCount)
+                    : 0).toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            <div style={styles.card}>
+              <div style={styles.label}>Revenue over time — {analytics.periodStart} to {analytics.periodEnd}</div>
+              <RevenueChart daily={analytics.daily} C={C} />
+            </div>
+
+            {analytics.tierBreakdown.length > 0 && (
+              <div style={styles.card}>
+                <div style={styles.label}>Loads by charge type</div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {analytics.tierBreakdown.map((row) => (
+                    <div key={row.label} style={{ ...styles.tile, flex: "0 0 auto", padding: "10px 14px" }}>
+                      <div style={{ fontSize: 13.5 }}>{row.label}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700 }}>{row.quantity}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analyticsStationId === "all" && analytics.stationTotals.length > 1 && (
+              <div style={styles.card}>
+                <div style={styles.label}>By station</div>
+                <table style={styles.table}>
+                  <thead><tr><th style={styles.th}>Station</th><th style={styles.th}>Loads</th><th style={styles.th}>Redirected</th><th style={styles.th}>Revenue</th></tr></thead>
+                  <tbody>
+                    {analytics.stationTotals.map((s) => (
+                      <tr key={s.station_id}>
+                        <td style={styles.td}>{s.name}</td>
+                        <td style={styles.td}>{s.loads}</td>
+                        <td style={styles.td}>{s.redirected}</td>
+                        <td style={styles.td}>${s.revenue.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {analytics.operatorActivity.length > 0 && (
+              <div style={styles.card}>
+                <div style={styles.label}>Operator activity</div>
+                <table style={styles.table}>
+                  <thead><tr><th style={styles.th}>Operator</th><th style={styles.th}>Loads</th><th style={styles.th}>Revenue</th></tr></thead>
+                  <tbody>
+                    {analytics.operatorActivity.map((o) => (
+                      <tr key={o.operator_name}>
+                        <td style={styles.td}>{o.operator_name}</td>
+                        <td style={styles.td}>{o.loads}</td>
+                        <td style={styles.td}>${o.revenue.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={styles.card}>
+              <div style={styles.label}>Reconciliation history</div>
+              {analytics.reconciliations.length === 0 ? (
+                <div style={{ color: C.slate, padding: "10px 0" }}>No reconciliations submitted in this range.</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={styles.table}>
+                    <thead><tr>
+                      <th style={styles.th}>Date</th><th style={styles.th}>Station</th><th style={styles.th}>Expected</th>
+                      <th style={styles.th}>Counted</th><th style={styles.th}>Variance</th><th style={styles.th}>Reviewed</th>
+                    </tr></thead>
+                    <tbody>
+                      {analytics.reconciliations.map((r) => (
+                        <tr key={r.id}>
+                          <td style={styles.td}>{r.business_date}</td>
+                          <td style={styles.td}>{r.station_name || "—"}</td>
+                          <td style={styles.td}>${Number(r.expected_cash).toFixed(2)}</td>
+                          <td style={styles.td}>${Number(r.cash_counted).toFixed(2)}</td>
+                          <td style={{ ...styles.td, color: Math.abs(r.variance) < 0.005 ? C.good : C.bad, fontWeight: 700 }}>${Number(r.variance).toFixed(2)}</td>
+                          <td style={styles.td}>{r.reviewed_by ? `✓ ${r.reviewed_by}` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        </>
+      )}
       </div>
     </div>
   );

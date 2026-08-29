@@ -522,6 +522,107 @@ export default async function handler(req, res) {
     return res.status(200).json({ transactions: withDetails });
   }
 
+  // ── Supervisor analytics — a date-range rollup across one station or all
+  // of them, for the "Analytics" tab on GatehouseDashboard.jsx. Aggregated
+  // in JS from the same rows the daily report already reads, same pattern
+  // as buildDailyReport/buildTierBreakdown above; no new trust surface —
+  // stationId (when given) is just an extra .eq() filter alongside the
+  // already-resolved companyId. ────────────────────────────────────────
+  if (action === 'get_analytics') {
+    const { stationId, periodStart, periodEnd } = req.body;
+    if (!periodStart || !periodEnd) return res.status(400).json({ error: 'Missing date range.' });
+
+    let txQuery = supabaseAdmin
+      .from('gatehouse_transactions')
+      .select('*')
+      .eq('company_id', companyId)
+      .gte('business_date', periodStart)
+      .lte('business_date', periodEnd);
+    let reconQuery = supabaseAdmin
+      .from('gatehouse_reconciliations')
+      .select('*')
+      .eq('company_id', companyId)
+      .gte('business_date', periodStart)
+      .lte('business_date', periodEnd);
+    if (stationId && stationId !== 'all') {
+      txQuery = txQuery.eq('station_id', stationId);
+      reconQuery = reconQuery.eq('station_id', stationId);
+    }
+
+    const [{ data: txRows, error: txErr }, { data: reconRows, error: reconErr }, { data: stations }] = await Promise.all([
+      txQuery.order('business_date', { ascending: true }),
+      reconQuery.order('business_date', { ascending: true }),
+      supabaseAdmin.from('gatehouse_stations').select('id, name').eq('company_id', companyId),
+    ]);
+    if (txErr || reconErr) return res.status(500).json({ error: 'Could not load analytics.' });
+
+    const stationNameById = Object.fromEntries((stations || []).map(s => [s.id, s.name]));
+    const transactions = txRows || [];
+
+    // One row per business_date: revenue split by payment method, loads,
+    // redirects — the series behind the revenue-over-time and redirected-
+    // loads-over-time charts.
+    const dailyMap = new Map();
+    for (const t of transactions) {
+      const d = dailyMap.get(t.business_date) || { business_date: t.business_date, cash: 0, cheque: 0, loads: 0, redirected: 0 };
+      d.loads += 1;
+      if (t.redirected) d.redirected += 1;
+      else if (t.payment_method === 'cash') d.cash += Number(t.amount || 0);
+      else if (t.payment_method === 'cheque') d.cheque += Number(t.amount || 0);
+      dailyMap.set(t.business_date, d);
+    }
+    const daily = [...dailyMap.values()].sort((a, b) => a.business_date.localeCompare(b.business_date));
+
+    // Per-station totals — only meaningful when stationId === 'all', but
+    // cheap to compute either way.
+    const stationMap = new Map();
+    for (const t of transactions) {
+      const s = stationMap.get(t.station_id) || { station_id: t.station_id, name: stationNameById[t.station_id] || 'Unknown', loads: 0, redirected: 0, revenue: 0 };
+      s.loads += 1;
+      if (t.redirected) s.redirected += 1;
+      else s.revenue += Number(t.amount || 0);
+      stationMap.set(t.station_id, s);
+    }
+    const stationTotals = [...stationMap.values()].sort((a, b) => b.revenue - a.revenue);
+
+    // Loads/revenue attributed to whoever was logged in when the ticket was
+    // issued — operator_name is only populated once individual identity is
+    // in use (named roster login, or the booth's editable operator field);
+    // rows before that grouped under "Unattributed" rather than silently
+    // dropped.
+    const opMap = new Map();
+    for (const t of transactions) {
+      const name = t.operator_name || 'Unattributed';
+      const o = opMap.get(name) || { operator_name: name, loads: 0, revenue: 0 };
+      o.loads += 1;
+      if (!t.redirected) o.revenue += Number(t.amount || 0);
+      opMap.set(name, o);
+    }
+    const operatorActivity = [...opMap.values()].sort((a, b) => b.loads - a.loads);
+
+    const cashTotal = transactions.filter(t => !t.redirected && t.payment_method === 'cash').reduce((s, t) => s + Number(t.amount || 0), 0);
+    const chequeTotal = transactions.filter(t => !t.redirected && t.payment_method === 'cheque').reduce((s, t) => s + Number(t.amount || 0), 0);
+    const redirectedCount = transactions.filter(t => t.redirected).length;
+
+    const reconciliations = (reconRows || [])
+      .map(r => ({ ...r, station_name: stationNameById[r.station_id] || null }))
+      .sort((a, b) => b.business_date.localeCompare(a.business_date));
+
+    return res.status(200).json({
+      periodStart,
+      periodEnd,
+      totals: {
+        cashTotal, chequeTotal, grandTotal: cashTotal + chequeTotal,
+        totalLoads: transactions.length, redirectedCount,
+      },
+      daily,
+      tierBreakdown: buildTierBreakdown(transactions),
+      stationTotals,
+      operatorActivity,
+      reconciliations,
+    });
+  }
+
   // ── Cash reconciliation ────────────────────────────────────────────────
   if (action === 'get_reconciliation') {
     const { stationId, businessDate } = req.body;
