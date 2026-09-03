@@ -130,14 +130,24 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { amendingId, record, clientSubmissionId, aiEditSignal } = req.body;
+      const { amendingId, record, clientSubmissionId, aiEditSignal, workerName } = req.body;
       if (!record) return res.status(400).json({ error: 'Missing record.' });
 
       if (amendingId) {
         // Confirm this record actually belongs to the worker's own company first.
         const { data: existing, error: findErr } = await supabaseAdmin
-          .from('flhas').select('id, company_id').eq('id', amendingId).limit(1);
+          .from('flhas').select('id, company_id, worker_name').eq('id', amendingId).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
+          return res.status(403).json({ error: 'Not allowed to amend this record.' });
+        }
+        // Same identity check the `resume` action already applies when
+        // deciding which of today's records a worker is even shown to amend
+        // (only those matching their typed name) — enforced here too, so a
+        // worker can't reach a coworker's FLHA by supplying its id directly
+        // instead of going through `resume`.
+        const claimedName = (workerName || '').trim().toLowerCase();
+        const ownerName = (existing[0].worker_name || '').trim().toLowerCase();
+        if (!claimedName || claimedName !== ownerName) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
         const { error } = await supabaseAdmin.from('flhas').update(record).eq('id', amendingId);
