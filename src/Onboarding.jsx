@@ -456,7 +456,7 @@ export default function Onboarding() {
             <label style={styles.fileBtn}>
               <UploadCloud size={16} color={C.text.muted} style={{ flexShrink: 0 }} />
               {logoFile ? logoFile.name : "Choose a file…"}
-              <input type="file" onChange={handleLogoFile} accept=".png,.jpg,.jpeg,.svg" style={{ display: "none" }} />
+              <input type="file" onChange={handleLogoFile} accept=".png,.jpg,.jpeg" style={{ display: "none" }} />
             </label>
             <div style={{ marginBottom: 6 }} />
           </div>
