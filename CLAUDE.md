@@ -98,6 +98,7 @@ connected service, should be reachable without authentication.
 | `secret-hygiene-scanner` | Scans tracked files for hardcoded credentials and confirms `.gitignore` covers env files. |
 | `public-url-discipline-auditor` | Confirms code never builds an unsigned public URL for a private bucket — this exact bug class has recurred twice in this repo's history (commits `9553f19`, `378b826`). |
 | `external-surface-auditor` | Checks Vercel preview-deployment protection and Stripe webhook signature verification — exposure that lives in connected services, not source files. |
+| `pentest-mindset-auditor` | Attacker's-mindset sweep of everything the other four don't cover: auth/session forgery, injection, XSS, IDOR within a company, file-upload abuse, secrets leaking into the client bundle, rate limiting/DoS, dependency vulnerabilities (`npm audit`), verbose error leakage, and security headers. Read-only — reports, does not fix. |
 
 **Each agent's file states exactly what it may fix itself vs. what needs a
 human.** The dividing line is whether the fix can only ever *tighten*
@@ -108,7 +109,7 @@ access-control judgment call, touches production availability, or means a
 secret needs rotating — those get reported, not silently fixed.
 
 **Runs every 3 days** via a recurring trigger: a fresh session applies all
-five checklists (manually, per the Agent-tool limitation noted above),
+six checklists (manually, per the Agent-tool limitation noted above),
 fixes what's safe to fix, and re-runs the checks once after fixing to
 confirm clean before stopping — it doesn't loop indefinitely. Code-level
 fixes still go through branch → draft PR, same as everywhere else in this
