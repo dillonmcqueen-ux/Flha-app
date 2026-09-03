@@ -17,6 +17,41 @@ const supabaseAdmin = createClient(
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// Nothing legitimate sent through this endpoint gets close to this — the
+// largest observed caller (AdminPanel.jsx's SOP condenser) already caps its
+// pasted-document input at 12,000 characters client-side before adding its
+// own ~1,500 characters of instructions. This is a server-side backstop
+// against an arbitrary-length prompt run up for cost/DoS, not a tuned limit.
+const MAX_PROMPT_CHARS = 40000;
+
+// Fixed-window rate limit (see docs/schema/ai-rate-limit-migration.sql) —
+// every call to this endpoint spends real Anthropic API cost, and unlike
+// every other endpoint in this app, nothing else here bounds how often a
+// single valid session can call it. Keyed by roster userId when the
+// session identifies one, else by companyId (shared-code sessions share a
+// bucket, same granularity the session itself carries).
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_LIMIT_MAX_REQUESTS = 20;
+
+async function checkRateLimit(key) {
+  const now = Date.now();
+  const { data: rows } = await supabaseAdmin
+    .from('ai_rate_limits')
+    .select('window_start, count')
+    .eq('key', key)
+    .limit(1);
+  const row = rows && rows[0];
+  if (!row || now - new Date(row.window_start).getTime() > RATE_LIMIT_WINDOW_MS) {
+    await supabaseAdmin
+      .from('ai_rate_limits')
+      .upsert({ key, window_start: new Date(now).toISOString(), count: 1 });
+    return true;
+  }
+  if (row.count >= RATE_LIMIT_MAX_REQUESTS) return false;
+  await supabaseAdmin.from('ai_rate_limits').update({ count: row.count + 1 }).eq('key', key);
+  return true;
+}
+
 async function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
@@ -61,6 +96,15 @@ export default async function handler(req, res) {
 
   if (!prompt) {
     return res.status(400).json({ error: "Missing prompt" });
+  }
+  if (typeof prompt !== 'string' || prompt.length > MAX_PROMPT_CHARS) {
+    return res.status(400).json({ error: "Prompt too long." });
+  }
+
+  const rateLimitKey = session.userId ? `user:${session.userId}` : `company:${session.companyId}`;
+  const allowed = await checkRateLimit(rateLimitKey);
+  if (!allowed) {
+    return res.status(429).json({ error: "Too many AI requests. Please wait a few minutes and try again." });
   }
 
   try {
