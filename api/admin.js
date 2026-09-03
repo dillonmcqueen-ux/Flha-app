@@ -26,6 +26,15 @@ const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SEC
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// Hash-then-compare so mismatched-length inputs never short-circuit —
+// timingSafeEqual itself throws on unequal-length buffers, and fixed-length
+// digests sidestep that while still comparing in constant time.
+function safeEqual(a, b) {
+  const ah = crypto.createHash('sha256').update(String(a)).digest();
+  const bh = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ah, bh);
+}
+
 async function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
@@ -33,7 +42,7 @@ async function verifySession(token) {
     .createHmac('sha256', process.env.SESSION_SECRET)
     .update(data)
     .digest('base64url');
-  if (sig !== expectedSig) return null;
+  if (!safeEqual(sig, expectedSig)) return null;
   let payload;
   try {
     payload = JSON.parse(Buffer.from(data, 'base64url').toString());
