@@ -303,7 +303,7 @@ export default async function handler(req, res) {
         )
         .select()
         .single();
-      if (error) return res.status(500).json({ error: "Couldn't generate report: " + error.message });
+      if (error) { console.error("equipment report save failed:", error.message); return res.status(500).json({ error: "Couldn't generate report. Try again." }); }
 
       const { data: coRows } = await supabaseAdmin.from('companies').select('name, logo_url').eq('id', companyId).limit(1);
       const company = coRows && coRows[0];
@@ -314,7 +314,8 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: 'Unknown action.' });
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Server error. Please try again.' });
+    console.error("equipmentreports handler failed:", e.message);
+    return res.status(500).json({ error: 'Server error. Please try again.' });
   }
 }
 

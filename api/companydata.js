@@ -260,7 +260,7 @@ export default async function handler(req, res) {
         .insert({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt })
         .select('id, name, role, active, created_at')
         .single();
-      if (error) return res.status(500).json({ error: "Couldn't add to the roster: " + error.message });
+      if (error) { console.error("roster add failed:", error.message); return res.status(500).json({ error: "Couldn't add to the roster. Try again." }); }
       return res.status(200).json({ ok: true, member: data, pin });
     }
 
@@ -394,7 +394,7 @@ export default async function handler(req, res) {
       const rows = policies.filter(p => (p || '').trim()).map(policy_text => ({ company_id: companyId, policy_text: policy_text.trim() }));
       if (rows.length === 0) return res.status(400).json({ error: 'No valid policies.' });
       const { error } = await supabaseAdmin.from('sops').insert(rows);
-      if (error) return res.status(500).json({ error: "Couldn't add policies: " + error.message });
+      if (error) { console.error("sop policies add failed:", error.message); return res.status(500).json({ error: "Couldn't add policies. Try again." }); }
       return res.status(200).json({ ok: true, count: rows.length });
     }
 
@@ -442,7 +442,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true, alreadyExists: true });
       }
       const { data, error } = await supabaseAdmin.from('sites').insert({ company_id: companyId, name }).select('id, name').single();
-      if (error) return res.status(500).json({ error: "Couldn't add site: " + error.message });
+      if (error) { console.error("site add failed:", error.message); return res.status(500).json({ error: "Couldn't add site. Try again." }); }
       return res.status(200).json({ ok: true, site: data });
     }
 
@@ -480,7 +480,7 @@ export default async function handler(req, res) {
         year: (year || '').trim(), make: (make || '').trim(), model: (model || '').trim(),
         type: (type || '').trim(), unit_number: (unitNumber || '').trim(),
       });
-      if (error) return res.status(500).json({ error: "Couldn't add equipment: " + error.message });
+      if (error) { console.error("equipment add failed:", error.message); return res.status(500).json({ error: "Couldn't add equipment. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -587,7 +587,7 @@ export default async function handler(req, res) {
         options: fieldType === 'dropdown' ? (options || '').trim() : '',
         required: !!required,
       });
-      if (error) return res.status(500).json({ error: "Couldn't add field: " + error.message });
+      if (error) { console.error("custom field add failed:", error.message); return res.status(500).json({ error: "Couldn't add field. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -638,7 +638,7 @@ export default async function handler(req, res) {
           terminology_notes: (terminologyNotes || '').trim(),
           updated_at: new Date().toISOString(),
         }, { onConflict: 'company_id' });
-      if (error) return res.status(500).json({ error: "Couldn't save company profile: " + error.message });
+      if (error) { console.error("company profile save failed:", error.message); return res.status(500).json({ error: "Couldn't save company profile. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -895,7 +895,7 @@ export default async function handler(req, res) {
         )
         .select()
         .single();
-      if (error) return res.status(500).json({ error: "Couldn't generate report: " + error.message });
+      if (error) { console.error("time clock report save failed:", error.message); return res.status(500).json({ error: "Couldn't generate report. Try again." }); }
 
       const { data: coRows } = await supabaseAdmin.from('companies').select('name, logo_url').eq('id', companyId).limit(1);
       const company = coRows && coRows[0];

@@ -334,7 +334,7 @@ export default async function handler(req, res) {
         company_code: companyCode.trim(),
         account_number: acct,
       });
-      if (error) return res.status(500).json({ error: "Couldn't add company: " + error.message });
+      if (error) { console.error("create_company failed:", error.message); return res.status(500).json({ error: "Couldn't add company. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -377,7 +377,7 @@ export default async function handler(req, res) {
       }
 
       const { error } = await supabaseAdmin.from('companies').update(updates).eq('id', companyId);
-      if (error) return res.status(500).json({ error: "Couldn't update codes: " + error.message });
+      if (error) { console.error("update codes failed:", error.message); return res.status(500).json({ error: "Couldn't update codes. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -393,7 +393,7 @@ export default async function handler(req, res) {
         address: (profile.address || '').trim(),
         logo_url: profile.logo_url || null,
       }).eq('id', companyId);
-      if (error) return res.status(500).json({ error: "Couldn't save: " + error.message });
+      if (error) { console.error("company field save failed:", error.message); return res.status(500).json({ error: "Couldn't save. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -402,7 +402,7 @@ export default async function handler(req, res) {
       const { companyId, suspended } = req.body;
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { error } = await supabaseAdmin.from('companies').update({ suspended: !!suspended }).eq('id', companyId);
-      if (error) return res.status(500).json({ error: "Couldn't update: " + error.message });
+      if (error) { console.error("company update failed:", error.message); return res.status(500).json({ error: "Couldn't update. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
@@ -483,10 +483,10 @@ export default async function handler(req, res) {
       ];
       for (const step of cleanupSteps) {
         const { error: stepError } = await step();
-        if (stepError) return res.status(500).json({ error: "Couldn't delete: " + stepError.message });
+        if (stepError) { console.error("company delete cleanup step failed:", stepError.message); return res.status(500).json({ error: "Couldn't delete. Try again." }); }
       }
       const { error } = await supabaseAdmin.from('companies').delete().eq('id', companyId);
-      if (error) return res.status(500).json({ error: "Couldn't delete: " + error.message });
+      if (error) { console.error("company delete failed:", error.message); return res.status(500).json({ error: "Couldn't delete. Try again." }); }
       return res.status(200).json({ ok: true });
     }
 
