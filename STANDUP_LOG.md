@@ -59,6 +59,10 @@ this file stays short and easy to scan.
     links on mobile).
 - The Stripe billing dashboard's webhook address, RLS coverage, storage bucket privacy, and the
   Vercel Pro-plan function-cap unwind are all confirmed done — no action needed on any of those.
+- FYI only, no action needed: a new Supabase Storage bucket, `gatehouse-uploads` (cheque photos
+  for the Gatehouse/transfer-station feature), was found during the 2026-09-03 security audit.
+  It's already private and already wired through the standard signed-URL pattern — just noting
+  it exists since it wasn't on the previously known-good bucket list.
 
 ## Repeating Issues
 
@@ -77,3 +81,8 @@ this file stays short and easy to scan.
 - Corrected a stale claim in Outstanding Items: offline support for FLHA, Inspection,
   MonthlyInspection, and CustomForm was already finished, not still pending — verified directly
   against the code rather than trusting the old note.
+- Ran the full 5-point recurring security audit (storage exposure, RLS coverage, secret hygiene,
+  public URL discipline, external surface/Vercel+Stripe). All five came back clean — no fixes
+  needed. One FYI: a new Storage bucket (`gatehouse-uploads`) turned up that wasn't on the
+  previously known-good list; it's already private and correctly signed, just noted above for
+  awareness.
