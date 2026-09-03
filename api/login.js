@@ -32,6 +32,44 @@ const ROSTER_TICKET_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_LOCKOUT_AFTER_ATTEMPTS = 8;
 const PIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
+// Real company/worker/supervisor codes observed live top out at 13
+// characters — anything at or above this length can't be a legitimate
+// company code, so throttling attempts at this length can never catch
+// ordinary worker/supervisor login traffic (see the comment on
+// verifyMasterCode for why the shared login endpoint itself isn't
+// rate-limited). Codes below this length are never counted at all.
+const MASTER_CODE_THROTTLE_MIN_LENGTH = 14;
+const MASTER_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MASTER_CODE_THROTTLE_MAX_ATTEMPTS = 20;
+
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.trim()) return fwd.split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+// Fixed-window per-IP counter for long (master-code-shaped) attempts only
+// — see docs/schema/master-code-throttle-migration.sql. Same non-atomic
+// read-then-write discipline as the existing PIN lockout.
+async function checkMasterCodeThrottle(ip) {
+  const now = Date.now();
+  const { data: rows } = await supabaseAdmin
+    .from('master_code_ip_limits')
+    .select('window_start, count')
+    .eq('ip', ip)
+    .limit(1);
+  const row = rows && rows[0];
+  if (!row || now - new Date(row.window_start).getTime() > MASTER_CODE_THROTTLE_WINDOW_MS) {
+    await supabaseAdmin
+      .from('master_code_ip_limits')
+      .upsert({ ip, window_start: new Date(now).toISOString(), count: 1 });
+    return true;
+  }
+  if (row.count >= MASTER_CODE_THROTTLE_MAX_ATTEMPTS) return false;
+  await supabaseAdmin.from('master_code_ip_limits').update({ count: row.count + 1 }).eq('ip', ip);
+  return true;
+}
+
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
 // digests sidestep that while still comparing in constant time.
@@ -154,12 +192,15 @@ function verifyMasterTicket(ticket) {
   }
 }
 
-// Checked against every worker/supervisor login attempt (see the plan doc
-// for why this isn't rate-limited: it's compared on every normal login
-// too, so a lockout here would eventually catch ordinary traffic). Stored
-// hashed, compared in constant time, and every successful use is logged
-// in master_login_log — that log is the visibility backstop in place of
-// a lockout.
+// Checked against every worker/supervisor login attempt — it's compared
+// on every normal login too, so a lockout on this shared endpoint would
+// eventually catch ordinary traffic (real company/worker/supervisor
+// codes, typos included). Instead, MASTER_CODE_THROTTLE_MIN_LENGTH above
+// throttles per-IP only for attempts long enough to be a plausible
+// master-code guess — see checkMasterCodeThrottle. Stored hashed,
+// compared in constant time, and every successful use is logged in
+// master_login_log — that log is the visibility backstop for whatever a
+// throttle alone doesn't catch.
 async function verifyMasterCode(entered) {
   const { data, error } = await supabaseAdmin
     .from('app_settings')
@@ -700,6 +741,12 @@ export default async function handler(req, res) {
   }
 
   // ── Master code — checked before any company lookup, for either role ────
+  // Long-code throttle only (see MASTER_CODE_THROTTLE_MIN_LENGTH above) —
+  // never applied to ordinary short company/worker/supervisor codes below.
+  if (entered.length >= MASTER_CODE_THROTTLE_MIN_LENGTH) {
+    const allowed = await checkMasterCodeThrottle(clientIp(req));
+    if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+  }
   if (await verifyMasterCode(entered)) {
     const { data: companies, error: coErr } = await supabaseAdmin.from('companies').select('id, name').order('name', { ascending: true });
     if (coErr) return res.status(500).json({ error: 'Connection error. Please try again.' });

@@ -118,9 +118,18 @@ export default async function handler(req, res) {
     // reach this action. ────────────────────────────────────────────────
     if (action === 'set_master_code') {
       const { newCode } = req.body;
-      if (!newCode || !String(newCode).trim()) return res.status(400).json({ error: 'Enter a code.' });
+      const trimmedCode = String(newCode || '').trim();
+      if (!trimmedCode) return res.status(400).json({ error: 'Enter a code.' });
+      // No lockout guards this code on the login side (see api/login.js's
+      // verifyMasterCode comment) — its length/entropy is the real defense
+      // against brute force, so it needs to actually be long. Matches the
+      // MASTER_CODE_THROTTLE_MIN_LENGTH threshold api/login.js throttles
+      // at, with margin above it.
+      if (trimmedCode.length < 20) {
+        return res.status(400).json({ error: 'Master code must be at least 20 characters — it has no login attempt limit, so its length is what keeps it safe from guessing.' });
+      }
       const salt = genSalt();
-      const hash = hashPin(String(newCode).trim(), salt);
+      const hash = hashPin(trimmedCode, salt);
       const { error } = await supabaseAdmin
         .from('app_settings')
         .upsert({ id: 1, master_code_hash: hash, master_code_salt: salt, updated_at: new Date().toISOString() });
@@ -129,7 +138,7 @@ export default async function handler(req, res) {
     }
 
     // ── Recent master-code logins, newest first — the visibility backstop
-    // in place of rate-limiting the master code itself (see api/login.js).
+    // alongside the per-IP long-code throttle (see api/login.js).
     if (action === 'list_master_login_log') {
       const { data: logs, error: logErr } = await supabaseAdmin
         .from('master_login_log')
