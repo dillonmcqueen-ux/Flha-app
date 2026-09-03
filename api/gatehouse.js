@@ -431,7 +431,10 @@ export default async function handler(req, res) {
       if (!txErr) { receiptNumber = candidate; insertError = null; break; }
       insertError = txErr; // unique-constraint race — loop retries with a fresh claim
     }
-    if (receiptNumber === null) return res.status(500).json({ error: insertError?.message || 'Could not save transaction — please try again.' });
+    if (receiptNumber === null) {
+      if (insertError) console.error('gatehouse transaction insert failed:', insertError.message);
+      return res.status(500).json({ error: 'Could not save transaction — please try again.' });
+    }
 
     if (cleanPlate) {
       await supabaseAdmin.from('gatehouse_vehicles').upsert(
@@ -744,7 +747,8 @@ export default async function handler(req, res) {
         attachments: [{ filename: gatehouseReportFilename(report), content: pdfBase64 }],
       });
     } catch (e) {
-      return res.status(500).json({ error: `Report generated but the email failed to send: ${e.message}` });
+      console.error('gatehouse report email failed:', e.message);
+      return res.status(500).json({ error: 'Report generated but the email failed to send. Try again.' });
     }
     return res.status(200).json({ ok: true });
   }

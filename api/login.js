@@ -646,7 +646,7 @@ export default async function handler(req, res) {
 
     if (rows.length > 0) {
       const { error: insErr } = await supabaseAdmin.from('equipment').insert(rows);
-      if (insErr) return res.status(500).json({ error: "Couldn't save equipment: " + insErr.message });
+      if (insErr) { console.error("claim equipment save failed:", insErr.message); return res.status(500).json({ error: "Couldn't save equipment. Try again." }); }
     }
     // Clear the draft either way (empty confirm = "skip equipment"), so a
     // page refresh doesn't re-offer the same draft for a second insert.
@@ -663,7 +663,7 @@ export default async function handler(req, res) {
     const rows = policies.filter((p) => (p || '').trim()).map((policy_text) => ({ company_id: request.created_company_id, policy_text: policy_text.trim() }));
     if (rows.length > 0) {
       const { error: insErr } = await supabaseAdmin.from('sops').insert(rows);
-      if (insErr) return res.status(500).json({ error: "Couldn't save SOPs: " + insErr.message });
+      if (insErr) { console.error("claim sops save failed:", insErr.message); return res.status(500).json({ error: "Couldn't save SOPs. Try again." }); }
     }
     await supabaseAdmin.from('onboarding_requests').update({ sop_drafts: [] }).eq('id', request.id);
     return res.status(200).json({ ok: true, added: rows.length });

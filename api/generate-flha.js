@@ -90,7 +90,8 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(500).json({ error: `Anthropic API error: ${response.status} ${errText}` });
+      console.error(`Anthropic API error: ${response.status} ${errText}`);
+      return res.status(500).json({ error: 'AI generation failed. Try again.' });
     }
 
     const data = await response.json();
@@ -102,6 +103,7 @@ export default async function handler(req, res) {
 
     res.status(200).json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('generate-flha handler failed:', err.message);
+    res.status(500).json({ error: 'AI generation failed. Try again.' });
   }
 }
