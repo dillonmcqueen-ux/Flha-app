@@ -103,7 +103,7 @@ function verifyTicket(ticket) {
     .createHmac('sha256', process.env.SESSION_SECRET)
     .update(data)
     .digest('base64url');
-  if (sig !== expectedSig) return null;
+  if (!safeEqual(sig, expectedSig)) return null;
   try {
     const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
     if (payload.purpose !== 'roster') return null;
@@ -143,7 +143,7 @@ function verifyMasterTicket(ticket) {
     .createHmac('sha256', process.env.SESSION_SECRET)
     .update(data)
     .digest('base64url');
-  if (sig !== expectedSig) return null;
+  if (!safeEqual(sig, expectedSig)) return null;
   try {
     const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
     if (payload.purpose !== 'master') return null;
