@@ -860,6 +860,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             action: "submit",
             token,
             amendingId,
+            workerName,
             record: {
               job_site: jobSite,
               task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),

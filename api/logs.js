@@ -46,15 +46,18 @@ async function verifySession(token) {
 
   // Individually-identified (roster) sessions: re-check `active` on every
   // request, so deactivating someone takes effect on their very next call
-  // instead of waiting out the token's TTL.
+  // instead of waiting out the token's TTL. `name` rides along so
+  // sign_late_toolbox below can bind a late signature to the actual
+  // authenticated identity instead of trusting whatever name the client
+  // sends, for companies where the session actually identifies a person.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 // flha-reports is a private bucket — the DB still stores a "public"-shaped
@@ -317,8 +320,14 @@ export default async function handler(req, res) {
       const existing = rows[0];
       if (existing.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
 
+      // Individually-identified (roster) sessions have a real authenticated
+      // name — use that instead of whatever the client sent, so a signed-in
+      // worker can't attach a late signature under a coworker's name. A
+      // shared-code session has no such identity to bind to (same as the
+      // paper sign-in sheet this replaces), so it keeps the typed name.
+      const attendeeName = session.name ? session.name : name.trim();
       const attendees = [...(existing.attendees_json || []), {
-        name: name.trim(),
+        name: attendeeName,
         signature,
         signedLate: true,
         signedAt: new Date().toISOString(),
