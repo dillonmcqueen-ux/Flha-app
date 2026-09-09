@@ -10,6 +10,7 @@ import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
 import TimeClockMap from "./TimeClockMap";
+import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
@@ -51,23 +52,6 @@ function toDatetimeLocal(iso) {
   const d = new Date(iso);
   const pad = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// Best-effort GPS fix for a punch. Never blocks the punch: resolves to null
-// coordinates on denied permission, timeout, or an unsupported browser.
-// The timeout starts counting before the browser's permission prompt even
-// appears, so it has to cover prompt-response time too, not just the GPS
-// fix — 8s was too tight and was timing out to null on real devices even
-// when permission was granted; bumped to 20s.
-function getPunchLocation() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve({ lat: null, lng: null, accuracy: null });
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      () => resolve({ lat: null, lng: null, accuracy: null }),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-    );
-  });
 }
 
 // Uses website/style.css's --risk-* scale verbatim (Low/Medium/High map to

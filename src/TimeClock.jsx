@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getPunchLocation } from "./punchLocation";
 
 function fmtClock(iso) {
   return new Date(iso).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" });
@@ -12,25 +13,6 @@ function fmtElapsed(ms) {
   const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
   const sec = String(totalSec % 60).padStart(2, "0");
   return `${h}:${m}:${sec}`;
-}
-
-// Best-effort GPS fix for a punch. Never blocks the punch: resolves to null
-// coordinates on denied permission, timeout, or an unsupported browser.
-// The timeout has to cover more than just the GPS fix itself — it starts
-// counting the instant getCurrentPosition is called, which is before the
-// browser's permission prompt even appears, so a worker taking a few
-// seconds to read and tap "Allow" eats into it too. 8s was too tight and
-// was timing out (falling back to null) on real devices even when the
-// worker granted permission — bumped to 20s to give the prompt + fix room.
-function getPunchLocation() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve({ lat: null, lng: null, accuracy: null });
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      () => resolve({ lat: null, lng: null, accuracy: null }),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-    );
-  });
 }
 
 export default function TimeClock({ companyId, companyName, userName = "", userId, onBack, token }) {
