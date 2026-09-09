@@ -1544,6 +1544,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [timeClockEntries, setTimeClockEntries] = useState([]);
   const [loadingTimeClockEntries, setLoadingTimeClockEntries] = useState(false);
   const [timeClockWeekLabel, setTimeClockWeekLabel] = useState("");
+  const [mapFilterPersonId, setMapFilterPersonId] = useState("");
+  const [mapFilterDate, setMapFilterDate] = useState("");
   const [editingEntryId, setEditingEntryId] = useState(null);
   const [editEntryForm, setEditEntryForm] = useState({ clockIn: "", clockOut: "" });
   const [savingEntry, setSavingEntry] = useState(false);
@@ -4439,11 +4441,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
                 Captured at the moment of clock in/out. Green = clock in, red = clock out. Manual entries have no location.
               </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <select
+                  value={mapFilterPersonId}
+                  onChange={e => setMapFilterPersonId(e.target.value)}
+                  style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", background: C.panelInset, color: C.text.body, cursor: "pointer" }}
+                >
+                  <option value="">All People</option>
+                  {timeClockRoster.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <input
+                  type="date"
+                  value={mapFilterDate}
+                  onChange={e => setMapFilterDate(e.target.value)}
+                  style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", background: C.panelInset, color: C.text.body, colorScheme: "dark" }}
+                />
+                {(mapFilterPersonId || mapFilterDate) && (
+                  <button
+                    onClick={() => { setMapFilterPersonId(""); setMapFilterDate(""); }}
+                    style={{ background: "transparent", color: "#A1A1AA", border: "1.5px solid #242424", borderRadius: 7, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               {loadingTimeClockEntries ? (
                 <div style={{ textAlign: "center", padding: "28px 0", color: "#9CA3AF" }}>Loading…</div>
               ) : (
                 <TimeClockMap
-                  entries={timeClockEntries}
+                  entries={timeClockEntries.filter(e => {
+                    if (mapFilterPersonId && e.roster_id !== mapFilterPersonId) return false;
+                    if (mapFilterDate) {
+                      const inDate = e.clock_in ? new Date(e.clock_in).toLocaleDateString("en-CA") : null;
+                      const outDate = e.clock_out ? new Date(e.clock_out).toLocaleDateString("en-CA") : null;
+                      if (inDate !== mapFilterDate && outDate !== mapFilterDate) return false;
+                    }
+                    return true;
+                  })}
                   rosterById={Object.fromEntries(timeClockRoster.map(m => [m.id, m]))}
                 />
               )}
