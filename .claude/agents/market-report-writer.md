@@ -60,7 +60,15 @@ Lead with the TL;DR so it's readable without expanding anything. This
 Slack-ready text is what gets sent as the actual message — hand it back
 clearly labeled so it can be posted as-is.
 
-Do not commit or push the report file; it's local to this run. (If FORA
-later decides these reports should be versioned in the repo, that's a
-deliberate follow-up change to this agent's instructions, not something to
-do unprompted.)
+## Committing the report
+
+This session's stop hook requires a clean working tree, so the report file
+can't be left untracked. After writing it and sending the Slack DM: create
+a branch (e.g. `claude/weekly-competitive-report-<date>`), commit just
+`docs/marketing/reports/<date>.md`, push it, and open a **draft** PR
+against `main` — same branch → commit → push → draft-PR pattern as
+everywhere else in this repo, kept for a human to skim and merge at their
+leisure rather than auto-merging a business-intel doc. Don't commit
+directly to `main`. The `_scratch/findings-<date>.md` file from
+`competitive-intel-researcher` is a working input, not a deliverable —
+delete it (or leave it untracked and remove it) rather than committing it.
