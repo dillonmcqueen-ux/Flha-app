@@ -9,6 +9,8 @@ import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionP
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
+import TimeClockMap from "./TimeClockMap";
+import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
@@ -16,7 +18,7 @@ import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW 
 import {
   HardHat, Wrench, ShieldAlert, Flag, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
-  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound,
+  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -1535,6 +1537,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [myTimeStatus, setMyTimeStatus] = useState(null);
   const [myTimeLoading, setMyTimeLoading] = useState(true);
   const [myTimeWorking, setMyTimeWorking] = useState(false);
+  const [myTimeGettingLocation, setMyTimeGettingLocation] = useState(false);
   const [myTimeError, setMyTimeError] = useState("");
   const [myTimeNow, setMyTimeNow] = useState(Date.now());
   const [timeClockRoster, setTimeClockRoster] = useState([]);
@@ -2100,10 +2103,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const toggleMyClock = async () => {
     setMyTimeError("");
     setMyTimeWorking(true);
+    setMyTimeGettingLocation(true);
     try {
+      const loc = await getPunchLocation();
+      setMyTimeGettingLocation(false);
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: myTimeStatus?.open ? "clock_out" : "clock_in", token }),
+        body: JSON.stringify({ action: myTimeStatus?.open ? "clock_out" : "clock_in", token, lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy }),
       });
       const data = await res.json();
       if (!res.ok) { setMyTimeError(data.error || "Something went wrong."); setMyTimeWorking(false); return; }
@@ -4418,13 +4424,30 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                       fontWeight: 800, fontSize: 15, color: "#fff",
                       background: myTimeWorking ? "#71717A" : myTimeStatus?.open ? "#DC2626" : "#16A34A",
                     }}>
-                      {myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
+                      {myTimeGettingLocation ? "Getting location…" : myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
                     </button>
                     {myTimeError && <div style={{ marginTop: 10, color: "#DC2626", fontSize: 13, fontWeight: 600 }}>{myTimeError}</div>}
                   </>
                 )}
               </div>
             )}
+
+            <div style={styles.card}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
+                Punch Locations{timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}
+              </div>
+              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
+                Captured at the moment of clock in/out. Green = clock in, red = clock out. Manual entries have no location.
+              </div>
+              {loadingTimeClockEntries ? (
+                <div style={{ textAlign: "center", padding: "28px 0", color: "#9CA3AF" }}>Loading…</div>
+              ) : (
+                <TimeClockMap
+                  entries={timeClockEntries}
+                  rosterById={Object.fromEntries(timeClockRoster.map(m => [m.id, m]))}
+                />
+              )}
+            </div>
 
             <div style={styles.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
@@ -4505,9 +4528,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                                   <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4" }}>
                                     {new Date(e.clock_in).toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric" })}
                                   </div>
-                                  <div style={{ fontSize: 12, color: "#A1A1AA" }}>
-                                    {new Date(e.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {e.clock_out ? new Date(e.clock_out).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "in progress"}
-                                    {e.edited_at ? " · edited" : ""}
+                                  <div style={{ fontSize: 12, color: "#A1A1AA", display: "flex", alignItems: "center", gap: 5 }}>
+                                    <span>
+                                      {new Date(e.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {e.clock_out ? new Date(e.clock_out).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "in progress"}
+                                      {e.edited_at ? " · edited" : ""}
+                                    </span>
+                                    {typeof e.clock_in_lat === "number" ? (
+                                      <MapPin size={12} color="#38BDF8" title="Location captured" />
+                                    ) : (
+                                      <span style={{ fontSize: 11, color: "#71717A" }}>· no location</span>
+                                    )}
                                   </div>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

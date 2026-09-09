@@ -694,9 +694,13 @@ export default async function handler(req, res) {
     // ── Time Clock: self-service (any registered roster user) ───────────
     if (action === 'clock_in') {
       if (!session.userId) return res.status(403).json({ error: 'Not available for this login.' });
+      const { lat, lng, accuracy } = req.body;
       const { error } = await supabaseAdmin.from('time_clock_entries').insert({
         company_id: session.companyId,
         roster_id: session.userId,
+        clock_in_lat: typeof lat === 'number' ? lat : null,
+        clock_in_lng: typeof lng === 'number' ? lng : null,
+        clock_in_accuracy_m: typeof accuracy === 'number' ? accuracy : null,
       });
       if (error) {
         if (isUniqueViolation(error)) return res.status(400).json({ error: "You're already clocked in." });
@@ -707,6 +711,7 @@ export default async function handler(req, res) {
 
     if (action === 'clock_out') {
       if (!session.userId) return res.status(403).json({ error: 'Not available for this login.' });
+      const { lat, lng, accuracy } = req.body;
       const { data: openRows, error: openErr } = await supabaseAdmin
         .from('time_clock_entries')
         .select('id')
@@ -715,7 +720,12 @@ export default async function handler(req, res) {
         .limit(1);
       if (openErr) return res.status(500).json({ error: "Couldn't clock out." });
       if (!openRows || openRows.length === 0) return res.status(404).json({ error: "You're not clocked in." });
-      const { error } = await supabaseAdmin.from('time_clock_entries').update({ clock_out: new Date().toISOString() }).eq('id', openRows[0].id);
+      const { error } = await supabaseAdmin.from('time_clock_entries').update({
+        clock_out: new Date().toISOString(),
+        clock_out_lat: typeof lat === 'number' ? lat : null,
+        clock_out_lng: typeof lng === 'number' ? lng : null,
+        clock_out_accuracy_m: typeof accuracy === 'number' ? accuracy : null,
+      }).eq('id', openRows[0].id);
       if (error) return res.status(500).json({ error: "Couldn't clock out." });
       return res.status(200).json({ ok: true });
     }
@@ -730,7 +740,7 @@ export default async function handler(req, res) {
         .limit(1);
       const { data: recent, error: recentErr } = await supabaseAdmin
         .from('time_clock_entries')
-        .select('id, clock_in, clock_out')
+        .select('id, clock_in, clock_out, clock_in_lat, clock_in_lng, clock_out_lat, clock_out_lng')
         .eq('roster_id', session.userId)
         .order('clock_in', { ascending: false })
         .limit(10);
@@ -757,7 +767,7 @@ export default async function handler(req, res) {
 
       const { data: entries, error: entriesErr } = await supabaseAdmin
         .from('time_clock_entries')
-        .select('id, roster_id, clock_in, clock_out, edited_by_roster_id, edited_at')
+        .select('id, roster_id, clock_in, clock_out, edited_by_roster_id, edited_at, clock_in_lat, clock_in_lng, clock_in_accuracy_m, clock_out_lat, clock_out_lng, clock_out_accuracy_m')
         .eq('company_id', companyId)
         .gte('clock_in', monday.toISOString())
         .lt('clock_in', nextMonday.toISOString())
@@ -785,6 +795,15 @@ export default async function handler(req, res) {
         clock_out: clockOut || null,
         edited_by_roster_id: session.userId || null,
         edited_at: new Date().toISOString(),
+        // A supervisor-edited time no longer matches the device's original
+        // GPS fix (which was captured for the old clock_in/clock_out), so
+        // clear it rather than showing a stale pin next to a corrected time.
+        clock_in_lat: null,
+        clock_in_lng: null,
+        clock_in_accuracy_m: null,
+        clock_out_lat: null,
+        clock_out_lng: null,
+        clock_out_accuracy_m: null,
       }).eq('id', entryId);
       if (error) {
         if (isUniqueViolation(error)) return res.status(400).json({ error: 'That person already has an open entry — close it first.' });
