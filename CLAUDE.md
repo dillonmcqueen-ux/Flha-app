@@ -211,8 +211,11 @@ Agent-tool limitation noted above). It labels every read, unstarred message sitt
 Gmail inbox by sender (reusing the existing `Notifications/<Service>` and `Database` label
 taxonomy, falling back to `Notifications/Other` for unrecognized automated senders), then
 archives it out of the inbox. Unread mail, starred mail, and anything already filed outside
-the inbox are left untouched. Real person-to-person correspondence gets archived but not
-force-labeled into the automated-notifications taxonomy.
+the inbox are left untouched. Real person-to-person correspondence is never force-labeled
+into the automated-notifications taxonomy — instead it's filed under a flat, per-business
+label named for whoever it's from (e.g. `LAND Auto`), reusing that business's label on every
+later thread from the same person/company, or left unlabeled (but still archived) if no
+business can be identified.
 
 This agent has nothing to do with the flha-app codebase or repo — it only uses the Gmail MCP
 tools, never touches git or application code.
