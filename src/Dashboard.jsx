@@ -4470,7 +4470,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               ) : (
                 <TimeClockMap
                   entries={timeClockEntries.filter(e => {
-                    if (mapFilterPersonId && e.roster_id !== mapFilterPersonId) return false;
+                    if (mapFilterPersonId && String(e.roster_id) !== mapFilterPersonId) return false;
                     if (mapFilterDate) {
                       const inDate = e.clock_in ? new Date(e.clock_in).toLocaleDateString("en-CA") : null;
                       const outDate = e.clock_out ? new Date(e.clock_out).toLocaleDateString("en-CA") : null;
