@@ -14,6 +14,19 @@ function fmtElapsed(ms) {
   return `${h}:${m}:${sec}`;
 }
 
+// Best-effort GPS fix for a punch. Never blocks the punch: resolves to null
+// coordinates on denied permission, timeout, or an unsupported browser.
+function getPunchLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve({ lat: null, lng: null, accuracy: null });
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      () => resolve({ lat: null, lng: null, accuracy: null }),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  });
+}
+
 export default function TimeClock({ companyId, companyName, userName = "", userId, onBack, token }) {
   const [status, setStatus] = useState(null); // { open, recent } | null while loading
   const [loading, setLoading] = useState(true);
@@ -48,9 +61,10 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
     setError("");
     setWorking(true);
     try {
+      const loc = await getPunchLocation();
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: status?.open ? "clock_out" : "clock_in", token }),
+        body: JSON.stringify({ action: status?.open ? "clock_out" : "clock_in", token, lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -58,6 +72,7 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
         setWorking(false);
         return;
       }
+      if (loc.lat == null) setError("Punched in, but location wasn't available.");
       await loadStatus();
     } catch (e) {
       setError("Connection error. Please try again.");
