@@ -16,13 +16,19 @@ function fmtElapsed(ms) {
 
 // Best-effort GPS fix for a punch. Never blocks the punch: resolves to null
 // coordinates on denied permission, timeout, or an unsupported browser.
+// The timeout has to cover more than just the GPS fix itself — it starts
+// counting the instant getCurrentPosition is called, which is before the
+// browser's permission prompt even appears, so a worker taking a few
+// seconds to read and tap "Allow" eats into it too. 8s was too tight and
+// was timing out (falling back to null) on real devices even when the
+// worker granted permission — bumped to 20s to give the prompt + fix room.
 function getPunchLocation() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve({ lat: null, lng: null, accuracy: null });
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
       () => resolve({ lat: null, lng: null, accuracy: null }),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
   });
 }
@@ -31,6 +37,7 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
   const [status, setStatus] = useState(null); // { open, recent } | null while loading
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
+  const [gettingLocation, setGettingLocation] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
 
@@ -60,8 +67,10 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
   const toggle = async () => {
     setError("");
     setWorking(true);
+    setGettingLocation(true);
     try {
       const loc = await getPunchLocation();
+      setGettingLocation(false);
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: status?.open ? "clock_out" : "clock_in", token, lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy }),
@@ -124,7 +133,7 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
                 background: working ? "#94A3B8" : status?.open ? "#DC2626" : "#16A34A",
               }}
             >
-              {working ? "Please wait…" : status?.open ? "Clock Out" : "Clock In"}
+              {gettingLocation ? "Getting location…" : working ? "Please wait…" : status?.open ? "Clock Out" : "Clock In"}
             </button>
             {error && <div style={{ marginTop: 12, color: "#DC2626", fontSize: 13, fontWeight: 600 }}>{error}</div>}
           </>

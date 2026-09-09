@@ -55,13 +55,17 @@ function toDatetimeLocal(iso) {
 
 // Best-effort GPS fix for a punch. Never blocks the punch: resolves to null
 // coordinates on denied permission, timeout, or an unsupported browser.
+// The timeout starts counting before the browser's permission prompt even
+// appears, so it has to cover prompt-response time too, not just the GPS
+// fix — 8s was too tight and was timing out to null on real devices even
+// when permission was granted; bumped to 20s.
 function getPunchLocation() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve({ lat: null, lng: null, accuracy: null });
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
       () => resolve({ lat: null, lng: null, accuracy: null }),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
   });
 }
@@ -1549,6 +1553,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [myTimeStatus, setMyTimeStatus] = useState(null);
   const [myTimeLoading, setMyTimeLoading] = useState(true);
   const [myTimeWorking, setMyTimeWorking] = useState(false);
+  const [myTimeGettingLocation, setMyTimeGettingLocation] = useState(false);
   const [myTimeError, setMyTimeError] = useState("");
   const [myTimeNow, setMyTimeNow] = useState(Date.now());
   const [timeClockRoster, setTimeClockRoster] = useState([]);
@@ -2114,8 +2119,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const toggleMyClock = async () => {
     setMyTimeError("");
     setMyTimeWorking(true);
+    setMyTimeGettingLocation(true);
     try {
       const loc = await getPunchLocation();
+      setMyTimeGettingLocation(false);
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: myTimeStatus?.open ? "clock_out" : "clock_in", token, lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy }),
@@ -4433,7 +4440,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                       fontWeight: 800, fontSize: 15, color: "#fff",
                       background: myTimeWorking ? "#71717A" : myTimeStatus?.open ? "#DC2626" : "#16A34A",
                     }}>
-                      {myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
+                      {myTimeGettingLocation ? "Getting location…" : myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
                     </button>
                     {myTimeError && <div style={{ marginTop: 10, color: "#DC2626", fontSize: 13, fontWeight: 600 }}>{myTimeError}</div>}
                   </>
