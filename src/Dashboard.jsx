@@ -22,7 +22,7 @@ import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
-  Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck,
+  Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -1755,6 +1755,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // needs the explicit carve-out below wherever this app decides whether
   // the current tab is still valid.
   const [activeTab, setActiveTab] = useState("overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState("newest");
   const [dateFilter, setDateFilter] = useState("all");
@@ -3513,7 +3514,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   return (
     <div style={styles.wrap}>
-      <style>{`@media (max-width: 880px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }`}</style>
+      <style>{`
+        @media (max-width: 880px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }
+        .fora-mobile-menu-btn { display: none; }
+        .fora-sidebar-backdrop { display: none; }
+        @media (max-width: 768px) {
+          .fora-mobile-menu-btn { display: inline-flex !important; }
+          .fora-sidebar {
+            position: fixed !important; top: 57px !important; left: 0 !important;
+            z-index: 60; height: calc(100vh - 57px) !important;
+            transform: translateX(-100%); transition: transform 200ms ease;
+            box-shadow: 0 20px 60px -20px rgba(0,0,0,0.75);
+          }
+          .fora-sidebar.fora-sidebar-open { transform: translateX(0); }
+        }
+      `}</style>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} onSave={saveFlhaEdit} defaultSupName={userName} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} onSave={saveInspectionEdit} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} onSave={saveToolboxEdit} />}
@@ -3535,6 +3550,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            className="fora-mobile-menu-btn"
+            onClick={() => setMobileNavOpen(o => !o)}
+            aria-label="Toggle navigation"
+            style={{
+              alignItems: "center", justifyContent: "center", width: 32, height: 32,
+              border: `1px solid ${C.line}`, borderRadius: RAD.md, background: "transparent",
+              color: C.text.body, cursor: "pointer", marginRight: 2,
+            }}
+          ><Menu size={16} /></button>
           <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)" }} />
           <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 18, color: C.text.primary, letterSpacing: "-0.01em" }}>FORA</span>
           <span style={{
@@ -3568,6 +3593,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           }}
           activeTab={activeTab}
           onSelectTab={setActiveTab}
+          mobileOpen={mobileNavOpen}
+          onMobileClose={() => setMobileNavOpen(false)}
         />
 
       <div style={{ padding: 16, flex: 1, minWidth: 0 }}>
