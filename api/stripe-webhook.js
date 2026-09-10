@@ -62,7 +62,8 @@ export default async function handler(req, res) {
     const rawBody = await readRawBody(req);
     event = stripe.webhooks.constructEvent(rawBody, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    return res.status(400).send(`Webhook signature verification failed: ${err.message}`);
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send('Webhook signature verification failed.');
   }
 
   // Idempotency: Stripe retries on timeout/non-2xx, and can occasionally
