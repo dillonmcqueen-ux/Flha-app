@@ -46,15 +46,18 @@ async function verifySession(token) {
 
   // Individually-identified (roster) sessions: re-check `active` on every
   // request, so deactivating someone takes effect on their very next call
-  // instead of waiting out the token's TTL.
+  // instead of waiting out the token's TTL. `name` rides along so the
+  // resume/amend actions below can bind to the actual authenticated
+  // identity instead of trusting whatever name the client sends, same as
+  // api/logs.js's sign_late_toolbox.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 // flha-reports is a private bucket — the DB still stores a "public"-shaped
@@ -115,7 +118,13 @@ export default async function handler(req, res) {
     if (action === 'resume') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { workerName } = req.body;
-      if (!workerName || !workerName.trim()) return res.status(400).json({ error: 'Enter your name.' });
+      // Individually-identified (roster) sessions have a real authenticated
+      // name — use that instead of whatever the client sent, so a signed-in
+      // worker can't resume/view a coworker's FLHA by typing their name. A
+      // shared-code session has no such identity to bind to, so it keeps
+      // the typed name (same pattern as api/logs.js's sign_late_toolbox).
+      const matchName = session.name ? session.name.trim() : (workerName || '').trim();
+      if (!matchName) return res.status(400).json({ error: 'Enter your name.' });
 
       const start = new Date(); start.setHours(0, 0, 0, 0);
       const { data, error } = await supabaseAdmin
@@ -127,7 +136,7 @@ export default async function handler(req, res) {
 
       if (error) return res.status(500).json({ error: 'Something went wrong. Try again.' });
       const matches = (data || []).filter(
-        f => (f.worker_name || '').trim().toLowerCase() === workerName.trim().toLowerCase()
+        f => (f.worker_name || '').trim().toLowerCase() === matchName.toLowerCase()
       );
       return res.status(200).json({ matches });
     }
@@ -151,10 +160,13 @@ export default async function handler(req, res) {
         }
         // Same identity check the `resume` action already applies when
         // deciding which of today's records a worker is even shown to amend
-        // (only those matching their typed name) — enforced here too, so a
+        // (only those matching their real name) — enforced here too, so a
         // worker can't reach a coworker's FLHA by supplying its id directly
-        // instead of going through `resume`.
-        const claimedName = (workerName || '').trim().toLowerCase();
+        // instead of going through `resume`. Individually-identified
+        // (roster) sessions are bound to their authenticated name, not
+        // whatever `workerName` the client sends — a shared-code session
+        // has no such identity, so it falls back to the typed name.
+        const claimedName = session.name ? session.name.trim().toLowerCase() : (workerName || '').trim().toLowerCase();
         const ownerName = (existing[0].worker_name || '').trim().toLowerCase();
         if (!claimedName || claimedName !== ownerName) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });

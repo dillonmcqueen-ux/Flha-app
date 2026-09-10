@@ -438,6 +438,33 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setApprovingId(null);
   };
 
+  const [showArchivedOnboarding, setShowArchivedOnboarding] = useState(false);
+
+  const setOnboardingArchived = async (id, archived) => {
+    setOnboardingRequests(prev => prev.map(r => r.id === id ? { ...r, archived } : r));
+    try {
+      await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "archive_onboarding_request", token, id, archived }),
+      });
+    } catch (e) { /* optimistic update already applied; next reload will reconcile */ }
+  };
+
+  const deleteOnboardingRequest = async (id) => {
+    if (!window.confirm("Permanently delete this onboarding request? This can't be undone.")) return;
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_onboarding_request", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't delete this request."); return; }
+      setOnboardingRequests(prev => prev.filter(r => r.id !== id));
+    } catch (e) {
+      setMsg("Couldn't delete this request. Try again.");
+    }
+  };
+
   const saveMasterCode = async () => {
     setMsg("");
     if (!masterCodeInput.trim()) { setMsg("Enter a new code."); return; }
@@ -1148,6 +1175,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const newOnboardingCount = onboardingRequests.filter(r => r.status === "new").length;
     const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
     const STATUS_COLOR = { new: C.amberDark, in_progress: C.status.info.text, needs_info: C.status.danger.text, done: C.green };
+    const visibleRequests = onboardingRequests.filter(r => showArchivedOnboarding ? true : !r.archived);
+    const archivedCount = onboardingRequests.filter(r => r.archived).length;
     const msgIsError = /(could not|couldn't|failed|error|enter)/.test(msg.toLowerCase());
     const goToTab = (key) => {
       setMsg("");
@@ -1340,22 +1369,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
             {/* ── Onboarding Requests ────────────────────────────────── */}
             {activeAdminTab === "onboarding" && (
-          loadingOnboarding ? (
+              <>
+                {archivedCount > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.inkSoft, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
+                    <input type="checkbox" checked={showArchivedOnboarding} onChange={e => setShowArchivedOnboarding(e.target.checked)} />
+                    Show archived ({archivedCount})
+                  </label>
+                )}
+                {loadingOnboarding ? (
             <div style={{ ...st.card, textAlign: "center", color: C.muted, padding: "30px 20px" }}>Loading…</div>
-          ) : onboardingRequests.length === 0 ? (
+          ) : visibleRequests.length === 0 ? (
             <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
               <Inbox size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
-              <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No submissions yet</div>
-              <div style={{ fontSize: 14, color: C.inkSoft }}>New customers land here after filling out the onboarding form.</div>
+              <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>
+                {onboardingRequests.length === 0 ? "No submissions yet" : "Nothing here"}
+              </div>
+              <div style={{ fontSize: 14, color: C.inkSoft }}>
+                {onboardingRequests.length === 0 ? "New customers land here after filling out the onboarding form." : "All submissions are archived — check \"Show archived\" above."}
+              </div>
             </div>
           ) : (
-            onboardingRequests.map(r => (
-              <div key={r.id} style={{ ...st.card, marginBottom: 14 }}>
+            visibleRequests.map(r => (
+              <div key={r.id} style={{ ...st.card, marginBottom: 14, opacity: r.archived ? 0.6 : 1 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {r.logo_url && <img src={r.logo_url} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: "contain", background: C.panelInset, border: `1px solid ${C.line}` }} />}
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: 16, color: C.ink }}>{r.company_name || "Unnamed company"}</div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: C.ink }}>{r.company_name || "Unnamed company"}{r.archived ? " (archived)" : ""}</div>
                       <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
                     </div>
                   </div>
@@ -1393,6 +1433,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 {/* At-a-glance approve/reject context: plan tier from the Stripe
                     checkout, and requested seats vs. that plan's cap — the two
                     things most likely to need a second look before approving. */}
+                {r.duplicateCount > 0 && (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                    ⚠ {r.duplicateCount} other request{r.duplicateCount === 1 ? "" : "s"} from a company named "{r.company_name}" — check before approving to avoid creating a duplicate company.
+                  </div>
+                )}
+
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                   {r.plan_tier && (
                     <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.status.info.bg, color: C.status.info.text }}>
@@ -1532,9 +1578,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     </button>
                   )}
                 </div>
+
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button
+                    style={{ ...st.ghost, color: C.inkSoft, border: `1.5px solid ${C.line}`, fontSize: 12, padding: "6px 10px" }}
+                    onClick={() => setOnboardingArchived(r.id, !r.archived)}
+                  >
+                    {r.archived ? "Unarchive" : "Archive"}
+                  </button>
+                  {!r.created_company_id && (
+                    <button
+                      style={{ ...st.ghost, color: "#B91C1C", border: "1.5px solid #FECACA", fontSize: 12, padding: "6px 10px" }}
+                      onClick={() => deleteOnboardingRequest(r.id)}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             ))
-          ))}
+          )}
+              </>
+            )}
           </div>
         </div>
       </div>

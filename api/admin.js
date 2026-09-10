@@ -166,6 +166,18 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: false });
       if (reqErr) return res.status(500).json({ error: 'Could not load onboarding requests.' });
 
+      // Flag duplicate company submissions (same normalized name showing up
+      // more than once) so the admin catches a second/accidental submission
+      // from the same company before approving it into a second company.
+      // Counted across archived rows too — archiving hides a request from
+      // the default view, it doesn't erase the fact that it happened.
+      const nameCounts = {};
+      (requests || []).forEach(r => {
+        const key = (r.company_name || '').trim().toLowerCase();
+        if (!key) return;
+        nameCounts[key] = (nameCounts[key] || 0) + 1;
+      });
+
       const enriched = await Promise.all((requests || []).map(async (r) => {
         let sop_file_urls = [];
         if (r.sop_file_paths && r.sop_file_paths.length > 0) {
@@ -184,6 +196,9 @@ export default async function handler(req, res) {
         const seatCount = roster.length;
         const seatCap = planSeatCap(r.plan_tier);
 
+        const key = (r.company_name || '').trim().toLowerCase();
+        const duplicateCount = key ? (nameCounts[key] || 1) - 1 : 0;
+
         return {
           ...r,
           sop_file_urls,
@@ -192,10 +207,48 @@ export default async function handler(req, res) {
           seatCap,
           overSeatCap: seatCap != null && seatCount > seatCap,
           skippedUserLines,
+          duplicateCount,
         };
       }));
 
       return res.status(200).json({ requests: enriched });
+    }
+
+    // ── Onboarding intake — archive / unarchive. Purely a "hide from the
+    // default list" toggle, separate from the new/in_progress/needs_info/
+    // done workflow status above — an archived request can be any status.
+    // Nothing is deleted, so it can always be brought back. ─────────────
+    if (action === 'archive_onboarding_request') {
+      const { id, archived } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing request id.' });
+      const { error } = await supabaseAdmin
+        .from('onboarding_requests')
+        .update({ archived: !!archived })
+        .eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't update archive state." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ── Onboarding intake — permanently delete. Blocked once a request has
+    // already created a company: that row is still what get_claim_link
+    // looks up by created_company_id to resend/refresh the claim link, so
+    // deleting it would strand that lookup. Archive it instead. ─────────
+    if (action === 'delete_onboarding_request') {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing request id.' });
+      const { data: rows, error: reqErr } = await supabaseAdmin
+        .from('onboarding_requests')
+        .select('id, created_company_id')
+        .eq('id', id)
+        .limit(1);
+      if (reqErr) return res.status(500).json({ error: 'Could not look up this request.' });
+      if (!rows || rows.length === 0) return res.status(404).json({ error: 'Request not found.' });
+      if (rows[0].created_company_id) {
+        return res.status(400).json({ error: "This request already created a company — archive it instead of deleting so the claim link stays available." });
+      }
+      const { error } = await supabaseAdmin.from('onboarding_requests').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't delete this request." });
+      return res.status(200).json({ ok: true });
     }
 
     // ── Onboarding intake — mark a submission new / in progress / needs
