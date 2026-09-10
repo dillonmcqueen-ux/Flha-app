@@ -1113,7 +1113,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         </div>
 
         <div style={st.body}>
-          {msg && <div style={{ ...st.card, marginBottom: 14, background: C.status.success.bg, color: C.status.success.text, fontSize: 14 }}>{msg}</div>}
+          {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("could not") || msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")) ? C.status.danger.bg : C.status.success.bg, color: (msg.toLowerCase().includes("could not") || msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")) ? C.status.danger.text : C.status.success.text, fontSize: 14 }}>{msg}</div>}
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: 8 }}>
