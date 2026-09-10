@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutDashboard } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, sidebar as SB } from "./theme";
 
 // Persistent left nav rail, replacing the old two-row (category pills, then
@@ -31,6 +31,8 @@ export default function Sidebar({
     try { localStorage.setItem("fora_sidebar_collapsed", collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
   }, [collapsed]);
 
+  const overviewActive = activeTab === "overview";
+
   return (
     <div style={{
       width: collapsed ? 60 : 224, flexShrink: 0, transition: "width 160ms ease",
@@ -40,19 +42,41 @@ export default function Sidebar({
       height: "calc(100vh - 57px)", overflowY: "auto", overflowX: "hidden",
     }}>
       <div style={{ flex: 1, padding: collapsed ? "10px 6px" : "14px 10px" }}>
+
+        {/* Overview — the landing page every supervisor sees on login. Its
+            own top-level link (not inside a category) since it's the "go
+            home" affordance once they've clicked into a document tab. */}
+        <button
+          title={collapsed ? "Overview" : undefined}
+          onClick={() => onSelectTab("overview")}
+          style={{
+            display: "flex", alignItems: "center", gap: 9,
+            justifyContent: collapsed ? "center" : "flex-start",
+            width: "100%", padding: collapsed ? "9px 0" : "9px 10px",
+            borderRadius: RAD.md, border: "none", cursor: "pointer", marginBottom: 16,
+            background: overviewActive ? SB.bgActive : "transparent",
+            color: overviewActive ? SB.itemTextActive : C.text.primary,
+            fontWeight: 700, fontSize: 13.5, textAlign: "left",
+          }}
+        >
+          <LayoutDashboard size={16} strokeWidth={2.25} style={{ flexShrink: 0 }} />
+          {!collapsed && <span>Overview</span>}
+        </button>
+
         {categories.map(cat => {
           const CatIcon = categoryIcon[cat.key];
           const visibleTabs = cat.tabs.filter(t => tabVisible[t]);
           if (visibleTabs.length === 0) return null;
           return (
-            <div key={cat.key} style={{ marginBottom: 18 }}>
+            <div key={cat.key} style={{ marginBottom: 20 }}>
               {!collapsed && (
                 <div style={{
-                  display: "flex", alignItems: "center", gap: 6, padding: "0 8px 6px",
-                  fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em",
-                  color: SB.groupLabel,
+                  display: "flex", alignItems: "center", gap: 8, padding: "0 8px 8px",
+                  marginBottom: 4, borderBottom: `1px solid ${SB.border}`,
+                  fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em",
+                  color: C.text.body,
                 }}>
-                  {CatIcon && <CatIcon size={12} strokeWidth={2.5} />}
+                  {CatIcon && <CatIcon size={16} strokeWidth={2.5} color={SB.accent} />}
                   {cat.label}
                 </div>
               )}

@@ -1679,7 +1679,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [showWorkerForms, setShowWorkerForms] = useState(false);
   const [selectedFlha, setSelectedFlha] = useState(null);
   const [showThisWeekModal, setShowThisWeekModal] = useState(false);
-  const [activeTab, setActiveTab] = useState("flhas");
+  // "overview" is the landing page every supervisor sees on login — the
+  // stat rings/sparklines/activity feed, no document list underneath it.
+  // It isn't one of the document tabs in TAB_VISIBLE/CATEGORIES, so it
+  // needs the explicit carve-out below wherever this app decides whether
+  // the current tab is still valid.
+  const [activeTab, setActiveTab] = useState("overview");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState("newest");
   const [dateFilter, setDateFilter] = useState("all");
@@ -2081,6 +2086,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // to one that doesn't have it active), bounce to the first tab that is.
   useEffect(() => {
     if (docSettings.length === 0) return;
+    if (activeTab === "overview") return;
     if (TAB_VISIBLE[activeTab]) return;
     const fallback = Object.keys(TAB_VISIBLE).find(t => TAB_VISIBLE[t]);
     if (fallback) setActiveTab(fallback);
@@ -3553,11 +3559,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {/* Overview — real ratios as rings, real trends as sparklines, real
-            per-site activity as effort bars, real recent submissions as a
-            live feed. Nothing on this panel is a placeholder or an
-            estimate; every number traces back to the same company-scoped
-            arrays the tabs below render from. */}
+        {/* Overview — the landing page. Real ratios as rings, real trends as
+            sparklines, real per-site activity as effort bars, real recent
+            submissions as a live feed. Nothing on this panel is a
+            placeholder or an estimate; every number traces back to the
+            same company-scoped arrays the document tabs render from.
+            Shown only on "overview" itself — clicking any sidebar item
+            replaces this with that tab's own content, it doesn't stack
+            underneath. */}
+        {activeTab === "overview" && (
         <div className="fora-overview-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(260px,1fr)", gap: 12, marginBottom: 16, alignItems: "start" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
@@ -3685,6 +3695,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             )}
           </div>
         </div>
+        )}
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
           <div style={styles.card}>
