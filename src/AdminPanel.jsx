@@ -6,6 +6,11 @@ import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
 import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
+import {
+  Construction, Inbox, Building2, FileText, User, DollarSign, Brain, Sparkles,
+  MapPin, Tractor, HardHat, Zap, ArrowUpRight, CircleCheckBig, Hourglass,
+  Check, Download,
+} from "lucide-react";
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1044,7 +1049,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
           <div style={{ width: 52, height: 52, borderRadius: 11, background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, border: `1px solid ${C.line}` }}>
-            {c.logo_url ? <img src={c.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 22 }}>🏗️</span>}
+            {c.logo_url ? <img src={c.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Construction size={22} color={C.muted} strokeWidth={2} />}
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
@@ -1117,7 +1122,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           {companies.length === 0 ? (
             <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
-              <div style={{ fontSize: 42, marginBottom: 10 }}>🏗️</div>
+              <Construction size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
               <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No companies yet</div>
               <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 18 }}>Onboard your first company to get started.</div>
               <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); }}>+ Onboard Company</button>
@@ -1243,7 +1248,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ ...st.card, textAlign: "center", color: C.muted, padding: "30px 20px" }}>Loading…</div>
           ) : onboardingRequests.length === 0 ? (
             <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
-              <div style={{ fontSize: 42, marginBottom: 10 }}>📥</div>
+              <Inbox size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
               <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No submissions yet</div>
               <div style={{ fontSize: 14, color: C.inkSoft }}>New customers land here after filling out the onboarding form.</div>
             </div>
@@ -1268,8 +1273,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <span style={{
                       padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700,
                       color: C.green, background: "#F0FDF4", border: "1.5px solid #BBF7D0",
+                      display: "inline-flex", alignItems: "center", gap: 5,
                     }}>
-                      ⚡ Auto-approved
+                      <Zap size={12} strokeWidth={2.5} /> Auto-approved
                     </span>
                   ) : (
                     <select
@@ -1298,7 +1304,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     </span>
                   )}
                   {r.stripe_customer_id ? (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F0FDF4", color: "#166534" }}>✓ Stripe checkout linked</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F0FDF4", color: "#166534", display: "inline-flex", alignItems: "center", gap: 4 }}><CircleCheckBig size={11} strokeWidth={2.5} /> Stripe checkout linked</span>
                   ) : (
                     <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FEF2F2", color: "#991B1B" }}>No Stripe checkout linked</span>
                   )}
@@ -1372,8 +1378,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {r.sop_file_urls.map((url, i) => (
-                        <a key={i} href={url} target="_blank" rel="noreferrer" style={{ ...st.code, textDecoration: "none" }}>
-                          File {i + 1} ↗
+                        <a key={i} href={url} target="_blank" rel="noreferrer" style={{ ...st.code, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          File {i + 1} <ArrowUpRight size={11} strokeWidth={2.5} />
                         </a>
                       ))}
                     </div>
@@ -1418,15 +1424,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                         </div>
                       </div>
                     ) : (
-                      <div style={{ fontSize: 13, color: C.green, fontWeight: 700 }}>✓ Company already created from this request</div>
+                      <div style={{ fontSize: 13, color: C.green, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}><CircleCheckBig size={14} strokeWidth={2.5} /> Company already created from this request</div>
                     )
                   ) : (
                     <button
-                      style={{ ...st.amberBtn, opacity: approvingId === r.id ? 0.7 : 1 }}
+                      style={{ ...st.amberBtn, opacity: approvingId === r.id ? 0.7 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                       disabled={approvingId === r.id}
                       onClick={() => approveOnboardingRequest(r.id)}
                     >
-                      {approvingId === r.id ? "Approving…" : "✓ Approve — create company"}
+                      {approvingId === r.id ? "Approving…" : (<><CircleCheckBig size={14} strokeWidth={2.5} /> Approve — create company</>)}
                     </button>
                   )}
                 </div>
@@ -1482,9 +1488,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // category entirely rather than showing tabs that do nothing for them.
   const isGatehouseCompany = activeCompany?.app_type === "gatehouse";
   const MANAGE_CATEGORIES = [
-    { key: "company", label: "🏢 Company Setup", tabs: isGatehouseCompany ? ["profile", "pricing"] : ["profile", "sops", "sites", "equipment", "brain"] },
-    ...(isGatehouseCompany ? [] : [{ key: "documents", label: "📄 Documents", tabs: ["fields", "monthly", "custom", "forms"] }]),
-    { key: "people", label: "👤 People & Access", tabs: ["roster", "codes"] },
+    { key: "company", label: "Company Setup", icon: Building2, tabs: isGatehouseCompany ? ["profile", "pricing"] : ["profile", "sops", "sites", "equipment", "brain"] },
+    ...(isGatehouseCompany ? [] : [{ key: "documents", label: "Documents", icon: FileText, tabs: ["fields", "monthly", "custom", "forms"] }]),
+    { key: "people", label: "People & Access", icon: User, tabs: ["roster", "codes"] },
   ];
   const MANAGE_CATEGORY_OF = Object.fromEntries(MANAGE_CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeManageCategory = MANAGE_CATEGORY_OF[manageTab] || MANAGE_CATEGORIES[0].key;
@@ -1505,7 +1511,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
             <div style={{ width: 44, height: 44, borderRadius: 10, background: "#ffffff18", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-              {profile.logo_url ? <img src={profile.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 20 }}>🏗️</span>}
+              {profile.logo_url ? <img src={profile.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Construction size={20} color={C.muted} strokeWidth={2} />}
             </div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 19 }}>{activeCompany?.name}</div>
@@ -1520,13 +1526,16 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#FEE2E2" : "#DCFCE7", color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#991B1B" : "#166534", fontSize: 14 }}>{msg}</div>}
 
         <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-          {MANAGE_CATEGORIES.map(cat => (
-            <button
-              key={cat.key}
-              style={st.tab(activeManageCategory === cat.key)}
-              onClick={() => goToManageTab(cat.tabs[0])}
-            >{cat.label}</button>
-          ))}
+          {MANAGE_CATEGORIES.map(cat => {
+            const CatIcon = cat.icon;
+            return (
+              <button
+                key={cat.key}
+                style={{ ...st.tab(activeManageCategory === cat.key), display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={() => goToManageTab(cat.tabs[0])}
+              ><CatIcon size={14} strokeWidth={2.25} /> {cat.label}</button>
+            );
+          })}
         </div>
 
         <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
@@ -1534,13 +1543,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <>
               <button style={st.tab(manageTab === "profile")} onClick={() => goToManageTab("profile")}>Profile</button>
               {isGatehouseCompany ? (
-                <button style={st.tab(manageTab === "pricing")} onClick={() => goToManageTab("pricing")}>💵 Pricing</button>
+                <button style={{ ...st.tab(manageTab === "pricing"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("pricing")}><DollarSign size={14} strokeWidth={2.25} /> Pricing</button>
               ) : (
                 <>
                   <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
                   <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
                   <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
-                  <button style={st.tab(manageTab === "brain")} onClick={() => goToManageTab("brain")}>🧠 Brain</button>
+                  <button style={{ ...st.tab(manageTab === "brain"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("brain")}><Brain size={14} strokeWidth={2.25} /> Brain</button>
                 </>
               )}
             </>
@@ -1566,7 +1575,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <label style={st.label}>Company logo</label>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
               <div style={{ width: 66, height: 66, borderRadius: 12, border: `1.5px solid ${C.line}`, background: "#F8FAFC", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-                {profile.logo_url ? <img src={profile.logo_url} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 26, color: C.muted }}>🏗️</span>}
+                {profile.logo_url ? <img src={profile.logo_url} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Construction size={26} color={C.muted} strokeWidth={1.75} />}
               </div>
               <label style={{ background: C.bg, color: C.ink, border: `1.5px solid ${C.line}`, borderRadius: 9, padding: "10px 15px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                 {uploadingLogo ? "Uploading…" : "Upload logo"}
@@ -1590,14 +1599,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         {manageTab === "sops" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>✨ Condense a long SOP document</div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><Sparkles size={15} color={C.amberDark} strokeWidth={2.25} /> Condense a long SOP document</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Paste a full safety policy or SOP document — even many pages. The AI pulls out the actual requirements and turns them into short, specific rules the FLHA system can use. Review them below before adding.</div>
               <textarea style={{ ...st.input, minHeight: 130, resize: "vertical", fontFamily: "inherit" }}
                 placeholder="Paste the full SOP document text here…"
                 value={rawSop} onChange={e => setRawSop(e.target.value)} />
               {condenseError && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "9px 12px", marginBottom: 10, fontSize: 13, color: "#991B1B" }}>{condenseError}</div>}
-              <button style={{ background: condensing ? "#94A3B8" : C.amber, color: "#1E293B", border: "none", borderRadius: 9, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", width: "100%" }} onClick={condenseSop} disabled={condensing}>
-                {condensing ? "⏳ Condensing…" : "✨ Condense into policies"}
+              <button style={{ background: condensing ? "#94A3B8" : C.amber, color: "#1E293B", border: "none", borderRadius: 9, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }} onClick={condenseSop} disabled={condensing}>
+                {condensing ? (<><Hourglass size={14} strokeWidth={2.25} /> Condensing…</>) : (<><Sparkles size={14} strokeWidth={2.25} /> Condense into policies</>)}
               </button>
             </div>
 
@@ -1719,7 +1728,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No sites yet. Add recurring locations, or let them build up from worker entries.</div>
               ) : siteList.map((site, i) => (
                 <div key={site.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < siteList.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 15 }}>📍</span>
+                  <MapPin size={15} color={C.inkSoft} />
                   <div style={{ flex: 1, fontSize: 14, color: "#334155" }}>{site.name}</div>
                   <button onClick={() => deleteSite(site.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
@@ -1748,7 +1757,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No equipment yet.</div>
               ) : equipList.map((eq, i) => (
                 <div key={eq.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < equipList.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 18 }}>🚜</span>
+                  <Tractor size={18} color={C.inkSoft} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
                     {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
@@ -1764,7 +1773,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, flex: 1 }}>🧠 Company profile</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, flex: 1, display: "flex", alignItems: "center", gap: 6 }}><Brain size={15} color={C.inkSoft} strokeWidth={2.25} /> Company profile</div>
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
                   background: brainProfile?.status === "confirmed" ? "#DCFCE7" : "#FEF3C7",
@@ -1773,8 +1782,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <button
                   onClick={downloadBrainPDF}
                   title="Download a snapshot PDF of what FORA has learned about this company, to share with the client"
-                  style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff", color: C.inkSoft, cursor: "pointer", whiteSpace: "nowrap" }}
-                >📄 Generate PDF</button>
+                  style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff", color: C.inkSoft, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 }}
+                ><FileText size={12} strokeWidth={2.25} /> Generate PDF</button>
               </div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
                 What FORA has learned about this company — inferred at onboarding, and refined over time from this company's own FLHA edits, toolbox talks, incidents, and near misses. Feeds into document generation as additional context; edit anything below to correct it.
@@ -1877,7 +1886,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               )}
 
               <div onClick={() => setNewField(p => ({ ...p, required: !p.required }))} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: newField.required ? "#FFFBEB" : "#F8FAFC", border: `1.5px solid ${newField.required ? C.amber : C.line}`, borderRadius: 9, marginBottom: 12, cursor: "pointer" }}>
-                <div style={{ width: 20, height: 20, borderRadius: 5, background: newField.required ? C.amber : "#fff", border: `1.5px solid ${newField.required ? C.amber : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#1E293B", fontSize: 13, fontWeight: 800 }}>{newField.required ? "✓" : ""}</div>
+                <div style={{ width: 20, height: 20, borderRadius: 5, background: newField.required ? C.amber : "#fff", border: `1.5px solid ${newField.required ? C.amber : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#1E293B", fontSize: 13, fontWeight: 800 }}>{newField.required ? <Check size={13} strokeWidth={3} /> : ""}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>Required — worker must fill this in</div>
               </div>
 
@@ -2008,7 +2017,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   </div>
                 ))}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <button style={{ ...st.darkBtn, flex: 1 }} onClick={() => generateRosterPinsPDF(allPinsResult)}>⬇ Download PDF</button>
+                  <button style={{ ...st.darkBtn, flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={() => generateRosterPinsPDF(allPinsResult)}><Download size={14} strokeWidth={2.25} /> Download PDF</button>
                   <button onClick={() => setAllPinsResult(null)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 13, cursor: "pointer", fontWeight: 600, borderRadius: 9, padding: "0 16px" }}>Done</button>
                 </div>
               </div>
@@ -2055,7 +2064,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   return (
                     <CollapsibleGroup
                       key={roleGroup}
-                      icon={roleGroup === "supervisor" ? "🦺" : "👷"}
+                      icon={roleGroup === "supervisor" ? <HardHat size={13} /> : <User size={13} />}
                       label={`${roleGroup}s`}
                       count={group.length}
                       colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"}

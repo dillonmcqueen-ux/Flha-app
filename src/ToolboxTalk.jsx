@@ -4,6 +4,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { Toolbox, Hourglass, MessageSquare, User, HardHat, Check, WifiOff, CircleCheckBig } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -363,7 +364,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>🧰</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <Toolbox size={26} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Toolbox Talk</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Safety meeting record</div>
@@ -435,7 +436,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </div>
           )}
           <button style={s.btn(loading ? "#94A3B8" : topic.trim() ? "#7C3AED" : "#94A3B8")} disabled={loading || !topic.trim()} onClick={generateTalk}>
-            {loading ? "⏳ Preparing talk…" : "Generate Talking Points"}
+            {loading ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Preparing talk…</span>) : "Generate Talking Points"}
           </button>
           {genError && (
             <button style={s.ghost} onClick={goManualTalk}>Continue without AI — I'll present from my own notes</button>
@@ -478,7 +479,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           {points.discussion?.length > 0 && (
             <div style={{ ...s.card, background: "#FAF5FF", border: "1.5px solid #E9D5FF" }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "#5B21B6", marginBottom: 8 }}>💬 Discussion — ask the crew</div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "#5B21B6", marginBottom: 8, display: "flex", alignItems: "center", gap: 7 }}><MessageSquare size={15} strokeWidth={2.25} /> Discussion — ask the crew</div>
               {points.discussion.map((d, i) => (
                 <div key={i} style={{ fontSize: 14, color: "#334155", marginBottom: 6, lineHeight: 1.5 }}>{i + 1}. {d}</div>
               ))}
@@ -504,13 +505,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 8 }}>Signed ({(presenterSigned ? 1 : 0) + attendees.length})</div>
               {presenterSigned && (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: attendees.length > 0 ? "1px solid #F1F5F9" : "none" }}>
-                  <span style={{ fontSize: 14, color: "#334155" }}>👤 {presenter} <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>PRESENTER</span></span>
-                  <span style={{ fontSize: 12, color: "#16A34A", fontWeight: 700 }}>✓ signed</span>
+                  <span style={{ fontSize: 14, color: "#334155", display: "inline-flex", alignItems: "center", gap: 5 }}><User size={13} strokeWidth={2.25} /> {presenter} <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>PRESENTER</span></span>
+                  <span style={{ fontSize: 12, color: "#16A34A", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}><Check size={12} strokeWidth={3} /> signed</span>
                 </div>
               )}
               {attendees.map((a, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < attendees.length - 1 ? "1px solid #F1F5F9" : "none" }}>
-                  <span style={{ fontSize: 14, color: "#334155" }}>👷 {a.name}</span>
+                  <span style={{ fontSize: 14, color: "#334155", display: "inline-flex", alignItems: "center", gap: 5 }}><HardHat size={13} strokeWidth={2.25} /> {a.name}</span>
                   <button onClick={() => removeAttendee(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
                 </div>
               ))}
@@ -540,7 +541,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 setAttendees([{ name: presenter, signature: sig, presenter: true, signedAt: new Date().toISOString() }]);
                 setPresenterSigned(true);
                 clearSig();
-              }}>✓ Presenter Sign</button>
+              }}><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Check size={14} strokeWidth={2.5} /> Presenter Sign</span></button>
             ) : (
               <button style={s.btn((attName.trim() && attHasSig) ? "#7C3AED" : "#94A3B8")} disabled={!attName.trim() || !attHasSig} onClick={addAttendee}>+ Add This Attendee</button>
             )}
@@ -625,7 +626,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This talk is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -638,7 +639,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
+            <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>{lateSignTarget ? "Signature Recorded" : "Toolbox Talk Recorded"}</div>
             {lateSignTarget ? (
               <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{lateSignTarget.record.meeting_type} · {lateSignTarget.record.site} · Signed by {lateName}</div>

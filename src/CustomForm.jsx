@@ -3,6 +3,7 @@ import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { FileText, TriangleAlert, WifiOff, CircleCheckBig } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -299,7 +300,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     <div style={s.wrap}>
       <div style={s.header(accent)}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>{form?.icon || "📄"}</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : (form?.icon ? <span style={{ fontSize: 26 }}>{form.icon}</span> : <FileText size={26} />)}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>{form?.title || "Custom Document"}</div>
           </div>
@@ -377,8 +378,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "review" && (
         <>
           {!aiAssisted && (
-            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-summarized — feel free to edit the summary below before submitting.
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E", display: "flex", alignItems: "center", gap: 7 }}>
+              <TriangleAlert size={15} strokeWidth={2.25} /> Not AI-summarized — feel free to edit the summary below before submitting.
             </div>
           )}
           <div style={s.card}>
@@ -441,7 +442,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{siteName()}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This document is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -454,7 +455,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>{flaggedItems.length > 0 ? "⚠️" : "✅"}</div>
+            {flaggedItems.length > 0
+              ? <TriangleAlert size={54} strokeWidth={1.75} color="#D97706" style={{ marginBottom: 12 }} />
+              : <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />}
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Submitted</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 18 }}>{siteName()} · {new Date().toLocaleDateString("en-CA")}</div>
             <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>

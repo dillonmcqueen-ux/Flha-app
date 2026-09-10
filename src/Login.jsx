@@ -4,6 +4,7 @@ import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 import GatehouseBooth from "./GatehouseBooth.jsx";
+import { HardHat, ClipboardList, KeyRound } from "lucide-react";
 import GatehouseDashboard from "./GatehouseDashboard.jsx";
 
 // Session storage — split by role. window.name survives a reload but not a
@@ -334,9 +335,9 @@ export default function Login() {
   };
 
   const roleMeta = {
-    worker: { icon: "🦺", title: "Worker", desc: "Complete a hazard assessment", accent: "#F97316" },
-    supervisor: { icon: "📋", title: "Supervisor / Safety", desc: "View your company dashboard", accent: "#1E3A5F" },
-    admin: { icon: "🔑", title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
+    worker: { icon: HardHat, title: "Worker", desc: "Complete a hazard assessment", accent: "#F97316" },
+    supervisor: { icon: ClipboardList, title: "Supervisor / Safety", desc: "View your company dashboard", accent: "#1E3A5F" },
+    admin: { icon: KeyRound, title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
   };
 
   const filteredNames = rosterNames.filter(m => m.name.toLowerCase().includes(nameFilter.trim().toLowerCase()));
@@ -361,9 +362,10 @@ export default function Login() {
             </div>
             {["worker", "supervisor"].map(r => {
               const m = roleMeta[r];
+              const RoleIcon = m.icon;
               return (
                 <button key={r} style={styles.roleBtn(m.accent)} onClick={() => { setRole(r); setError(""); setCode(""); }}>
-                  <span style={{ fontSize: 26 }}>{m.icon}</span>
+                  <RoleIcon size={26} strokeWidth={2} color={m.accent} />
                   <span>
                     <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "#F97316" }}>{m.title}</span>
                     <span style={{ display: "block", fontSize: 12, color: "#9CA3AF" }}>{m.desc}</span>
@@ -374,7 +376,7 @@ export default function Login() {
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
               <button style={styles.adminBtn(roleMeta.admin.accent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>
-                <span style={{ fontSize: 15 }}>{roleMeta.admin.icon}</span>
+                <roleMeta.admin.icon size={15} strokeWidth={2.25} color={roleMeta.admin.accent} />
                 <span style={{ fontWeight: 600, fontSize: 12, color: "#9CA3AF" }}>{roleMeta.admin.title}</span>
               </button>
             </div>
@@ -486,7 +488,7 @@ export default function Login() {
           // ── Step 1: admin code, or company code ─────────────────────
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <span style={{ fontSize: 26 }}>{roleMeta[role].icon}</span>
+              {(() => { const RoleIcon = roleMeta[role].icon; return <RoleIcon size={26} strokeWidth={2} color={roleMeta[role].accent} />; })()}
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316" }}>{roleMeta[role].title}</div>
                 <div style={{ fontSize: 12, color: "#9CA3AF" }}>

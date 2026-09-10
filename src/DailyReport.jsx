@@ -4,6 +4,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { ClipboardList, Hourglass, TriangleAlert, WifiOff, CircleCheckBig, Check } from "lucide-react";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
@@ -314,7 +315,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>📋</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <ClipboardList size={26} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Daily Report</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>End-of-day site summary</div>
@@ -353,7 +354,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Weather (select all that apply)</label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 11 }}>
             {WEATHER.map(w => (
-              <button key={w} onClick={() => toggleWeather(w)} style={{ flex: "1 1 28%", padding: "9px 4px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${weather.includes(w) ? "#16A34A" : "#E2E8F0"}`, background: weather.includes(w) ? "#F0FDF4" : "#fff", color: weather.includes(w) ? "#15803D" : "#94A3B8" }}>{weather.includes(w) ? "✓ " : ""}{w}</button>
+              <button key={w} onClick={() => toggleWeather(w)} style={{ flex: "1 1 28%", padding: "9px 4px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${weather.includes(w) ? "#16A34A" : "#E2E8F0"}`, background: weather.includes(w) ? "#F0FDF4" : "#fff", color: weather.includes(w) ? "#15803D" : "#94A3B8", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>{weather.includes(w) && <Check size={12} strokeWidth={3} />}{w}</button>
             ))}
           </div>
 
@@ -430,7 +431,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               </div>
             )}
             <button style={s.btn(loading ? "#94A3B8" : workDone.trim() ? "#16A34A" : "#94A3B8")} disabled={loading || !workDone.trim()} onClick={generateReport}>
-              {loading ? "⏳ Writing report…" : "Generate Report"}
+              {loading ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Writing report…</span>) : "Generate Report"}
             </button>
             {genError && (
               <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — use my notes as written</button>
@@ -445,7 +446,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <>
           {report.ai_assisted === false && (
             <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-polished — these are your notes as written. Feel free to tidy the wording below before submitting.
+              <TriangleAlert size={15} strokeWidth={2.25} style={{ verticalAlign: "-2px", marginRight: 6 }} /> Not AI-polished — these are your notes as written. Feel free to tidy the wording below before submitting.
             </div>
           )}
           <div style={s.card}>
@@ -493,7 +494,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reportDate}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -506,7 +507,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
+            <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Daily Report Submitted</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{site} · {reportDate}</div>
             <button style={s.btn("#16A34A")} onClick={onBack}>Back to menu</button>

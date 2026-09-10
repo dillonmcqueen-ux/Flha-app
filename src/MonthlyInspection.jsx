@@ -3,6 +3,7 @@ import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionP
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { CalendarClock, Hourglass, TriangleAlert, WifiOff, CircleCheckBig } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -313,7 +314,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>🗓️</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <CalendarClock size={26} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Monthly Site Inspection</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>{new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" })}</div>
@@ -337,7 +338,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           )}
           {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't check this site. Try again.</div>}
           <button style={s.btn(checking ? "#94A3B8" : siteId ? "#4338CA" : "#94A3B8")} disabled={checking || !siteId} onClick={checkSiteAndProceed}>
-            {checking ? "⏳ Checking…" : "Continue →"}
+            {checking ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Checking…</span>) : "Continue →"}
           </button>
         </div>
       )}
@@ -346,7 +347,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "none" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "10px 0" }}>
-            <div style={{ fontSize: 44, marginBottom: 10 }}>🗓️</div>
+            <CalendarClock size={40} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 10 }} />
             <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B", marginBottom: 6 }}>No monthly inspection set up</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 18 }}>Your company doesn't have an active monthly inspection form yet. Ask your admin to set one up.</div>
             <button style={s.btn("#4338CA")} onClick={onBack}>Back to menu</button>
@@ -410,7 +411,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </div>
           )}
           <button style={s.btn(loading ? "#94A3B8" : (workerName && allAnswered && notesComplete) ? "#4338CA" : "#94A3B8")} disabled={loading || !workerName || !allAnswered || !notesComplete} onClick={generateSummary}>
-            {loading ? "⏳ Writing summary…" : "Generate Summary"}
+            {loading ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Writing summary…</span>) : "Generate Summary"}
           </button>
           {genError && (
             <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI summary</button>
@@ -424,7 +425,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <>
           {!aiAssisted && (
             <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-summarized — feel free to edit the summary below before submitting.
+              <TriangleAlert size={15} strokeWidth={2.25} style={{ verticalAlign: "-2px", marginRight: 6 }} /> Not AI-summarized — feel free to edit the summary below before submitting.
             </div>
           )}
           <div style={s.card}>
@@ -487,7 +488,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{siteName()}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -500,7 +501,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>{flaggedItems.length > 0 ? "⚠️" : "✅"}</div>
+            {flaggedItems.length > 0
+              ? <TriangleAlert size={54} strokeWidth={1.75} color="#D97706" style={{ marginBottom: 12 }} />
+              : <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />}
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Inspection Submitted</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{siteName()} · {new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" })}</div>
             {flaggedItems.length > 0 && (

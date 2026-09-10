@@ -14,11 +14,14 @@ import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
+import { AreaChart, Area, ResponsiveContainer } from "recharts";
+import { reviewBacklog, fieldSiteActivity } from "./analyticsUtils";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
-  HardHat, Wrench, ShieldAlert, Flag, CalendarClock, FileText, LogOut, ClipboardList,
+  HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
+  Radio, CircleCheckBig,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -73,6 +76,98 @@ function RiskBadge({ risk }) {
       background: c.bg, border: `1px solid ${c.border}`, color: c.text,
       borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700
     }}>{risk}</span>
+  );
+}
+
+// ── Overview-panel data helpers ─────────────────────────────────────────
+// All real, derived straight from the same company-scoped arrays the rest
+// of the dashboard already renders from — no invented numbers. Buckets a
+// list of records into one-count-per-calendar-day for the trailing `days`
+// days (inclusive of today), keyed off each record's own timestamp field.
+function bucketByDay(items, days, dateField = "created_at") {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const buckets = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    buckets.push({ key: d.toISOString().slice(0, 10), count: 0 });
+  }
+  const byKey = {};
+  buckets.forEach(b => { byKey[b.key] = b; });
+  items.forEach(it => {
+    const v = it?.[dateField];
+    if (!v) return;
+    const key = new Date(v).toISOString().slice(0, 10);
+    if (byKey[key]) byKey[key].count += 1;
+  });
+  return buckets;
+}
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+}
+
+// Circular progress ring — real value/max pair (never a fabricated %).
+// Number lives inside the ring, label beneath, matching a stat-tile's
+// visual weight but as a ratio rather than a bare count.
+function ProgressRing({ value, max, label, sublabel, color, size = 100, thickness = 9 }) {
+  const r = (size - thickness) / 2;
+  const circumference = 2 * Math.PI * r;
+  const ratio = max > 0 ? Math.min(1, value / max) : 0;
+  const offset = circumference * (1 - ratio);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, minWidth: 100 }}>
+      <div style={{ position: "relative", width: size, height: size }}>
+        <svg width={size} height={size}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.line} strokeWidth={thickness} />
+          <circle
+            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={thickness}
+            strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            style={{ transition: "stroke-dashoffset 500ms ease" }}
+          />
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 21, color: C.text.primary, lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: C.text.faint, marginTop: 2 }}>of {max}</div>
+        </div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text.body, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+        {sublabel && <div style={{ fontSize: 11, color: C.text.faint, marginTop: 1 }}>{sublabel}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Tiny trailing-7-day trend, drawn from real daily counts (bucketByDay
+// above) — no synthetic curve. Used beneath a stat tile's headline number.
+function Sparkline({ data, color, height = 30 }) {
+  const gid = `spark-${color.replace("#", "")}`;
+  return (
+    <div style={{ width: "100%", height, marginTop: 8 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.4} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <Area type="monotone" dataKey="count" stroke={color} strokeWidth={1.75} fill={`url(#${gid})`} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -2518,7 +2613,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
-  const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
   const docsThisWeekList = [
@@ -2557,6 +2651,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     else if (type === "customdoc") openCustomDocRecord(doc);
   };
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
+
+  // ── Overview panel — rings, sparklines, site activity, recent feed ──────
+  // Every number below is derived from the same company-scoped arrays used
+  // everywhere else on this screen (and, for reviewBacklog/fieldSiteActivity,
+  // the exact analyticsUtils functions the Analytics tab uses — so nothing
+  // here can drift from what Analytics reports for the same company).
+  const flhaReviewStats = { total: companyFlhas.length, signedOff: companyFlhas.length - awaitingSignOff };
+  const reportReviewStats = reviewBacklog(companyNearMisses, companyIncidents);
+
+  const overviewAllDocs = [
+    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses,
+    ...companyIncidents, ...companyDaily, ...companyMonthlyRecords, ...companyCustomDocs,
+  ];
+  const docsSpark = bucketByDay(overviewAllDocs, 7);
+  const correctiveSpark = bucketByDay(companyMonthlyActions, 7);
+
+  const recentActivityList = [
+    ...companyFlhas.map(doc => ({ type: "flha", doc })),
+    ...companyInspections.map(doc => ({ type: "inspection", doc })),
+    ...companyToolbox.map(doc => ({ type: "toolbox", doc })),
+    ...companyNearMisses.map(doc => ({ type: "nearmiss", doc })),
+    ...companyIncidents.map(doc => ({ type: "incident", doc })),
+    ...companyDaily.map(doc => ({ type: "daily", doc })),
+    ...companyMonthlyRecords.map(doc => ({ type: "monthly", doc })),
+    ...companyCustomDocs.map(doc => ({ type: "customdoc", doc })),
+  ].filter(x => x.doc.created_at)
+   .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
+   .slice(0, 8);
+
+  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents)
+    .map(s => ({ ...s, total: s.flhas + s.toolbox + s.daily + s.nearMisses + s.incidents, needsAttention: s.nearMisses + s.incidents > 0 }))
+    .filter(s => s.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+  const siteActivityMax = Math.max(1, ...siteActivity.map(s => s.total));
 
   const reviewNearMiss = async (id, notes, reviewerName) => {
     const record = nearMisses.find(n => n.id === id);
@@ -3246,28 +3375,22 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     searchInput: { width: "100%", padding: "9px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none", background: C.panelInset, color: C.text.primary },
   };
 
-  // Stat-tile renderer — a "quiet" state (dark panel, muted numeral) vs an
-  // "alert" state (tinted gradient fill + glow ring in the relevant status
-  // color, brand-orange for the neutral/positive tally). No chart here —
-  // just a decorative ring behind the icon for visual weight, per the
-  // "no charts in this pass" direction.
-  const TONE = {
-    danger: { bg: "linear-gradient(160deg,#3a1414 0%,#1a0d0d 100%)", ring: "0 0 0 1px rgba(239,68,68,0.55), 0 16px 32px -16px rgba(239,68,68,0.5)", accent: "#F87171", label: "rgba(255,255,255,0.72)" },
-    warning: { bg: "linear-gradient(160deg,#3a2a0a 0%,#1c1508 100%)", ring: "0 0 0 1px rgba(245,158,11,0.5), 0 16px 32px -16px rgba(245,158,11,0.4)", accent: "#FBBF24", label: "rgba(255,255,255,0.72)" },
-    accent: { bg: "linear-gradient(160deg,#2c1608 0%,#1a1008 100%)", ring: "0 0 0 1px rgba(249,115,22,0.45), 0 16px 32px -16px rgba(249,115,22,0.4)", accent: "#FB923C", label: "rgba(255,255,255,0.72)" },
-    neutral: { bg: C.panel, ring: `0 0 0 1px ${C.line}`, accent: C.text.faint, label: C.text.muted },
-  };
-  const statTile = (Icon, value, label, onClick, tone = "neutral") => {
-    const t = TONE[tone];
+  // Sparkline stat-tile renderer — a headline number with a real trailing-
+  // 7-day trend beneath it (see `bucketByDay` above). Tone only changes the
+  // icon/trend colour; the card surface stays a plain dark panel so the
+  // colour is a signal, not a background fill (per the accent-as-highlight
+  // rule, not a block).
+  const SPARK_TONE = { accent: C.orange, danger: C.status.danger.solid, warning: C.status.warning.solid, neutral: C.text.faint };
+  const sparkTile = (Icon, value, label, sparkData, onClick, tone = "neutral") => {
+    const color = SPARK_TONE[tone] || SPARK_TONE.neutral;
     return (
-      <div onClick={onClick} style={{
-        position: "relative", overflow: "hidden", background: t.bg, borderRadius: RAD.lg,
-        padding: "16px 18px", cursor: onClick ? "pointer" : "default", boxShadow: t.ring,
-      }}>
-        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: `12px solid ${t.accent}16`, top: -34, right: -34 }} />
-        <Icon size={17} color={t.accent} strokeWidth={2.25} style={{ position: "relative", display: "block", marginBottom: 10 }} />
-        <div style={{ fontFamily: FONT.heading, fontSize: 30, fontWeight: 700, color: tone === "neutral" ? C.text.primary : "#fff", lineHeight: 1, position: "relative" }}>{value}</div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: t.label, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 6, position: "relative" }}>{label}</div>
+      <div onClick={onClick} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px", cursor: onClick ? "pointer" : "default", boxShadow: SHAD.md }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <Icon size={14} color={color} strokeWidth={2.25} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+        </div>
+        <div style={{ fontFamily: FONT.heading, fontSize: 26, fontWeight: 700, color: C.text.primary, lineHeight: 1, marginTop: 8 }}>{value}</div>
+        <Sparkline data={sparkData} color={color} />
       </div>
     );
   };
@@ -3308,6 +3431,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   return (
     <div style={styles.wrap}>
+      <style>{`@media (max-width: 880px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }`}</style>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} onSave={saveFlhaEdit} defaultSupName={userName} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} onSave={saveInspectionEdit} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} onSave={saveToolboxEdit} />}
@@ -3413,20 +3537,137 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-          {statTile(ShieldAlert, awaitingSignOff, "Awaiting Sign-Off",
-            () => TAB_VISIBLE.flhas && setActiveTab("flhas"),
-            awaitingSignOff > 0 ? "danger" : "neutral")}
-          {statTile(Flag, needsReview, "Needs Review", () => {
-            const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
-            if (TAB_VISIBLE[target]) setActiveTab(target);
-            else if (TAB_VISIBLE.incident) setActiveTab("incident");
-            else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
-          }, needsReview > 0 ? "warning" : "neutral")}
-          {statTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions",
-            () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
-            openCorrectiveCount > 0 ? "accent" : "neutral")}
-          {statTile(FileText, docsThisWeek, "Docs This Week", () => setShowThisWeekModal(true), "neutral")}
+        {/* Overview — real ratios as rings, real trends as sparklines, real
+            per-site activity as effort bars, real recent submissions as a
+            live feed. Nothing on this panel is a placeholder or an
+            estimate; every number traces back to the same company-scoped
+            arrays the tabs below render from. */}
+        <div className="fora-overview-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(260px,1fr)", gap: 12, marginBottom: 16, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+              <div
+                onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")}
+                style={{ ...styles.card, margin: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: TAB_VISIBLE.flhas ? "pointer" : "default" }}
+              >
+                <ProgressRing
+                  value={awaitingSignOff} max={Math.max(flhaReviewStats.total, 1)}
+                  label="Awaiting Sign-Off"
+                  sublabel={flhaReviewStats.total > 0 ? `of ${flhaReviewStats.total} FLHAs` : "No FLHAs yet"}
+                  color={awaitingSignOff > 0 ? C.orange : C.status.success.solid}
+                />
+              </div>
+              <div
+                onClick={() => {
+                  const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
+                  if (TAB_VISIBLE[target]) setActiveTab(target);
+                  else if (TAB_VISIBLE.incident) setActiveTab("incident");
+                  else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
+                }}
+                style={{ ...styles.card, margin: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              >
+                <ProgressRing
+                  value={reportReviewStats.reviewed} max={Math.max(reportReviewStats.total, 1)}
+                  label="Reports Reviewed"
+                  sublabel={reportReviewStats.total > 0 ? `${reportReviewStats.outstanding} outstanding` : "No reports yet"}
+                  color={reportReviewStats.total > 0 && reportReviewStats.caughtUp ? C.status.success.solid : C.orange}
+                />
+              </div>
+              {sparkTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions", correctiveSpark,
+                () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
+                openCorrectiveCount > 0 ? "accent" : "neutral")}
+              {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "neutral")}
+            </div>
+
+            {/* Site activity — FORA's own take on a "live operations" centerpiece:
+                real per-site submission counts across the last activity on file,
+                not a copied network/topology visual. Warm accent = a site has an
+                open near-miss/incident sitting in it; green = clean. */}
+            <div style={{
+              position: "relative", overflow: "hidden",
+              background: "linear-gradient(180deg,#151515 0%,#111111 100%)",
+              border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "18px 20px", boxShadow: SHAD.md,
+            }}>
+              <div style={{
+                position: "absolute", width: 320, height: 320, borderRadius: "50%",
+                background: "radial-gradient(circle, rgba(249,115,22,0.10) 0%, transparent 70%)",
+                top: -150, right: -110, pointerEvents: "none",
+              }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, position: "relative" }}>
+                <MapPin size={15} color={C.orange} strokeWidth={2.25} />
+                <span style={{ fontSize: 13, fontWeight: 800, color: C.text.primary }}>Site Activity</span>
+                <span style={{ fontSize: 11, color: C.text.faint, marginLeft: "auto" }}>Field submissions by site</span>
+              </div>
+              {siteActivity.length === 0 ? (
+                <div style={{ color: C.text.faint, fontSize: 13, position: "relative" }}>No field activity logged yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 11, position: "relative" }}>
+                  {siteActivity.map(s => {
+                    const pctOfMax = Math.round((s.total / siteActivityMax) * 100);
+                    const barColor = s.needsAttention ? C.status.warning.solid : C.status.success.solid;
+                    return (
+                      <div key={s.site}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
+                          <span style={{ fontWeight: 700, color: C.text.body }}>{s.site}</span>
+                          <span style={{ color: C.text.faint }}>{s.total} submission{s.total === 1 ? "" : "s"} · {pctOfMax}%</span>
+                        </div>
+                        <div style={{ height: 7, borderRadius: 99, background: C.panelInset, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pctOfMax}%`, borderRadius: 99, background: barColor }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Recent activity — a live feed of real submissions, newest first,
+              with each item's real status (sign-off/review state where the
+              document type has one, "Logged" where it doesn't). */}
+          <div style={{ ...styles.card, margin: 0, display: "flex", flexDirection: "column", maxHeight: 468, boxSizing: "border-box" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10, flexShrink: 0 }}>
+              <Radio size={13} color={C.status.success.solid} strokeWidth={2.5} />
+              <span style={{ fontSize: 13, fontWeight: 800, color: C.text.primary }}>Recent Activity</span>
+            </div>
+            {recentActivityList.length === 0 ? (
+              <div style={{ color: C.text.faint, fontSize: 13 }}>Nothing submitted yet.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}>
+                {recentActivityList.map(({ type, doc }, i) => {
+                  const meta = DOC_TYPE_META[type];
+                  const Icon = meta.icon;
+                  let statusLabel = "Logged", statusColor = C.text.faint;
+                  if (type === "flha") {
+                    statusLabel = doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
+                    statusColor = doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
+                  } else if (type === "nearmiss" || type === "incident") {
+                    statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
+                    statusColor = doc.reviewed ? C.status.success.text : C.status.warning.text;
+                  }
+                  return (
+                    <div
+                      key={`${type}-${doc.id}-${i}`}
+                      onClick={() => openWeekDoc(type, doc)}
+                      style={{ display: "flex", gap: 10, padding: "9px 2px", borderBottom: i < recentActivityList.length - 1 ? `1px solid ${C.line}` : "none", cursor: "pointer" }}
+                    >
+                      <div style={{ width: 28, height: 28, borderRadius: 8, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Icon size={14} color={C.text.muted} strokeWidth={2.25} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text.body, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {meta.label} · {meta.primary(doc) || "—"}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: statusColor }}>{statusLabel}</span>
+                          <span style={{ fontSize: 10.5, color: C.text.faint }}>· {timeAgo(doc.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>

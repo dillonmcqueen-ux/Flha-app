@@ -4,6 +4,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { TriangleAlert, Tractor, Hourglass, CircleCheckBig, WifiOff } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -477,7 +478,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     const flaggedItems = (r.items || []).filter(it => it.condition === "Defective" || it.condition === "Monitor");
     return (
       <div style={{ ...s.card, background: "#FEF2F2", border: "1.5px solid #FCA5A5" }}>
-        <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 4 }}>⚠️ Previous inspection flagged issues</div>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><TriangleAlert size={15} strokeWidth={2.25} /> Previous inspection flagged issues</div>
         <div style={{ fontSize: 13, color: "#7F1D1D", marginBottom: 8 }}>
           {lastInspection.worker_name || "Unknown"} · {new Date(lastInspection.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
         </div>
@@ -496,7 +497,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>🚜</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <Tractor size={26} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Equipment Inspection</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Pre-trip & post-trip checks</div>
@@ -551,7 +552,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't check this equipment. Check your connection and try again.</div>}
 
           <button style={s.btn(checking ? "#94A3B8" : equipmentLabel() ? "#0369A1" : "#94A3B8")} disabled={checking || !equipmentLabel()} onClick={checkEquipmentAndProceed}>
-            {checking ? "⏳ Checking…" : "Continue →"}
+            {checking ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Checking…</span>) : "Continue →"}
           </button>
         </div>
       )}
@@ -713,7 +714,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               </div>
             )}
             <button style={s.btn(signed && !saveError ? "#16A34A" : hasSignature ? "#0369A1" : "#94A3B8")} disabled={!hasSignature || (signed && !saveError)} onClick={submitPretrip}>
-              {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Pre-Trip Inspection"}
+              {savingInspection ? "Saving…" : signed && !saveError ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CircleCheckBig size={14} strokeWidth={2.25} /> Submitted</span>) : "Sign & Submit Pre-Trip Inspection"}
             </button>
           </div>
         </>
@@ -790,7 +791,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               const ready = hasSignature && workerName && (isTrailer || endReading) && hasChanges !== null && (!hasChanges || changeNotes.trim());
               return (
                 <button style={s.btn(signed && !saveError ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
-                  {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Post-Trip"}
+                  {savingInspection ? "Saving…" : signed && !saveError ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CircleCheckBig size={14} strokeWidth={2.25} /> Submitted</span>) : "Sign & Submit Post-Trip"}
                 </button>
               );
             })()}
@@ -802,7 +803,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{equipmentLabel()}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -815,7 +816,9 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>{(mode === "pretrip" ? defectiveCount > 0 : hasChanges && changeCondition === "Defective") ? "⚠️" : "✅"}</div>
+            {(mode === "pretrip" ? defectiveCount > 0 : hasChanges && changeCondition === "Defective")
+              ? <TriangleAlert size={54} strokeWidth={1.75} color="#D97706" style={{ marginBottom: 12 }} />
+              : <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />}
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>
               {mode === "posttrip" ? "Post-Trip Complete" : "Pre-Trip Complete"}
             </div>

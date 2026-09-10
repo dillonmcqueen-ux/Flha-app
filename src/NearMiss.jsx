@@ -5,6 +5,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { TriangleAlert, Check, Hourglass, X, WifiOff, CircleCheckBig } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -312,7 +313,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>⚠️</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <TriangleAlert size={26} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Near Miss Report</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Report a close call</div>
@@ -327,7 +328,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: "#1E293B" }}>Report details</div>
 
           <div onClick={() => setAnonymous(!anonymous)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: anonymous ? "#FFFBEB" : "#F8FAFC", border: `1.5px solid ${anonymous ? "#FCD34D" : "#E2E8F0"}`, borderRadius: 10, marginBottom: 14, cursor: "pointer" }}>
-            <div style={{ width: 22, height: 22, borderRadius: 6, background: anonymous ? "#D97706" : "#fff", border: `1.5px solid ${anonymous ? "#D97706" : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 800 }}>{anonymous ? "✓" : ""}</div>
+            <div style={{ width: 22, height: 22, borderRadius: 6, background: anonymous ? "#D97706" : "#fff", border: `1.5px solid ${anonymous ? "#D97706" : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 800 }}>{anonymous ? <Check size={13} strokeWidth={3} color="#fff" /> : ""}</div>
             <div>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>Report anonymously</div>
               <div style={{ fontSize: 12, color: "#64748B" }}>Your name won't appear on the report</div>
@@ -385,7 +386,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </div>
           )}
           <button style={s.btn(loading ? "#94A3B8" : description.trim() ? "#D97706" : "#94A3B8")} disabled={loading || !description.trim()} onClick={generateReport}>
-            {loading ? "⏳ Structuring report…" : "Generate Report"}
+            {loading ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Structuring report…</span>) : "Generate Report"}
           </button>
           {genError && (
             <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — I'll fill this in myself</button>
@@ -399,7 +400,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <>
           {report.ai_assisted === false && (
             <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-structured — fill in the details below yourself before submitting.
+              <TriangleAlert size={15} strokeWidth={2.25} style={{ verticalAlign: "-2px", marginRight: 6 }} /> Not AI-structured — fill in the details below yourself before submitting.
             </div>
           )}
           <div style={s.card}>
@@ -439,7 +440,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {(report.contributingFactors || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
                 <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("contributingFactors", i, e.target.value)} />
-                <button onClick={() => removeListItem("contributingFactors", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <button onClick={() => removeListItem("contributingFactors", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><X size={14} strokeWidth={2.5} /></button>
               </div>
             ))}
             <button onClick={() => addListItem("contributingFactors")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add factor</button>
@@ -455,7 +456,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {(report.immediateActions || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
                 <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("immediateActions", i, e.target.value)} />
-                <button onClick={() => removeListItem("immediateActions", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <button onClick={() => removeListItem("immediateActions", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><X size={14} strokeWidth={2.5} /></button>
               </div>
             ))}
             <button onClick={() => addListItem("immediateActions")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add action</button>
@@ -466,7 +467,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {(report.nextSteps || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
                 <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("nextSteps", i, e.target.value)} />
-                <button onClick={() => removeListItem("nextSteps", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <button onClick={() => removeListItem("nextSteps", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><X size={14} strokeWidth={2.5} /></button>
               </div>
             ))}
             <button onClick={() => addListItem("nextSteps")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add step</button>
@@ -516,7 +517,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reporterLabel()}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -529,7 +530,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
+            <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Near Miss Reported</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reporterLabel()}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>Thank you for reporting. Near-miss reports help prevent injuries before they happen.</div>

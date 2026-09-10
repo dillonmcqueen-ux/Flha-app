@@ -5,6 +5,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { Ambulance, WifiOff, X, Camera, TriangleAlert, CircleCheckBig, Hourglass } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -474,7 +475,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>🚑</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <Ambulance size={26} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Incident Report</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Formal incident record</div>
@@ -558,29 +559,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div key={p.id} style={{ position: "relative", aspectRatio: "1", borderRadius: 9, overflow: "hidden", border: "1.5px solid #E2E8F0", background: "#F1F5F9" }}>
                   <img src={p.previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: p.uploading ? 0.5 : 1 }} />
                   {p.uploading && (
-                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#475569" }}>⏳</div>
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#475569" }}><Hourglass size={16} strokeWidth={2.25} /></div>
                   )}
                   {p.pending && (
-                    <div style={{ position: "absolute", inset: 0, background: "#FFFBEB99", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#92400E", textAlign: "center", padding: 4 }}>📶 Queued</div>
+                    <div style={{ position: "absolute", inset: 0, background: "#FFFBEB99", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#92400E", textAlign: "center", padding: 4, gap: 2 }}><WifiOff size={13} strokeWidth={2.25} /> Queued</div>
                   )}
                   {p.error && (
                     <div style={{ position: "absolute", inset: 0, background: "#FEF2F2CC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#991B1B" }}>Failed</div>
                   )}
-                  <button onClick={() => removePhoto(p.id)} style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", background: "#00000090", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                  <button onClick={() => removePhoto(p.id)} style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", background: "#00000090", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={12} strokeWidth={2.5} /></button>
                 </div>
               ))}
             </div>
           )}
 
           {photos.some(p => p.pending) && (
-            <div style={{ fontSize: 12, color: "#92400E", marginBottom: 10 }}>📶 Queued photos will upload automatically once you're back online — no need to redo them.</div>
+            <div style={{ fontSize: 12, color: "#92400E", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><WifiOff size={13} strokeWidth={2.25} /> Queued photos will upload automatically once you're back online — no need to redo them.</div>
           )}
           {photoBudgetError && (
             <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B" }}>{photoBudgetError}</div>
           )}
 
           <label style={{ display: "block", background: "#F1F5F9", color: "#334155", border: "1.5px dashed #CBD5E1", borderRadius: 9, padding: "14px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center", marginBottom: 14 }}>
-            📷 Add photos
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Camera size={15} strokeWidth={2.25} /> Add photos</span>
             <input type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => { handlePhotoSelect(e.target.files); e.target.value = ""; }} />
           </label>
 
@@ -591,7 +592,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
             setStep("describe");
           }}>
-            {uploadingCount > 0 ? `⏳ Uploading ${uploadingCount} photo${uploadingCount > 1 ? "s" : ""}…` : "Continue →"}
+            {uploadingCount > 0 ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> {`Uploading ${uploadingCount} photo${uploadingCount > 1 ? "s" : ""}…`}</span>) : "Continue →"}
           </button>
           <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
         </div>
@@ -609,7 +610,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </div>
           )}
           <button style={s.btn(loading ? "#94A3B8" : description.trim() ? "#DC2626" : "#94A3B8")} disabled={loading || !description.trim()} onClick={generateReport}>
-            {loading ? "⏳ Structuring report…" : "Generate Report"}
+            {loading ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Structuring report…</span>) : "Generate Report"}
           </button>
           {genError && (
             <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — I'll fill this in myself</button>
@@ -622,8 +623,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "review" && report && (
         <>
           {report.ai_assisted === false && (
-            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-structured — fill in the details below yourself before submitting.
+            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E", display: "flex", alignItems: "center", gap: 7 }}>
+              <TriangleAlert size={15} strokeWidth={2.25} /> Not AI-structured — fill in the details below yourself before submitting.
             </div>
           )}
           <div style={s.card}>
@@ -713,7 +714,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
+            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{incidentType} · {site} · {reporter}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
@@ -726,7 +727,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
+            <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />
             <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Incident Report Filed</div>
             <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{incidentType} · {site} · {reporter}</div>
             <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report has been saved and sent to your supervisor's dashboard for review.</div>
@@ -745,7 +746,7 @@ function ListEditor({ s, title, field, report, updateList, removeListItem, addLi
       {(report[field] || []).map((f, i) => (
         <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
           <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList(field, i, e.target.value)} />
-          <button onClick={() => removeListItem(field, i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+          <button onClick={() => removeListItem(field, i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><X size={14} strokeWidth={2.5} /></button>
         </div>
       ))}
       <button onClick={() => addListItem(field)} style={{ background: "transparent", border: "none", color: "#991B1B", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add</button>
