@@ -4,7 +4,9 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
-import { ClipboardList, Hourglass, TriangleAlert, WifiOff, CircleCheckBig, Check } from "lucide-react";
+import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
+import { buildFormStyles, disabledBg, bannerStyle, docAccent } from "./FormKit";
+import { ArrowLeft, ClipboardList, AlertTriangle, Loader2, CheckCircle2, WifiOff, Check, Plus, X } from "lucide-react";
 
 const WEATHER = ["Clear", "Cloudy", "Rain", "Snow", "Windy", "Hot", "Cold"];
 
@@ -300,38 +302,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     }
   };
 
-  const s = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: 16, colorScheme: "light" },
-    header: { background: "linear-gradient(135deg,#15803D,#16A34A)", borderRadius: 14, padding: "18px 20px", marginBottom: 16, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" },
-    card: { background: "#fff", borderRadius: 14, padding: 18, marginBottom: 14, boxShadow: "0 1px 3px #0f172a12" },
-    label: { display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 },
-    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC", color: "#1E293B", colorScheme: "light" },
-    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer", width: "100%" }),
-    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
-    section: { fontWeight: 800, fontSize: 15, color: "#15803D", marginBottom: 8 },
-  };
+  const accent = docAccent(C, "daily");
+  const s = buildFormStyles(C, FONT, RAD, SHAD, accent);
 
   return (
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <ClipboardList size={26} />}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <ClipboardList size={26} strokeWidth={2} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Daily Report</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>End-of-day site summary</div>
           </div>
         </div>
-        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Menu</button>
+        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><ArrowLeft size={15} strokeWidth={2.5} /> Menu</button>
       </div>
 
       {/* SETUP */}
       {step === "setup" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: "#1E293B" }}>Site & conditions</div>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Site & conditions</div>
 
           <label style={s.label}>Your name</label>
           <input
-            style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Reporter name" value={reporter}
             onChange={e => setReporter(e.target.value)}
             readOnly={!!loginUserName}
@@ -354,7 +348,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Weather (select all that apply)</label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 11 }}>
             {WEATHER.map(w => (
-              <button key={w} onClick={() => toggleWeather(w)} style={{ flex: "1 1 28%", padding: "9px 4px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${weather.includes(w) ? "#16A34A" : "#E2E8F0"}`, background: weather.includes(w) ? "#F0FDF4" : "#fff", color: weather.includes(w) ? "#15803D" : "#94A3B8", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>{weather.includes(w) && <Check size={12} strokeWidth={3} />}{w}</button>
+              <button key={w} onClick={() => toggleWeather(w)} style={{ flex: "1 1 28%", padding: "10px 4px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${weather.includes(w) ? C.status.success.solid : C.line}`, background: weather.includes(w) ? C.status.success.bg : C.panelInset, color: weather.includes(w) ? C.status.success.text : C.text.faint, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>{weather.includes(w) && <Check size={13} strokeWidth={3} />}{w}</button>
             ))}
           </div>
 
@@ -363,7 +357,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
 
-          <button style={s.btn((reporter && site) ? "#16A34A" : "#94A3B8")} disabled={!reporter || !site} onClick={() => {
+          <button style={s.btn((reporter && site) ? accent : disabledBg(C))} disabled={!reporter || !site} onClick={() => {
             const missing = cf.missingRequired();
             if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
             setStep("notes");
@@ -375,7 +369,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "notes" && (
         <>
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Crew, equipment & visitors</div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Crew, equipment & visitors</div>
             <label style={s.label}>Crew on site + hours</label>
             <input style={s.input} placeholder="e.g. 4 laborers, 1 operator — 8 hrs each" value={crew} onChange={e => setCrew(e.target.value)} />
 
@@ -389,18 +383,18 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     return <option key={eq.id} value={lbl} disabled={pickedEquip.includes(lbl)}>{lbl}</option>;
                   })}
                 </select>
-                <button onClick={addPickedEquip} disabled={!equipDropdown} style={{ background: equipDropdown ? "#16A34A" : "#CBD5E1", color: "#fff", border: "none", borderRadius: 9, padding: "0 16px", fontWeight: 700, fontSize: 14, cursor: equipDropdown ? "pointer" : "default", flexShrink: 0 }}>Add</button>
+                <button onClick={addPickedEquip} disabled={!equipDropdown} style={{ background: equipDropdown ? accent : disabledBg(C), color: "#fff", border: "none", borderRadius: RAD.md, padding: "0 18px", fontWeight: 700, fontSize: 14, cursor: equipDropdown ? "pointer" : "default", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}><Plus size={15} strokeWidth={2.5} /> Add</button>
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 11 }}>No equipment registered for this company yet.</div>
+              <div style={{ fontSize: 13, color: C.text.faint, marginBottom: 11 }}>No equipment registered for this company yet.</div>
             )}
 
             {pickedEquip.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 11 }}>
                 {pickedEquip.map(label => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 9 }}>
-                    <span style={{ fontSize: 14, color: "#15803D" }}>{label}</span>
-                    <button onClick={() => removePickedEquip(label)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}`, borderRadius: RAD.md }}>
+                    <span style={{ fontSize: 14, color: C.status.success.text }}>{label}</span>
+                    <button onClick={() => removePickedEquip(label)} style={{ background: "transparent", border: "none", color: C.status.danger.text, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 700 }}><X size={14} strokeWidth={2.5} /> Remove</button>
                   </div>
                 ))}
               </div>
@@ -413,30 +407,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           </div>
 
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>The day's notes</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 12 }}>Jot rough notes — the AI will clean each into a professional summary.</div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>The day's notes</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 12 }}>Jot rough notes — the AI will clean each into a professional summary.</div>
 
             <label style={s.label}>Work completed today</label>
-            <textarea style={{ ...s.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. dug footings north side, poured 2 piers, backfilled east trench" value={workDone} onChange={e => setWorkDone(e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 90, resize: "vertical" }} placeholder="e.g. dug footings north side, poured 2 piers, backfilled east trench" value={workDone} onChange={e => setWorkDone(e.target.value)} />
 
             <label style={s.label}>Delays / issues / downtime</label>
-            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. concrete truck 2 hrs late, rain stopped work 1pm-2pm" value={delays} onChange={e => setDelays(e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical" }} placeholder="e.g. concrete truck 2 hrs late, rain stopped work 1pm-2pm" value={delays} onChange={e => setDelays(e.target.value)} />
 
             <label style={s.label}>Plan for tomorrow</label>
-            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. strip forms, pour remaining piers, start south footings" value={tomorrow} onChange={e => setTomorrow(e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical" }} placeholder="e.g. strip forms, pour remaining piers, start south footings" value={tomorrow} onChange={e => setTomorrow(e.target.value)} />
 
             {genError && (
-              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-                Couldn't generate the report. Check your connection and try again, or continue with your own notes below.
+              <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Couldn't generate the report. Check your connection and try again, or continue with your own notes below.</span>
               </div>
             )}
-            <button style={s.btn(loading ? "#94A3B8" : workDone.trim() ? "#16A34A" : "#94A3B8")} disabled={loading || !workDone.trim()} onClick={generateReport}>
-              {loading ? (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Hourglass size={14} strokeWidth={2.25} /> Writing report…</span>) : "Generate Report"}
+            <button style={s.btn(loading ? disabledBg(C) : workDone.trim() ? accent : disabledBg(C))} disabled={loading || !workDone.trim()} onClick={generateReport}>
+              {loading ? <><Loader2 size={16} className="fora-spin" /> Writing report…</> : "Generate Report"}
             </button>
             {genError && (
               <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — use my notes as written</button>
             )}
-            <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
+            <button style={s.ghost} onClick={() => setStep("setup")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
           </div>
         </>
       )}
@@ -445,48 +439,48 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "review" && report && (
         <>
           {report.ai_assisted === false && (
-            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              <TriangleAlert size={15} strokeWidth={2.25} style={{ verticalAlign: "-2px", marginRight: 6 }} /> Not AI-polished — these are your notes as written. Feel free to tidy the wording below before submitting.
+            <div style={bannerStyle(C, RAD, "warning")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Not AI-polished — these are your notes as written. Feel free to tidy the wording below before submitting.</span>
             </div>
           )}
           <div style={s.card}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#15803D", textTransform: "uppercase", letterSpacing: 0.5 }}>Daily Report</div>
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{site} · {reportDate} · {weatherSummary()}{temperature ? `, ${temperature}` : ""}</div>
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>By {reporter}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>Daily Report</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{site} · {reportDate} · {weatherSummary()}{temperature ? `, ${temperature}` : ""}</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>By {reporter}</div>
           </div>
 
           {(crew || equipmentSummary() || visitors) && (
             <div style={s.card}>
-              {crew && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}><strong>Crew:</strong> {crew}</div>}
-              {equipmentSummary() && <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}><strong>Equipment:</strong> {equipmentSummary()}</div>}
-              {visitors && <div style={{ fontSize: 13, color: "#374151" }}><strong>Visitors:</strong> {visitors}</div>}
+              {crew && <div style={{ fontSize: 13, color: C.text.body, marginBottom: 4 }}><strong>Crew:</strong> {crew}</div>}
+              {equipmentSummary() && <div style={{ fontSize: 13, color: C.text.body, marginBottom: 4 }}><strong>Equipment:</strong> {equipmentSummary()}</div>}
+              {visitors && <div style={{ fontSize: 13, color: C.text.body }}><strong>Visitors:</strong> {visitors}</div>}
             </div>
           )}
 
           <div style={s.card}>
             <div style={s.section}>Work Completed</div>
-            <textarea style={{ ...s.input, minHeight: 100, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={report.workSummary} onChange={e => updateText("workSummary", e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 100, resize: "vertical", marginBottom: 0 }} value={report.workSummary} onChange={e => updateText("workSummary", e.target.value)} />
           </div>
 
           <div style={s.card}>
             <div style={s.section}>Delays / Issues</div>
-            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={report.delaysSummary} onChange={e => updateText("delaysSummary", e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", marginBottom: 0 }} value={report.delaysSummary} onChange={e => updateText("delaysSummary", e.target.value)} />
           </div>
 
           <div style={s.card}>
             <div style={s.section}>Plan for Tomorrow</div>
-            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={report.tomorrowPlan} onChange={e => updateText("tomorrowPlan", e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 70, resize: "vertical", marginBottom: 0 }} value={report.tomorrowPlan} onChange={e => updateText("tomorrowPlan", e.target.value)} />
           </div>
 
           {saveError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Couldn't save this report. Check your connection and try again.
+            <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Couldn't save this report. Check your connection and try again.</span>
             </div>
           )}
-          <button style={s.btn(saving ? "#94A3B8" : "#16A34A")} disabled={saving} onClick={submit}>
-            {saving ? "Submitting…" : saveError ? "Try Again" : "Submit Daily Report"}
+          <button style={s.btn(saving ? disabledBg(C) : accent)} disabled={saving} onClick={submit}>
+            {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting…</> : saveError ? "Try Again" : <><CheckCircle2 size={16} strokeWidth={2.25} /> Submit Daily Report</>}
           </button>
-          <button style={s.ghost} onClick={() => setStep("notes")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("notes")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </>
       )}
 
@@ -494,11 +488,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <WifiOff size={54} strokeWidth={1.75} color="#94A3B8" style={{ marginBottom: 12 }} />
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reportDate}</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
-            <button style={s.btn("#16A34A")} onClick={onBack}>Back to menu</button>
+            <WifiOff size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 8 }}>{site} · {reportDate}</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
@@ -507,13 +501,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <CircleCheckBig size={54} strokeWidth={1.75} color="#16A34A" style={{ marginBottom: 12 }} />
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Daily Report Submitted</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{site} · {reportDate}</div>
-            <button style={s.btn("#16A34A")} onClick={onBack}>Back to menu</button>
+            <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Daily Report Submitted</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 20 }}>{site} · {reportDate}</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
+      <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
     </div>
   );
 }
