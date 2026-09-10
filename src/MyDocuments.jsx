@@ -16,21 +16,24 @@
 //    ready-to-open PDF link — "pdf ready to present to someone on the fly."
 import { useState, useEffect } from "react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
-import { ChevronLeft, FileText, RotateCcw, Trash2, ExternalLink, Inbox } from "lucide-react";
+import {
+  ChevronLeft, FileText, RotateCcw, Trash2, ExternalLink, Inbox,
+  HardHat, Wrench, MessageSquareText, Eye, Siren, ClipboardList, CalendarClock, FolderKanban,
+} from "lucide-react";
 import { clearDraft } from "./useDraftAutosave.js";
 
 const NAME_KEY_PREFIX = "fora_myname_";
 const DRAFT_PREFIX = "fora_draft_";
 
 const TYPE_META = {
-  flha: { label: "FLHA", icon: "🦺" },
-  inspection: { label: "Equipment Inspection", icon: "🔧" },
-  toolbox: { label: "Toolbox Talk", icon: "🗣️" },
-  nearmiss: { label: "Near Miss Report", icon: "👀" },
-  incident: { label: "Incident Report", icon: "🚨" },
-  daily: { label: "Daily Report", icon: "📋" },
-  monthly: { label: "Monthly Inspection", icon: "🗓️" },
-  customform: { label: "Custom Document", icon: "🗂️" },
+  flha: { label: "FLHA", icon: HardHat },
+  inspection: { label: "Equipment Inspection", icon: Wrench },
+  toolbox: { label: "Toolbox Talk", icon: MessageSquareText },
+  nearmiss: { label: "Near Miss Report", icon: Eye },
+  incident: { label: "Incident Report", icon: Siren },
+  daily: { label: "Daily Report", icon: ClipboardList },
+  monthly: { label: "Monthly Inspection", icon: CalendarClock },
+  customform: { label: "Custom Document", icon: FolderKanban },
 };
 
 // Every draft key looks like fora_draft_<formType>_<scopeId>, and scopeId is
@@ -144,7 +147,7 @@ export default function MyDocuments({ companyId, userName, userId, token, onBack
           const meta = TYPE_META[d.type];
           return (
             <div key={d.key} style={s.card}>
-              <div style={{ fontSize: 22 }}>{meta.icon}</div>
+              <div style={{ color: C.orange, display: "flex" }}><meta.icon size={22} strokeWidth={1.75} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>{meta.label}</div>
                 <div style={{ fontSize: 12, color: C.text.muted, marginTop: 1 }}>
@@ -190,10 +193,10 @@ export default function MyDocuments({ companyId, userName, userId, token, onBack
           </div>
         ) : (
           documents.map(doc => {
-            const meta = TYPE_META[doc.type] || { label: doc.title, icon: "📄" };
+            const meta = TYPE_META[doc.type] || { label: doc.title, icon: FileText };
             return (
               <div key={`${doc.type}-${doc.id}`} style={s.card}>
-                <div style={{ fontSize: 22 }}>{meta.icon}</div>
+                <div style={{ color: C.orange, display: "flex" }}><meta.icon size={22} strokeWidth={1.75} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>{doc.title || meta.label}</div>
                   <div style={{ fontSize: 12, color: C.text.muted, marginTop: 1 }}>

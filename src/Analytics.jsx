@@ -1,10 +1,26 @@
 import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, Cell,
+} from "recharts";
+import { HardHat, Wrench } from "lucide-react";
+import {
   severityBreakdown, nearMissIncidentRatio, reviewBacklog, highRiskFlhaRate,
   equipmentIssueStats, fieldSiteActivity, scheduledSiteActivity, monthlyTrend,
   correctiveActionAging, reporterLeaderboard, monthlyPassRate, toolboxAvgAttendance,
   maintenanceSummary,
 } from "./analyticsUtils";
 import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
+
+// Shared recharts styling so every chart on the page reads as one system
+// (dark panel background, hairline grid, tooltip that matches the app's
+// panelRaised surface) instead of recharts' light-mode defaults.
+const chartTooltipStyle = {
+  contentStyle: { background: C.panelRaised, border: `1px solid ${C.line}`, borderRadius: RAD.sm, fontSize: 12, color: C.text.primary },
+  labelStyle: { color: C.text.muted, fontWeight: 700, marginBottom: 4 },
+  itemStyle: { color: C.text.body },
+  cursor: { fill: C.panelInset },
+};
+const axisTick = { fill: C.text.muted, fontSize: 11 };
 
 const TONE = { neutral: C.orange, good: C.status.success.solid, warn: C.status.warning.solid, bad: C.status.danger.solid };
 const SEV_COLOR = { Low: C.risk.low.solid, Medium: C.risk.medium.solid, High: C.risk.high.solid, Critical: C.risk.extreme.solid };
@@ -30,24 +46,26 @@ function StatTile({ label, value, sub, tone = "neutral" }) {
   );
 }
 
+// Real horizontal bar chart (recharts) — replaces the old hand-rolled
+// nested-<div>-with-width:% bars. Each item can carry its own `color`
+// (severity/status breakdowns); otherwise every bar uses `barColor`.
 function RankedBarList({ items, limit, emptyLabel = "Not enough data yet.", barColor = C.orange }) {
   const list = limit ? items.slice(0, limit) : items;
   const hasData = list.some(it => it.count > 0);
   if (!hasData) return <div style={{ color: C.text.faint, fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
-  const max = Math.max(...list.map(it => it.count), 1);
+  const rowHeight = 30;
   return (
-    <div>
-      {list.map((it, i) => (
-        <div key={i} style={{ marginBottom: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
-            <span style={{ color: C.text.body, fontWeight: 600 }}>{it.label}</span>
-            <span style={{ color: C.text.muted, fontWeight: 700 }}>{it.count}</span>
-          </div>
-          <div style={{ background: C.panelInset, borderRadius: 6, height: 8 }}>
-            <div style={{ width: `${it.count > 0 ? Math.max((it.count / max) * 100, 4) : 0}%`, background: it.color || barColor, height: 8, borderRadius: 6, transition: "width .2s" }} />
-          </div>
-        </div>
-      ))}
+    <div style={{ width: "100%", height: list.length * rowHeight + 10 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={list} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 0 }} barCategoryGap={8}>
+          <XAxis type="number" hide />
+          <YAxis type="category" dataKey="label" width={130} tick={axisTick} axisLine={false} tickLine={false} />
+          <Tooltip {...chartTooltipStyle} formatter={(v) => [v, "Count"]} />
+          <Bar dataKey="count" radius={[0, 6, 6, 0]} maxBarSize={16}>
+            {list.map((it, i) => <Cell key={i} fill={it.color || barColor} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -80,38 +98,28 @@ function SimpleTable({ columns, rows, emptyLabel = "Not enough data yet." }) {
   );
 }
 
-function TrendBars({ buckets, series, emptyLabel = "Not enough data yet." }) {
+// Real trend chart (recharts) — this is the "trend chart" Advanced-tier's
+// empty-state copy already promises; it used to just be hand-rolled bars
+// with no axis/gridline/tooltip. Line chart reads better than bars for a
+// 6-month-over-time series (the point is the trajectory, not the buckets).
+function TrendChart({ buckets, series, emptyLabel = "Not enough data yet." }) {
   const hasData = buckets.some(b => series.some(s => (b[s.key] || 0) > 0));
   if (!hasData) return <div style={{ color: C.text.faint, fontSize: 13, padding: "8px 0" }}>{emptyLabel}</div>;
-  const max = Math.max(...buckets.flatMap(b => series.map(s => b[s.key] || 0)), 1);
   return (
-    <div>
-      <div style={{ display: "flex", gap: 14, marginBottom: 10, flexWrap: "wrap" }}>
-        {series.map(s => (
-          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: C.text.muted }}>
-            <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
-            {s.label}
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
-        {buckets.map((b, i) => (
-          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 84 }}>
-              {series.map(s => {
-                const v = b[s.key] || 0;
-                return (
-                  <div key={s.key} title={`${s.label}: ${v}`} style={{
-                    width: 14, height: v > 0 ? Math.max((v / max) * 80, 4) : 0,
-                    background: s.color, borderRadius: "3px 3px 0 0",
-                  }} />
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 10, color: C.text.faint, marginTop: 4 }}>{b.label}</div>
-          </div>
-        ))}
-      </div>
+    <div style={{ width: "100%", height: 220 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={buckets} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.line} vertical={false} />
+          <XAxis dataKey="label" tick={axisTick} axisLine={{ stroke: C.line }} tickLine={false} />
+          <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} width={28} />
+          <Tooltip {...chartTooltipStyle} />
+          <Legend wrapperStyle={{ fontSize: 12, color: C.text.muted }} />
+          {series.map(s => (
+            <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2.5}
+              dot={{ r: 3, fill: s.color, strokeWidth: 0 }} activeDot={{ r: 5 }} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -142,7 +150,7 @@ export function SafetyAnalyticsPanel({
 
   return (
     <div>
-      <SectionCard title={`🦺 Safety Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
+      <SectionCard title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><HardHat size={17} color={C.orange} strokeWidth={2.25} />{`Safety Analytics — ${companyName || "Company"}`}</span>} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <StatTile label="Total FLHAs" value={flhas.length} />
           <StatTile label="Incidents" value={incidents.length} tone={incidents.length > 0 ? "bad" : "good"} />
@@ -221,7 +229,7 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
   return (
     <>
       <SectionCard title="6-Month Trend" subtitle="Near misses and incidents per month">
-        <TrendBars
+        <TrendChart
           buckets={trend}
           series={[{ key: "nearMiss", label: "Near Miss", color: C.status.warning.solid }, { key: "incident", label: "Incident", color: C.status.danger.solid }]}
           emptyLabel="No near misses or incidents in the last 6 months."
@@ -302,7 +310,7 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
 
   return (
     <div>
-      <SectionCard title={`🔧 Equipment Analytics — ${companyName || "Company"}`} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
+      <SectionCard title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Wrench size={16} color={C.orange} strokeWidth={2.25} />{`Equipment Analytics — ${companyName || "Company"}`}</span>} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <StatTile label="Pretrip Inspections" value={pretripCount} />
           <StatTile label="Daily Reports" value={daily.length} />

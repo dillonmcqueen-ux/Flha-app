@@ -18,7 +18,7 @@ import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW 
 import {
   HardHat, Wrench, ShieldAlert, Flag, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
-  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin,
+  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -262,7 +262,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSupName =
 
         {h.sopAlerts?.length > 0 && (
           <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6 }}>⚠️ SOP ALERTS TRIGGERED</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><AlertTriangle size={13} strokeWidth={2.5} />SOP ALERTS TRIGGERED</div>
             {h.sopAlerts.map((a, i) => <div key={i} style={{ fontSize: 13, color: "#9A3412", marginBottom: 2 }}>• {a}</div>)}
           </div>
         )}
@@ -649,7 +649,7 @@ function ReportRow({ rec, last, onClick, kind }) {
           {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2 }}>✓ Reviewed by {rec.reviewed_by}</div>}
         </div>
         <div style={{ fontSize: 11, color: rec.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
-          {rec.pdf_url ? "📄 PDF" : ""} →
+          {rec.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : ""} →
         </div>
       </div>
     </div>
@@ -1283,15 +1283,15 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4" }}>📄 This Week's Documents</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4", display: "flex", alignItems: "center", gap: 8 }}><FileText size={17} color={C.orange} strokeWidth={2.25} />This Week's Documents</div>
             <div style={{ fontSize: 13, color: "#A1A1AA" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
           </div>
-          <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}><X size={13} strokeWidth={2.5} />Close</button>
         </div>
 
         {docs.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+            <FileText size={32} strokeWidth={1.5} style={{ marginBottom: 8, opacity: 0.6 }} />
             No documents submitted yet this week.
           </div>
         ) : (
@@ -1305,7 +1305,7 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
               >
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "rgba(99,102,241,0.12)", padding: "2px 8px", borderRadius: 20 }}>{m.icon} {m.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "rgba(99,102,241,0.12)", padding: "2px 8px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}><m.icon size={12} strokeWidth={2.5} />{m.label}</span>
                   </div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{m.primary(doc)}</div>
                   <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{m.secondary(doc)}</div>
@@ -2535,14 +2535,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const docsThisWeek = docsThisWeekList.length;
 
   const DOC_TYPE_META = {
-    flha: { icon: "📋", label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
-    inspection: { icon: "🚜", label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
-    toolbox: { icon: "🧰", label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
-    nearmiss: { icon: "⚠️", label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    incident: { icon: "🚑", label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    daily: { icon: "📋", label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    monthly: { icon: "🗓️", label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
-    customdoc: { icon: "🗂️", label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
+    flha: { icon: ClipboardList, label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
+    inspection: { icon: ClipboardCheck, label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
+    toolbox: { icon: Hammer, label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
+    nearmiss: { icon: AlertTriangle, label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    incident: { icon: Siren, label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    daily: { icon: ClipboardList, label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    monthly: { icon: CalendarClock, label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
+    customdoc: { icon: FolderKanban, label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
   };
 
   const openWeekDoc = (type, doc) => {
@@ -3170,7 +3170,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {processed.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+            <div style={{ marginBottom: 8 }}><FolderKanban size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
             {docs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
           </div>
         ) : (
@@ -3183,11 +3183,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={{ flex: 1, paddingRight: 10 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.form_icon} {r.form_title}</div>
-                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{r.submitted_by}</div>
                   </div>
                   <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
-                    {r.pdf_url ? "📄 PDF" : ""} →
+                    {r.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : ""} →
                   </div>
                 </div>
               </div>
@@ -3199,7 +3199,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             return (
               <CollapsibleGroup
                 key={groupName}
-                icon={cdGroupBy === "site" ? "📍" : "🗂️"}
+                icon={cdGroupBy === "site" ? <MapPin size={12} /> : <FolderKanban size={12} />}
                 label={groupName}
                 count={groupItems.length}
                 colorPreset="indigo"
@@ -3390,7 +3390,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {suspended && (
           <div style={{ background: "rgba(239,68,68,0.14)", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 2 }}>⚠️ Account suspended</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}><AlertTriangle size={14} strokeWidth={2.5} />Account suspended</div>
             <div style={{ fontSize: 13, color: "#FCA5A5" }}>Your company's access is currently suspended. You can still view and export existing records, but workers cannot submit new FLHAs. Please contact your administrator.</div>
           </div>
         )}
@@ -3521,7 +3521,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedFlhas.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                <div style={{ marginBottom: 8 }}><ClipboardList size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyFlhas.length === 0 ? "No FLHAs submitted yet for this company." : "No FLHAs match your filters."}
               </div>
             ) : (
@@ -3547,7 +3547,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div>
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{f.worker_name || "Unknown Worker"}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
+                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{f.job_site || "No location"}</div>
                             <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                               {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                             </div>
@@ -3559,7 +3559,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
                             {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
                             <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
-                              {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
+                              {f.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF"} · {hazards.length} hazards →
                             </div>
                           </div>
                         </div>
@@ -3574,7 +3574,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={groupBy === "site" ? "📍" : "👷"}
+                    icon={groupBy === "site" ? <MapPin size={12} /> : <CircleUserRound size={12} />}
                     label={groupName}
                     count={groupFlhas.length}
                     colorPreset="purple"
@@ -3622,7 +3622,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedInspections.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🚜</div>
+                <div style={{ marginBottom: 8 }}><ClipboardCheck size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyInspections.length === 0 ? "No inspections submitted yet." : "No inspections match your filters."}
               </div>
             ) : (
@@ -3643,7 +3643,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{insp.equipment_label || "Equipment"}</div>
                             <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
                           </div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{insp.worker_name || "Unknown"}</div>
                           {(insp.start_reading || insp.end_reading) && (
                             <div style={{ fontSize: 11, color: "#71717A", marginTop: 2 }}>
                               {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
@@ -3660,7 +3660,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "rgba(245,158,11,0.14)", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
                               : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
                           <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                            {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
+                            {insp.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF"} →
                           </div>
                         </div>
                       </div>
@@ -3674,7 +3674,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={inspGroupBy === "equipment" ? "🚜" : "👷"}
+                    icon={inspGroupBy === "equipment" ? <ClipboardCheck size={12} /> : <CircleUserRound size={12} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="blue"
@@ -3722,7 +3722,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedToolbox.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🧰</div>
+                <div style={{ marginBottom: 8 }}><Hammer size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyToolbox.length === 0 ? "No toolbox talks recorded yet." : "No toolbox talks match your filters."}
               </div>
             ) : (
@@ -3747,7 +3747,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           </div>
                         </div>
                         <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
-                          {t.pdf_url ? "📄 PDF" : "No PDF"} →
+                          {t.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : "No PDF"} →
                         </div>
                       </div>
                     </div>
@@ -3760,7 +3760,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={tbtGroupBy === "site" ? "📍" : "🧰"}
+                    icon={tbtGroupBy === "site" ? <MapPin size={12} /> : <Hammer size={12} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="purple"
@@ -3808,7 +3808,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedNearMisses.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+                <div style={{ marginBottom: 8 }}><AlertTriangle size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyNearMisses.length === 0 ? "No near miss reports yet." : "No near miss reports match your filters."}
               </div>
             ) : nmGroupBy === "none" ? (
@@ -3842,7 +3842,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               Object.entries(groupedNearMisses).map(([groupName, groupItems]) => (
                 <CollapsibleGroup
                   key={groupName}
-                  icon={nmGroupBy === "site" ? "📍" : "⚠️"}
+                  icon={nmGroupBy === "site" ? <MapPin size={12} /> : <AlertTriangle size={12} />}
                   label={groupName}
                   count={groupItems.length}
                   colorPreset="amber"
@@ -3891,7 +3891,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedIncidents.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🚑</div>
+                <div style={{ marginBottom: 8 }}><Siren size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyIncidents.length === 0 ? "No incident reports yet." : "No incident reports match your filters."}
               </div>
             ) : incGroupBy === "none" ? (
@@ -3925,7 +3925,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               Object.entries(groupedIncidents).map(([groupName, groupItems]) => (
                 <CollapsibleGroup
                   key={groupName}
-                  icon={incGroupBy === "site" ? "📍" : "🚑"}
+                  icon={incGroupBy === "site" ? <MapPin size={12} /> : <Siren size={12} />}
                   label={groupName}
                   count={groupItems.length}
                   colorPreset="red"
@@ -3973,7 +3973,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedDaily.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                <div style={{ marginBottom: 8 }}><ClipboardList size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyDaily.length === 0 ? "No daily reports yet." : "No daily reports match your filters."}
               </div>
             ) : (
@@ -3992,10 +3992,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "rgba(34,197,94,0.14)", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
                           </div>
                           <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{d.site} · {d.reporter_name}</div>
                         </div>
                         <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
-                          {d.pdf_url ? "📄 PDF" : ""} →
+                          {d.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : ""} →
                         </div>
                       </div>
                     </div>
@@ -4008,7 +4008,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={dailyGroupBy === "site" ? "📍" : "👷"}
+                    icon={dailyGroupBy === "site" ? <MapPin size={12} /> : <CircleUserRound size={12} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="green"
@@ -4065,7 +4065,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
                 {processedMonthly.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>🗓️</div>
+                    <div style={{ marginBottom: 8 }}><CalendarClock size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                     {companyMonthlyRecords.length === 0 ? "No monthly inspections submitted yet." : "No submissions match your filters."}
                   </div>
                 ) : (
@@ -4078,15 +4078,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div style={{ flex: 1, paddingRight: 10 }}>
                             <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.form_title}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {r.period_month}</div>
+                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{r.submitted_by}</div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
                             {r.open_actions > 0
                               ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(239,68,68,0.14)", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
                               : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
                             <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
-                              {r.pdf_url ? "📄 PDF" : "No PDF"} →
+                              {r.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF"} →
                             </div>
                           </div>
                         </div>
@@ -4099,7 +4099,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     return (
                       <CollapsibleGroup
                         key={groupName}
-                        icon={moGroupBy === "site" ? "📍" : "🗓️"}
+                        icon={moGroupBy === "site" ? <MapPin size={12} /> : <CalendarClock size={12} />}
                         label={groupName}
                         count={groupItems.length}
                         colorPreset="indigo"
@@ -4174,7 +4174,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 background: generatingSafetyAnalyticsPdf ? "#71717A" : "#F97316", color: generatingSafetyAnalyticsPdf ? "#fff" : "#0A0A0A", border: "none", borderRadius: 8,
                 padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
               }}>
-                {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
+                {generatingSafetyAnalyticsPdf ? "Generating…" : <><HardHat size={13} strokeWidth={2.5} style={{ marginRight: 5, verticalAlign: -2 }} />Safety Analytics PDF</>}
               </button>
               {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
             </div>
@@ -4202,7 +4202,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 background: generatingEquipmentAnalyticsPdf ? "#71717A" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
                 padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
               }}>
-                {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
+                {generatingEquipmentAnalyticsPdf ? "Generating…" : <><Wrench size={13} strokeWidth={2.5} style={{ marginRight: 5, verticalAlign: -2 }} />Equipment Analytics PDF</>}
               </button>
               {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
             </div>
@@ -4276,7 +4276,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
             ) : sortedEquipmentReports.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🔧</div>
+                <div style={{ marginBottom: 8 }}><Wrench size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 No equipment reports yet.
               </div>
             ) : (
@@ -4290,7 +4290,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                   </div>
                   <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                    {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                    {r.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF yet"} →
                   </div>
                 </div>
               ))
@@ -4518,7 +4518,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
               ) : timeClockRoster.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>⏱️</div>
+                  <div style={{ marginBottom: 8 }}><Clock size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                   No one on the roster yet.
                 </div>
               ) : (
@@ -4531,7 +4531,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     return (
                       <CollapsibleGroup
                         key={member.id}
-                        icon={member.role === "supervisor" ? "🦺" : "👷"}
+                        icon={member.role === "supervisor" ? <HardHat size={12} /> : <CircleUserRound size={12} />}
                         label={`${member.name} — ${totalHours.toFixed(1)} hrs`}
                         count={memberEntries.length}
                         colorPreset={member.role === "supervisor" ? "indigo" : "purple"}
@@ -4640,7 +4640,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
               ) : timeClockReports.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                  <div style={{ marginBottom: 8 }}><FileText size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                   No time clock reports yet.
                 </div>
               ) : (
@@ -4654,7 +4654,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                       <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
                     </div>
                     <div style={{ fontSize: 11, color: r.pdf_url ? "#0891B2" : "#9CA3AF" }}>
-                      {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                      {r.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF yet"} →
                     </div>
                   </div>
                 ))
@@ -4688,7 +4688,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const group = rosterList.filter(m => m.role === roleGroup && m.active);
                   if (group.length === 0) return null;
                   return (
-                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? "🦺" : "👷"} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
+                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? <HardHat size={12} /> : <CircleUserRound size={12} />} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
                       {group.map((m, i) => (
                         <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? "1px solid #242424" : "none" }}>
                           <div style={{ flex: 1 }}>
@@ -4719,7 +4719,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
             {companySops.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                <div style={{ marginBottom: 8 }}><FileText size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 No SOPs loaded for this company.
               </div>
             ) : (
