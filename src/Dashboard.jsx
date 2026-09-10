@@ -4303,21 +4303,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "daily" && TAB_VISIBLE.daily && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Daily Reports
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedDaily.length} of {companyDaily.length} shown — tap any report to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search site or reporter…"
-              value={dailySearch}
-              onChange={e => setDailySearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.daily}
+              title={`${company?.name || ""} — Daily Reports`}
+              subtitle={`${processedDaily.length} of ${companyDaily.length} shown — tap any report to view`}
             />
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            <StatStrip items={[
+              { icon: ClipboardList, value: companyDaily.length, label: "Total reports", tone: "neutral" },
+              { icon: FileText, value: companyDaily.filter(d => d.pdf_url).length, label: "PDF ready", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search site or reporter…"
+                value={dailySearch}
+                onChange={e => setDailySearch(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, marginTop: 10 }}>
               <select value={dailySortBy} onChange={e => setDailySortBy(e.target.value)} style={styles.select}>
                 <option value="newest">Newest first</option>
                 <option value="oldest">Oldest first</option>
@@ -4342,19 +4349,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const r = d.report_json || {};
                   return (
                     <div key={d.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
-                      cursor: "pointer"
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
+                      cursor: "pointer", display: "flex", gap: 10, alignItems: "flex-start",
                     }} onClick={() => setSelectedDaily(d)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1, paddingRight: 10 }}>
+                      <RowIconTile icon={ClipboardList} color={C.text.muted} />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                        <div style={{ flex: 1, paddingRight: 10, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{d.report_date}</div>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "rgba(34,197,94,0.14)", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{d.report_date}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: C.status.success.text, background: C.status.success.bg, padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
                           </div>
-                          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{d.site} · {d.reporter_name}</div>
+                          <div style={{ fontSize: 13, color: C.text.body, marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{d.site} · {d.reporter_name}</div>
                         </div>
-                        <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
+                        <div style={{ fontSize: 11, color: d.pdf_url ? C.status.success.text : C.text.faint, flexShrink: 0 }}>
                           {d.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : ""} →
                         </div>
                       </div>
