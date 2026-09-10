@@ -6,6 +6,26 @@ import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
 import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
+import {
+  Construction, Inbox, Building2, FileText, User, DollarSign, Brain, Sparkles,
+  MapPin, Tractor, HardHat, Zap, ArrowUpRight, CircleCheckBig, Hourglass,
+  Check, Download, Menu, KeyRound,
+} from "lucide-react";
+import { colors as T, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
+import Sidebar from "./Sidebar";
+
+// Persistent left-sidebar nav for the top-level Company Console (Overview /
+// Onboarding Requests / All Codes) — same Sidebar.jsx component and lookup
+// shape Dashboard.jsx uses, so Dillon's admin login gets the identical
+// sidebar+mobile-drawer nav pattern he asked for after seeing it on the
+// supervisor dashboard. `view` state below still drives which screen
+// renders; these just map the sidebar's tab keys onto that existing state
+// so nothing about data-loading/handlers underneath had to change.
+const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound };
+const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes" };
+const ADMIN_CATEGORY_ICON = { admin: Building2 };
+const ADMIN_CATEGORIES = [{ key: "admin", label: "Admin", tabs: ["onboarding", "codes"] }];
+const VIEW_TO_ADMIN_TAB = { home: "overview", onboardingRequests: "onboarding", allCodes: "codes" };
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -25,17 +45,28 @@ function codePrefix(name) {
 // is the actual enforcement point, this just drives the "8/10 used" badge.
 const SEAT_CAP_BY_TIER = { basic: 10, advanced: 50 };
 
-// Design tokens
+// Design tokens — reskinned onto src/theme.js's dark navy/black + orange
+// system (the same tokens Dashboard.jsx's Overview panel and Sidebar.jsx
+// use). Key names are kept the same as the original light-mode object so
+// every existing `C.xxx` reference below resolves correctly without a
+// site-wide rename; only the *values* — and the handful of places that
+// used `C.ink`/`C.white` as a background instead of text — changed.
 const C = {
-  ink: "#1E293B",       // deep slate — authority
-  inkSoft: "#475569",
-  amber: "#F59E0B",     // safety accent
-  amberDark: "#B45309",
-  green: "#16A34A",     // active truth only
-  bg: "#EEF2F6",
-  line: "#E2E8F0",
-  white: "#FFFFFF",
-  muted: "#94A3B8",
+  ink: T.text.primary,       // headings / highest-emphasis text
+  inkSoft: T.text.body,      // secondary/body text
+  amber: T.orange,           // brand accent
+  amberDark: T.risk.high.text, // orange, tuned for text on a dark surface
+  green: T.status.success.text,
+  bg: T.bg,                  // page background
+  panel: T.panel,            // card surface
+  panelRaised: T.panelRaised,
+  panelInset: T.panelInset,  // sunken surface: disabled/secondary buttons, nested content
+  line: T.line,
+  lineStrong: T.lineStrong,
+  white: T.text.onDark,
+  onOrange: T.text.onOrange, // text on a solid-orange fill
+  muted: T.text.faint,
+  status: T.status,
 };
 
 export default function AdminPanel({ onViewDashboard, onLogout, token }) {
@@ -43,6 +74,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("home");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [manageTab, setManageTab] = useState("profile");
   const [saving, setSaving] = useState(false);
@@ -1021,18 +1053,45 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   // ── shared styles ────────────────────────────────────────
   const st = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: C.bg, minHeight: "100vh", colorScheme: "light" },
-    topbar: { background: C.ink, color: C.white, padding: "20px 22px" },
+    wrap: { fontFamily: FONT.body, background: C.bg, minHeight: "100vh", colorScheme: "dark" },
+    topbar: { background: C.panel, color: C.ink, padding: "20px 22px", borderBottom: `1px solid ${C.line}` },
     body: { padding: "18px 16px 40px", maxWidth: 960, margin: "0 auto" },
-    card: { background: C.white, borderRadius: 14, padding: 18, boxShadow: "0 1px 3px #0f172a12" },
-    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: `1.5px solid ${C.line}`, fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC", color: C.ink, colorScheme: "light" },
+    card: { background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: 18, boxShadow: SHAD.md },
+    input: { width: "100%", padding: "11px 13px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: C.panelInset, color: C.ink, colorScheme: "dark" },
     label: { display: "block", fontWeight: 700, fontSize: 12, color: C.inkSoft, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
-    amberBtn: { background: C.amber, color: C.ink, border: "none", borderRadius: 10, padding: "12px 18px", fontWeight: 800, fontSize: 14, cursor: "pointer" },
-    darkBtn: { background: C.ink, color: C.white, border: "none", borderRadius: 10, padding: "12px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer" },
-    ghost: { background: "transparent", color: C.white, border: "1px solid #ffffff40", borderRadius: 9, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
-    tab: (a) => ({ padding: "9px 16px", borderRadius: 9, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 14, background: a ? C.ink : "transparent", color: a ? C.white : C.inkSoft }),
-    code: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", background: C.ink, color: C.amber, borderRadius: 8, padding: "6px 12px", fontSize: 15, cursor: "pointer", fontWeight: 600, letterSpacing: 0.5 },
+    amberBtn: { background: C.amber, color: C.onOrange, border: "none", borderRadius: RAD.md, padding: "12px 18px", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: GLOW.orangeSoft },
+    darkBtn: { background: C.panelInset, color: C.ink, border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: "12px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer" },
+    ghost: { background: "transparent", color: C.ink, border: `1px solid ${C.lineStrong}`, borderRadius: RAD.sm, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
+    tab: (a) => ({ padding: "9px 16px", borderRadius: RAD.sm, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 14, background: a ? "rgba(249,115,22,0.14)" : "transparent", color: a ? C.amberDark : C.inkSoft }),
+    code: { fontFamily: FONT.mono, background: C.panelInset, color: C.amber, borderRadius: RAD.sm, padding: "6px 12px", fontSize: 15, cursor: "pointer", fontWeight: 600, letterSpacing: 0.5, border: `1px solid ${C.line}` },
     sectionTitle: { display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 13, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12 },
+  };
+
+  // Overview stat tile — same icon-tile-plus-number shape as Dashboard.jsx's
+  // Overview stat strip, built from numbers this component already computes
+  // (activeCompanies/setupCompanies/onboardingRequests/companies), nothing
+  // invented.
+  const AdminStatTile = ({ icon: Icon, value, label, tone = "neutral", onClick }) => {
+    const TONE = { accent: C.amber, danger: C.status.danger.solid, success: C.status.success.solid, neutral: C.muted };
+    const color = TONE[tone] || TONE.neutral;
+    return (
+      <div
+        onClick={onClick}
+        style={{
+          display: "flex", alignItems: "center", gap: 10, background: C.panelInset, border: `1px solid ${C.line}`,
+          borderRadius: RAD.md, padding: "10px 16px", flex: "1 1 170px", minWidth: 150,
+          cursor: onClick ? "pointer" : "default",
+        }}
+      >
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon size={16} color={color} strokeWidth={2.25} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 20, color: C.ink, lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 2, whiteSpace: "nowrap" }}>{label}</div>
+        </div>
+      </div>
+    );
   };
 
   // Completeness meter — the signature element
@@ -1065,13 +1124,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     return (
       <div onClick={() => openManage(c)} style={{
         ...st.card, cursor: "pointer",
-        borderLeft: `4px solid ${c.suspended ? "#DC2626" : active ? C.green : C.amber}`,
+        borderLeft: `4px solid ${c.suspended ? C.status.danger.solid : active ? C.green : C.amber}`,
         opacity: c.suspended ? 0.85 : 1,
-        transition: "transform 0.1s", display: "flex", flexDirection: "column", gap: 14
+        transition: "border-color 0.15s, transform 0.1s", display: "flex", flexDirection: "column", gap: 14
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-          <div style={{ width: 52, height: 52, borderRadius: 11, background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, border: `1px solid ${C.line}` }}>
-            {c.logo_url ? <img src={c.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 22 }}>🏗️</span>}
+          <div style={{ width: 52, height: 52, borderRadius: RAD.md, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, border: `1px solid ${C.line}` }}>
+            {c.logo_url ? <img src={c.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Construction size={22} color={C.muted} strokeWidth={2} />}
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
@@ -1082,19 +1141,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </div>
           </div>
           {c.suspended
-            ? <span style={{ fontSize: 11, fontWeight: 800, color: "#DC2626", background: "#FEE2E2", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>SUSPENDED</span>
+            ? <span style={{ fontSize: 11, fontWeight: 800, color: C.status.danger.text, background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>SUSPENDED</span>
             : active
-              ? <span style={{ fontSize: 11, fontWeight: 800, color: C.green, background: "#DCFCE7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>ACTIVE</span>
-              : <span style={{ fontSize: 11, fontWeight: 800, color: C.amberDark, background: "#FEF3C7", padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{doneCount(c)}/{Object.keys(steps(c)).length}</span>}
+              ? <span style={{ fontSize: 11, fontWeight: 800, color: C.status.success.text, background: C.status.success.bg, border: `1px solid ${C.status.success.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>ACTIVE</span>
+              : <span style={{ fontSize: 11, fontWeight: 800, color: C.status.warning.text, background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>{doneCount(c)}/{Object.keys(steps(c)).length}</span>}
         </div>
         <Meter c={c} />
         <button
           onClick={(e) => toggleSuspend(c, e)}
           style={{
-            width: "100%", borderRadius: 8, padding: "8px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+            width: "100%", borderRadius: RAD.sm, padding: "8px", fontSize: 13, fontWeight: 700, cursor: "pointer",
             border: c.suspended ? "none" : `1.5px solid ${C.line}`,
-            background: c.suspended ? C.green : "#F8FAFC",
-            color: c.suspended ? "#fff" : C.inkSoft
+            background: c.suspended ? C.status.success.solid : C.panelInset,
+            color: c.suspended ? C.onOrange : C.inkSoft
           }}>
           {c.suspended ? "Reactivate access" : "Suspend access"}
         </button>
@@ -1104,181 +1163,224 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   if (loading) return <div style={{ ...st.wrap, padding: 30, color: C.inkSoft }}>Loading console…</div>;
 
-  // ═══ HOME ═════════════════════════════════════════════════
-  if (view === "home") {
+  // ═══ CONSOLE — Overview / Onboarding Requests / All Codes ═══════════════
+  // Persistent left sidebar (src/Sidebar.jsx) replacing the old full-screen
+  // view swap + "← Console" back button — same UX model Dashboard.jsx uses.
+  // `view` still drives which screen is active (other code below reads/sets
+  // it, e.g. openManage/addCompany), this block just maps its three
+  // "top-level destination" values onto sidebar tab keys instead of
+  // rendering each as its own <div style={st.wrap}> screen.
+  if (view === "home" || view === "allCodes" || view === "onboardingRequests") {
+    const activeAdminTab = VIEW_TO_ADMIN_TAB[view];
+    const newOnboardingCount = onboardingRequests.filter(r => r.status === "new").length;
+    const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
+    const STATUS_COLOR = { new: C.amberDark, in_progress: C.status.info.text, needs_info: C.status.danger.text, done: C.green };
+    const visibleRequests = onboardingRequests.filter(r => showArchivedOnboarding ? true : !r.archived);
+    const archivedCount = onboardingRequests.filter(r => r.archived).length;
+    const msgIsError = /(could not|couldn't|failed|error|enter)/.test(msg.toLowerCase());
+    const goToTab = (key) => {
+      setMsg("");
+      if (key === "onboarding") { setView("onboardingRequests"); loadOnboardingRequests(); }
+      else if (key === "codes") { setView("allCodes"); loadAllCodesView(); }
+      else setView("home");
+    };
+
     return (
       <div style={st.wrap}>
-        <div style={st.topbar}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <style>{`
+          .fora-mobile-menu-btn { display: none; }
+          .fora-sidebar-backdrop { display: none; }
+          @media (max-width: 768px) {
+            .fora-mobile-menu-btn { display: inline-flex !important; }
+            .fora-sidebar {
+              position: fixed !important; top: 57px !important; left: 0 !important;
+              z-index: 60; height: calc(100vh - 57px) !important;
+              transform: translateX(-100%); transition: transform 200ms ease;
+              box-shadow: 0 20px 60px -20px rgba(0,0,0,0.75);
+            }
+            .fora-sidebar.fora-sidebar-open { transform: translateX(0); }
+          }
+        `}</style>
+
+        <header style={{
+          position: "sticky", top: 0, zIndex: 40,
+          background: C.panel, borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              className="fora-mobile-menu-btn"
+              onClick={() => setMobileNavOpen(o => !o)}
+              aria-label="Toggle navigation"
+              style={{
+                alignItems: "center", justifyContent: "center", width: 32, height: 32,
+                border: `1px solid ${C.line}`, borderRadius: RAD.md, background: "transparent",
+                color: C.inkSoft, cursor: "pointer", marginRight: 2,
+              }}
+            ><Menu size={16} /></button>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: C.amber, textTransform: "uppercase" }}>FORA Admin</div>
-              <div style={{ fontWeight: 800, fontSize: 24, marginTop: 2 }}>Company Console</div>
-            </div>
-            {onLogout && <button style={st.ghost} onClick={onLogout}>Sign out</button>}
-          </div>
-          <div style={{ display: "flex", gap: 20, marginTop: 16 }}>
-            <div><span style={{ fontSize: 22, fontWeight: 800, color: C.green }}>{activeCompanies.length}</span> <span style={{ fontSize: 13, color: "#CBD5E1" }}>active</span></div>
-            <div><span style={{ fontSize: 22, fontWeight: 800, color: C.amber }}>{setupCompanies.length}</span> <span style={{ fontSize: 13, color: "#CBD5E1" }}>need setup</span></div>
-          </div>
-        </div>
-
-        <div style={st.body}>
-          {msg && <div style={{ ...st.card, marginBottom: 14, background: "#DCFCE7", color: "#166534", fontSize: 14 }}>{msg}</div>}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
-              <button style={st.darkBtn} onClick={() => { setView("allCodes"); setMsg(""); loadAllCodesView(); }}>All Codes</button>
-              <button style={st.darkBtn} onClick={() => { setView("onboardingRequests"); setMsg(""); loadOnboardingRequests(); }}>
-                Onboarding Requests{onboardingRequests.filter(r => r.status === "new" && !r.archived).length > 0 ? ` (${onboardingRequests.filter(r => r.status === "new" && !r.archived).length})` : ""}
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.white, color: C.ink, fontWeight: 600, cursor: "pointer", colorScheme: "light" }}>
-                <option value="name">Name (A–Z)</option>
-                <option value="id">Account number</option>
-              </select>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>Company Console</div>
             </div>
           </div>
+          {onLogout && <button style={st.ghost} onClick={onLogout}>Sign out</button>}
+        </header>
 
-          {companies.length === 0 ? (
-            <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
-              <div style={{ fontSize: 42, marginBottom: 10 }}>🏗️</div>
-              <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No companies yet</div>
-              <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 18 }}>Onboard your first company to get started.</div>
-              <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); }}>+ Onboard Company</button>
-            </div>
-          ) : (
-            <>
-              {/* Needs setup first — it's the actionable section */}
-              {setupCompanies.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ ...st.sectionTitle, color: C.amberDark }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 4, background: C.amber }} /> Needs setup ({setupCompanies.length})
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-                    {setupCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
-                  </div>
-                </div>
-              )}
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <Sidebar
+            categories={ADMIN_CATEGORIES}
+            categoryIcon={ADMIN_CATEGORY_ICON}
+            tabIcon={ADMIN_TAB_ICON}
+            tabLabel={ADMIN_TAB_LABEL}
+            tabVisible={{ onboarding: true, codes: true }}
+            tabCounts={{ onboarding: newOnboardingCount }}
+            activeTab={activeAdminTab}
+            onSelectTab={goToTab}
+            mobileOpen={mobileNavOpen}
+            onMobileClose={() => setMobileNavOpen(false)}
+          />
 
-              {activeCompanies.length > 0 && (
-                <div>
-                  <div style={{ ...st.sectionTitle, color: C.green }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Active ({activeCompanies.length})
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-                    {activeCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ═══ ALL CODES ════════════════════════════════════════════
-  if (view === "allCodes") {
-    return (
-      <div style={st.wrap}>
-        <div style={st.topbar}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 800, fontSize: 20 }}>All Codes</div>
-            <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); }}>← Console</button>
-          </div>
-        </div>
-        <div style={st.body}>
-          {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("enter")) ? "#FEE2E2" : "#DCFCE7", color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("enter")) ? "#991B1B" : "#166534", fontSize: 14 }}>{msg}</div>}
-
-          <div style={{ ...st.card, marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Every company's code(s)</div>
-            {companies.length === 0 ? (
-              <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No companies yet.</div>
-            ) : (
-              [...companies].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c, i, arr) => (
-                <div key={c.id} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: C.ink, marginBottom: 6 }}>{c.name}</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={st.code} onClick={() => copyText(c.company_code)}>{c.company_code || "—"}</span>
-                    {c.roster_enabled && <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: "#DCFCE7", padding: "3px 9px", borderRadius: 20 }}>ROSTER</span>}
-                    {(c.worker_code || c.supervisor_code) && (
-                      <>
-                        <span style={{ fontSize: 11, color: C.muted }}>legacy:</span>
-                        {c.worker_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.worker_code)}>{c.worker_code}</span>}
-                        {c.supervisor_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.supervisor_code)}>{c.supervisor_code}</span>}
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))
+          <div style={{ padding: 16, flex: 1, minWidth: 0 }}>
+            {msg && (
+              <div style={{ ...st.card, marginBottom: 14, background: msgIsError ? C.status.danger.bg : C.status.success.bg, color: msgIsError ? C.status.danger.text : C.status.success.text, fontSize: 14 }}>{msg}</div>
             )}
-          </div>
 
-          <div style={{ ...st.card, marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Master login code</div>
-            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
-              Logs into any company, as either worker or supervisor, straight from the public login screen — no company code or PIN needed. Stored securely; the current value can't be viewed, only replaced.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="New master code" value={masterCodeInput} onChange={e => setMasterCodeInput(e.target.value)} />
-              <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={saveMasterCode} disabled={savingMasterCode}>{savingMasterCode ? "Saving…" : "Save"}</button>
-            </div>
-          </div>
-
-          <div style={st.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
-            {masterLoginLogs.length === 0 ? (
-              <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No master-code logins yet.</div>
-            ) : (
+            {/* ── Overview ───────────────────────────────────────────── */}
+            {activeAdminTab === "overview" && (
               <>
-                {masterLoginLogs.slice(0, logsShown).map((l, i, arr) => (
-                  <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
-                    <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
-                    <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+                  <AdminStatTile icon={CircleCheckBig} value={activeCompanies.length} label="Active" tone="success" />
+                  <AdminStatTile icon={Hourglass} value={setupCompanies.length} label="Need setup" tone="accent" />
+                  <AdminStatTile
+                    icon={Inbox} value={newOnboardingCount} label="New onboarding requests"
+                    tone={newOnboardingCount > 0 ? "accent" : "neutral"}
+                    onClick={() => goToTab("onboarding")}
+                  />
+                  <AdminStatTile icon={Building2} value={companies.length} label="Total companies" tone="neutral" />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
+                  <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.ink, fontWeight: 600, cursor: "pointer", colorScheme: "dark" }}>
+                      <option value="name">Name (A–Z)</option>
+                      <option value="id">Account number</option>
+                    </select>
                   </div>
-                ))}
-                {masterLoginLogs.length > logsShown && (
-                  <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
-                    Show more ({masterLoginLogs.length - logsShown} more)
-                  </button>
+                </div>
+
+                {companies.length === 0 ? (
+                  <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
+                    <Construction size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
+                    <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No companies yet</div>
+                    <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 18 }}>Onboard your first company to get started.</div>
+                    <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); }}>+ Onboard Company</button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Needs setup first — it's the actionable section */}
+                    {setupCompanies.length > 0 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ ...st.sectionTitle, color: C.amberDark }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 4, background: C.amber }} /> Needs setup ({setupCompanies.length})
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                          {setupCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
+                        </div>
+                      </div>
+                    )}
+
+                    {activeCompanies.length > 0 && (
+                      <div>
+                        <div style={{ ...st.sectionTitle, color: C.green }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Active ({activeCompanies.length})
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                          {activeCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  // ═══ ONBOARDING REQUESTS ═════════════════════════════════
-  if (view === "onboardingRequests") {
-    const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
-    const STATUS_COLOR = { new: C.amberDark, in_progress: "#2563EB", needs_info: "#B91C1C", done: C.green };
-    const visibleRequests = onboardingRequests.filter(r => showArchivedOnboarding ? true : !r.archived);
-    const archivedCount = onboardingRequests.filter(r => r.archived).length;
-    return (
-      <div style={st.wrap}>
-        <div style={st.topbar}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 800, fontSize: 20 }}>Onboarding Requests</div>
-            <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); }}>← Console</button>
-          </div>
-        </div>
-        <div style={st.body}>
-          {archivedCount > 0 && (
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.inkSoft, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
-              <input type="checkbox" checked={showArchivedOnboarding} onChange={e => setShowArchivedOnboarding(e.target.checked)} />
-              Show archived ({archivedCount})
-            </label>
-          )}
-          {loadingOnboarding ? (
+            {/* ── All Codes ──────────────────────────────────────────── */}
+            {activeAdminTab === "codes" && (
+              <>
+                <div style={{ ...st.card, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Every company's code(s)</div>
+                  {companies.length === 0 ? (
+                    <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No companies yet.</div>
+                  ) : (
+                    [...companies].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c, i, arr) => (
+                      <div key={c.id} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.ink, marginBottom: 6 }}>{c.name}</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={st.code} onClick={() => copyText(c.company_code)}>{c.company_code || "—"}</span>
+                          {c.roster_enabled && <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: C.status.success.bg, padding: "3px 9px", borderRadius: 20 }}>ROSTER</span>}
+                          {(c.worker_code || c.supervisor_code) && (
+                            <>
+                              <span style={{ fontSize: 11, color: C.muted }}>legacy:</span>
+                              {c.worker_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.worker_code)}>{c.worker_code}</span>}
+                              {c.supervisor_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.supervisor_code)}>{c.supervisor_code}</span>}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ ...st.card, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Master login code</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                    Logs into any company, as either worker or supervisor, straight from the public login screen — no company code or PIN needed. Stored securely; the current value can't be viewed, only replaced.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="New master code" value={masterCodeInput} onChange={e => setMasterCodeInput(e.target.value)} />
+                    <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={saveMasterCode} disabled={savingMasterCode}>{savingMasterCode ? "Saving…" : "Save"}</button>
+                  </div>
+                </div>
+
+                <div style={st.card}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
+                  {masterLoginLogs.length === 0 ? (
+                    <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No master-code logins yet.</div>
+                  ) : (
+                    <>
+                      {masterLoginLogs.slice(0, logsShown).map((l, i, arr) => (
+                        <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
+                          <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
+                          <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {masterLoginLogs.length > logsShown && (
+                        <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
+                          Show more ({masterLoginLogs.length - logsShown} more)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ── Onboarding Requests ────────────────────────────────── */}
+            {activeAdminTab === "onboarding" && (
+              <>
+                {archivedCount > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.inkSoft, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
+                    <input type="checkbox" checked={showArchivedOnboarding} onChange={e => setShowArchivedOnboarding(e.target.checked)} />
+                    Show archived ({archivedCount})
+                  </label>
+                )}
+                {loadingOnboarding ? (
             <div style={{ ...st.card, textAlign: "center", color: C.muted, padding: "30px 20px" }}>Loading…</div>
           ) : visibleRequests.length === 0 ? (
             <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
-              <div style={{ fontSize: 42, marginBottom: 10 }}>📥</div>
+              <Inbox size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
               <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>
                 {onboardingRequests.length === 0 ? "No submissions yet" : "Nothing here"}
               </div>
@@ -1291,7 +1393,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div key={r.id} style={{ ...st.card, marginBottom: 14, opacity: r.archived ? 0.6 : 1 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {r.logo_url && <img src={r.logo_url} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: "contain", background: C.bg, border: `1px solid ${C.line}` }} />}
+                    {r.logo_url && <img src={r.logo_url} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: "contain", background: C.panelInset, border: `1px solid ${C.line}` }} />}
                     <div>
                       <div style={{ fontWeight: 800, fontSize: 16, color: C.ink }}>{r.company_name || "Unnamed company"}{r.archived ? " (archived)" : ""}</div>
                       <div style={{ fontSize: 12, color: C.muted }}>{new Date(r.created_at).toLocaleString()}</div>
@@ -1306,9 +1408,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     // "auto_approved" as a settable value.
                     <span style={{
                       padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                      color: C.green, background: "#F0FDF4", border: "1.5px solid #BBF7D0",
+                      color: C.green, background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}`,
+                      display: "inline-flex", alignItems: "center", gap: 5,
                     }}>
-                      ⚡ Auto-approved
+                      <Zap size={12} strokeWidth={2.5} /> Auto-approved
                     </span>
                   ) : (
                     <select
@@ -1319,7 +1422,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       }}
                       style={{
                         padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 12, fontWeight: 700,
-                        color: STATUS_COLOR[r.status] || C.ink, background: C.white, cursor: "pointer", colorScheme: "light",
+                        color: STATUS_COLOR[r.status] || C.ink, background: C.panelInset, cursor: "pointer", colorScheme: "dark",
                       }}
                     >
                       {Object.entries(STATUS_LABEL).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
@@ -1338,45 +1441,45 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                   {r.plan_tier && (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#EEF2FF", color: "#3730A3" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.status.info.bg, color: C.status.info.text }}>
                       {r.plan_tier === "advanced" ? "Advanced plan" : "Basic plan"}
                     </span>
                   )}
                   {r.stripe_customer_id ? (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F0FDF4", color: "#166534" }}>✓ Stripe checkout linked</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.status.success.bg, color: C.status.success.text, display: "inline-flex", alignItems: "center", gap: 4 }}><CircleCheckBig size={11} strokeWidth={2.5} /> Stripe checkout linked</span>
                   ) : (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FEF2F2", color: "#991B1B" }}>No Stripe checkout linked</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.status.danger.bg, color: C.status.danger.text }}>No Stripe checkout linked</span>
                   )}
                   <span style={{
                     fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999,
-                    background: r.overSeatCap ? "#FEF2F2" : "#F1F5F9", color: r.overSeatCap ? "#991B1B" : C.inkSoft,
+                    background: r.overSeatCap ? C.status.danger.bg : C.panelInset, color: r.overSeatCap ? C.status.danger.text : C.inkSoft,
                   }}>
                     {r.seatCount} seat{r.seatCount === 1 ? "" : "s"} requested{r.seatCap ? ` / ${r.seatCap} cap` : ""}{r.overSeatCap ? " — over cap" : ""}
                   </span>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: C.inkSoft }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.panelInset, color: C.inkSoft }}>
                     {r.siteCount} site{r.siteCount === 1 ? "" : "s"}
                   </span>
                   {r.sop_file_urls && r.sop_file_urls.length > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: C.inkSoft }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.panelInset, color: C.inkSoft }}>
                       {r.sop_file_urls.length} SOP file{r.sop_file_urls.length === 1 ? "" : "s"}
                     </span>
                   )}
                   {r.custom_request && r.custom_request.trim() && (
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: "#FFFBEB", color: "#92400E" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: C.status.warning.bg, color: C.status.warning.text }}>
                       Custom request — needs bespoke work
                     </span>
                   )}
                 </div>
 
                 {r.skippedUserLines && r.skippedUserLines.length > 0 && (
-                  <div style={{ fontSize: 12, color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, color: C.status.danger.text, background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
                     Couldn't parse as "Name — role": {r.skippedUserLines.join("; ")}
                   </div>
                 )}
 
                 {needsInfoNoteFor === r.id && (
-                  <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 6 }}>What needs fixing? The submitter will see this and can fix + resubmit themselves.</div>
+                  <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.status.danger.text, marginBottom: 6 }}>What needs fixing? The submitter will see this and can fix + resubmit themselves.</div>
                     <textarea
                       style={{ ...st.input, minHeight: 60, width: "100%", boxSizing: "border-box" }}
                       value={needsInfoNote}
@@ -1390,7 +1493,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   </div>
                 )}
                 {r.status === "needs_info" && r.admin_note && needsInfoNoteFor !== r.id && (
-                  <div style={{ fontSize: 12, color: "#991B1B", marginBottom: 10 }}>Waiting on submitter: "{r.admin_note}"</div>
+                  <div style={{ fontSize: 12, color: C.status.danger.text, marginBottom: 10 }}>Waiting on submitter: "{r.admin_note}"</div>
                 )}
 
                 <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 10, lineHeight: 1.6 }}>
@@ -1417,8 +1520,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {r.sop_file_urls.map((url, i) => (
-                        <a key={i} href={url} target="_blank" rel="noreferrer" style={{ ...st.code, textDecoration: "none" }}>
-                          File {i + 1} ↗
+                        <a key={i} href={url} target="_blank" rel="noreferrer" style={{ ...st.code, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          File {i + 1} <ArrowUpRight size={11} strokeWidth={2.5} />
                         </a>
                       ))}
                     </div>
@@ -1429,29 +1532,29 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
                   {r.created_company_id ? (
                     approvalResults[r.id] ? (
-                      <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, padding: 14 }}>
-                        <div style={{ fontWeight: 800, fontSize: 14, color: "#166534", marginBottom: 8 }}>
+                      <div style={{ background: C.status.success.bg, border: `1px solid ${C.status.success.border}`, borderRadius: 10, padding: 14 }}>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: C.status.success.text, marginBottom: 8 }}>
                           Company created — code {approvalResults[r.id].companyCode}
                         </div>
                         {approvalResults[r.id].sitesCreated > 0 && (
-                          <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].sitesCreated} site(s) added.</div>
+                          <div style={{ fontSize: 12, color: C.status.success.text, marginBottom: 6 }}>{approvalResults[r.id].sitesCreated} site(s) added.</div>
                         )}
                         {approvalResults[r.id].rosterCreated > 0 && (
-                          <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>{approvalResults[r.id].rosterCreated} roster member(s) added.</div>
+                          <div style={{ fontSize: 12, color: C.status.success.text, marginBottom: 6 }}>{approvalResults[r.id].rosterCreated} roster member(s) added.</div>
                         )}
                         {approvalResults[r.id].skippedUserLines?.length > 0 && (
                           <div style={{ fontSize: 12, color: C.amberDark, marginTop: 8 }}>
                             Couldn't parse (add manually from the Roster tab): {approvalResults[r.id].skippedUserLines.join("; ")}
                           </div>
                         )}
-                        <div style={{ fontSize: 12, color: "#166534", marginTop: 8, fontWeight: 700 }}>
+                        <div style={{ fontSize: 12, color: C.status.success.text, marginTop: 8, fontWeight: 700 }}>
                           {approvalResults[r.id].claimEmailSent
                             ? "A claim link was emailed to the contact — they'll assign their own roster PINs and review the AI-drafted equipment/SOPs there."
                             : "No contact email on file — get the claim link below and share it with them yourself."}
                         </div>
                         {!approvalResults[r.id].claimEmailSent && (
                           claimLinks[approvalResults[r.id].companyId] ? (
-                            <div style={{ fontSize: 12, color: C.ink, marginTop: 6, wordBreak: "break-all", fontFamily: "monospace", background: C.white, borderRadius: 6, padding: 8 }}>
+                            <div style={{ fontSize: 12, color: C.ink, marginTop: 6, wordBreak: "break-all", fontFamily: FONT.mono, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: 8 }}>
                               {claimLinks[approvalResults[r.id].companyId]}
                             </div>
                           ) : (
@@ -1463,15 +1566,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                         </div>
                       </div>
                     ) : (
-                      <div style={{ fontSize: 13, color: C.green, fontWeight: 700 }}>✓ Company already created from this request</div>
+                      <div style={{ fontSize: 13, color: C.green, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}><CircleCheckBig size={14} strokeWidth={2.5} /> Company already created from this request</div>
                     )
                   ) : (
                     <button
-                      style={{ ...st.amberBtn, opacity: approvingId === r.id ? 0.7 : 1 }}
+                      style={{ ...st.amberBtn, opacity: approvingId === r.id ? 0.7 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                       disabled={approvingId === r.id}
                       onClick={() => approveOnboardingRequest(r.id)}
                     >
-                      {approvingId === r.id ? "Approving…" : "✓ Approve — create company"}
+                      {approvingId === r.id ? "Approving…" : (<><CircleCheckBig size={14} strokeWidth={2.5} /> Approve — create company</>)}
                     </button>
                   )}
                 </div>
@@ -1495,6 +1598,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               </div>
             ))
           )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -1511,7 +1617,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           </div>
         </div>
         <div style={st.body}>
-          {msg && <div style={{ ...st.card, marginBottom: 14, background: "#FEE2E2", color: "#991B1B", fontSize: 14 }}>{msg}</div>}
+          {msg && <div style={{ ...st.card, marginBottom: 14, background: C.status.danger.bg, color: C.status.danger.text, fontSize: 14 }}>{msg}</div>}
           <div style={st.card}>
             <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 16 }}>Start with the company name. A company code generates automatically — edit it if you like. You'll build out their worker/supervisor roster and add SOPs, logo and contact details next.</div>
             <label style={st.label}>Company name</label>
@@ -1544,9 +1650,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // category entirely rather than showing tabs that do nothing for them.
   const isGatehouseCompany = activeCompany?.app_type === "gatehouse";
   const MANAGE_CATEGORIES = [
-    { key: "company", label: "🏢 Company Setup", tabs: isGatehouseCompany ? ["profile", "pricing"] : ["profile", "sops", "sites", "equipment", "brain"] },
-    ...(isGatehouseCompany ? [] : [{ key: "documents", label: "📄 Documents", tabs: ["fields", "monthly", "custom", "forms"] }]),
-    { key: "people", label: "👤 People & Access", tabs: ["roster", "codes"] },
+    { key: "company", label: "Company Setup", icon: Building2, tabs: isGatehouseCompany ? ["profile", "pricing"] : ["profile", "sops", "sites", "equipment", "brain"] },
+    ...(isGatehouseCompany ? [] : [{ key: "documents", label: "Documents", icon: FileText, tabs: ["fields", "monthly", "custom", "forms"] }]),
+    { key: "people", label: "People & Access", icon: User, tabs: ["roster", "codes"] },
   ];
   const MANAGE_CATEGORY_OF = Object.fromEntries(MANAGE_CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
   const activeManageCategory = MANAGE_CATEGORY_OF[manageTab] || MANAGE_CATEGORIES[0].key;
@@ -1566,12 +1672,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       <div style={st.topbar}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 10, background: "#ffffff18", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-              {profile.logo_url ? <img src={profile.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 20 }}>🏗️</span>}
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: C.panelRaised, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+              {profile.logo_url ? <img src={profile.logo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Construction size={20} color={C.muted} strokeWidth={2} />}
             </div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 19 }}>{activeCompany?.name}</div>
-              <div style={{ fontSize: 12, color: "#CBD5E1" }}>#{activeCompany?.account_number || activeId} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
+              <div style={{ fontSize: 12, color: C.inkSoft }}>#{activeCompany?.account_number || activeId} · {cnt.flhas} FLHAs · {cnt.sops} SOPs</div>
             </div>
           </div>
           <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); loadAll(); }}>← Console</button>
@@ -1579,16 +1685,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       </div>
 
       <div style={st.body}>
-        {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#FEE2E2" : "#DCFCE7", color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? "#991B1B" : "#166534", fontSize: 14 }}>{msg}</div>}
+        {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? C.status.danger.bg : C.status.success.bg, color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed")) ? C.status.danger.text : C.status.success.text, fontSize: 14 }}>{msg}</div>}
 
         <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-          {MANAGE_CATEGORIES.map(cat => (
-            <button
-              key={cat.key}
-              style={st.tab(activeManageCategory === cat.key)}
-              onClick={() => goToManageTab(cat.tabs[0])}
-            >{cat.label}</button>
-          ))}
+          {MANAGE_CATEGORIES.map(cat => {
+            const CatIcon = cat.icon;
+            return (
+              <button
+                key={cat.key}
+                style={{ ...st.tab(activeManageCategory === cat.key), display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={() => goToManageTab(cat.tabs[0])}
+              ><CatIcon size={14} strokeWidth={2.25} /> {cat.label}</button>
+            );
+          })}
         </div>
 
         <div style={{ ...st.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
@@ -1596,13 +1705,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <>
               <button style={st.tab(manageTab === "profile")} onClick={() => goToManageTab("profile")}>Profile</button>
               {isGatehouseCompany ? (
-                <button style={st.tab(manageTab === "pricing")} onClick={() => goToManageTab("pricing")}>💵 Pricing</button>
+                <button style={{ ...st.tab(manageTab === "pricing"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("pricing")}><DollarSign size={14} strokeWidth={2.25} /> Pricing</button>
               ) : (
                 <>
                   <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
                   <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
                   <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
-                  <button style={st.tab(manageTab === "brain")} onClick={() => goToManageTab("brain")}>🧠 Brain</button>
+                  <button style={{ ...st.tab(manageTab === "brain"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("brain")}><Brain size={14} strokeWidth={2.25} /> Brain</button>
                 </>
               )}
             </>
@@ -1627,10 +1736,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={st.card}>
             <label style={st.label}>Company logo</label>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-              <div style={{ width: 66, height: 66, borderRadius: 12, border: `1.5px solid ${C.line}`, background: "#F8FAFC", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-                {profile.logo_url ? <img src={profile.logo_url} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 26, color: C.muted }}>🏗️</span>}
+              <div style={{ width: 66, height: 66, borderRadius: 12, border: `1.5px solid ${C.line}`, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                {profile.logo_url ? <img src={profile.logo_url} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Construction size={26} color={C.muted} strokeWidth={1.75} />}
               </div>
-              <label style={{ background: C.bg, color: C.ink, border: `1.5px solid ${C.line}`, borderRadius: 9, padding: "10px 15px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              <label style={{ background: C.panelInset, color: C.ink, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "10px 15px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                 {uploadingLogo ? "Uploading…" : "Upload logo"}
                 <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => uploadLogo(e.target.files?.[0])} disabled={uploadingLogo} />
               </label>
@@ -1652,14 +1761,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         {manageTab === "sops" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>✨ Condense a long SOP document</div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><Sparkles size={15} color={C.amberDark} strokeWidth={2.25} /> Condense a long SOP document</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Paste a full safety policy or SOP document — even many pages. The AI pulls out the actual requirements and turns them into short, specific rules the FLHA system can use. Review them below before adding.</div>
               <textarea style={{ ...st.input, minHeight: 130, resize: "vertical", fontFamily: "inherit" }}
                 placeholder="Paste the full SOP document text here…"
                 value={rawSop} onChange={e => setRawSop(e.target.value)} />
-              {condenseError && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "9px 12px", marginBottom: 10, fontSize: 13, color: "#991B1B" }}>{condenseError}</div>}
-              <button style={{ background: condensing ? "#94A3B8" : C.amber, color: "#1E293B", border: "none", borderRadius: 9, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", width: "100%" }} onClick={condenseSop} disabled={condensing}>
-                {condensing ? "⏳ Condensing…" : "✨ Condense into policies"}
+              {condenseError && <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: 8, padding: "9px 12px", marginBottom: 10, fontSize: 13, color: C.status.danger.text }}>{condenseError}</div>}
+              <button style={{ background: condensing ? C.muted : C.amber, color: C.onOrange, border: "none", borderRadius: 9, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }} onClick={condenseSop} disabled={condensing}>
+                {condensing ? (<><Hourglass size={14} strokeWidth={2.25} /> Condensing…</>) : (<><Sparkles size={14} strokeWidth={2.25} /> Condense into policies</>)}
               </button>
             </div>
 
@@ -1677,9 +1786,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No policies yet.</div>
               ) : existingSops.map((sop, i) => (
                 <div key={sop.id} style={{ display: "flex", gap: 11, alignItems: "flex-start", padding: "11px 0", borderBottom: i < existingSops.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <div style={{ width: 22, height: 22, borderRadius: 6, background: C.ink, color: C.amber, fontSize: 11, fontWeight: 800, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
-                  <div style={{ flex: 1, fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{sop.policy_text}</div>
-                  <button onClick={() => deleteSop(sop.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                  <div style={{ width: 22, height: 22, borderRadius: RAD.sm, background: "rgba(249,115,22,0.14)", border: `1px solid ${C.status.warning.border}`, color: C.amberDark, fontSize: 11, fontWeight: 800, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
+                  <div style={{ flex: 1, fontSize: 14, color: C.inkSoft, lineHeight: 1.5 }}>{sop.policy_text}</div>
+                  <button onClick={() => deleteSop(sop.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -1715,17 +1824,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <>
                       <input style={{ ...st.input, marginBottom: 0, flex: 2 }} value={editTierLabel} onChange={e => setEditTierLabel(e.target.value)} />
                       <input style={{ ...st.input, marginBottom: 0, flex: 1 }} type="number" step="0.01" value={editTierPrice} onChange={e => setEditTierPrice(e.target.value)} />
-                      <button onClick={() => saveEditTier(tier)} disabled={savingTier} style={{ background: "transparent", border: "none", color: "#166534", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Save</button>
+                      <button onClick={() => saveEditTier(tier)} disabled={savingTier} style={{ background: "transparent", border: "none", color: C.status.success.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Save</button>
                       <button onClick={() => setEditingTierId(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Cancel</button>
                     </>
                   ) : (
                     <>
-                      <div style={{ flex: 1, fontSize: 14, color: "#334155" }}>{tier.label}{!tier.active && " (removed)"}</div>
+                      <div style={{ flex: 1, fontSize: 14, color: C.inkSoft }}>{tier.label}{!tier.active && " (removed)"}</div>
                       <div style={{ fontWeight: 700, color: C.ink, fontSize: 14 }}>${Number(tier.price).toFixed(2)}</div>
                       {tier.active && (
                         <>
                           <button onClick={() => startEditTier(tier)} style={{ background: "transparent", border: "none", color: C.amber, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Edit</button>
-                          <button onClick={() => deleteGatehouseTier(tier.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                          <button onClick={() => deleteGatehouseTier(tier.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                         </>
                       )}
                     </>
@@ -1743,17 +1852,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <>
                       <input style={{ ...st.input, marginBottom: 0, flex: 2 }} value={editTierLabel} onChange={e => setEditTierLabel(e.target.value)} />
                       <input style={{ ...st.input, marginBottom: 0, flex: 1 }} type="number" step="0.01" value={editTierPrice} onChange={e => setEditTierPrice(e.target.value)} />
-                      <button onClick={() => saveEditTier(tier)} disabled={savingTier} style={{ background: "transparent", border: "none", color: "#166534", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Save</button>
+                      <button onClick={() => saveEditTier(tier)} disabled={savingTier} style={{ background: "transparent", border: "none", color: C.status.success.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Save</button>
                       <button onClick={() => setEditingTierId(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Cancel</button>
                     </>
                   ) : (
                     <>
-                      <div style={{ flex: 1, fontSize: 14, color: "#334155" }}>{tier.label}{!tier.active && " (removed)"}</div>
+                      <div style={{ flex: 1, fontSize: 14, color: C.inkSoft }}>{tier.label}{!tier.active && " (removed)"}</div>
                       <div style={{ fontWeight: 700, color: C.ink, fontSize: 14 }}>+${Number(tier.price).toFixed(2)}</div>
                       {tier.active && (
                         <>
                           <button onClick={() => startEditTier(tier)} style={{ background: "transparent", border: "none", color: C.amber, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Edit</button>
-                          <button onClick={() => deleteGatehouseTier(tier.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                          <button onClick={() => deleteGatehouseTier(tier.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                         </>
                       )}
                     </>
@@ -1781,9 +1890,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No sites yet. Add recurring locations, or let them build up from worker entries.</div>
               ) : siteList.map((site, i) => (
                 <div key={site.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < siteList.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 15 }}>📍</span>
-                  <div style={{ flex: 1, fontSize: 14, color: "#334155" }}>{site.name}</div>
-                  <button onClick={() => deleteSite(site.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                  <MapPin size={15} color={C.inkSoft} />
+                  <div style={{ flex: 1, fontSize: 14, color: C.inkSoft }}>{site.name}</div>
+                  <button onClick={() => deleteSite(site.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -1810,12 +1919,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No equipment yet.</div>
               ) : equipList.map((eq, i) => (
                 <div key={eq.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < equipList.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 18 }}>🚜</span>
+                  <Tractor size={18} color={C.inkSoft} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
                     {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
                   </div>
-                  <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                  <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -1826,17 +1935,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ ...st.card, borderLeft: `4px solid ${C.amber}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, flex: 1 }}>🧠 Company profile</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, flex: 1, display: "flex", alignItems: "center", gap: 6 }}><Brain size={15} color={C.inkSoft} strokeWidth={2.25} /> Company profile</div>
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-                  background: brainProfile?.status === "confirmed" ? "#DCFCE7" : "#FEF3C7",
-                  color: brainProfile?.status === "confirmed" ? "#166534" : "#92400E",
+                  background: brainProfile?.status === "confirmed" ? C.status.success.bg : C.status.warning.bg,
+                  color: brainProfile?.status === "confirmed" ? C.status.success.text : C.status.warning.text,
                 }}>{brainProfile?.status === "confirmed" ? "Confirmed" : "Draft — AI-generated, not yet reviewed"}</span>
                 <button
                   onClick={downloadBrainPDF}
                   title="Download a snapshot PDF of what FORA has learned about this company, to share with the client"
-                  style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff", color: C.inkSoft, cursor: "pointer", whiteSpace: "nowrap" }}
-                >📄 Generate PDF</button>
+                  style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panelInset, color: C.inkSoft, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 }}
+                ><FileText size={12} strokeWidth={2.25} /> Generate PDF</button>
               </div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
                 What FORA has learned about this company — inferred at onboarding, and refined over time from this company's own FLHA edits, toolbox talks, incidents, and near misses. Feeds into document generation as additional context; edit anything below to correct it.
@@ -1861,7 +1970,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               ) : (
                 brainProfile.hazard_emphasis.map((e, i) => (
                   <div key={i} style={{ padding: "8px 0", borderBottom: i < brainProfile.hazard_emphasis.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>{e.category}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.inkSoft }}>{e.category}</div>
                     {e.note && <div style={{ fontSize: 12, color: C.inkSoft }}>{e.note}</div>}
                   </div>
                 ))
@@ -1894,7 +2003,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       <div style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>{label}</div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {list.map((item) => (
-                          <span key={item.name} style={{ fontSize: 12, background: C.bg, border: `1px solid ${C.line}`, borderRadius: 999, padding: "3px 10px", color: C.ink }}>{item.name} × {item.count}</span>
+                          <span key={item.name} style={{ fontSize: 12, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.pill, padding: "3px 10px", color: C.ink }}>{item.name} × {item.count}</span>
                         ))}
                       </div>
                     </div>
@@ -1927,7 +2036,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <label style={st.label}>Field type</label>
               <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
                 {[{ k: "text", l: "Text box" }, { k: "dropdown", l: "Dropdown" }].map(t => (
-                  <button key={t.k} onClick={() => setNewField(p => ({ ...p, field_type: t.k }))} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${newField.field_type === t.k ? C.ink : C.line}`, background: newField.field_type === t.k ? C.ink : "#fff", color: newField.field_type === t.k ? "#fff" : C.muted }}>{t.l}</button>
+                  <button key={t.k} onClick={() => setNewField(p => ({ ...p, field_type: t.k }))} style={{ flex: 1, padding: "10px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${newField.field_type === t.k ? C.amber : C.line}`, background: newField.field_type === t.k ? "rgba(249,115,22,0.14)" : C.panelInset, color: newField.field_type === t.k ? C.amberDark : C.muted }}>{t.l}</button>
                 ))}
               </div>
 
@@ -1938,8 +2047,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 </>
               )}
 
-              <div onClick={() => setNewField(p => ({ ...p, required: !p.required }))} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: newField.required ? "#FFFBEB" : "#F8FAFC", border: `1.5px solid ${newField.required ? C.amber : C.line}`, borderRadius: 9, marginBottom: 12, cursor: "pointer" }}>
-                <div style={{ width: 20, height: 20, borderRadius: 5, background: newField.required ? C.amber : "#fff", border: `1.5px solid ${newField.required ? C.amber : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#1E293B", fontSize: 13, fontWeight: 800 }}>{newField.required ? "✓" : ""}</div>
+              <div onClick={() => setNewField(p => ({ ...p, required: !p.required }))} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: newField.required ? C.status.warning.bg : C.panelInset, border: `1.5px solid ${newField.required ? C.amber : C.line}`, borderRadius: 9, marginBottom: 12, cursor: "pointer" }}>
+                <div style={{ width: 20, height: 20, borderRadius: 5, background: newField.required ? C.amber : C.panelInset, border: `1.5px solid ${newField.required ? C.amber : C.lineStrong}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.onOrange, fontSize: 13, fontWeight: 800 }}>{newField.required ? <Check size={13} strokeWidth={3} /> : ""}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>Required — worker must fill this in</div>
               </div>
 
@@ -1952,12 +2061,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No custom fields — this company uses the standard forms.</div>
               ) : fieldList.map((f, i) => (
                 <div key={f.id} style={{ display: "flex", gap: 11, alignItems: "flex-start", padding: "11px 0", borderBottom: i < fieldList.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, color: C.amber, background: C.ink, padding: "3px 7px", borderRadius: 5, flexShrink: 0, textTransform: "uppercase" }}>{f.doc_type}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: C.amberDark, background: "rgba(249,115,22,0.14)", border: `1px solid ${C.status.warning.border}`, padding: "3px 7px", borderRadius: RAD.sm, flexShrink: 0, textTransform: "uppercase" }}>{f.doc_type}</span>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{f.label}{f.required ? <span style={{ color: "#DC2626" }}> *</span> : null}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>{f.label}{f.required ? <span style={{ color: C.status.danger.text }}> *</span> : null}</div>
                     <div style={{ fontSize: 12, color: C.muted }}>{f.field_type === "dropdown" ? `Dropdown: ${f.options}` : "Text box"}</div>
                   </div>
-                  <button onClick={() => deleteField(f.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
+                  <button onClick={() => deleteField(f.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -1983,9 +2092,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 4 }}>Built-in forms</div>
                 {docSettings.filter(d => !d.isCustom).map((d, i, arr) => (
                   <div key={d.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{d.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>{d.label}</div>
                     <button onClick={() => toggleDocSetting(d)} style={{
-                      background: d.isActive ? "#DCFCE7" : "#F1F5F9",
+                      background: d.isActive ? C.status.success.bg : C.panelInset,
                       color: d.isActive ? C.green : C.muted,
                       border: "none", borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 800, cursor: "pointer",
                     }}>
@@ -2002,10 +2111,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <div key={d.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span>{d.icon}</span>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{d.label}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>{d.label}</div>
                       </div>
                       <button onClick={() => toggleDocSetting(d)} style={{
-                        background: d.isActive ? "#DCFCE7" : "#F1F5F9",
+                        background: d.isActive ? C.status.success.bg : C.panelInset,
                         color: d.isActive ? C.green : C.muted,
                         border: "none", borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 800, cursor: "pointer",
                       }}>
@@ -2028,9 +2137,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ display: "flex", gap: 8 }}>
                 {["basic", "advanced"].map(t => (
                   <button key={t} onClick={() => setAnalyticsTier(t)} style={{
-                    flex: 1, textTransform: "capitalize", border: analyticsTier === t ? "none" : `1.5px solid ${C.line}`,
-                    background: analyticsTier === t ? C.ink : "#fff", color: analyticsTier === t ? "#fff" : C.inkSoft,
-                    borderRadius: 10, padding: "10px", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                    flex: 1, textTransform: "capitalize", border: `1.5px solid ${analyticsTier === t ? C.amber : C.line}`,
+                    background: analyticsTier === t ? "rgba(249,115,22,0.14)" : C.panelInset, color: analyticsTier === t ? C.amberDark : C.inkSoft,
+                    borderRadius: RAD.md, padding: "10px", fontWeight: 800, fontSize: 13, cursor: "pointer",
                   }}>
                     {t}
                   </button>
@@ -2041,15 +2150,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={st.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                 <div style={{ fontWeight: 800, fontSize: 15, color: C.ink }}>Seats used</div>
-                <div style={{ fontWeight: 800, fontSize: 15, color: rosterActiveCount >= rosterCap ? "#DC2626" : C.ink }}>{rosterActiveCount} / {rosterCap}</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: rosterActiveCount >= rosterCap ? C.status.danger.text : C.ink }}>{rosterActiveCount} / {rosterCap}</div>
               </div>
               <div style={{ height: 8, borderRadius: 4, background: C.line, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${Math.min(100, (rosterActiveCount / rosterCap) * 100)}%`, background: rosterActiveCount >= rosterCap ? "#DC2626" : C.green, transition: "width 0.2s" }} />
+                <div style={{ height: "100%", width: `${Math.min(100, (rosterActiveCount / rosterCap) * 100)}%`, background: rosterActiveCount >= rosterCap ? C.status.danger.solid : C.status.success.solid, transition: "width 0.2s" }} />
               </div>
             </div>
 
             {revealedPin && (
-              <div style={{ ...st.card, background: "#FFFBEB", border: `1.5px solid ${C.amber}` }}>
+              <div style={{ ...st.card, background: C.status.warning.bg, border: `1.5px solid ${C.amber}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 4 }}>PIN for {revealedPin.name} — shown once, write it down now</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={st.code} onClick={() => copyText(revealedPin.pin)}>{revealedPin.pin}</span>
@@ -2059,7 +2168,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             )}
 
             {allPinsResult && (
-              <div style={{ ...st.card, background: "#FFFBEB", border: `1.5px solid ${C.amber}` }}>
+              <div style={{ ...st.card, background: C.status.warning.bg, border: `1.5px solid ${C.amber}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 10 }}>
                   All PINs regenerated — shown once, download or copy them now
                 </div>
@@ -2070,7 +2179,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   </div>
                 ))}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <button style={{ ...st.darkBtn, flex: 1 }} onClick={() => generateRosterPinsPDF(allPinsResult)}>⬇ Download PDF</button>
+                  <button style={{ ...st.darkBtn, flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={() => generateRosterPinsPDF(allPinsResult)}><Download size={14} strokeWidth={2.25} /> Download PDF</button>
                   <button onClick={() => setAllPinsResult(null)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 13, cursor: "pointer", fontWeight: 600, borderRadius: 9, padding: "0 16px" }}>Done</button>
                 </div>
               </div>
@@ -2096,7 +2205,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ display: "flex", gap: 8 }}>
                 <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="Full name" value={newRosterName}
                   onChange={e => setNewRosterName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addRosterMember(); }} />
-                <select value={newRosterRole} onChange={e => setNewRosterRole(e.target.value)} style={{ padding: "11px 13px", borderRadius: 9, border: `1.5px solid ${C.line}`, fontSize: 15, background: "#F8FAFC", color: C.ink, fontWeight: 600, colorScheme: "light" }}>
+                <select value={newRosterRole} onChange={e => setNewRosterRole(e.target.value)} style={{ padding: "11px 13px", borderRadius: 9, border: `1.5px solid ${C.line}`, fontSize: 15, background: C.panelInset, color: C.ink, fontWeight: 600, colorScheme: "dark" }}>
                   <option value="worker">Worker</option>
                   <option value="supervisor">Supervisor</option>
                 </select>
@@ -2117,7 +2226,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   return (
                     <CollapsibleGroup
                       key={roleGroup}
-                      icon={roleGroup === "supervisor" ? "🦺" : "👷"}
+                      icon={roleGroup === "supervisor" ? <HardHat size={13} /> : <User size={13} />}
                       label={`${roleGroup}s`}
                       count={group.length}
                       colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"}
@@ -2126,7 +2235,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       {group.map((m, i) => (
                         <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? `1px solid ${C.line}` : "none", opacity: m.active ? 1 : 0.6 }}>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>{m.name}</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>{m.name}</div>
                             <div style={{ fontSize: 12, color: C.muted }}>
                               {m.active ? (m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in") : "Deactivated"}
                             </div>
@@ -2135,7 +2244,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                             <button onClick={() => resetRosterPin(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Reset PIN</button>
                           )}
                           {m.active ? (
-                            <button onClick={() => deactivateRosterMember(m.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Deactivate</button>
+                            <button onClick={() => deactivateRosterMember(m.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Deactivate</button>
                           ) : (
                             <button onClick={() => reactivateRosterMember(m.id)} style={{ background: "transparent", border: "none", color: C.green, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Reactivate</button>
                           )}
@@ -2159,9 +2268,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 disabled={cutoverSaving}
                 style={{
                   width: "100%", borderRadius: 10, padding: "11px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer",
-                  border: activeCompany?.roster_enabled ? "1.5px solid #FCA5A5" : "none",
-                  background: activeCompany?.roster_enabled ? "#FEF2F2" : C.amber,
-                  color: activeCompany?.roster_enabled ? "#DC2626" : C.ink,
+                  border: activeCompany?.roster_enabled ? `1.5px solid ${C.status.danger.border}` : "none",
+                  background: activeCompany?.roster_enabled ? C.status.danger.bg : C.amber,
+                  color: activeCompany?.roster_enabled ? C.status.danger.text : C.ink,
                 }}>
                 {cutoverSaving ? "Updating…" : activeCompany?.roster_enabled ? "Revert to shared company code" : "Switch to individual logins"}
               </button>
@@ -2225,7 +2334,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <button
                 onClick={deleteCompany}
                 disabled={saving}
-                style={{ width: "100%", background: "#FEF2F2", color: "#DC2626", border: "1.5px solid #FCA5A5", borderRadius: 10, padding: "11px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                style={{ width: "100%", background: C.status.danger.bg, color: C.status.danger.text, border: `1.5px solid ${C.status.danger.border}`, borderRadius: 10, padding: "11px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
                 Delete company
               </button>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>

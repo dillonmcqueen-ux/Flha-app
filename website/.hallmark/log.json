@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2026-09-10",
+    "scope": "app",
+    "macrostructure": "existing (preserved) — nav/footer/icon-system redesign",
+    "theme": "custom",
+    "theme_axes": "dark / grotesk-sans / warm",
+    "enrichment": "none",
+    "brief": "FORA marketing site — modern-minimal genre, OKLCH re-tokenized brand, N1b centered nav, Ft5-adapted statement footer, single SVG line-icon system replacing all emoji-as-icon usage across index/big-five/custom-builds/the-brain/what-is-fora"
+  }
+]

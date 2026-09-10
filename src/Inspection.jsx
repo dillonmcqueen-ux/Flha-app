@@ -4,6 +4,9 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
+import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
+import { ArrowLeft, AlertTriangle, Tractor, Loader2, CheckCircle2, WifiOff, PenLine } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -73,11 +76,13 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
   }
 }
 
-const CONDITIONS = [
-  { key: "Good", color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
-  { key: "Monitor", color: "#D97706", bg: "#FFFBEB", border: "#FCD34D" },
-  { key: "Defective", color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5" },
-  { key: "N/A", color: "#64748B", bg: "#F1F5F9", border: "#CBD5E1" },
+// Drawn from theme.js's status scale — Good/Monitor/Defective map to
+// success/warning/danger; N/A is a neutral gray rather than a status color.
+const CONDITIONS = (C) => [
+  { key: "Good", color: C.status.success.text, bg: C.status.success.bg, border: C.status.success.border },
+  { key: "Monitor", color: C.status.warning.text, bg: C.status.warning.bg, border: C.status.warning.border },
+  { key: "Defective", color: C.status.danger.text, bg: C.status.danger.bg, border: C.status.danger.border },
+  { key: "N/A", color: C.text.faint, bg: C.panelInset, border: C.line },
 ];
 
 export default function Inspection({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
@@ -461,32 +466,26 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   };
 
   // ── styles ───────────────────────────────────────────────
-  const s = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: 16, colorScheme: "light" },
-    header: { background: "linear-gradient(135deg,#0C4A6E,#0369A1)", borderRadius: 14, padding: "18px 20px", marginBottom: 16, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" },
-    card: { background: "#fff", borderRadius: 14, padding: 18, marginBottom: 14, boxShadow: "0 1px 3px #0f172a12" },
-    label: { display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 },
-    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC", color: "#1E293B", colorScheme: "light" },
-    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer", width: "100%" }),
-    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
-  };
+  const accent = docAccent(C, "inspection");
+  const s = buildFormStyles(C, FONT, RAD, SHAD, accent);
+  const COND = CONDITIONS(C);
 
   const IssuesBanner = () => {
     if (!lastHadIssues(lastInspection)) return null;
     const r = lastInspection.results_json || {};
     const flaggedItems = (r.items || []).filter(it => it.condition === "Defective" || it.condition === "Monitor");
     return (
-      <div style={{ ...s.card, background: "#FEF2F2", border: "1.5px solid #FCA5A5" }}>
-        <div style={{ fontWeight: 800, fontSize: 14, color: "#991B1B", marginBottom: 4 }}>⚠️ Previous inspection flagged issues</div>
-        <div style={{ fontSize: 13, color: "#7F1D1D", marginBottom: 8 }}>
+      <div style={{ ...s.card, background: C.status.danger.bg, border: `1.5px solid ${C.status.danger.border}` }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: C.status.danger.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={15} strokeWidth={2.25} /> Previous inspection flagged issues</div>
+        <div style={{ fontSize: 13, color: C.text.body, marginBottom: 8 }}>
           {lastInspection.worker_name || "Unknown"} · {new Date(lastInspection.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
         </div>
         {flaggedItems.length > 0 ? flaggedItems.map((it, i) => (
-          <div key={i} style={{ fontSize: 13, color: "#991B1B", marginBottom: 4 }}>
+          <div key={i} style={{ fontSize: 13, color: C.status.danger.text, marginBottom: 4 }}>
             • <strong>{it.item}</strong> — {it.condition}{it.note ? `: ${it.note}` : ""}
           </div>
         )) : (
-          r.changeNotes && <div style={{ fontSize: 13, color: "#991B1B" }}>• {r.changeCondition}: {r.changeNotes}</div>
+          r.changeNotes && <div style={{ fontSize: 13, color: C.status.danger.text }}>• {r.changeCondition}: {r.changeNotes}</div>
         )}
       </div>
     );
@@ -496,20 +495,20 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>🚜</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <Tractor size={26} strokeWidth={2} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Equipment Inspection</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Pre-trip & post-trip checks</div>
           </div>
         </div>
-        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Menu</button>
+        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><ArrowLeft size={15} strokeWidth={2.5} /> Menu</button>
       </div>
 
       {/* STEP: pick equipment */}
       {step === "equipment" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Select equipment</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Choose from your fleet, or enter a rental / one-off machine.</div>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Select equipment</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 16 }}>Choose from your fleet, or enter a rental / one-off machine.</div>
 
           {equipment.length > 0 && eqMode === "list" ? (
             <>
@@ -540,18 +539,18 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               <label style={s.label}>Type</label>
               <input style={s.input} placeholder="e.g. Excavator" value={freeEq.type} onChange={e => setFreeEq(p => ({ ...p, type: e.target.value }))} />
               <label style={s.label}>Unit / asset number (optional)</label>
-              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: -6, marginBottom: 6, lineHeight: 1.4 }}>If your company tags this machine with a unit number, enter it here — it's what lets this get added to the fleet correctly instead of as a duplicate.</div>
+              <div style={{ fontSize: 11, color: C.text.faint, marginTop: -6, marginBottom: 6, lineHeight: 1.4 }}>If your company tags this machine with a unit number, enter it here — it's what lets this get added to the fleet correctly instead of as a duplicate.</div>
               <input style={s.input} placeholder="e.g. 56" value={freeEq.unit_number} onChange={e => setFreeEq(p => ({ ...p, unit_number: e.target.value }))} />
               {equipment.length > 0 && (
-                <button onClick={() => { setEqMode("list"); setFreeEq({ year: "", make: "", model: "", type: "", unit_number: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}>← Choose from fleet</button>
+                <button onClick={() => { setEqMode("list"); setFreeEq({ year: "", make: "", model: "", type: "", unit_number: "" }); }} style={{ background: "transparent", border: "none", color: accent, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><ArrowLeft size={13} strokeWidth={2.5} /> Choose from fleet</button>
               )}
             </>
           )}
 
-          {genError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>Couldn't check this equipment. Check your connection and try again.</div>}
+          {genError && <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} /><span>Couldn't check this equipment. Check your connection and try again.</span></div>}
 
-          <button style={s.btn(checking ? "#94A3B8" : equipmentLabel() ? "#0369A1" : "#94A3B8")} disabled={checking || !equipmentLabel()} onClick={checkEquipmentAndProceed}>
-            {checking ? "⏳ Checking…" : "Continue →"}
+          <button style={s.btn(checking ? disabledBg(C) : equipmentLabel() ? accent : disabledBg(C))} disabled={checking || !equipmentLabel()} onClick={checkEquipmentAndProceed}>
+            {checking ? <><Loader2 size={16} className="fora-spin" /> Checking…</> : "Continue →"}
           </button>
         </div>
       )}
@@ -560,20 +559,20 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "choice" && (
         <>
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>{equipmentLabel()}</div>
-            <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10, padding: "12px 14px", marginTop: 10 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#0369A1", marginBottom: 2 }}>Pre-Trip already done today</div>
-              <div style={{ fontSize: 13, color: "#374151" }}>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>{equipmentLabel()}</div>
+            <div style={{ background: C.status.info.bg, border: `1px solid ${C.status.info.border}`, borderRadius: RAD.md, padding: "12px 14px", marginTop: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.status.info.text, marginBottom: 2 }}>Pre-Trip already done today</div>
+              <div style={{ fontSize: 13, color: C.text.body }}>
                 {openPretrip.worker_name} · {new Date(openPretrip.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
               </div>
-              {openPretrip.start_reading && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
+              {openPretrip.start_reading && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
             </div>
           </div>
 
           <IssuesBanner />
 
           <div style={s.card}>
-            <button style={s.btn("#0369A1")} onClick={choosePostTrip}>Do Post-Trip Inspection</button>
+            <button style={s.btn(accent)} onClick={choosePostTrip}>Do Post-Trip Inspection</button>
             <button style={s.ghost} onClick={chooseNewPretrip}>Start a new Pre-Trip instead</button>
           </div>
         </>
@@ -584,11 +583,11 @@ export default function Inspection({ companyId, companyName, userName: loginUser
         <>
           <IssuesBanner />
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Inspector</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Inspecting: <strong>{equipmentLabel()}</strong></div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Inspector</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 16 }}>Inspecting: <strong>{equipmentLabel()}</strong></div>
             <label style={s.label}>Your name</label>
             <input
-              style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+              style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
               placeholder="e.g. John Smith" value={workerName}
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
@@ -599,7 +598,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
                 <label style={s.label}>Reading type</label>
                 <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
                   {["Hours", "KM"].map(u => (
-                    <button key={u} onClick={() => setReadingUnit(u)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${readingUnit === u ? "#0369A1" : "#E2E8F0"}`, background: readingUnit === u ? "#F0F9FF" : "#fff", color: readingUnit === u ? "#0369A1" : "#94A3B8" }}>{u}</button>
+                    <button key={u} onClick={() => setReadingUnit(u)} style={{ flex: 1, padding: "11px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${readingUnit === u ? accent : C.line}`, background: readingUnit === u ? C.status.info.bg : C.panelInset, color: readingUnit === u ? C.status.info.text : C.text.faint }}>{u}</button>
                   ))}
                 </div>
 
@@ -631,14 +630,14 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             )}
 
             <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
-            <button style={s.btn((workerName && (isTrailer || startReading)) ? "#0369A1" : "#94A3B8")} disabled={!workerName || (!isTrailer && !startReading)} onClick={() => {
+            <button style={s.btn((workerName && (isTrailer || startReading)) ? accent : disabledBg(C))} disabled={!workerName || (!isTrailer && !startReading)} onClick={() => {
               const missing = cf.missingRequired();
               if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
               generateInspection();
             }}>
               Start Inspection
             </button>
-            <button style={s.ghost} onClick={() => setStep("equipment")}>← Back</button>
+            <button style={s.ghost} onClick={() => setStep("equipment")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
           </div>
         </>
       )}
@@ -647,45 +646,45 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "inspect" && (
         <>
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{equipmentLabel()}</div>
-            {inspectionMeta.machineSummary && <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{inspectionMeta.machineSummary}</div>}
-            {!isTrailer && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>}
-            {isTowCapable && selectedAttachedTrailer() && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>Trailer attached: {selectedAttachedTrailer().label}</div>}
+            <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary }}>{equipmentLabel()}</div>
+            {inspectionMeta.machineSummary && <div style={{ fontSize: 13, color: C.text.muted, marginTop: 2 }}>{inspectionMeta.machineSummary}</div>}
+            {!isTrailer && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>}
+            {isTowCapable && selectedAttachedTrailer() && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 6 }}>Trailer attached: {selectedAttachedTrailer().label}</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              {defectiveCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "4px 10px", borderRadius: 20 }}>{defectiveCount} defective</span>}
-              {monitorCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#D97706", background: "#FFFBEB", padding: "4px 10px", borderRadius: 20 }}>{monitorCount} monitor</span>}
+              {defectiveCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{defectiveCount} defective</span>}
+              {monitorCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{monitorCount} monitor</span>}
             </div>
           </div>
 
           {items.map((it, i) => {
-            const cond = CONDITIONS.find(c => c.key === it.condition);
+            const cond = COND.find(c => c.key === it.condition);
             const isNewUnit = it.unit && it.unit !== items[i - 1]?.unit;
             return (
               <div key={i}>
                 {isNewUnit && (
                   <div style={{
-                    background: it.unit === "trailer" ? "#EDE9FE" : "#DBEAFE", borderRadius: 9,
+                    background: it.unit === "trailer" ? C.orangeSoft : C.status.info.bg, borderRadius: RAD.md,
                     padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
-                    color: it.unit === "trailer" ? "#5B21B6" : "#1E40AF",
+                    color: it.unit === "trailer" ? accent : C.status.info.text,
                   }}>
                     {it.unit === "trailer" ? "TRAILER" : "TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
                   </div>
                 )}
               <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
-                {it.category && <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", marginBottom: 3 }}>{it.category}</div>}
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#1E293B", marginBottom: 8 }}>{it.item}</div>
+                {it.category && <div style={{ fontSize: 11, fontWeight: 700, color: C.text.faint, textTransform: "uppercase", marginBottom: 3 }}>{it.category}</div>}
+                <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary, marginBottom: 8 }}>{it.item}</div>
                 <div style={{ display: "flex", gap: 5, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 8 : 0 }}>
-                  {CONDITIONS.map(c => (
+                  {COND.map(c => (
                     <button key={c.key} onClick={() => setCondition(i, c.key)} style={{
-                      flex: 1, padding: "6px 4px", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                      border: `1.5px solid ${it.condition === c.key ? c.color : "#E2E8F0"}`,
-                      background: it.condition === c.key ? c.bg : "#fff",
-                      color: it.condition === c.key ? c.color : "#94A3B8",
+                      flex: 1, padding: "8px 4px", borderRadius: RAD.sm, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                      border: `1.5px solid ${it.condition === c.key ? c.color : C.line}`,
+                      background: it.condition === c.key ? c.bg : C.panelInset,
+                      color: it.condition === c.key ? c.color : C.text.faint,
                     }}>{c.key}</button>
                   ))}
                 </div>
                 {(it.condition === "Defective" || it.condition === "Monitor") && (
-                  <input style={{ ...s.input, padding: "8px 10px", marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
+                  <input style={{ ...s.input, padding: "9px 11px", marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
                 )}
               </div>
               </div>
@@ -694,26 +693,26 @@ export default function Inspection({ companyId, companyName, userName: loginUser
 
           {/* signature */}
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: "#1E293B" }}>Inspector signature</div>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: C.text.primary, display: "flex", alignItems: "center", gap: 8 }}><PenLine size={17} strokeWidth={2.25} color={accent} /> Inspector signature</div>
+            <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
-                style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                style={signatureCanvasStyle(C, RAD)}
                 onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
                 onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
               {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
-              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
+              <div style={{ fontSize: 13, color: C.text.body }}>Signed by: <strong>{workerName}</strong></div>
+              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
             </div>
             {saveError && (
-              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-                Couldn't save this inspection. Check your connection and try again.
+              <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Couldn't save this inspection. Check your connection and try again.</span>
               </div>
             )}
-            <button style={s.btn(signed && !saveError ? "#16A34A" : hasSignature ? "#0369A1" : "#94A3B8")} disabled={!hasSignature || (signed && !saveError)} onClick={submitPretrip}>
-              {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Pre-Trip Inspection"}
+            <button style={s.btn(signed && !saveError ? C.status.success.solid : hasSignature ? accent : disabledBg(C))} disabled={!hasSignature || (signed && !saveError)} onClick={submitPretrip}>
+              {savingInspection ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : signed && !saveError ? <><CheckCircle2 size={16} strokeWidth={2.25} /> Submitted</> : "Sign & Submit Pre-Trip Inspection"}
             </button>
           </div>
         </>
@@ -723,30 +722,33 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "posttrip" && (
         <>
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B" }}>{equipmentLabel()}</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>
+            <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary }}>{equipmentLabel()}</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginTop: 4 }}>
               Linked to Pre-Trip by {openPretrip.worker_name} · {new Date(openPretrip.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
             </div>
-            {!isTrailer && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
+            {!isTrailer && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
           </div>
 
           <div style={s.card}>
             <label style={s.label}>Any changes since the Pre-Trip?</label>
             <div style={{ display: "flex", gap: 8, marginBottom: hasChanges ? 14 : 0 }}>
-              <button onClick={() => setHasChanges(false)} style={{ flex: 1, padding: "12px", borderRadius: 9, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === false ? "#16A34A" : "#E2E8F0"}`, background: hasChanges === false ? "#F0FDF4" : "#fff", color: hasChanges === false ? "#16A34A" : "#94A3B8" }}>No changes</button>
-              <button onClick={() => setHasChanges(true)} style={{ flex: 1, padding: "12px", borderRadius: 9, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === true ? "#D97706" : "#E2E8F0"}`, background: hasChanges === true ? "#FFFBEB" : "#fff", color: hasChanges === true ? "#D97706" : "#94A3B8" }}>Yes, something changed</button>
+              <button onClick={() => setHasChanges(false)} style={{ flex: 1, padding: "13px", borderRadius: RAD.md, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === false ? C.status.success.solid : C.line}`, background: hasChanges === false ? C.status.success.bg : C.panelInset, color: hasChanges === false ? C.status.success.text : C.text.faint }}>No changes</button>
+              <button onClick={() => setHasChanges(true)} style={{ flex: 1, padding: "13px", borderRadius: RAD.md, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === true ? C.status.warning.solid : C.line}`, background: hasChanges === true ? C.status.warning.bg : C.panelInset, color: hasChanges === true ? C.status.warning.text : C.text.faint }}>Yes, something changed</button>
             </div>
 
             {hasChanges === true && (
               <>
                 <label style={s.label}>How serious?</label>
                 <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
-                  {["Monitor", "Defective"].map(c => (
-                    <button key={c} onClick={() => setChangeCondition(c)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${changeCondition === c ? (c === "Defective" ? "#DC2626" : "#D97706") : "#E2E8F0"}`, background: changeCondition === c ? (c === "Defective" ? "#FEF2F2" : "#FFFBEB") : "#fff", color: changeCondition === c ? (c === "Defective" ? "#DC2626" : "#D97706") : "#94A3B8" }}>{c}</button>
-                  ))}
+                  {["Monitor", "Defective"].map(c => {
+                    const tone = c === "Defective" ? C.status.danger : C.status.warning;
+                    return (
+                      <button key={c} onClick={() => setChangeCondition(c)} style={{ flex: 1, padding: "11px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${changeCondition === c ? tone.solid : C.line}`, background: changeCondition === c ? tone.bg : C.panelInset, color: changeCondition === c ? tone.text : C.text.faint }}>{c}</button>
+                    );
+                  })}
                 </div>
                 <label style={s.label}>What changed?</label>
-                <textarea style={{ ...s.input, minHeight: 80, resize: "vertical", fontFamily: "inherit" }} placeholder="Describe what changed during the shift" value={changeNotes} onChange={e => setChangeNotes(e.target.value)} />
+                <textarea style={{ ...s.input, minHeight: 80, resize: "vertical" }} placeholder="Describe what changed during the shift" value={changeNotes} onChange={e => setChangeNotes(e.target.value)} />
               </>
             )}
           </div>
@@ -754,7 +756,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           <div style={s.card}>
             <label style={s.label}>Your name</label>
             <input
-              style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+              style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
               placeholder="e.g. John Smith" value={workerName}
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
@@ -768,29 +770,29 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           </div>
 
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: "#1E293B" }}>Signature</div>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10, color: C.text.primary, display: "flex", alignItems: "center", gap: 8 }}><PenLine size={17} strokeWidth={2.25} color={accent} /> Signature</div>
+            <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={180}
-                style={{ width: "100%", height: 150, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                style={signatureCanvasStyle(C, RAD)}
                 onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
                 onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
               {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, color: "#475569" }}>Signed by: <strong>{workerName}</strong></div>
-              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
+              <div style={{ fontSize: 13, color: C.text.body }}>Signed by: <strong>{workerName}</strong></div>
+              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear</button>
             </div>
             {saveError && (
-              <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-                Couldn't save this inspection. Check your connection and try again.
+              <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Couldn't save this inspection. Check your connection and try again.</span>
               </div>
             )}
             {(() => {
               const ready = hasSignature && workerName && (isTrailer || endReading) && hasChanges !== null && (!hasChanges || changeNotes.trim());
               return (
-                <button style={s.btn(signed && !saveError ? "#16A34A" : ready ? "#0369A1" : "#94A3B8")} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
-                  {savingInspection ? "Saving…" : signed && !saveError ? "✓ Submitted" : "Sign & Submit Post-Trip"}
+                <button style={s.btn(signed && !saveError ? C.status.success.solid : ready ? accent : disabledBg(C))} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
+                  {savingInspection ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : signed && !saveError ? <><CheckCircle2 size={16} strokeWidth={2.25} /> Submitted</> : "Sign & Submit Post-Trip"}
                 </button>
               );
             })()}
@@ -802,11 +804,11 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{equipmentLabel()}</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
-            <button style={s.btn("#0369A1")} onClick={onBack}>Back to menu</button>
+            <WifiOff size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 8 }}>{equipmentLabel()}</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>This inspection is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
@@ -815,27 +817,30 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>{(mode === "pretrip" ? defectiveCount > 0 : hasChanges && changeCondition === "Defective") ? "⚠️" : "✅"}</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>
+            {(mode === "pretrip" ? defectiveCount > 0 : hasChanges && changeCondition === "Defective")
+              ? <AlertTriangle size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
+              : <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />}
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>
               {mode === "posttrip" ? "Post-Trip Complete" : "Pre-Trip Complete"}
             </div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{equipmentLabel()} · {new Date().toLocaleString("en-CA")}</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 20 }}>{equipmentLabel()} · {new Date().toLocaleString("en-CA")}</div>
             {mode === "pretrip" && defectiveCount > 0 && (
-              <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 10, padding: 14, marginBottom: 18, textAlign: "left" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#991B1B" }}>{defectiveCount} defective item{defectiveCount > 1 ? "s" : ""} flagged</div>
-                <div style={{ fontSize: 13, color: "#B91C1C", marginTop: 2 }}>This machine may not be safe to operate. Report to your supervisor.</div>
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 18, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.danger.text }}>{defectiveCount} defective item{defectiveCount > 1 ? "s" : ""} flagged</div>
+                <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>This machine may not be safe to operate. Report to your supervisor.</div>
               </div>
             )}
             {mode === "posttrip" && hasChanges && (
-              <div style={{ background: changeCondition === "Defective" ? "#FEF2F2" : "#FFFBEB", border: `1px solid ${changeCondition === "Defective" ? "#FCA5A5" : "#FCD34D"}`, borderRadius: 10, padding: 14, marginBottom: 18, textAlign: "left" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: changeCondition === "Defective" ? "#991B1B" : "#92400E" }}>Change reported: {changeCondition}</div>
-                <div style={{ fontSize: 13, color: changeCondition === "Defective" ? "#B91C1C" : "#B45309", marginTop: 2 }}>Reported to your supervisor for review.</div>
+              <div style={{ background: changeCondition === "Defective" ? C.status.danger.bg : C.status.warning.bg, border: `1px solid ${changeCondition === "Defective" ? C.status.danger.border : C.status.warning.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 18, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: changeCondition === "Defective" ? C.status.danger.text : C.status.warning.text }}>Change reported: {changeCondition}</div>
+                <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>Reported to your supervisor for review.</div>
               </div>
             )}
-            <button style={s.btn("#0369A1")} onClick={onBack}>Back to menu</button>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
+      <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
     </div>
   );
 }

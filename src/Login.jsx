@@ -4,7 +4,9 @@ import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 import GatehouseBooth from "./GatehouseBooth.jsx";
+import { HardHat, ClipboardList, KeyRound, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import GatehouseDashboard from "./GatehouseDashboard.jsx";
+import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 
 // Session storage — split by role. window.name survives a reload but not a
 // fully closed-and-reopened tab, which is exactly the case that matters most
@@ -286,57 +288,62 @@ export default function Login() {
   }
 
   // ── Styles ───────────────────────────────────────────────
+  // Same design system as Dashboard.jsx/WorkerMenu.jsx (src/theme.js) —
+  // dark surfaces, two-part shadows, orange glow accent — reskinned onto
+  // theme tokens instead of hand-copied hex. No layout/logic changes.
   const styles = {
     wrap: {
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
-      background: "#0A0A0A", minHeight: "100vh",
+      fontFamily: FONT.body,
+      background: C.bg, minHeight: "100vh",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 16
     },
     card: {
-      background: "#161616", borderRadius: 16, padding: 28, width: "100%", maxWidth: 420,
-      border: "1px solid #F9731640", boxShadow: "0 4px 30px #F9731622"
+      background: `linear-gradient(160deg, ${C.panelRaised} 0%, ${C.panel} 100%)`,
+      borderRadius: RAD.xl, padding: 28, width: "100%", maxWidth: 420,
+      border: `1px solid ${C.orangeDim}`, boxShadow: `${SHAD.lg}, ${GLOW.orangeSoft}`
     },
     roleBtn: (accent) => ({
-      width: "100%", padding: "16px 18px", borderRadius: 12, border: "1.5px solid #2A2A2A",
-      background: "#1E1E1E", cursor: "pointer", marginBottom: 12, textAlign: "left",
-      display: "flex", alignItems: "center", gap: 14, transition: "all 0.15s"
+      width: "100%", padding: "16px 18px", borderRadius: RAD.md, border: `1.5px solid ${C.line}`,
+      background: C.panelInset, cursor: "pointer", marginBottom: 12, textAlign: "left",
+      display: "flex", alignItems: "center", gap: 14, transition: "all 0.15s", minHeight: 64, boxSizing: "border-box"
     }),
     adminBtn: (accent) => ({
-      width: "auto", padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2A2A2A",
-      background: "#1E1E1E", cursor: "pointer", margin: "4px auto 0", textAlign: "left",
-      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s"
+      width: "auto", padding: "8px 14px", borderRadius: RAD.md, border: `1.5px solid ${C.line}`,
+      background: C.panelInset, cursor: "pointer", margin: "4px auto 0", textAlign: "left",
+      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s", minHeight: 36, boxSizing: "border-box"
     }),
     input: {
-      width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #F9731660",
-      background: "#1E1E1E", color: "#fff",
-      fontSize: 16, boxSizing: "border-box", outline: "none", marginBottom: 12
+      width: "100%", padding: "12px 14px", borderRadius: RAD.md, border: `1.5px solid ${C.orangeDim}`,
+      background: C.panelInset, color: C.text.primary,
+      fontSize: 16, boxSizing: "border-box", outline: "none", marginBottom: 12, minHeight: 46
     },
     primaryBtn: {
-      width: "100%", background: "#F97316", color: "#fff", border: "none", borderRadius: 10,
-      padding: "13px", fontWeight: 700, fontSize: 16, cursor: "pointer"
+      width: "100%", background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.md,
+      padding: "14px", fontWeight: 700, fontSize: 16, cursor: "pointer", minHeight: 48
     },
     backBtn: {
-      width: "100%", background: "#1E1E1E", color: "#F97316", border: "1.5px solid #F9731660", borderRadius: 10,
-      padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", marginTop: 10
+      width: "100%", background: C.panelInset, color: C.orange, border: `1.5px solid ${C.orangeDim}`, borderRadius: RAD.md,
+      padding: "12px", fontWeight: 600, fontSize: 14, cursor: "pointer", marginTop: 10, minHeight: 44,
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
     },
     nameBtn: (active) => ({
-      width: "100%", padding: "13px 14px", borderRadius: 10, border: `1.5px solid ${active ? "#F97316" : "#2A2A2A"}`,
-      background: active ? "#2A1A0F" : "#1E1E1E", color: "#fff", cursor: "pointer", marginBottom: 8,
-      textAlign: "left", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center"
+      width: "100%", padding: "13px 14px", borderRadius: RAD.md, border: `1.5px solid ${active ? C.orange : C.line}`,
+      background: active ? C.orangeSoft : C.panelInset, color: C.text.primary, cursor: "pointer", marginBottom: 8,
+      textAlign: "left", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 48, boxSizing: "border-box"
     }),
     pinDots: {
       display: "flex", justifyContent: "center", gap: 14, margin: "20px 0"
     },
     pinDot: (filled) => ({
       width: 18, height: 18, borderRadius: "50%",
-      border: "1.5px solid #F97316", background: filled ? "#F97316" : "transparent"
+      border: `1.5px solid ${C.orange}`, background: filled ? C.orange : "transparent"
     }),
   };
 
   const roleMeta = {
-    worker: { icon: "🦺", title: "Worker", desc: "Complete a hazard assessment", accent: "#F97316" },
-    supervisor: { icon: "📋", title: "Supervisor / Safety", desc: "View your company dashboard", accent: "#1E3A5F" },
-    admin: { icon: "🔑", title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
+    worker: { icon: HardHat, title: "Worker", desc: "Complete a hazard assessment", accent: C.orange },
+    supervisor: { icon: ClipboardList, title: "Supervisor / Safety", desc: "View your company dashboard", accent: C.status.info.solid },
+    admin: { icon: KeyRound, title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
   };
 
   const filteredNames = rosterNames.filter(m => m.name.toLowerCase().includes(nameFilter.trim().toLowerCase()));
@@ -351,22 +358,23 @@ export default function Login() {
             alt="FORA"
             style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
           />
-          <div style={{ fontSize: 13, color: "#9CA3AF" }}>AI-powered field documentation portal</div>
+          <div style={{ fontSize: 13, color: C.text.muted }}>AI-powered field documentation portal</div>
         </div>
 
         {!role ? (
           <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#9CA3AF", marginBottom: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text.muted, marginBottom: 12, textAlign: "center" }}>
               Select your role to continue
             </div>
             {["worker", "supervisor"].map(r => {
               const m = roleMeta[r];
+              const RoleIcon = m.icon;
               return (
                 <button key={r} style={styles.roleBtn(m.accent)} onClick={() => { setRole(r); setError(""); setCode(""); }}>
-                  <span style={{ fontSize: 26 }}>{m.icon}</span>
+                  <RoleIcon size={26} strokeWidth={2} color={m.accent} />
                   <span>
-                    <span style={{ display: "block", fontWeight: 700, fontSize: 15, color: "#F97316" }}>{m.title}</span>
-                    <span style={{ display: "block", fontSize: 12, color: "#9CA3AF" }}>{m.desc}</span>
+                    <span style={{ display: "block", fontFamily: FONT.heading, fontWeight: 700, fontSize: 15, color: m.accent }}>{m.title}</span>
+                    <span style={{ display: "block", fontSize: 12, color: C.text.muted }}>{m.desc}</span>
                   </span>
                 </button>
               );
@@ -374,16 +382,16 @@ export default function Login() {
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
               <button style={styles.adminBtn(roleMeta.admin.accent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>
-                <span style={{ fontSize: 15 }}>{roleMeta.admin.icon}</span>
-                <span style={{ fontWeight: 600, fontSize: 12, color: "#9CA3AF" }}>{roleMeta.admin.title}</span>
+                <roleMeta.admin.icon size={15} strokeWidth={2.25} color={roleMeta.admin.accent} />
+                <span style={{ fontWeight: 600, fontSize: 12, color: C.text.muted }}>{roleMeta.admin.title}</span>
               </button>
             </div>
           </>
         ) : masterTicket ? (
           // ── Master code: pick any company ──────────────────────────
           <>
-            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>Master login</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Pick a company to log into as {role}.</div>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Master login</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Pick a company to log into as {role}.</div>
 
             <input
               style={styles.input}
@@ -396,7 +404,7 @@ export default function Login() {
 
             <div style={{ maxHeight: 320, overflowY: "auto" }}>
               {filteredMasterCompanies.length === 0 && (
-                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No companies match.</div>
+                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>No companies match.</div>
               )}
               {filteredMasterCompanies.map(c => (
                 <button key={c.id} style={styles.nameBtn(false)} disabled={checking} onClick={() => pickMasterCompany(c.id)}>
@@ -406,18 +414,18 @@ export default function Login() {
             </div>
 
             {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: "#FCA5A5" }}>
-                {error}
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
               </div>
             )}
 
-            <button style={styles.backBtn} onClick={resetToRolePick}>← Start over</button>
+            <button style={styles.backBtn} onClick={resetToRolePick}><ChevronLeft size={14} /> Start over</button>
           </>
         ) : companyTicket && !selectedRoster ? (
           // ── Step 2: pick your name from this company's active roster ──
           <>
-            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>{rosterCompanyName}</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Which of these is you?</div>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>{rosterCompanyName}</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Which of these is you?</div>
 
             <input
               style={styles.input}
@@ -430,32 +438,32 @@ export default function Login() {
 
             <div style={{ maxHeight: 320, overflowY: "auto" }}>
               {nameFilter.trim().length === 0 ? (
-                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>Start typing to find your name.</div>
+                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>Start typing to find your name.</div>
               ) : filteredNames.length === 0 ? (
-                <div style={{ fontSize: 13, color: "#9CA3AF", textAlign: "center", padding: "12px 0" }}>No names match.</div>
+                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>No names match.</div>
               ) : (
                 filteredNames.map(m => (
                   <button key={m.id} style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
                     <span>{m.name}</span>
-                    <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase" }}>{m.role}</span>
+                    <span style={{ fontSize: 11, color: C.text.muted, textTransform: "uppercase" }}>{m.role}</span>
                   </button>
                 ))
               )}
             </div>
 
             {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: "#FCA5A5" }}>
-                {error}
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
               </div>
             )}
 
-            <button style={styles.backBtn} onClick={resetToRolePick}>← Start over</button>
+            <button style={styles.backBtn} onClick={resetToRolePick}><ChevronLeft size={14} /> Start over</button>
           </>
         ) : companyTicket && selectedRoster ? (
           // ── Step 3: PIN ──────────────────────────────────────────────
           <>
-            <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316", marginBottom: 2 }}>{selectedRoster.name}</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>Enter your 4-digit PIN</div>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>{selectedRoster.name}</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 8 }}>Enter your 4-digit PIN</div>
 
             <input
               style={{ ...styles.input, textAlign: "center", fontSize: 28, letterSpacing: 12, marginBottom: 0 }}
@@ -473,23 +481,23 @@ export default function Login() {
             </div>
 
             {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
-                {error}
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
               </div>
             )}
 
             <button style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); }}>
-              ← Not {selectedRoster.name}?
+              <ChevronLeft size={14} /> Not {selectedRoster.name}?
             </button>
           </>
         ) : (
           // ── Step 1: admin code, or company code ─────────────────────
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <span style={{ fontSize: 26 }}>{roleMeta[role].icon}</span>
+              {(() => { const RoleIcon = roleMeta[role].icon; return <RoleIcon size={26} strokeWidth={2} color={roleMeta[role].accent} />; })()}
               <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "#F97316" }}>{roleMeta[role].title}</div>
-                <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange }}>{roleMeta[role].title}</div>
+                <div style={{ fontSize: 12, color: C.text.muted }}>
                   {role === "admin" ? "Enter your admin code" : "Enter your company code"}
                 </div>
               </div>
@@ -504,30 +512,30 @@ export default function Login() {
               onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
               autoFocus
             />
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 12 }}>
               Codes are case sensitive — enter it exactly as given.
             </div>
 
             {error && (
-              <div style={{ background: "#2A1212", border: "1px solid #DC262660", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: "#FCA5A5" }}>
-                {error}
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
               </div>
             )}
 
-            <button style={styles.primaryBtn} onClick={handleSubmit} disabled={checking}>
-              {checking ? "Checking…" : "Continue →"}
+            <button style={{ ...styles.primaryBtn, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={handleSubmit} disabled={checking}>
+              {checking ? "Checking…" : (<>Continue <ChevronRight size={16} /></>)}
             </button>
             <button style={styles.backBtn} onClick={resetToRolePick}>
-              ← Back
+              <ChevronLeft size={14} /> Back
             </button>
           </>
         )}
       </div>
 
-      <div style={{ position: "fixed", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 12, color: "#6B7280" }}>
-        <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: "#6B7280" }}>Privacy Policy</a>
+      <div style={{ position: "fixed", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 12, color: C.text.faint }}>
+        <a href="https://forafieldsolutions.com/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: C.text.faint }}>Privacy Policy</a>
         <span style={{ margin: "0 8px" }}>·</span>
-        <a href="https://forafieldsolutions.com/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: "#6B7280" }}>Terms of Use</a>
+        <a href="https://forafieldsolutions.com/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: C.text.faint }}>Terms of Use</a>
       </div>
     </div>
   );

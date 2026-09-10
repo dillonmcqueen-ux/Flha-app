@@ -5,6 +5,9 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
+import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
+import { ArrowLeft, AlertTriangle, Loader2, CheckCircle2, WifiOff, PenLine, Plus, Trash2, Check } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -72,12 +75,15 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
   }
 }
 
-const SEVERITY = {
-  Low: { color: "#16A34A", bg: "#F0FDF4", border: "#86EFAC" },
-  Medium: { color: "#D97706", bg: "#FFFBEB", border: "#FCD34D" },
-  High: { color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5" },
-  Critical: { color: "#FFFFFF", bg: "#7F1D1D", border: "#7F1D1D" },
-};
+// Reuses theme.js's risk scale — Low/Medium/High map 1:1 to colors.risk;
+// "Critical" reuses the "extreme" (stop-work) tone, deliberately solid and
+// alarming rather than translucent, same reasoning as Dashboard's risk badges.
+const SEVERITY = (C) => ({
+  Low: { color: C.risk.low.text, bg: C.risk.low.bg, border: C.risk.low.border },
+  Medium: { color: C.risk.medium.text, bg: C.risk.medium.bg, border: C.risk.medium.border },
+  High: { color: C.risk.high.text, bg: C.risk.high.bg, border: C.risk.high.border },
+  Critical: { color: C.risk.extreme.text, bg: C.risk.extreme.bg, border: C.risk.extreme.border },
+});
 const SEVERITY_LEVELS = ["Low", "Medium", "High", "Critical"];
 
 export default function NearMiss({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
@@ -297,40 +303,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     }
   };
 
-  const s = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: 16, colorScheme: "light" },
-    header: { background: "linear-gradient(135deg,#B45309,#D97706)", borderRadius: 14, padding: "18px 20px", marginBottom: 16, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" },
-    card: { background: "#fff", borderRadius: 14, padding: 18, marginBottom: 14, boxShadow: "0 1px 3px #0f172a12" },
-    label: { display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 },
-    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC", color: "#1E293B", colorScheme: "light" },
-    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer", width: "100%" }),
-    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
-    section: { fontWeight: 800, fontSize: 15, color: "#B45309", marginBottom: 8 },
-  };
+  const accent = docAccent(C, "nearmiss");
+  const s = buildFormStyles(C, FONT, RAD, SHAD, accent);
+  const SEV = SEVERITY(C);
 
   return (
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>⚠️</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <AlertTriangle size={26} strokeWidth={2} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Near Miss Report</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Report a close call</div>
           </div>
         </div>
-        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Menu</button>
+        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><ArrowLeft size={15} strokeWidth={2.5} /> Menu</button>
       </div>
 
       {/* SETUP */}
       {step === "setup" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: "#1E293B" }}>Report details</div>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Report details</div>
 
-          <div onClick={() => setAnonymous(!anonymous)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: anonymous ? "#FFFBEB" : "#F8FAFC", border: `1.5px solid ${anonymous ? "#FCD34D" : "#E2E8F0"}`, borderRadius: 10, marginBottom: 14, cursor: "pointer" }}>
-            <div style={{ width: 22, height: 22, borderRadius: 6, background: anonymous ? "#D97706" : "#fff", border: `1.5px solid ${anonymous ? "#D97706" : "#CBD5E1"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 800 }}>{anonymous ? "✓" : ""}</div>
+          <div onClick={() => setAnonymous(!anonymous)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", background: anonymous ? C.status.warning.bg : C.panelInset, border: `1.5px solid ${anonymous ? C.status.warning.border : C.line}`, borderRadius: RAD.md, marginBottom: 14, cursor: "pointer" }}>
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: anonymous ? C.status.warning.solid : "transparent", border: `1.5px solid ${anonymous ? C.status.warning.solid : C.lineStrong}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", flexShrink: 0 }}>{anonymous && <Check size={15} strokeWidth={3} />}</div>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>Report anonymously</div>
-              <div style={{ fontSize: 12, color: "#64748B" }}>Your name won't appear on the report</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>Report anonymously</div>
+              <div style={{ fontSize: 12, color: C.text.muted }}>Your name won't appear on the report</div>
             </div>
           </div>
 
@@ -338,7 +337,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <>
               <label style={s.label}>Your name</label>
               <input
-                style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+                style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
                 placeholder="Reporter name" value={reporter}
                 onChange={e => setReporter(e.target.value)}
                 readOnly={!!loginUserName}
@@ -365,7 +364,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
 
-          <button style={s.btn((site && (anonymous || reporter)) ? "#D97706" : "#94A3B8")} disabled={!site || (!anonymous && !reporter)} onClick={() => {
+          <button style={s.btn((site && (anonymous || reporter)) ? accent : disabledBg(C))} disabled={!site || (!anonymous && !reporter)} onClick={() => {
             const missing = cf.missingRequired();
             if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
             setStep("describe");
@@ -376,21 +375,21 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* DESCRIBE */}
       {step === "describe" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What happened?</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the near miss in your own words. The AI will structure it into a clean report.</div>
-          <textarea style={{ ...s.input, minHeight: 140, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. I was walking behind the excavator and the operator started to swing without seeing me. I stepped back just in time. There was no spotter and the horn didn't sound." value={description} onChange={e => setDescription(e.target.value)} />
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>What happened?</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>Describe the near miss in your own words. The AI will structure it into a clean report.</div>
+          <textarea style={{ ...s.input, minHeight: 140, resize: "vertical" }} placeholder="e.g. I was walking behind the excavator and the operator started to swing without seeing me. I stepped back just in time. There was no spotter and the horn didn't sound." value={description} onChange={e => setDescription(e.target.value)} />
           {genError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Couldn't generate the report. Check your connection and try again, or continue and write it up yourself.
+            <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Couldn't generate the report. Check your connection and try again, or continue and write it up yourself.</span>
             </div>
           )}
-          <button style={s.btn(loading ? "#94A3B8" : description.trim() ? "#D97706" : "#94A3B8")} disabled={loading || !description.trim()} onClick={generateReport}>
-            {loading ? "⏳ Structuring report…" : "Generate Report"}
+          <button style={s.btn(loading ? disabledBg(C) : description.trim() ? accent : disabledBg(C))} disabled={loading || !description.trim()} onClick={generateReport}>
+            {loading ? <><Loader2 size={16} className="fora-spin" /> Structuring report…</> : "Generate Report"}
           </button>
           {genError && (
             <button style={s.ghost} onClick={continueWithoutAI}>Continue without AI — I'll fill this in myself</button>
           )}
-          <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("setup")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
@@ -398,40 +397,39 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "review" && report && (
         <>
           {report.ai_assisted === false && (
-            <div style={{ background: "#FFFBEB", border: "1.5px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400E" }}>
-              ⚠️ Not AI-structured — fill in the details below yourself before submitting.
+            <div style={bannerStyle(C, RAD, "warning")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Not AI-structured — fill in the details below yourself before submitting.</span>
             </div>
           )}
           <div style={s.card}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#B45309", textTransform: "uppercase", letterSpacing: 0.5 }}>Near Miss Incident Report</div>
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{reporterLabel()} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>Near Miss Incident Report</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{reporterLabel()} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
           </div>
 
           {/* Severity index */}
-          <div style={{ ...s.card, background: (SEVERITY[report.severity] || SEVERITY.Medium).bg, border: `1.5px solid ${(SEVERITY[report.severity] || SEVERITY.Medium).border}` }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Potential Severity</div>
+          <div style={{ ...s.card, background: (SEV[report.severity] || SEV.Medium).bg, border: `1.5px solid ${(SEV[report.severity] || SEV.Medium).border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Potential Severity</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
               {SEVERITY_LEVELS.map(lvl => {
                 const sel = report.severity === lvl;
-                const c = SEVERITY[lvl];
+                const c = SEV[lvl];
                 return (
                   <button key={lvl} onClick={() => updateText("severity", lvl)} style={{
-                    flex: 1, padding: "10px 4px", borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: "pointer",
-                    border: `1.5px solid ${sel ? c.color : "#E2E8F0"}`,
-                    background: sel ? c.bg : "#fff",
-                    color: sel ? c.color : "#94A3B8",
-                    boxShadow: sel && lvl === "Critical" ? "inset 0 0 0 2px #7F1D1D" : "none",
+                    flex: 1, padding: "11px 4px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    border: `1.5px solid ${sel ? c.color : C.line}`,
+                    background: sel ? c.bg : C.panelInset,
+                    color: sel ? c.color : C.text.faint,
                   }}>{lvl}</button>
                 );
               })}
             </div>
-            {report.severityReason && <div style={{ fontSize: 13, color: "#475569", fontStyle: "italic" }}>{report.severityReason}</div>}
-            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>AI-suggested — tap to adjust</div>
+            {report.severityReason && <div style={{ fontSize: 13, color: C.text.body, fontStyle: "italic" }}>{report.severityReason}</div>}
+            <div style={{ fontSize: 11, color: C.text.faint, marginTop: 6 }}>AI-suggested — tap to adjust</div>
           </div>
 
           <div style={s.card}>
             <div style={s.section}>What Happened</div>
-            <textarea style={{ ...s.input, minHeight: 80, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={report.whatHappened} onChange={e => updateText("whatHappened", e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 80, resize: "vertical", marginBottom: 0 }} value={report.whatHappened} onChange={e => updateText("whatHappened", e.target.value)} />
           </div>
 
           <div style={s.card}>
@@ -439,15 +437,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {(report.contributingFactors || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
                 <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("contributingFactors", i, e.target.value)} />
-                <button onClick={() => removeListItem("contributingFactors", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <button onClick={() => removeListItem("contributingFactors", i)} style={{ background: C.status.danger.bg, color: C.status.danger.text, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><Trash2 size={15} strokeWidth={2.25} /></button>
               </div>
             ))}
-            <button onClick={() => addListItem("contributingFactors")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add factor</button>
+            <button onClick={() => addListItem("contributingFactors")} style={{ background: "transparent", border: "none", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}><Plus size={15} strokeWidth={2.5} /> Add factor</button>
           </div>
 
           <div style={s.card}>
             <div style={s.section}>Potential Outcome</div>
-            <textarea style={{ ...s.input, minHeight: 60, resize: "vertical", fontFamily: "inherit", marginBottom: 0 }} value={report.potentialOutcome} onChange={e => updateText("potentialOutcome", e.target.value)} />
+            <textarea style={{ ...s.input, minHeight: 60, resize: "vertical", marginBottom: 0 }} value={report.potentialOutcome} onChange={e => updateText("potentialOutcome", e.target.value)} />
           </div>
 
           <div style={s.card}>
@@ -455,10 +453,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {(report.immediateActions || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
                 <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("immediateActions", i, e.target.value)} />
-                <button onClick={() => removeListItem("immediateActions", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <button onClick={() => removeListItem("immediateActions", i)} style={{ background: C.status.danger.bg, color: C.status.danger.text, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><Trash2 size={15} strokeWidth={2.25} /></button>
               </div>
             ))}
-            <button onClick={() => addListItem("immediateActions")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add action</button>
+            <button onClick={() => addListItem("immediateActions")} style={{ background: "transparent", border: "none", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}><Plus size={15} strokeWidth={2.5} /> Add action</button>
           </div>
 
           <div style={s.card}>
@@ -466,49 +464,49 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {(report.nextSteps || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
                 <input style={{ ...s.input, marginBottom: 0 }} value={f} onChange={e => updateList("nextSteps", i, e.target.value)} />
-                <button onClick={() => removeListItem("nextSteps", i)} style={{ background: "#FEF2F2", color: "#DC2626", border: "none", borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                <button onClick={() => removeListItem("nextSteps", i)} style={{ background: C.status.danger.bg, color: C.status.danger.text, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center" }}><Trash2 size={15} strokeWidth={2.25} /></button>
               </div>
             ))}
-            <button onClick={() => addListItem("nextSteps")} style={{ background: "transparent", border: "none", color: "#B45309", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Add step</button>
+            <button onClick={() => addListItem("nextSteps")} style={{ background: "transparent", border: "none", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}><Plus size={15} strokeWidth={2.5} /> Add step</button>
           </div>
 
-          <button style={s.btn("#D97706")} onClick={() => setStep("sign")}>Continue to Sign →</button>
-          <button style={s.ghost} onClick={() => setStep("describe")}>← Back</button>
+          <button style={s.btn(accent)} onClick={() => setStep("sign")}>Continue to Sign →</button>
+          <button style={s.ghost} onClick={() => setStep("describe")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </>
       )}
 
       {/* SIGN */}
       {step === "sign" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4, color: "#1E293B" }}>{anonymous ? "Confirm & Submit" : "Sign & Submit"}</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>{anonymous ? "This report will be submitted anonymously." : "Sign to confirm this report is accurate."}</div>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4, color: C.text.primary, display: "flex", alignItems: "center", gap: 8 }}><PenLine size={18} strokeWidth={2.25} color={accent} /> {anonymous ? "Confirm & Submit" : "Sign & Submit"}</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>{anonymous ? "This report will be submitted anonymously." : "Sign to confirm this report is accurate."}</div>
 
           {!anonymous && (
             <>
               <label style={s.label}>Signature</label>
-              <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+              <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
               <div style={{ position: "relative", marginBottom: 6 }}>
                 <canvas ref={canvasRef} width={600} height={160}
-                  style={{ width: "100%", height: 130, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                  style={{ ...signatureCanvasStyle(C, RAD), height: 130 }}
                   onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
                   onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
                 {!hasSignature && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
               </div>
               <div style={{ textAlign: "right", marginBottom: 12 }}>
-                <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+                <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
               </div>
             </>
           )}
 
           {saveError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Couldn't save this report. Check your connection and try again.
+            <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Couldn't save this report. Check your connection and try again.</span>
             </div>
           )}
-          <button style={s.btn(saving ? "#94A3B8" : (anonymous || hasSignature) ? "#16A34A" : "#94A3B8")} disabled={saving || (!anonymous && !hasSignature)} onClick={submit}>
-            {saving ? "Submitting…" : saveError ? "Try Again" : anonymous ? "Submit Report" : "Sign & Submit Report"}
+          <button style={s.btn(saving ? disabledBg(C) : (anonymous || hasSignature) ? C.status.success.solid : disabledBg(C))} disabled={saving || (!anonymous && !hasSignature)} onClick={submit}>
+            {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting…</> : saveError ? "Try Again" : <><CheckCircle2 size={16} strokeWidth={2.25} /> {anonymous ? "Submit Report" : "Sign & Submit Report"}</>}
           </button>
-          <button style={s.ghost} onClick={() => setStep("review")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("review")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
@@ -516,11 +514,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reporterLabel()}</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
-            <button style={s.btn("#D97706")} onClick={onBack}>Back to menu</button>
+            <WifiOff size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 8 }}>{site} · {reporterLabel()}</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>This report is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
@@ -529,14 +527,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Near Miss Reported</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{site} · {reporterLabel()}</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>Thank you for reporting. Near-miss reports help prevent injuries before they happen.</div>
-            <button style={s.btn("#D97706")} onClick={onBack}>Back to menu</button>
+            <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Near Miss Reported</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 8 }}>{site} · {reporterLabel()}</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>Thank you for reporting. Near-miss reports help prevent injuries before they happen.</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
+      <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
     </div>
   );
 }

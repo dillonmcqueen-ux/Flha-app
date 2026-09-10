@@ -117,9 +117,9 @@
     <p class="builtaround" data-reveal style="margin-bottom:20px; text-align:center; font-size:13.5px; color:var(--muted); letter-spacing:.02em; text-transform:uppercase;">Illustrative — shows what becomes possible as you connect more Custom Builds to the same Brain</p>
     <div class="brain-flow" data-reveal>
       <div class="brain-sources">
-        <div class="brain-chip">⏱️ Time Clock</div>
-        <div class="brain-chip">🦺 FLHA</div>
-        <div class="brain-chip">🎫 Ticket Management</div>
+        <div class="brain-chip"><svg class="icon-svg"><use href="icons.svg#timer"/></svg> Time Clock</div>
+        <div class="brain-chip"><svg class="icon-svg"><use href="icons.svg#hardhat"/></svg> FLHA</div>
+        <div class="brain-chip"><svg class="icon-svg"><use href="icons.svg#ticket"/></svg> Ticket Management</div>
       </div>
       <div class="brain-down">↓</div>
       <div class="brain-core">The Brain<span>What correlating site, crew, equipment, and open tickets could look like</span></div>
@@ -129,35 +129,35 @@
 
     <div class="story-steps" data-reveal>
       <div class="story-step">
-        <div class="story-icon">⏱️</div>
+        <div class="story-icon"><svg class="icon-svg"><use href="icons.svg#timer"/></svg></div>
         <div>
           <h4>A worker clocks in on Time Clock</h4>
           <p>Site B, assigned to the excavation crew, running Excavator #4. That's a Custom Build most companies add to replace a paper sign-in sheet or a separate app nobody checks. On its own, it's just a timestamp.</p>
         </div>
       </div>
       <div class="story-step">
-        <div class="story-icon">🦺</div>
+        <div class="story-icon"><svg class="icon-svg"><use href="icons.svg#hardhat"/></svg></div>
         <div>
           <h4>They open an FLHA for "digging near the east fence line"</h4>
           <p>Once Time Clock and FLHA share the same Brain, none of that would have to be typed in again: who's on shift, which site they're on, which machine they're running. The FLHA could be generated already scoped to Site B and Excavator #4, cross-referenced against your company's own trenching SOPs, not a generic template.</p>
         </div>
       </div>
       <div class="story-step">
-        <div class="story-icon">🎫</div>
+        <div class="story-icon"><svg class="icon-svg"><use href="icons.svg#ticket"/></svg></div>
         <div>
           <h4>The hazard controls call for a pre-use hydraulic check</h4>
           <p>Standard stuff for an excavator. What isn't standard is that Excavator #4 could already have an open ticket in Ticket Management for a hydraulic hose flagged during last week's inspection, still unresolved. Two separate systems, entered by two different people, days apart.</p>
         </div>
       </div>
       <div class="story-step flag">
-        <div class="story-icon">🧠</div>
+        <div class="story-icon"><svg class="icon-svg"><use href="icons.svg#brain"/></svg></div>
         <div>
           <h4>This is the connection the Brain is built toward</h4>
           <p>Because the FLHA's hazard flag and an open maintenance ticket would both reference the same piece of equipment, FORA could surface that ticket right inside the FLHA review, and flag it to the supervisor before sign-off, instead of it sitting buried in a maintenance log nobody was going to check that morning.</p>
         </div>
       </div>
       <div class="story-step">
-        <div class="story-icon">✅</div>
+        <div class="story-icon"><svg class="icon-svg"><use href="icons.svg#check"/></svg></div>
         <div>
           <h4>Ten minutes lost beats a hydraulic failure on a live dig</h4>
           <p>No incident report to file, no near miss that almost became something worse. Nobody would have to be sharp enough that morning to manually connect a time clock entry, a hazard assessment, and a maintenance backlog by hand. That's the point of connecting the systems: they'd catch it once they're built to actually read each other.</p>
@@ -182,7 +182,9 @@
 </section>
 
 <footer>
-  <div class="wrap foot-row">
+  <div class="wrap">
+    <p class="foot-stmt">Built around your company.<br>Not a template.</p>
+    <div class="foot-row">
     <div class="logo"><span class="dot"></span>FORA</div>
     <div class="foot-links">
       <a href="index.html">Home</a>
@@ -196,6 +198,7 @@
       <a href="terms.html">Terms of Use</a>
     </div>
     <div class="foot-copy">© <span id="year"></span> FORA. Field Operations Record Automation.</div>
+    </div>
   </div>
 </footer>
 

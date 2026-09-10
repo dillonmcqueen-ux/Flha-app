@@ -4,6 +4,9 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
+import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
+import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
+import { ArrowLeft, Hammer, AlertTriangle, Loader2, CheckCircle2, WifiOff, PenLine, Plus, MessageCircle, User, HardHat, Check } from "lucide-react";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -349,35 +352,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     }
   };
 
-  const s = {
-    wrap: { fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#F0F4F8", minHeight: "100vh", padding: 16, colorScheme: "light" },
-    header: { background: "linear-gradient(135deg,#5B21B6,#7C3AED)", borderRadius: 14, padding: "18px 20px", marginBottom: 16, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" },
-    card: { background: "#fff", borderRadius: 14, padding: 18, marginBottom: 14, boxShadow: "0 1px 3px #0f172a12" },
-    label: { display: "block", fontWeight: 700, fontSize: 12, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 },
-    input: { width: "100%", padding: "11px 13px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 15, boxSizing: "border-box", outline: "none", marginBottom: 11, background: "#F8FAFC", color: "#1E293B", colorScheme: "light" },
-    btn: (bg, fg = "#fff") => ({ background: bg, color: fg, border: "none", borderRadius: 10, padding: "13px", fontWeight: 800, fontSize: 15, cursor: "pointer", width: "100%" }),
-    ghost: { background: "#F1F5F9", color: "#334155", border: "none", borderRadius: 10, padding: "11px", fontWeight: 600, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 10 },
-  };
+  const accent = docAccent(C, "toolbox");
+  const s = buildFormStyles(C, FONT, RAD, SHAD, accent);
 
   return (
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <span style={{ fontSize: 26 }}>🧰</span>}
+          {companyLogo ? <img src={companyLogo} alt="" style={{ width: 38, height: 38, borderRadius: 8, objectFit: "cover", background: "#fff" }} /> : <Hammer size={26} strokeWidth={2} />}
           <div>
             <div style={{ fontWeight: 800, fontSize: 19 }}>Toolbox Talk</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>Safety meeting record</div>
           </div>
         </div>
-        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Menu</button>
+        <button onClick={onBack} style={{ background: "#ffffff20", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><ArrowLeft size={15} strokeWidth={2.5} /> Menu</button>
       </div>
 
       {/* CHOICE */}
       {step === "choice" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Toolbox Talk</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Running a new talk, or signing one you missed?</div>
-          <button style={s.btn("#7C3AED")} onClick={() => setStep("setup")}>Start a New Toolbox Talk</button>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Toolbox Talk</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>Running a new talk, or signing one you missed?</div>
+          <button style={s.btn(accent)} onClick={() => setStep("setup")}>Start a New Toolbox Talk</button>
           <button style={s.ghost} onClick={() => { setLateSignError(""); setStep("findtalk"); loadOpenTalks(); }}>I Missed One — Sign It Now</button>
         </div>
       )}
@@ -385,10 +381,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* SETUP */}
       {step === "setup" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: "#1E293B" }}>Meeting details</div>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Meeting details</div>
           <label style={s.label}>Presenter name</label>
           <input
-            style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Who is leading the talk?" value={presenter}
             onChange={e => setPresenter(e.target.value)}
             readOnly={!!loginUserName}
@@ -397,7 +393,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <label style={s.label}>Meeting type</label>
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
             {MEETING_TYPES.map(t => (
-              <button key={t} onClick={() => setMeetingType(t)} style={{ flex: "1 1 40%", padding: "10px", borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${meetingType === t ? "#7C3AED" : "#E2E8F0"}`, background: meetingType === t ? "#7C3AED" : "#fff", color: meetingType === t ? "#fff" : "#64748B" }}>{t}</button>
+              <button key={t} onClick={() => setMeetingType(t)} style={{ flex: "1 1 40%", padding: "11px", borderRadius: RAD.sm, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${meetingType === t ? accent : C.line}`, background: meetingType === t ? accent : C.panelInset, color: meetingType === t ? "#fff" : C.text.faint }}>{t}</button>
             ))}
           </div>
 
@@ -414,44 +410,44 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           <CustomFieldInputs cf={cf} labelStyle={s.label} inputStyle={s.input} />
 
-          <button style={s.btn((presenter && site) ? "#7C3AED" : "#94A3B8")} disabled={!presenter || !site} onClick={() => {
+          <button style={s.btn((presenter && site) ? accent : disabledBg(C))} disabled={!presenter || !site} onClick={() => {
             const missing = cf.missingRequired();
             if (missing.length > 0) { alert(`Please fill in: ${missing.join(", ")}`); return; }
             setStep("topic");
           }}>Continue →</button>
-          <button style={s.ghost} onClick={() => setStep("choice")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("choice")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
       {/* TOPIC */}
       {step === "topic" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>What's the talk about?</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Describe the task, job, or safety focus. The AI will generate talking points for a 5-10 minute talk.</div>
-          <textarea style={{ ...s.input, minHeight: 120, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Today we're pouring concrete near the road — I want to cover traffic control, silica dust, and manual lifting" value={topic} onChange={e => setTopic(e.target.value)} />
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>What's the talk about?</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>Describe the task, job, or safety focus. The AI will generate talking points for a 5-10 minute talk.</div>
+          <textarea style={{ ...s.input, minHeight: 120, resize: "vertical" }} placeholder="e.g. Today we're pouring concrete near the road — I want to cover traffic control, silica dust, and manual lifting" value={topic} onChange={e => setTopic(e.target.value)} />
           {genError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Couldn't generate the talk. Check your connection and try again, or run it from your own notes.
+            <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Couldn't generate the talk. Check your connection and try again, or run it from your own notes.</span>
             </div>
           )}
-          <button style={s.btn(loading ? "#94A3B8" : topic.trim() ? "#7C3AED" : "#94A3B8")} disabled={loading || !topic.trim()} onClick={generateTalk}>
-            {loading ? "⏳ Preparing talk…" : "Generate Talking Points"}
+          <button style={s.btn(loading ? disabledBg(C) : topic.trim() ? accent : disabledBg(C))} disabled={loading || !topic.trim()} onClick={generateTalk}>
+            {loading ? <><Loader2 size={16} className="fora-spin" /> Preparing talk…</> : "Generate Talking Points"}
           </button>
           {genError && (
             <button style={s.ghost} onClick={goManualTalk}>Continue without AI — I'll present from my own notes</button>
           )}
-          <button style={s.ghost} onClick={() => setStep("setup")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("setup")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
       {/* MANUAL TALK — docs/scope-offline-capability.md Phase 2 fallback when AI is unreachable */}
       {step === "manualtalk" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Your talking points</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>No AI structuring this time — jot down what you plan to cover. This becomes the record of the talk.</div>
-          <textarea style={{ ...s.input, minHeight: 160, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. Reviewed traffic control plan, flaggers positioned before any lane closure. Silica dust — wet-cutting only, respirators on hand. No manual lifting over 50 lbs without a second person." value={manualNotes} onChange={e => setManualNotes(e.target.value)} />
-          <button style={s.btn(manualNotes.trim() ? "#7C3AED" : "#94A3B8")} disabled={!manualNotes.trim()} onClick={confirmManualTalk}>Continue to Sign-Off →</button>
-          <button style={s.ghost} onClick={() => setStep("topic")}>← Back</button>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Your talking points</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>No AI structuring this time — jot down what you plan to cover. This becomes the record of the talk.</div>
+          <textarea style={{ ...s.input, minHeight: 160, resize: "vertical" }} placeholder="e.g. Reviewed traffic control plan, flaggers positioned before any lane closure. Silica dust — wet-cutting only, respirators on hand. No manual lifting over 50 lbs without a second person." value={manualNotes} onChange={e => setManualNotes(e.target.value)} />
+          <button style={s.btn(manualNotes.trim() ? accent : disabledBg(C))} disabled={!manualNotes.trim()} onClick={confirmManualTalk}>Continue to Sign-Off →</button>
+          <button style={s.ghost} onClick={() => setStep("topic")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
@@ -459,34 +455,34 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "review" && points && (
         <>
           <div style={s.card}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: 0.5 }}>{meetingType} Toolbox Talk</div>
-            <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B", marginTop: 2 }}>{points.summary}</div>
-            <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>Presenter: {presenter} · {site}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>{meetingType} Toolbox Talk</div>
+            <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary, marginTop: 2 }}>{points.summary}</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 4 }}>Presenter: {presenter} · {site}</div>
           </div>
 
           {(points.sections || []).map((sec, i) => (
             <div key={i} style={s.card}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "#5B21B6", marginBottom: 8 }}>{sec.heading}</div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: accent, marginBottom: 8 }}>{sec.heading}</div>
               {(sec.bullets || []).map((b, j) => (
                 <div key={j} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                  <span style={{ color: "#7C3AED", fontWeight: 800 }}>•</span>
-                  <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{b}</span>
+                  <span style={{ color: accent, fontWeight: 800 }}>•</span>
+                  <span style={{ fontSize: 14, color: C.text.body, lineHeight: 1.5 }}>{b}</span>
                 </div>
               ))}
             </div>
           ))}
 
           {points.discussion?.length > 0 && (
-            <div style={{ ...s.card, background: "#FAF5FF", border: "1.5px solid #E9D5FF" }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "#5B21B6", marginBottom: 8 }}>💬 Discussion — ask the crew</div>
+            <div style={{ ...s.card, background: C.orangeSoft, border: `1.5px solid ${C.orangeDim}` }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: accent, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}><MessageCircle size={16} strokeWidth={2.25} /> Discussion — ask the crew</div>
               {points.discussion.map((d, i) => (
-                <div key={i} style={{ fontSize: 14, color: "#334155", marginBottom: 6, lineHeight: 1.5 }}>{i + 1}. {d}</div>
+                <div key={i} style={{ fontSize: 14, color: C.text.body, marginBottom: 6, lineHeight: 1.5 }}>{i + 1}. {d}</div>
               ))}
             </div>
           )}
 
-          <button style={s.btn("#7C3AED")} onClick={() => setStep("signoff")}>Continue to Sign-Off →</button>
-          <button style={s.ghost} onClick={() => setStep("topic")}>← Back</button>
+          <button style={s.btn(accent)} onClick={() => setStep("signoff")}>Continue to Sign-Off →</button>
+          <button style={s.ghost} onClick={() => setStep("topic")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </>
       )}
 
@@ -494,24 +490,24 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "signoff" && (
         <>
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 17, color: "#1E293B", marginBottom: 4 }}>Attendance & Sign-Off</div>
-            <div style={{ fontSize: 13, color: "#64748B" }}>Presenter: <strong>{presenter}</strong>{!presenterSigned && " — sign first, then pass the device to each attendee."}</div>
+            <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><PenLine size={18} strokeWidth={2.25} color={accent} /> Attendance & Sign-Off</div>
+            <div style={{ fontSize: 13, color: C.text.muted }}>Presenter: <strong>{presenter}</strong>{!presenterSigned && " — sign first, then pass the device to each attendee."}</div>
           </div>
 
           {/* Signed list */}
           {(presenterSigned || attendees.length > 0) && (
             <div style={s.card}>
-              <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 8 }}>Signed ({(presenterSigned ? 1 : 0) + attendees.length})</div>
+              <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>Signed ({(presenterSigned ? 1 : 0) + attendees.length})</div>
               {presenterSigned && (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: attendees.length > 0 ? "1px solid #F1F5F9" : "none" }}>
-                  <span style={{ fontSize: 14, color: "#334155" }}>👤 {presenter} <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>PRESENTER</span></span>
-                  <span style={{ fontSize: 12, color: "#16A34A", fontWeight: 700 }}>✓ signed</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: attendees.length > 0 ? `1px solid ${C.line}` : "none" }}>
+                  <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><User size={14} strokeWidth={2.25} /> {presenter} <span style={{ fontSize: 11, color: accent, fontWeight: 700 }}>PRESENTER</span></span>
+                  <span style={{ fontSize: 12, color: C.status.success.text, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}><Check size={13} strokeWidth={3} /> signed</span>
                 </div>
               )}
               {attendees.map((a, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < attendees.length - 1 ? "1px solid #F1F5F9" : "none" }}>
-                  <span style={{ fontSize: 14, color: "#334155" }}>👷 {a.name}</span>
-                  <button onClick={() => removeAttendee(i)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < attendees.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                  <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><HardHat size={14} strokeWidth={2.25} /> {a.name}</span>
+                  <button onClick={() => removeAttendee(i)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -519,41 +515,41 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           {/* Signature capture */}
           <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#1E293B", marginBottom: 8 }}>{!presenterSigned ? "Presenter signature" : "Add attendee"}</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>{!presenterSigned ? "Presenter signature" : "Add attendee"}</div>
             <label style={s.label}>Name</label>
             <input style={s.input} placeholder={!presenterSigned ? presenter : "Attendee full name"} value={!presenterSigned ? presenter : attName} onChange={e => setAttName(e.target.value)} disabled={!presenterSigned} />
             <label style={s.label}>Signature</label>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+            <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
             <div style={{ position: "relative", marginBottom: 6 }}>
               <canvas ref={canvasRef} width={600} height={160}
-                style={{ width: "100%", height: 130, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+                style={{ ...signatureCanvasStyle(C, RAD), height: 130 }}
                 onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
                 onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
               {!attHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
             </div>
             <div style={{ textAlign: "right", marginBottom: 10 }}>
-              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
             </div>
             {!presenterSigned ? (
-              <button style={s.btn(attHasSig ? "#7C3AED" : "#94A3B8")} disabled={!attHasSig} onClick={() => {
+              <button style={s.btn(attHasSig ? accent : disabledBg(C))} disabled={!attHasSig} onClick={() => {
                 const sig = canvasRef.current.toDataURL("image/png");
                 setAttendees([{ name: presenter, signature: sig, presenter: true, signedAt: new Date().toISOString() }]);
                 setPresenterSigned(true);
                 clearSig();
-              }}>✓ Presenter Sign</button>
+              }}><Check size={16} strokeWidth={2.5} /> Presenter Sign</button>
             ) : (
-              <button style={s.btn((attName.trim() && attHasSig) ? "#7C3AED" : "#94A3B8")} disabled={!attName.trim() || !attHasSig} onClick={addAttendee}>+ Add This Attendee</button>
+              <button style={s.btn((attName.trim() && attHasSig) ? accent : disabledBg(C))} disabled={!attName.trim() || !attHasSig} onClick={addAttendee}><Plus size={16} strokeWidth={2.5} /> Add This Attendee</button>
             )}
           </div>
 
           {saveError && (
-            <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>
-              Couldn't save this talk. Check your connection and try again.
+            <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Couldn't save this talk. Check your connection and try again.</span>
             </div>
           )}
           {presenterSigned && (
-            <button style={s.btn(saving ? "#94A3B8" : "#16A34A")} disabled={saving} onClick={submit}>
-              {saving ? "Saving…" : saveError ? "Try Again" : `Finish & Save (${attendees.length} signed)`}
+            <button style={s.btn(saving ? disabledBg(C) : C.status.success.solid)} disabled={saving} onClick={submit}>
+              {saving ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : saveError ? "Try Again" : <><CheckCircle2 size={16} strokeWidth={2.25} /> Finish & Save ({attendees.length} signed)</>}
             </button>
           )}
         </>
@@ -562,62 +558,62 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {/* FIND TALK (sign-later) */}
       {step === "findtalk" && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>Recent Toolbox Talks</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>Pick the one you need to sign — from the last two weeks.</div>
-          {lateSignError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>{lateSignError}</div>}
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Recent Toolbox Talks</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>Pick the one you need to sign — from the last two weeks.</div>
+          {lateSignError && <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} /><span>{lateSignError}</span></div>}
           {loadingOpenTalks ? (
-            <div style={{ textAlign: "center", color: "#94A3B8", padding: "20px 0" }}>Loading…</div>
+            <div style={{ textAlign: "center", color: C.text.faint, padding: "20px 0" }}>Loading…</div>
           ) : openTalks.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#94A3B8", padding: "20px 0" }}>No toolbox talks found in the last two weeks. Ask your supervisor.</div>
+            <div style={{ textAlign: "center", color: C.text.faint, padding: "20px 0" }}>No toolbox talks found in the last two weeks. Ask your supervisor.</div>
           ) : (
             openTalks.map(t => (
-              <button key={t.id} onClick={() => openTalkToSign(t.id)} style={{ display: "block", width: "100%", textAlign: "left", background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8, cursor: "pointer" }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "#1E293B" }}>{t.meeting_type} · {t.site}</div>
-                <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{t.presenter_name} · {new Date(t.created_at).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} · {t.signedCount} signed</div>
+              <button key={t.id} onClick={() => openTalkToSign(t.id)} style={{ display: "block", width: "100%", textAlign: "left", background: C.panelInset, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, padding: "12px 14px", marginBottom: 8, cursor: "pointer" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{t.meeting_type} · {t.site}</div>
+                <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{t.presenter_name} · {new Date(t.created_at).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} · {t.signedCount} signed</div>
               </button>
             ))
           )}
-          <button style={s.ghost} onClick={() => setStep("choice")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("choice")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
       {/* LATE SIGN */}
       {step === "latesign" && lateSignTarget && (
         <div style={s.card}>
-          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: "#1E293B" }}>{lateSignTarget.record.meeting_type} Toolbox Talk</div>
-          <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>{lateSignTarget.record.meeting_type} Toolbox Talk</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>
             {lateSignTarget.record.site} · Presented by {lateSignTarget.record.presenter_name} · {new Date(lateSignTarget.record.created_at).toLocaleDateString("en-CA")}
           </div>
           {lateSignTarget.record.talking_points_json?.summary && (
-            <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "#334155" }}>{lateSignTarget.record.talking_points_json.summary}</div>
+            <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: C.text.body }}>{lateSignTarget.record.talking_points_json.summary}</div>
           )}
 
           <label style={s.label}>Your name</label>
           <input
-            style={{ ...s.input, ...(loginUserName ? { background: "#F3F4F6", color: "#6B7280" } : {}) }}
+            style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Your full name" value={lateName}
             onChange={e => setLateName(e.target.value)}
             readOnly={!!loginUserName}
           />
 
           <label style={s.label}>Signature</label>
-          <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+          <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
           <div style={{ position: "relative", marginBottom: 6 }}>
             <canvas ref={canvasRef} width={600} height={160}
-              style={{ width: "100%", height: 130, border: "1.5px solid #E2E8F0", borderRadius: 10, background: "#fff", touchAction: "none", display: "block" }}
+              style={{ ...signatureCanvasStyle(C, RAD), height: 130 }}
               onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
               onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
             {!attHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
           </div>
           <div style={{ textAlign: "right", marginBottom: 10 }}>
-            <button onClick={clearSig} style={{ background: "transparent", border: "none", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+            <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
 
-          {lateSignError && <div style={{ background: "#FEF2F2", border: "1.5px solid #FCA5A5", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: "#991B1B" }}>{lateSignError}</div>}
-          <button style={s.btn((lateName.trim() && attHasSig && !signingLate) ? "#16A34A" : "#94A3B8")} disabled={!lateName.trim() || !attHasSig || signingLate} onClick={signLate}>
-            {signingLate ? "Saving…" : "Sign & Submit"}
+          {lateSignError && <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} /><span>{lateSignError}</span></div>}
+          <button style={s.btn((lateName.trim() && attHasSig && !signingLate) ? C.status.success.solid : disabledBg(C))} disabled={!lateName.trim() || !attHasSig || signingLate} onClick={signLate}>
+            {signingLate ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : <><CheckCircle2 size={16} strokeWidth={2.25} /> Sign & Submit</>}
           </button>
-          <button style={s.ghost} onClick={() => setStep("findtalk")}>← Back</button>
+          <button style={s.ghost} onClick={() => setStep("findtalk")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
 
@@ -625,11 +621,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "queued" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>📶</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>Saved — No Signal</div>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 8 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
-            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 20 }}>This talk is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
-            <button style={s.btn("#7C3AED")} onClick={onBack}>Back to menu</button>
+            <WifiOff size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Saved — No Signal</div>
+            <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 8 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>This talk is saved on your device and will send automatically the next time you're back online — no need to redo it.</div>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
@@ -638,17 +634,18 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: "#1E293B", marginBottom: 6 }}>{lateSignTarget ? "Signature Recorded" : "Toolbox Talk Recorded"}</div>
+            <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>{lateSignTarget ? "Signature Recorded" : "Toolbox Talk Recorded"}</div>
             {lateSignTarget ? (
-              <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{lateSignTarget.record.meeting_type} · {lateSignTarget.record.site} · Signed by {lateName}</div>
+              <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 20 }}>{lateSignTarget.record.meeting_type} · {lateSignTarget.record.site} · Signed by {lateName}</div>
             ) : (
-              <div style={{ fontSize: 14, color: "#64748B", marginBottom: 20 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
+              <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 20 }}>{meetingType} · {site} · {attendees.length} attendee{attendees.length !== 1 ? "s" : ""}</div>
             )}
-            <button style={s.btn("#7C3AED")} onClick={onBack}>Back to menu</button>
+            <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>
       )}
+      <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
     </div>
   );
 }

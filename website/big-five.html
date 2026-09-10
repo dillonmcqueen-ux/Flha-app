@@ -51,11 +51,11 @@
       <p>These are pre-built examples so you can see the format and depth of a real FLHA without an account. Pick one below.</p>
     </div>
     <div class="demo-chips" id="demoChips" data-reveal>
-      <button class="demo-chip" data-id="trenching"><span>🚧</span>Trenching near utilities</button>
-      <button class="demo-chip" data-id="scaffolding"><span>🪜</span>Working at height on scaffolding</button>
-      <button class="demo-chip" data-id="forklift"><span>🏭</span>Forklift at a loading dock</button>
-      <button class="demo-chip" data-id="confined-space"><span>🛢️</span>Confined space tank entry</button>
-      <button class="demo-chip" data-id="hot-work"><span>🔥</span>Welding in a shop</button>
+      <button class="demo-chip" data-id="trenching"><svg class="icon-svg"><use href="icons.svg#barricade"/></svg>Trenching near utilities</button>
+      <button class="demo-chip" data-id="scaffolding"><svg class="icon-svg"><use href="icons.svg#ladder"/></svg>Working at height on scaffolding</button>
+      <button class="demo-chip" data-id="forklift"><svg class="icon-svg"><use href="icons.svg#factory"/></svg>Forklift at a loading dock</button>
+      <button class="demo-chip" data-id="confined-space"><svg class="icon-svg"><use href="icons.svg#barrel"/></svg>Confined space tank entry</button>
+      <button class="demo-chip" data-id="hot-work"><svg class="icon-svg"><use href="icons.svg#flame"/></svg>Welding in a shop</button>
     </div>
     <div class="demo-panel" id="demoPanel" hidden data-reveal></div>
   </div>
@@ -75,19 +75,19 @@
         <div class="flow-title">How it works</div>
         <div class="flow">
           <div class="flow-step">
-            <div class="flow-icon">🗣️</div>
+            <div class="flow-icon"><svg class="icon-svg"><use href="icons.svg#talk"/></svg></div>
             <div class="flow-label">Describe the task</div>
             <div class="flow-sub">By voice or text, in plain language</div>
           </div>
           <div class="flow-arrow">→</div>
           <div class="flow-step">
-            <div class="flow-icon">🔍</div>
+            <div class="flow-icon"><svg class="icon-svg"><use href="icons.svg#search"/></svg></div>
             <div class="flow-label">FORA checks your SOPs</div>
             <div class="flow-sub">Cross-referenced against your company's own procedures</div>
           </div>
           <div class="flow-arrow">→</div>
           <div class="flow-step">
-            <div class="flow-icon">📄</div>
+            <div class="flow-icon"><svg class="icon-svg"><use href="icons.svg#document"/></svg></div>
             <div class="flow-label">Get your document</div>
             <div class="flow-sub">Complete, formatted, ready to sign</div>
           </div>
@@ -106,35 +106,35 @@
     </div>
     <div class="doc-grid">
       <div class="doc-row" data-reveal>
-        <div class="icon">🦺</div>
+        <div class="icon"><svg class="icon-svg"><use href="icons.svg#hardhat"/></svg></div>
         <div>
           <h3>Field Level Hazard Assessment (FLHA)</h3>
           <p>Describe the task by voice or text: "digging a trench near the east fence line" is enough. FORA cross-references your company's own SOPs and equipment list, then hands back the hazards, controls, required PPE, and any relevant alerts specific to that task. Signed off in the field, stored with every other submission, exportable as a clean PDF.</p>
         </div>
       </div>
       <div class="doc-row" data-reveal>
-        <div class="icon">🗣️</div>
+        <div class="icon"><svg class="icon-svg"><use href="icons.svg#talk"/></svg></div>
         <div>
           <h3>Toolbox Talk</h3>
           <p>Pick a topic and FORA drafts a complete 5–10 minute talk a supervisor can walk straight into with the crew, ready to go, tailored to your company's operations and the work actually happening that day, not a stock topic pulled off a list.</p>
         </div>
       </div>
       <div class="doc-row" data-reveal>
-        <div class="icon">🚨</div>
+        <div class="icon"><svg class="icon-svg"><use href="icons.svg#alert"/></svg></div>
         <div>
           <h3>Incident Report</h3>
           <p>Give it the raw, unfiltered details of what happened, in whatever order they come out. FORA turns that into a formal, structured incident report: complete, professional, and ready to file, or to hand to a regulator or insurer if it ever comes to that.</p>
         </div>
       </div>
       <div class="doc-row" data-reveal>
-        <div class="icon">👀</div>
+        <div class="icon"><svg class="icon-svg"><use href="icons.svg#eye"/></svg></div>
         <div>
           <h3>Near Miss Report</h3>
           <p>A quick description of what almost happened becomes a clean, professional near-miss report in under a minute, so the things that felt "too small to write up" actually get written up, and the pattern behind them gets caught before it becomes an incident.</p>
         </div>
       </div>
       <div class="doc-row" data-reveal>
-        <div class="icon">🔧</div>
+        <div class="icon"><svg class="icon-svg"><use href="icons.svg#wrench"/></svg></div>
         <div>
           <h3>Equipment Inspection</h3>
           <p>Pick the piece of equipment and FORA generates the pre-use inspection checklist built for that exact type. A skid steer and a boom lift don't get the same checklist, and neither should your crew's paperwork.</p>
@@ -157,7 +157,9 @@
 </section>
 
 <footer>
-  <div class="wrap foot-row">
+  <div class="wrap">
+    <p class="foot-stmt">Built around your company.<br>Not a template.</p>
+    <div class="foot-row">
     <div class="logo"><span class="dot"></span>FORA</div>
     <div class="foot-links">
       <a href="index.html">Home</a>
@@ -171,6 +173,7 @@
       <a href="terms.html">Terms of Use</a>
     </div>
     <div class="foot-copy">© <span id="year"></span> FORA. Field Operations Record Automation.</div>
+    </div>
   </div>
 </footer>
 

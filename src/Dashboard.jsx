@@ -9,16 +9,20 @@ import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionP
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
+import Sidebar from "./Sidebar";
 import TimeClockMap from "./TimeClockMap";
 import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
+import { AreaChart, Area, ResponsiveContainer } from "recharts";
+import { reviewBacklog, fieldSiteActivity } from "./analyticsUtils";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
-  HardHat, Wrench, ShieldAlert, Flag, CalendarClock, FileText, LogOut, ClipboardList,
+  HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
-  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin,
+  Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
+  Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -44,6 +48,17 @@ const TAB_ICON = {
   workforcecustomdocs: FolderKanban,
 };
 const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
+
+// Sidebar nav labels — same strings the old two-row tab bar used, moved
+// here as a lookup table since the sidebar (src/Sidebar.jsx) renders every
+// visible tab at once instead of one category's worth on click.
+const TAB_LABEL = {
+  flhas: "FLHAs", toolbox: "Toolbox Talks", nearmiss: "Near Misses", incident: "Incidents",
+  monthly: "Monthly", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
+  inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance",
+  customdocs: "Custom Docs", analytics: "Equipment Analytics",
+  timeclock: "Time Clock", roster: "Roster", workforcecustomdocs: "Custom Docs",
+};
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -73,6 +88,164 @@ function RiskBadge({ risk }) {
       background: c.bg, border: `1px solid ${c.border}`, color: c.text,
       borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700
     }}>{risk}</span>
+  );
+}
+
+// ── Shared "document tab" chrome ────────────────────────────────────────
+// The five record-list tabs (FLHAs, Inspections, Toolbox, Near Misses,
+// Incidents) previously rendered as a bare title + search box + <select>s +
+// flat rows — the Overview panel's icon tiles, panel headers and stat
+// summaries never made it down to them. These three helpers give every
+// list tab the same visual language as Overview (icon-tile headers, real
+// stat chips fed by numbers the component already computes, icon-tile list
+// rows) without duplicating that markup five times.
+
+// Panel header: icon tile + title + subtitle, optional right-aligned
+// actions (bulk export/delete). Same icon-tile-plus-heading shape as the
+// Overview "Site Activity" / "Recent Activity" panel headers.
+function PanelHeader({ icon: Icon, title, subtitle, actions }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <div style={{ width: 34, height: 34, borderRadius: RAD.md, background: C.orangeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon size={17} color={C.orange} strokeWidth={2.25} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 15.5, color: C.text.primary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 12.5, color: C.text.faint, marginTop: 1 }}>{subtitle}</div>}
+        </div>
+      </div>
+      {actions && <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>{actions}</div>}
+    </div>
+  );
+}
+
+// A row of small stat readouts summarizing real, already-computed numbers
+// for this tab (e.g. "12 total · 3 awaiting sign-off"). Skipped entirely by
+// a tab if there's nothing genuine to summarize — see call sites.
+function StatStrip({ items }) {
+  const TONE = { accent: C.orange, danger: C.status.danger.solid, warning: C.status.warning.solid, success: C.status.success.solid, neutral: C.text.muted };
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+      {items.map(({ icon: Icon, value, label, tone = "neutral" }, i) => {
+        const color = TONE[tone] || TONE.neutral;
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: "9px 14px", flex: "1 1 150px", minWidth: 140 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Icon size={15} color={color} strokeWidth={2.25} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: FONT.heading, fontSize: 19, fontWeight: 700, color: C.text.primary, lineHeight: 1 }}>{value}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.text.faint, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Small rounded icon tile used to lead every list row — same 28px
+// icon-tile-on-C.panelInset pattern as the Overview "Recent Activity" feed,
+// carried down into every document list so a row reads as a record, not a
+// line of plain text.
+function RowIconTile({ icon: Icon, color = C.text.muted, size = 28 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: 8, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={size - 14} color={color} strokeWidth={2.25} />
+    </div>
+  );
+}
+
+// ── Overview-panel data helpers ─────────────────────────────────────────
+// All real, derived straight from the same company-scoped arrays the rest
+// of the dashboard already renders from — no invented numbers. Buckets a
+// list of records into one-count-per-calendar-day for the trailing `days`
+// days (inclusive of today), keyed off each record's own timestamp field.
+function bucketByDay(items, days, dateField = "created_at") {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const buckets = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    buckets.push({ key: d.toISOString().slice(0, 10), count: 0 });
+  }
+  const byKey = {};
+  buckets.forEach(b => { byKey[b.key] = b; });
+  items.forEach(it => {
+    const v = it?.[dateField];
+    if (!v) return;
+    const key = new Date(v).toISOString().slice(0, 10);
+    if (byKey[key]) byKey[key].count += 1;
+  });
+  return buckets;
+}
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+}
+
+// Circular progress ring — real value/max pair (never a fabricated %).
+// Number lives inside the ring, label beneath, matching a stat-tile's
+// visual weight but as a ratio rather than a bare count.
+function ProgressRing({ value, max, label, sublabel, color, size = 100, thickness = 9 }) {
+  const r = (size - thickness) / 2;
+  const circumference = 2 * Math.PI * r;
+  const ratio = max > 0 ? Math.min(1, value / max) : 0;
+  const offset = circumference * (1 - ratio);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, minWidth: 100 }}>
+      <div style={{ position: "relative", width: size, height: size }}>
+        <svg width={size} height={size}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.line} strokeWidth={thickness} />
+          <circle
+            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={thickness}
+            strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            style={{ transition: "stroke-dashoffset 500ms ease" }}
+          />
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 21, color: C.text.primary, lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: C.text.faint, marginTop: 2 }}>of {max}</div>
+        </div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text.body, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+        {sublabel && <div style={{ fontSize: 11, color: C.text.faint, marginTop: 1 }}>{sublabel}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Tiny trailing-7-day trend, drawn from real daily counts (bucketByDay
+// above) — no synthetic curve. Used beneath a stat tile's headline number.
+function Sparkline({ data, color, height = 30 }) {
+  const gid = `spark-${color.replace("#", "")}`;
+  return (
+    <div style={{ width: "100%", height, marginTop: 8 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.4} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <Area type="monotone" dataKey="count" stroke={color} strokeWidth={1.75} fill={`url(#${gid})`} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -262,7 +435,7 @@ function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSupName =
 
         {h.sopAlerts?.length > 0 && (
           <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6 }}>⚠️ SOP ALERTS TRIGGERED</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#C2410C", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><AlertTriangle size={13} strokeWidth={2.5} />SOP ALERTS TRIGGERED</div>
             {h.sopAlerts.map((a, i) => <div key={i} style={{ fontSize: 13, color: "#9A3412", marginBottom: 2 }}>• {a}</div>)}
           </div>
         )}
@@ -626,8 +799,9 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
 function ReportRow({ rec, last, onClick, kind }) {
   const r = rec.report_json || {};
   const sevColors = {
-    Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
-    High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
+    Low: C.status.success, Medium: { text: "#FDE047", bg: "rgba(234,179,8,0.14)", border: "rgba(234,179,8,0.4)" },
+    High: { text: "#FB923C", bg: "rgba(249,115,22,0.14)", border: "rgba(249,115,22,0.4)" },
+    Critical: { text: "#fff", bg: C.status.danger.solid, border: C.status.danger.solid },
   };
   const sev = r.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
@@ -635,21 +809,24 @@ function ReportRow({ rec, last, onClick, kind }) {
     ? (r.summary || rec.incident_type || "")
     : (r.whatHappened || rec.involved || "");
   const who = kind === "nearmiss" && rec.is_anonymous ? "Anonymous" : rec.reporter_name;
+  const Icon = kind === "incident" ? Siren : AlertTriangle;
+  const tileColor = kind === "incident" ? C.status.danger.text : C.status.warning.text;
   return (
-    <div onClick={onClick} style={{ padding: "12px 4px", borderBottom: last ? "none" : "1px solid #24242480", cursor: "pointer" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, paddingRight: 10 }}>
+    <div onClick={onClick} style={{ display: "flex", gap: 10, padding: "12px 4px", borderBottom: last ? "none" : `1px solid ${C.line}`, cursor: "pointer" }}>
+      <RowIconTile icon={Icon} color={tileColor} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, paddingRight: 10, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: sc.c, background: sc.bg, padding: "2px 9px", borderRadius: 20, border: sev === "Critical" ? "none" : `1px solid ${sc.c}30` }}>{sev.toUpperCase()}</span>
-            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: "#F87171", background: "rgba(239,68,68,0.14)", padding: "2px 8px", borderRadius: 20 }}>{rec.incident_type}</span>}
-            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{rec.site}</div>
+            <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "2px 9px", borderRadius: RAD.pill, border: sev === "Critical" ? "none" : `1px solid ${sc.border}` }}>{sev.toUpperCase()}</span>
+            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "2px 8px", borderRadius: RAD.pill }}>{rec.incident_type}</span>}
+            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{rec.site}</div>
           </div>
-          <div style={{ fontSize: 13, color: "#D4D4D8" }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
-          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>🧑 {who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
-          {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2 }}>✓ Reviewed by {rec.reviewed_by}</div>}
+          <div style={{ fontSize: 13, color: C.text.body }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
+          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
+          {rec.reviewed && <div style={{ fontSize: 11, color: C.status.success.text, fontWeight: 700, marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}><ShieldCheck size={11} />Reviewed by {rec.reviewed_by}</div>}
         </div>
-        <div style={{ fontSize: 11, color: rec.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
-          {rec.pdf_url ? "📄 PDF" : ""} →
+        <div style={{ fontSize: 11, color: rec.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+          {rec.pdf_url && <FileText size={11} />}{rec.pdf_url ? "PDF" : ""} →
         </div>
       </div>
     </div>
@@ -1283,15 +1460,15 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4" }}>📄 This Week's Documents</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#F5F5F4", display: "flex", alignItems: "center", gap: 8 }}><FileText size={17} color={C.orange} strokeWidth={2.25} />This Week's Documents</div>
             <div style={{ fontSize: 13, color: "#A1A1AA" }}>{docs.length} document{docs.length === 1 ? "" : "s"} across all types, newest first</div>
           </div>
-          <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}><X size={13} strokeWidth={2.5} />Close</button>
         </div>
 
         {docs.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+            <FileText size={32} strokeWidth={1.5} style={{ marginBottom: 8, opacity: 0.6 }} />
             No documents submitted yet this week.
           </div>
         ) : (
@@ -1305,7 +1482,7 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
               >
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "rgba(99,102,241,0.12)", padding: "2px 8px", borderRadius: 20 }}>{m.icon} {m.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4338CA", background: "rgba(99,102,241,0.12)", padding: "2px 8px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}><m.icon size={12} strokeWidth={2.5} />{m.label}</span>
                   </div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{m.primary(doc)}</div>
                   <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{m.secondary(doc)}</div>
@@ -1572,7 +1749,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [showWorkerForms, setShowWorkerForms] = useState(false);
   const [selectedFlha, setSelectedFlha] = useState(null);
   const [showThisWeekModal, setShowThisWeekModal] = useState(false);
-  const [activeTab, setActiveTab] = useState("flhas");
+  // "overview" is the landing page every supervisor sees on login — the
+  // stat rings/sparklines/activity feed, no document list underneath it.
+  // It isn't one of the document tabs in TAB_VISIBLE/CATEGORIES, so it
+  // needs the explicit carve-out below wherever this app decides whether
+  // the current tab is still valid.
+  const [activeTab, setActiveTab] = useState("overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState("newest");
   const [dateFilter, setDateFilter] = useState("all");
@@ -1970,13 +2153,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
     { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
-  const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
-  const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
-
   // If the currently open tab just got deactivated (or the company changed
   // to one that doesn't have it active), bounce to the first tab that is.
   useEffect(() => {
     if (docSettings.length === 0) return;
+    if (activeTab === "overview") return;
     if (TAB_VISIBLE[activeTab]) return;
     const fallback = Object.keys(TAB_VISIBLE).find(t => TAB_VISIBLE[t]);
     if (fallback) setActiveTab(fallback);
@@ -2518,7 +2699,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
-  const needsReview = companyNearMisses.filter(n => !n.reviewed).length + companyIncidents.filter(n => !n.reviewed).length;
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
   const docsThisWeekList = [
@@ -2535,14 +2715,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const docsThisWeek = docsThisWeekList.length;
 
   const DOC_TYPE_META = {
-    flha: { icon: "📋", label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
-    inspection: { icon: "🚜", label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
-    toolbox: { icon: "🧰", label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
-    nearmiss: { icon: "⚠️", label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    incident: { icon: "🚑", label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    daily: { icon: "📋", label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
-    monthly: { icon: "🗓️", label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
-    customdoc: { icon: "🗂️", label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
+    flha: { icon: ClipboardList, label: "FLHA", primary: d => d.worker_name || "Unknown Worker", secondary: d => d.job_site || "" },
+    inspection: { icon: ClipboardCheck, label: "Inspection", primary: d => d.equipment_label || "Equipment", secondary: d => d.trip_type === "posttrip" ? "Post-trip" : "Pre-trip" },
+    toolbox: { icon: Hammer, label: "Toolbox Talk", primary: d => d.site || "", secondary: d => d.presenter_name || "" },
+    nearmiss: { icon: AlertTriangle, label: "Near Miss", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    incident: { icon: Siren, label: "Incident", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    daily: { icon: ClipboardList, label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
+    monthly: { icon: CalendarClock, label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
+    customdoc: { icon: FolderKanban, label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
   };
 
   const openWeekDoc = (type, doc) => {
@@ -2557,6 +2737,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     else if (type === "customdoc") openCustomDocRecord(doc);
   };
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
+
+  // ── Overview panel — rings, sparklines, site activity, recent feed ──────
+  // Every number below is derived from the same company-scoped arrays used
+  // everywhere else on this screen (and, for reviewBacklog/fieldSiteActivity,
+  // the exact analyticsUtils functions the Analytics tab uses — so nothing
+  // here can drift from what Analytics reports for the same company).
+  const flhaReviewStats = { total: companyFlhas.length, signedOff: companyFlhas.length - awaitingSignOff };
+  const reportReviewStats = reviewBacklog(companyNearMisses, companyIncidents);
+
+  const overviewAllDocs = [
+    ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses,
+    ...companyIncidents, ...companyDaily, ...companyMonthlyRecords, ...companyCustomDocs,
+  ];
+  const docsSpark = bucketByDay(overviewAllDocs, 7);
+  const correctiveSpark = bucketByDay(companyMonthlyActions, 7);
+
+  const recentActivityList = [
+    ...companyFlhas.map(doc => ({ type: "flha", doc })),
+    ...companyInspections.map(doc => ({ type: "inspection", doc })),
+    ...companyToolbox.map(doc => ({ type: "toolbox", doc })),
+    ...companyNearMisses.map(doc => ({ type: "nearmiss", doc })),
+    ...companyIncidents.map(doc => ({ type: "incident", doc })),
+    ...companyDaily.map(doc => ({ type: "daily", doc })),
+    ...companyMonthlyRecords.map(doc => ({ type: "monthly", doc })),
+    ...companyCustomDocs.map(doc => ({ type: "customdoc", doc })),
+  ].filter(x => x.doc.created_at)
+   .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
+   .slice(0, 8);
+
+  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents)
+    .map(s => ({ ...s, total: s.flhas + s.toolbox + s.daily + s.nearMisses + s.incidents, needsAttention: s.nearMisses + s.incidents > 0 }))
+    .filter(s => s.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+  const siteActivityMax = Math.max(1, ...siteActivity.map(s => s.total));
 
   const reviewNearMiss = async (id, notes, reviewerName) => {
     const record = nearMisses.find(n => n.id === id);
@@ -3139,21 +3354,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     const { processed, grouped } = buildCustomDocsView(docs);
     return (
       <div style={styles.card}>
-        <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-          {company?.name} — Custom Document Submissions
-        </div>
-        <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-          {processed.length} of {docs.length} shown — tap any submission to view.
-        </div>
-
-        <input
-          style={styles.searchInput}
-          placeholder="🔍 Search document, site, or submitted by…"
-          value={cdSearch}
-          onChange={e => setCdSearch(e.target.value)}
+        <PanelHeader
+          icon={FolderKanban}
+          title={`${company?.name || ""} — Custom Document Submissions`}
+          subtitle={`${processed.length} of ${docs.length} shown — tap any submission to view`}
         />
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <StatStrip items={[
+          { icon: FolderKanban, value: docs.length, label: "Total submissions", tone: "neutral" },
+          { icon: FileText, value: docs.filter(d => d.pdf_url).length, label: "PDF ready", tone: "success" },
+        ]} />
+
+        <div style={{ position: "relative", marginBottom: 10 }}>
+          <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+          <input
+            style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+            placeholder="Search document, site, or submitted by…"
+            value={cdSearch}
+            onChange={e => setCdSearch(e.target.value)}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, marginTop: 10 }}>
           <select value={cdSortBy} onChange={e => setCdSortBy(e.target.value)} style={styles.select}>
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -3169,25 +3391,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         </div>
 
         {processed.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+          <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+            <div style={{ marginBottom: 8 }}><FolderKanban size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
             {docs.length === 0 ? "No custom document submissions yet." : "No submissions match your filters."}
           </div>
         ) : (
           Object.entries(grouped).map(([groupName, groupItems]) => {
             const renderRows = () => groupItems.map((r, i) => (
               <div key={r.id} style={{
-                padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
-                cursor: "pointer"
+                padding: "12px 4px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
+                display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer"
               }} onClick={() => openCustomDocRecord(r)}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div style={{ flex: 1, paddingRight: 10 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.form_icon} {r.form_title}</div>
-                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                <RowIconTile icon={FolderKanban} color={r.pdf_url ? C.status.success.text : C.text.muted} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.form_icon} {r.form_title}</div>
+                    <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{r.submitted_by}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF", flexShrink: 0 }}>
-                    {r.pdf_url ? "📄 PDF" : ""} →
+                  <div style={{ fontSize: 11, color: r.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+                    {r.pdf_url && <FileText size={11} />}{r.pdf_url ? "PDF" : ""} →
                   </div>
                 </div>
               </div>
@@ -3199,7 +3422,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             return (
               <CollapsibleGroup
                 key={groupName}
-                icon={cdGroupBy === "site" ? "📍" : "🗂️"}
+                icon={cdGroupBy === "site" ? <MapPin size={12} /> : <FolderKanban size={12} />}
                 label={groupName}
                 count={groupItems.length}
                 colorPreset="indigo"
@@ -3241,44 +3464,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       cursor: "pointer", fontWeight: 600, fontSize: 13,
       background: active ? "rgba(249,115,22,0.12)" : "transparent", color: active ? "#FB923C" : C.text.muted,
     }),
-    flhaRow: { padding: "12px 14px", borderBottom: `1px solid ${C.line}`, cursor: "pointer" },
     select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.text.body, cursor: "pointer", outline: "none" },
     searchInput: { width: "100%", padding: "9px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none", background: C.panelInset, color: C.text.primary },
   };
 
-  // Stat-tile renderer — a "quiet" state (dark panel, muted numeral) vs an
-  // "alert" state (tinted gradient fill + glow ring in the relevant status
-  // color, brand-orange for the neutral/positive tally). No chart here —
-  // just a decorative ring behind the icon for visual weight, per the
-  // "no charts in this pass" direction.
-  const TONE = {
-    danger: { bg: "linear-gradient(160deg,#3a1414 0%,#1a0d0d 100%)", ring: "0 0 0 1px rgba(239,68,68,0.55), 0 16px 32px -16px rgba(239,68,68,0.5)", accent: "#F87171", label: "rgba(255,255,255,0.72)" },
-    warning: { bg: "linear-gradient(160deg,#3a2a0a 0%,#1c1508 100%)", ring: "0 0 0 1px rgba(245,158,11,0.5), 0 16px 32px -16px rgba(245,158,11,0.4)", accent: "#FBBF24", label: "rgba(255,255,255,0.72)" },
-    accent: { bg: "linear-gradient(160deg,#2c1608 0%,#1a1008 100%)", ring: "0 0 0 1px rgba(249,115,22,0.45), 0 16px 32px -16px rgba(249,115,22,0.4)", accent: "#FB923C", label: "rgba(255,255,255,0.72)" },
-    neutral: { bg: C.panel, ring: `0 0 0 1px ${C.line}`, accent: C.text.faint, label: C.text.muted },
-  };
-  const statTile = (Icon, value, label, onClick, tone = "neutral") => {
-    const t = TONE[tone];
+  // Sparkline stat-tile renderer — a headline number with a real trailing-
+  // 7-day trend beneath it (see `bucketByDay` above). Tone only changes the
+  // icon/trend colour; the card surface stays a plain dark panel so the
+  // colour is a signal, not a background fill (per the accent-as-highlight
+  // rule, not a block).
+  const SPARK_TONE = { accent: C.orange, danger: C.status.danger.solid, warning: C.status.warning.solid, neutral: C.text.faint };
+  const sparkTile = (Icon, value, label, sparkData, onClick, tone = "neutral") => {
+    const color = SPARK_TONE[tone] || SPARK_TONE.neutral;
     return (
-      <div onClick={onClick} style={{
-        position: "relative", overflow: "hidden", background: t.bg, borderRadius: RAD.lg,
-        padding: "16px 18px", cursor: onClick ? "pointer" : "default", boxShadow: t.ring,
-      }}>
-        <div style={{ position: "absolute", width: 100, height: 100, borderRadius: "50%", border: `12px solid ${t.accent}16`, top: -34, right: -34 }} />
-        <Icon size={17} color={t.accent} strokeWidth={2.25} style={{ position: "relative", display: "block", marginBottom: 10 }} />
-        <div style={{ fontFamily: FONT.heading, fontSize: 30, fontWeight: 700, color: tone === "neutral" ? C.text.primary : "#fff", lineHeight: 1, position: "relative" }}>{value}</div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: t.label, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 6, position: "relative" }}>{label}</div>
+      <div onClick={onClick} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px", cursor: onClick ? "pointer" : "default", boxShadow: SHAD.md }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <Icon size={14} color={color} strokeWidth={2.25} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+        </div>
+        <div style={{ fontFamily: FONT.heading, fontSize: 26, fontWeight: 700, color: C.text.primary, lineHeight: 1, marginTop: 8 }}>{value}</div>
+        <Sparkline data={sparkData} color={color} />
       </div>
-    );
-  };
-
-  const renderTabBtn = (key, label, count) => {
-    const Icon = TAB_ICON[key];
-    return (
-      <button key={key} style={styles.tab(activeTab === key)} onClick={() => setActiveTab(key)}>
-        {Icon && <Icon size={14} strokeWidth={2.25} />}
-        <span>{label}{count > 0 ? ` (${count})` : ""}</span>
-      </button>
     );
   };
 
@@ -3308,6 +3514,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   return (
     <div style={styles.wrap}>
+      <style>{`
+        @media (max-width: 880px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }
+        .fora-mobile-menu-btn { display: none; }
+        .fora-sidebar-backdrop { display: none; }
+        @media (max-width: 768px) {
+          .fora-mobile-menu-btn { display: inline-flex !important; }
+          .fora-sidebar {
+            position: fixed !important; top: 57px !important; left: 0 !important;
+            z-index: 60; height: calc(100vh - 57px) !important;
+            transform: translateX(-100%); transition: transform 200ms ease;
+            box-shadow: 0 20px 60px -20px rgba(0,0,0,0.75);
+          }
+          .fora-sidebar.fora-sidebar-open { transform: translateX(0); }
+        }
+      `}</style>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} onSave={saveFlhaEdit} defaultSupName={userName} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} onSave={saveInspectionEdit} />}
       {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} onSave={saveToolboxEdit} />}
@@ -3329,6 +3550,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            className="fora-mobile-menu-btn"
+            onClick={() => setMobileNavOpen(o => !o)}
+            aria-label="Toggle navigation"
+            style={{
+              alignItems: "center", justifyContent: "center", width: 32, height: 32,
+              border: `1px solid ${C.line}`, borderRadius: RAD.md, background: "transparent",
+              color: C.text.body, cursor: "pointer", marginRight: 2,
+            }}
+          ><Menu size={16} /></button>
           <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)" }} />
           <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 18, color: C.text.primary, letterSpacing: "-0.01em" }}>FORA</span>
           <span style={{
@@ -3347,7 +3578,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         )}
       </header>
 
-      <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-start" }}>
+        <Sidebar
+          categories={CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t]))}
+          categoryIcon={CATEGORY_ICON}
+          tabIcon={TAB_ICON}
+          tabLabel={TAB_LABEL}
+          tabVisible={TAB_VISIBLE}
+          tabCounts={{
+            nearmiss: companyNearMisses.filter(n => !n.reviewed).length,
+            incident: companyIncidents.filter(n => !n.reviewed).length,
+            monthly: openCorrectiveCount,
+            maintenance: maintenanceStatus.filter(e => e.status === "overdue").length,
+          }}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          mobileOpen={mobileNavOpen}
+          onMobileClose={() => setMobileNavOpen(false)}
+        />
+
+      <div style={{ padding: 16, flex: 1, minWidth: 0 }}>
 
         {/* Hero / welcome moment — the thing the flat-white-card version didn't
             have at all. Company greeting up front, orange radial glow behind
@@ -3390,7 +3640,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {suspended && (
           <div style={{ background: "rgba(239,68,68,0.14)", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 2 }}>⚠️ Account suspended</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}><AlertTriangle size={14} strokeWidth={2.5} />Account suspended</div>
             <div style={{ fontSize: 13, color: "#FCA5A5" }}>Your company's access is currently suspended. You can still view and export existing records, but workers cannot submit new FLHAs. Please contact your administrator.</div>
           </div>
         )}
@@ -3413,90 +3663,181 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-          {statTile(ShieldAlert, awaitingSignOff, "Awaiting Sign-Off",
-            () => TAB_VISIBLE.flhas && setActiveTab("flhas"),
-            awaitingSignOff > 0 ? "danger" : "neutral")}
-          {statTile(Flag, needsReview, "Needs Review", () => {
-            const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
-            if (TAB_VISIBLE[target]) setActiveTab(target);
-            else if (TAB_VISIBLE.incident) setActiveTab("incident");
-            else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
-          }, needsReview > 0 ? "warning" : "neutral")}
-          {statTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions",
-            () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
-            openCorrectiveCount > 0 ? "accent" : "neutral")}
-          {statTile(FileText, docsThisWeek, "Docs This Week", () => setShowThisWeekModal(true), "neutral")}
-        </div>
-
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => {
-            const Icon = CATEGORY_ICON[cat.key];
-            const active = activeCategory === cat.key;
-            return (
-              <button
-                key={cat.key}
-                style={styles.tab(active)}
-                onClick={() => {
-                  const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
-                  if (firstVisible) setActiveTab(firstVisible);
-                }}
-              ><Icon size={14} strokeWidth={2.25} /> {cat.label}</button>
-            );
-          })}
-        </div>
-
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && activeCategory === "safety" && renderTabBtn("flhas", "FLHAs")}
-          {TAB_VISIBLE.toolbox && activeCategory === "safety" && renderTabBtn("toolbox", "Toolbox Talks")}
-          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && renderTabBtn("nearmiss", "Near Misses", companyNearMisses.filter(n => !n.reviewed).length)}
-          {TAB_VISIBLE.incident && activeCategory === "safety" && renderTabBtn("incident", "Incidents", companyIncidents.filter(n => !n.reviewed).length)}
-          {TAB_VISIBLE.monthly && activeCategory === "safety" && renderTabBtn("monthly", "Monthly", openCorrectiveCount)}
-          {activeCategory === "safety" && renderTabBtn("sops", "SOPs")}
-          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && renderTabBtn("safetycustomdocs", "Custom Docs")}
-          {activeCategory === "safety" && renderTabBtn("safetyanalytics", "Safety Analytics")}
-          {TAB_VISIBLE.inspections && activeCategory === "operations" && renderTabBtn("inspections", "Inspections")}
-          {TAB_VISIBLE.daily && activeCategory === "operations" && renderTabBtn("daily", "Daily")}
-          {TAB_VISIBLE.equipment && activeCategory === "operations" && renderTabBtn("equipment", "Equipment")}
-          {TAB_VISIBLE.maintenance && activeCategory === "operations" && renderTabBtn("maintenance", "Maintenance", maintenanceStatus.filter(e => e.status === "overdue").length)}
-          {TAB_VISIBLE.customdocs && activeCategory === "operations" && renderTabBtn("customdocs", "Custom Docs")}
-          {activeCategory === "operations" && renderTabBtn("analytics", "Equipment Analytics")}
-          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && renderTabBtn("timeclock", "Time Clock")}
-          {TAB_VISIBLE.roster && activeCategory === "workforce" && renderTabBtn("roster", "Roster")}
-          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && renderTabBtn("workforcecustomdocs", "Custom Docs")}
-        </div>
-
-        {activeTab === "flhas" && TAB_VISIBLE.flhas && (
-          <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
-                  {company?.name} — Field Assessments
-                </div>
-                <div style={{ fontSize: 13, color: "#A1A1AA" }}>
-                  {processedFlhas.length} of {companyFlhas.length} shown
-                </div>
+        {/* Overview — the landing page. Real ratios as rings, real trends as
+            sparklines, real per-site activity as effort bars, real recent
+            submissions as a live feed. Nothing on this panel is a
+            placeholder or an estimate; every number traces back to the
+            same company-scoped arrays the document tabs render from.
+            Shown only on "overview" itself — clicking any sidebar item
+            replaces this with that tab's own content, it doesn't stack
+            underneath. */}
+        {activeTab === "overview" && (
+        <div className="fora-overview-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(260px,1fr)", gap: 12, marginBottom: 16, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+              <div
+                onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")}
+                style={{ ...styles.card, margin: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: TAB_VISIBLE.flhas ? "pointer" : "default" }}
+              >
+                <ProgressRing
+                  value={awaitingSignOff} max={Math.max(flhaReviewStats.total, 1)}
+                  label="Awaiting Sign-Off"
+                  sublabel={flhaReviewStats.total > 0 ? `of ${flhaReviewStats.total} FLHAs` : "No FLHAs yet"}
+                  color={awaitingSignOff > 0 ? C.orange : C.status.success.solid}
+                />
               </div>
-              {selectedIds.size > 0 && (
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                  <button onClick={exportSelected} style={{
-                    background: "#F97316", color: "#0A0A0A", border: "none", borderRadius: 8,
-                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
-                  }}>⬇ {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
-                  <button onClick={deleteSelected} style={{
-                    background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8,
-                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
-                  }}>🗑 Delete</button>
+              <div
+                onClick={() => {
+                  const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
+                  if (TAB_VISIBLE[target]) setActiveTab(target);
+                  else if (TAB_VISIBLE.incident) setActiveTab("incident");
+                  else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
+                }}
+                style={{ ...styles.card, margin: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              >
+                <ProgressRing
+                  value={reportReviewStats.reviewed} max={Math.max(reportReviewStats.total, 1)}
+                  label="Reports Reviewed"
+                  sublabel={reportReviewStats.total > 0 ? `${reportReviewStats.outstanding} outstanding` : "No reports yet"}
+                  color={reportReviewStats.total > 0 && reportReviewStats.caughtUp ? C.status.success.solid : C.orange}
+                />
+              </div>
+              {sparkTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions", correctiveSpark,
+                () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
+                openCorrectiveCount > 0 ? "accent" : "neutral")}
+              {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "neutral")}
+            </div>
+
+            {/* Site activity — FORA's own take on a "live operations" centerpiece:
+                real per-site submission counts across the last activity on file,
+                not a copied network/topology visual. Warm accent = a site has an
+                open near-miss/incident sitting in it; green = clean. */}
+            <div style={{
+              position: "relative", overflow: "hidden",
+              background: "linear-gradient(180deg,#151515 0%,#111111 100%)",
+              border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "18px 20px", boxShadow: SHAD.md,
+            }}>
+              <div style={{
+                position: "absolute", width: 320, height: 320, borderRadius: "50%",
+                background: "radial-gradient(circle, rgba(249,115,22,0.10) 0%, transparent 70%)",
+                top: -150, right: -110, pointerEvents: "none",
+              }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, position: "relative" }}>
+                <MapPin size={15} color={C.orange} strokeWidth={2.25} />
+                <span style={{ fontSize: 13, fontWeight: 800, color: C.text.primary }}>Site Activity</span>
+                <span style={{ fontSize: 11, color: C.text.faint, marginLeft: "auto" }}>Field submissions by site</span>
+              </div>
+              {siteActivity.length === 0 ? (
+                <div style={{ color: C.text.faint, fontSize: 13, position: "relative" }}>No field activity logged yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 11, position: "relative" }}>
+                  {siteActivity.map(s => {
+                    const pctOfMax = Math.round((s.total / siteActivityMax) * 100);
+                    const barColor = s.needsAttention ? C.status.warning.solid : C.status.success.solid;
+                    return (
+                      <div key={s.site}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
+                          <span style={{ fontWeight: 700, color: C.text.body }}>{s.site}</span>
+                          <span style={{ color: C.text.faint }}>{s.total} submission{s.total === 1 ? "" : "s"} · {pctOfMax}%</span>
+                        </div>
+                        <div style={{ height: 7, borderRadius: 99, background: C.panelInset, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pctOfMax}%`, borderRadius: 99, background: barColor }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
+          </div>
 
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search worker or site…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+          {/* Recent activity — a live feed of real submissions, newest first,
+              with each item's real status (sign-off/review state where the
+              document type has one, "Logged" where it doesn't). */}
+          <div style={{ ...styles.card, margin: 0, display: "flex", flexDirection: "column", maxHeight: 468, boxSizing: "border-box" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10, flexShrink: 0 }}>
+              <Radio size={13} color={C.status.success.solid} strokeWidth={2.5} />
+              <span style={{ fontSize: 13, fontWeight: 800, color: C.text.primary }}>Recent Activity</span>
+            </div>
+            {recentActivityList.length === 0 ? (
+              <div style={{ color: C.text.faint, fontSize: 13 }}>Nothing submitted yet.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}>
+                {recentActivityList.map(({ type, doc }, i) => {
+                  const meta = DOC_TYPE_META[type];
+                  const Icon = meta.icon;
+                  let statusLabel = "Logged", statusColor = C.text.faint;
+                  if (type === "flha") {
+                    statusLabel = doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
+                    statusColor = doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
+                  } else if (type === "nearmiss" || type === "incident") {
+                    statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
+                    statusColor = doc.reviewed ? C.status.success.text : C.status.warning.text;
+                  }
+                  return (
+                    <div
+                      key={`${type}-${doc.id}-${i}`}
+                      onClick={() => openWeekDoc(type, doc)}
+                      style={{ display: "flex", gap: 10, padding: "9px 2px", borderBottom: i < recentActivityList.length - 1 ? `1px solid ${C.line}` : "none", cursor: "pointer" }}
+                    >
+                      <div style={{ width: 28, height: 28, borderRadius: 8, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Icon size={14} color={C.text.muted} strokeWidth={2.25} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text.body, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {meta.label} · {meta.primary(doc) || "—"}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: statusColor }}>{statusLabel}</span>
+                          <span style={{ fontSize: 10.5, color: C.text.faint }}>· {timeAgo(doc.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+        )}
+
+        {activeTab === "flhas" && TAB_VISIBLE.flhas && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={TAB_ICON.flhas}
+              title={`${company?.name || ""} — Field Assessments`}
+              subtitle={`${processedFlhas.length} of ${companyFlhas.length} shown`}
+              actions={selectedIds.size > 0 && (
+                <>
+                  <button onClick={exportSelected} style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                  }}><Download size={14} strokeWidth={2.5} />{selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
+                  <button onClick={deleteSelected} style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.status.danger.bg, color: C.status.danger.text, border: `1.5px solid ${C.status.danger.border}`, borderRadius: RAD.sm,
+                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                  }}><Trash2 size={14} strokeWidth={2.5} />Delete</button>
+                </>
+              )}
             />
+
+            <StatStrip items={[
+              { icon: ClipboardList, value: companyFlhas.length, label: "Total FLHAs", tone: "neutral" },
+              { icon: AlertTriangle, value: awaitingSignOff, label: "Awaiting sign-off", tone: awaitingSignOff > 0 ? "warning" : "neutral" },
+              { icon: CircleCheckBig, value: flhaReviewStats.signedOff, label: "Signed off", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search worker or site…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={styles.select}>
@@ -3520,8 +3861,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedFlhas.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><ClipboardList size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyFlhas.length === 0 ? "No FLHAs submitted yet for this company." : "No FLHAs match your filters."}
               </div>
             ) : (
@@ -3533,33 +3874,35 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const medRisk = hazards.filter(h => h.risk === "Medium").length;
                   return (
                     <div key={f.id} style={{
-                      ...styles.flhaRow,
-                      borderBottom: i < groupFlhas.length - 1 ? "1px solid #242424" : "none",
+                      padding: "12px 4px",
+                      borderBottom: i < groupFlhas.length - 1 ? `1px solid ${C.line}` : "none",
                       display: "flex", alignItems: "flex-start", gap: 10,
-                      background: selectedIds.has(f.id) ? "rgba(56,189,248,0.12)" : "transparent"
+                      background: selectedIds.has(f.id) ? "rgba(249,115,22,0.10)" : "transparent",
+                      borderRadius: RAD.sm,
                     }}>
                       <input type="checkbox" checked={selectedIds.has(f.id)}
                         onChange={() => toggleSelect(f.id)}
-                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
+                        style={{ marginTop: 11, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
                         onClick={e => e.stopPropagation()}
                       />
-                      <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
+                      <RowIconTile icon={ClipboardList} color={f.status === "pending_approval" ? C.status.warning.text : C.status.success.text} />
+                      <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelectedFlha(f)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{f.worker_name || "Unknown Worker"}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {f.job_site || "No location"}</div>
-                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{f.worker_name || "Unknown Worker"}</div>
+                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{f.job_site || "No location"}</div>
+                            <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                               {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                             </div>
                           </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#DC2626", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
+                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.danger.solid, padding: "3px 9px", borderRadius: RAD.pill }}>NEEDS SIGN-OFF</span>}
                             {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                             {highRisk > 0 && <RiskBadge risk="High" />}
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
                             {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
-                            <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
-                              {f.pdf_url ? "📄 PDF ready" : "No PDF"} · {hazards.length} hazards →
+                            <div style={{ fontSize: 11, color: f.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3 }}>
+                              {f.pdf_url && <FileText size={11} />}{f.pdf_url ? "PDF ready" : "No PDF"} · {hazards.length} hazards →
                             </div>
                           </div>
                         </div>
@@ -3574,7 +3917,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={groupBy === "site" ? "📍" : "👷"}
+                    icon={groupBy === "site" ? <MapPin size={12} /> : <CircleUserRound size={12} />}
                     label={groupName}
                     count={groupFlhas.length}
                     colorPreset="purple"
@@ -3591,19 +3934,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "inspections" && TAB_VISIBLE.inspections && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Equipment Inspections
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedInspections.length} of {companyInspections.length} shown — tap any row to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search worker or equipment…"
-              value={inspSearch}
-              onChange={e => setInspSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.inspections}
+              title={`${company?.name || ""} — Equipment Inspections`}
+              subtitle={`${processedInspections.length} of ${companyInspections.length} shown — tap any row to view`}
             />
+
+            <StatStrip items={[
+              { icon: ClipboardCheck, value: companyInspections.length, label: "Total inspections", tone: "neutral" },
+              { icon: AlertTriangle, value: companyInspections.reduce((n, i) => n + (i.results_json?.defectiveCount || 0), 0), label: "Defective items", tone: "danger" },
+              { icon: Settings2, value: companyInspections.reduce((n, i) => n + (i.results_json?.monitorCount || 0), 0), label: "Flagged to monitor", tone: "warning" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search worker or equipment…"
+                value={inspSearch}
+                onChange={e => setInspSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={inspSortBy} onChange={e => setInspSortBy(e.target.value)} style={styles.select}>
@@ -3621,8 +3972,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedInspections.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🚜</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><ClipboardCheck size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyInspections.length === 0 ? "No inspections submitted yet." : "No inspections match your filters."}
               </div>
             ) : (
@@ -3632,35 +3983,38 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const isPost = insp.trip_type === "posttrip";
                   const def = r.defectiveCount || 0;
                   const mon = r.monitorCount || 0;
+                  const statusTone = def > 0 ? C.status.danger : mon > 0 ? C.status.warning : C.status.success;
                   return (
                     <div key={insp.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
+                      display: "flex", gap: 10,
+                      padding: "12px 4px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedInspection(insp)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div>
+                      <RowIconTile icon={Wrench} color={statusTone.text} />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{insp.equipment_label || "Equipment"}</div>
-                            <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{insp.equipment_label || "Equipment"}</div>
+                            <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#C4B5FD" : C.status.info.text, background: isPost ? "rgba(124,58,237,0.16)" : C.status.info.bg, padding: "2px 6px", borderRadius: RAD.pill }}>{isPost ? "POST" : "PRE"}</span>
                           </div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {insp.worker_name || "Unknown"}</div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{insp.worker_name || "Unknown"}</div>
                           {(insp.start_reading || insp.end_reading) && (
-                            <div style={{ fontSize: 11, color: "#71717A", marginTop: 2 }}>
+                            <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                               {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
                             </div>
                           )}
-                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                             {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
                           {def > 0
-                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(239,68,68,0.14)", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{def} defective</span>
                             : mon > 0
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "rgba(245,158,11,0.14)", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
-                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
-                          <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                            {insp.pdf_url ? "📄 PDF ready" : "No PDF"} →
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{mon} monitor</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: C.status.success.text, background: C.status.success.bg, padding: "3px 9px", borderRadius: RAD.pill }}>All good</span>}
+                          <div style={{ fontSize: 11, color: insp.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3 }}>
+                            {insp.pdf_url && <FileText size={11} />}{insp.pdf_url ? "PDF ready" : "No PDF"} →
                           </div>
                         </div>
                       </div>
@@ -3674,7 +4028,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={inspGroupBy === "equipment" ? "🚜" : "👷"}
+                    icon={inspGroupBy === "equipment" ? <ClipboardCheck size={12} /> : <CircleUserRound size={12} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="blue"
@@ -3691,19 +4045,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "toolbox" && TAB_VISIBLE.toolbox && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Toolbox Talks
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedToolbox.length} of {companyToolbox.length} shown — tap any meeting to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search presenter or site…"
-              value={tbtSearch}
-              onChange={e => setTbtSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.toolbox}
+              title={`${company?.name || ""} — Toolbox Talks`}
+              subtitle={`${processedToolbox.length} of ${companyToolbox.length} shown — tap any meeting to view`}
             />
+
+            <StatStrip items={[
+              { icon: Hammer, value: companyToolbox.length, label: "Total talks", tone: "neutral" },
+              { icon: CalendarClock, value: companyToolbox.filter(t => t.created_at && new Date(t.created_at) >= startOfWeek).length, label: "This week", tone: "accent" },
+              { icon: Users, value: companyToolbox.reduce((n, t) => n + (t.attendees_json || []).length, 0), label: "Attendees signed", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search presenter or site…"
+                value={tbtSearch}
+                onChange={e => setTbtSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={tbtSortBy} onChange={e => setTbtSortBy(e.target.value)} style={styles.select}>
@@ -3721,8 +4083,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedToolbox.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🧰</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Hammer size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyToolbox.length === 0 ? "No toolbox talks recorded yet." : "No toolbox talks match your filters."}
               </div>
             ) : (
@@ -3731,23 +4093,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const attendees = t.attendees_json || [];
                   return (
                     <div key={t.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
+                      display: "flex", gap: 10,
+                      padding: "12px 4px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedToolbox(t)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1 }}>
+                      <RowIconTile icon={Hammer} color="#C4B5FD" />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{t.site}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#C4B5FD", background: "rgba(124,58,237,0.16)", padding: "2px 8px", borderRadius: RAD.pill }}>{t.meeting_type}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{t.site}</div>
                           </div>
-                          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
-                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          <div style={{ fontSize: 13, color: C.text.body, marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Mic size={11} />{t.presenter_name}</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Users size={11} />{attendees.length} signed</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                             {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
                         </div>
-                        <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
-                          {t.pdf_url ? "📄 PDF" : "No PDF"} →
+                        <div style={{ fontSize: 11, color: t.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+                          {t.pdf_url && <FileText size={11} />}{t.pdf_url ? "PDF" : "No PDF"} →
                         </div>
                       </div>
                     </div>
@@ -3760,7 +4127,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={tbtGroupBy === "site" ? "📍" : "🧰"}
+                    icon={tbtGroupBy === "site" ? <MapPin size={12} /> : <Hammer size={12} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="purple"
@@ -3777,19 +4144,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "nearmiss" && TAB_VISIBLE.nearmiss && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Near Miss Reports
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedNearMisses.length} of {companyNearMisses.length} shown.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search reporter or site…"
-              value={nmSearch}
-              onChange={e => setNmSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.nearmiss}
+              title={`${company?.name || ""} — Near Miss Reports`}
+              subtitle={`${processedNearMisses.length} of ${companyNearMisses.length} shown`}
             />
+
+            <StatStrip items={[
+              { icon: AlertTriangle, value: companyNearMisses.length, label: "Total reports", tone: "neutral" },
+              { icon: Flag, value: nmAwaiting.length, label: "Awaiting review", tone: nmAwaiting.length > 0 ? "warning" : "neutral" },
+              { icon: ShieldCheck, value: nmReviewed.length, label: "Reviewed", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search reporter or site…"
+                value={nmSearch}
+                onChange={e => setNmSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={nmSortBy} onChange={e => setNmSortBy(e.target.value)} style={styles.select}>
@@ -3807,22 +4182,24 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedNearMisses.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><AlertTriangle size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyNearMisses.length === 0 ? "No near miss reports yet." : "No near miss reports match your filters."}
               </div>
             ) : nmGroupBy === "none" ? (
               <>
                 {nmAwaiting.length > 0 && (
                   <>
-                    <div style={{ background: "#B45309", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 22 }}>🚩</span>
+                    <div style={{ background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.lg, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 34, height: 34, borderRadius: RAD.md, background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Flag size={17} color={C.status.warning.text} strokeWidth={2.25} />
+                      </div>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{nmAwaiting.length} Awaiting Review</div>
-                        <div style={{ fontSize: 12, opacity: 0.9 }}>Tap to review and record action taken</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: C.status.warning.text }}>{nmAwaiting.length} Awaiting Review</div>
+                        <div style={{ fontSize: 12, color: C.text.muted }}>Tap to review and record action taken</div>
                       </div>
                     </div>
-                    <div style={{ background: "rgba(245,158,11,0.14)", borderRadius: 10, border: "1.5px solid #FDE68A", padding: "4px 12px", marginBottom: 20 }}>
+                    <div style={{ background: C.panelInset, borderRadius: RAD.lg, border: `1.5px solid ${C.status.warning.border}`, padding: "4px 12px", marginBottom: 20 }}>
                       {nmAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                       ))}
@@ -3831,7 +4208,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 )}
                 {nmReviewed.length > 0 && (
                   <>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
                     {nmReviewed.map((n, i, arr) => (
                       <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                     ))}
@@ -3842,7 +4219,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               Object.entries(groupedNearMisses).map(([groupName, groupItems]) => (
                 <CollapsibleGroup
                   key={groupName}
-                  icon={nmGroupBy === "site" ? "📍" : "⚠️"}
+                  icon={nmGroupBy === "site" ? <MapPin size={12} /> : <AlertTriangle size={12} />}
                   label={groupName}
                   count={groupItems.length}
                   colorPreset="amber"
@@ -3860,19 +4237,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "incident" && TAB_VISIBLE.incident && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Incident Reports
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedIncidents.length} of {companyIncidents.length} shown.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search reporter, site, or type…"
-              value={incSearch}
-              onChange={e => setIncSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.incident}
+              title={`${company?.name || ""} — Incident Reports`}
+              subtitle={`${processedIncidents.length} of ${companyIncidents.length} shown`}
             />
+
+            <StatStrip items={[
+              { icon: Siren, value: companyIncidents.length, label: "Total reports", tone: "neutral" },
+              { icon: Flag, value: incAwaiting.length, label: "Awaiting review", tone: incAwaiting.length > 0 ? "danger" : "neutral" },
+              { icon: ShieldCheck, value: incReviewed.length, label: "Reviewed", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search reporter, site, or type…"
+                value={incSearch}
+                onChange={e => setIncSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={incSortBy} onChange={e => setIncSortBy(e.target.value)} style={styles.select}>
@@ -3890,22 +4275,24 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedIncidents.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🚑</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Siren size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyIncidents.length === 0 ? "No incident reports yet." : "No incident reports match your filters."}
               </div>
             ) : incGroupBy === "none" ? (
               <>
                 {incAwaiting.length > 0 && (
                   <>
-                    <div style={{ background: "#F87171", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 22 }}>🚩</span>
+                    <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.lg, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 34, height: 34, borderRadius: RAD.md, background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Flag size={17} color={C.status.danger.text} strokeWidth={2.25} />
+                      </div>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{incAwaiting.length} Awaiting Review</div>
-                        <div style={{ fontSize: 12, opacity: 0.9 }}>Incident reports require your review — tap to record action taken</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: C.status.danger.text }}>{incAwaiting.length} Awaiting Review</div>
+                        <div style={{ fontSize: 12, color: C.text.muted }}>Incident reports require your review — tap to record action taken</div>
                       </div>
                     </div>
-                    <div style={{ background: "rgba(239,68,68,0.14)", borderRadius: 10, border: "1.5px solid rgba(239,68,68,0.4)", padding: "4px 12px", marginBottom: 20 }}>
+                    <div style={{ background: C.panelInset, borderRadius: RAD.lg, border: `1.5px solid ${C.status.danger.border}`, padding: "4px 12px", marginBottom: 20 }}>
                       {incAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                       ))}
@@ -3914,7 +4301,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 )}
                 {incReviewed.length > 0 && (
                   <>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
                     {incReviewed.map((n, i, arr) => (
                       <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                     ))}
@@ -3925,7 +4312,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               Object.entries(groupedIncidents).map(([groupName, groupItems]) => (
                 <CollapsibleGroup
                   key={groupName}
-                  icon={incGroupBy === "site" ? "📍" : "🚑"}
+                  icon={incGroupBy === "site" ? <MapPin size={12} /> : <Siren size={12} />}
                   label={groupName}
                   count={groupItems.length}
                   colorPreset="red"
@@ -3943,21 +4330,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "daily" && TAB_VISIBLE.daily && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Daily Reports
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedDaily.length} of {companyDaily.length} shown — tap any report to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search site or reporter…"
-              value={dailySearch}
-              onChange={e => setDailySearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.daily}
+              title={`${company?.name || ""} — Daily Reports`}
+              subtitle={`${processedDaily.length} of ${companyDaily.length} shown — tap any report to view`}
             />
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            <StatStrip items={[
+              { icon: ClipboardList, value: companyDaily.length, label: "Total reports", tone: "neutral" },
+              { icon: FileText, value: companyDaily.filter(d => d.pdf_url).length, label: "PDF ready", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search site or reporter…"
+                value={dailySearch}
+                onChange={e => setDailySearch(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, marginTop: 10 }}>
               <select value={dailySortBy} onChange={e => setDailySortBy(e.target.value)} style={styles.select}>
                 <option value="newest">Newest first</option>
                 <option value="oldest">Oldest first</option>
@@ -3973,7 +4367,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {processedDaily.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                <div style={{ marginBottom: 8 }}><ClipboardList size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyDaily.length === 0 ? "No daily reports yet." : "No daily reports match your filters."}
               </div>
             ) : (
@@ -3982,20 +4376,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const r = d.report_json || {};
                   return (
                     <div key={d.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
-                      cursor: "pointer"
+                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
+                      cursor: "pointer", display: "flex", gap: 10, alignItems: "flex-start",
                     }} onClick={() => setSelectedDaily(d)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1, paddingRight: 10 }}>
+                      <RowIconTile icon={ClipboardList} color={C.text.muted} />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                        <div style={{ flex: 1, paddingRight: 10, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{d.report_date}</div>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "rgba(34,197,94,0.14)", padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{d.report_date}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: C.status.success.text, background: C.status.success.bg, padding: "2px 8px", borderRadius: 20 }}>{d.weather}{d.temperature ? `, ${d.temperature}` : ""}</span>
                           </div>
-                          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {d.site} · {d.reporter_name}</div>
+                          <div style={{ fontSize: 13, color: C.text.body, marginTop: 3 }}>{r.workSummary ? (r.workSummary.length > 90 ? r.workSummary.slice(0, 90) + "…" : r.workSummary) : d.site}</div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{d.site} · {d.reporter_name}</div>
                         </div>
-                        <div style={{ fontSize: 11, color: d.pdf_url ? "#16A34A" : "#9CA3AF", flexShrink: 0 }}>
-                          {d.pdf_url ? "📄 PDF" : ""} →
+                        <div style={{ fontSize: 11, color: d.pdf_url ? C.status.success.text : C.text.faint, flexShrink: 0 }}>
+                          {d.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : ""} →
                         </div>
                       </div>
                     </div>
@@ -4008,7 +4403,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 return (
                   <CollapsibleGroup
                     key={groupName}
-                    icon={dailyGroupBy === "site" ? "📍" : "👷"}
+                    icon={dailyGroupBy === "site" ? <MapPin size={12} /> : <CircleUserRound size={12} />}
                     label={groupName}
                     count={groupItems.length}
                     colorPreset="green"
@@ -4034,21 +4429,29 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {monthlySubTab === "records" && (
               <div style={styles.card}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-                  {company?.name} — Monthly Inspections
-                </div>
-                <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-                  {processedMonthly.length} of {companyMonthlyRecords.length} shown — tap any submission to view.
-                </div>
-
-                <input
-                  style={styles.searchInput}
-                  placeholder="🔍 Search site, submitted by, or form…"
-                  value={moSearch}
-                  onChange={e => setMoSearch(e.target.value)}
+                <PanelHeader
+                  icon={TAB_ICON.monthly}
+                  title={`${company?.name || ""} — Monthly Inspections`}
+                  subtitle={`${processedMonthly.length} of ${companyMonthlyRecords.length} shown — tap any submission to view`}
                 />
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                <StatStrip items={[
+                  { icon: CalendarClock, value: companyMonthlyRecords.length, label: "Total submissions", tone: "neutral" },
+                  { icon: AlertTriangle, value: companyMonthlyRecords.reduce((n, r) => n + (r.open_actions || 0), 0), label: "Open actions", tone: companyMonthlyRecords.reduce((n, r) => n + (r.open_actions || 0), 0) > 0 ? "danger" : "neutral" },
+                  { icon: CircleCheckBig, value: companyMonthlyRecords.filter(r => !r.open_actions).length, label: "All clear", tone: "success" },
+                ]} />
+
+                <div style={{ position: "relative", marginBottom: 10 }}>
+                  <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+                  <input
+                    style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                    placeholder="Search site, submitted by, or form…"
+                    value={moSearch}
+                    onChange={e => setMoSearch(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, marginTop: 10 }}>
                   <select value={moSortBy} onChange={e => setMoSortBy(e.target.value)} style={styles.select}>
                     <option value="newest">Newest first</option>
                     <option value="oldest">Oldest first</option>
@@ -4064,29 +4467,30 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 </div>
 
                 {processedMonthly.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>🗓️</div>
+                  <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                    <div style={{ marginBottom: 8 }}><CalendarClock size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                     {companyMonthlyRecords.length === 0 ? "No monthly inspections submitted yet." : "No submissions match your filters."}
                   </div>
                 ) : (
                   Object.entries(groupedMonthly).map(([groupName, groupItems]) => {
                     const renderRows = () => groupItems.map((r, i) => (
                       <div key={r.id} style={{
-                        padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
-                        cursor: "pointer"
+                        padding: "12px 4px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
+                        display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer"
                       }} onClick={() => openMonthlyRecord(r)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div style={{ flex: 1, paddingRight: 10 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.form_title}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>📍 {r.site_name} · {r.period_month}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>👷 {r.submitted_by}</div>
+                        <RowIconTile icon={CalendarClock} color={r.open_actions > 0 ? C.status.danger.text : C.status.success.text} />
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.form_title}</div>
+                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {r.period_month}</div>
+                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{r.submitted_by}</div>
                           </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
                             {r.open_actions > 0
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(239,68,68,0.14)", padding: "3px 9px", borderRadius: 20 }}>{r.open_actions} open</span>
-                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All clear</span>}
-                            <div style={{ fontSize: 11, color: r.pdf_url ? "#4338CA" : "#9CA3AF" }}>
-                              {r.pdf_url ? "📄 PDF" : "No PDF"} →
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{r.open_actions} open</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: C.status.success.text, background: C.status.success.bg, padding: "3px 9px", borderRadius: RAD.pill }}>All clear</span>}
+                            <div style={{ fontSize: 11, color: r.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3 }}>
+                              {r.pdf_url && <FileText size={11} />}{r.pdf_url ? "PDF ready" : "No PDF"} →
                             </div>
                           </div>
                         </div>
@@ -4099,7 +4503,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     return (
                       <CollapsibleGroup
                         key={groupName}
-                        icon={moGroupBy === "site" ? "📍" : "🗓️"}
+                        icon={moGroupBy === "site" ? <MapPin size={12} /> : <CalendarClock size={12} />}
                         label={groupName}
                         count={groupItems.length}
                         colorPreset="indigo"
@@ -4116,28 +4520,37 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {monthlySubTab === "actions" && (
               <div style={styles.card}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-                  {company?.name} — Corrective Actions
-                </div>
-                <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>Assign a responsible person and target date, then mark resolved once complete.</div>
-
-                <input
-                  style={styles.searchInput}
-                  placeholder="🔍 Search question, site, or submitted by…"
-                  value={moaSearch}
-                  onChange={e => setMoaSearch(e.target.value)}
+                <PanelHeader
+                  icon={AlertTriangle}
+                  title={`${company?.name || ""} — Corrective Actions`}
+                  subtitle="Assign a responsible person and target date, then mark resolved once complete"
                 />
 
+                <StatStrip items={[
+                  { icon: AlertTriangle, value: companyMonthlyActions.filter(a => a.status !== "resolved").length, label: "Open", tone: companyMonthlyActions.filter(a => a.status !== "resolved").length > 0 ? "danger" : "neutral" },
+                  { icon: CircleCheckBig, value: companyMonthlyActions.filter(a => a.status === "resolved").length, label: "Resolved", tone: "success" },
+                ]} />
+
+                <div style={{ position: "relative", marginBottom: 14 }}>
+                  <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+                  <input
+                    style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                    placeholder="Search question, site, or submitted by…"
+                    value={moaSearch}
+                    onChange={e => setMoaSearch(e.target.value)}
+                  />
+                </div>
+
                 {processedMonthlyActions.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                  <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                    <div style={{ marginBottom: 8 }}><CircleCheckBig size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                     {companyMonthlyActions.length === 0 ? "No corrective actions logged yet." : "No corrective actions match your search."}
                   </div>
                 ) : (
                   <>
                     {processedMonthlyActions.filter(a => a.status !== "resolved").length > 0 && (
                       <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: "#F87171", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: C.status.danger.text, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
                           Open ({processedMonthlyActions.filter(a => a.status !== "resolved").length})
                         </div>
                         {processedMonthlyActions.filter(a => a.status !== "resolved").map(ca => (
@@ -4147,7 +4560,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     )}
                     {processedMonthlyActions.filter(a => a.status === "resolved").length > 0 && (
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
                           Resolved ({processedMonthlyActions.filter(a => a.status === "resolved").length})
                         </div>
                         {processedMonthlyActions.filter(a => a.status === "resolved").map(ca => (
@@ -4168,15 +4581,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "safetyanalytics" && (
           <>
-            <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginRight: "auto" }}>Export a snapshot:</div>
-              <button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
-                background: generatingSafetyAnalyticsPdf ? "#71717A" : "#F97316", color: generatingSafetyAnalyticsPdf ? "#fff" : "#0A0A0A", border: "none", borderRadius: 8,
-                padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-              }}>
-                {generatingSafetyAnalyticsPdf ? "Generating…" : "🦺 Safety Analytics PDF"}
-              </button>
-              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+            <div style={styles.card}>
+              <PanelHeader
+                icon={TAB_ICON.safetyanalytics}
+                title={`${company?.name || ""} — Safety Analytics`}
+                subtitle="Trends across FLHAs, toolbox talks, near misses, and incidents"
+                actions={<button onClick={downloadSafetyAnalyticsPdf} disabled={generatingSafetyAnalyticsPdf} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: generatingSafetyAnalyticsPdf ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                  padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer"
+                }}>
+                  <Download size={14} strokeWidth={2.5} />{generatingSafetyAnalyticsPdf ? "Generating…" : "Export PDF"}
+                </button>}
+              />
+              {analyticsPdfError && <div style={{ fontSize: 12, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{analyticsPdfError}</div>}
             </div>
 
             <SafetyAnalyticsPanel
@@ -4196,15 +4614,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "analytics" && (
           <>
-            <div style={{ ...styles.card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginRight: "auto" }}>Export a snapshot:</div>
-              <button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
-                background: generatingEquipmentAnalyticsPdf ? "#71717A" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
-                padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-              }}>
-                {generatingEquipmentAnalyticsPdf ? "Generating…" : "🔧 Equipment Analytics PDF"}
-              </button>
-              {analyticsPdfError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {analyticsPdfError}</div>}
+            <div style={styles.card}>
+              <PanelHeader
+                icon={TAB_ICON.analytics}
+                title={`${company?.name || ""} — Equipment Analytics`}
+                subtitle="Trends across inspections, daily reports, and preventative maintenance"
+                actions={<button onClick={downloadEquipmentAnalyticsPdf} disabled={generatingEquipmentAnalyticsPdf} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: generatingEquipmentAnalyticsPdf ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                  padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer"
+                }}>
+                  <Download size={14} strokeWidth={2.5} />{generatingEquipmentAnalyticsPdf ? "Generating…" : "Export PDF"}
+                </button>}
+              />
+              {analyticsPdfError && <div style={{ fontSize: 12, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{analyticsPdfError}</div>}
             </div>
 
             <EquipmentAnalyticsPanel
@@ -4220,46 +4643,49 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "equipment" && equipmentReportsEnabled && (
           <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
-                {company?.name} — Weekly Equipment Usage
-              </div>
-              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <PanelHeader
+              icon={TAB_ICON.equipment}
+              title={`${company?.name || ""} — Weekly Equipment Usage`}
+              subtitle="A new report is generated automatically every Sunday at 11:59pm for the week just finished — tap any report to view or download"
+              actions={<>
                 <button onClick={() => { setShowManualPull(s => !s); setManualPullError(""); }} style={{
-                  background: "#1D1D1D", color: "#38BDF8", border: "1.5px solid #38BDF8", borderRadius: 8,
-                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-                }}>
-                  🕐 Request Manual Pull
-                </button>
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: "transparent", color: C.status.info.text, border: `1.5px solid ${C.status.info.border}`, borderRadius: RAD.sm,
+                  padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                }}><Clock size={14} strokeWidth={2.5} />Manual Pull</button>
                 <button onClick={generateThisWeeksReport} disabled={generatingNewReport} style={{
-                  background: generatingNewReport ? "#71717A" : "#0369A1", color: "#fff", border: "none", borderRadius: 8,
-                  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-                }}>
-                  {generatingNewReport ? "Generating…" : "+ Generate This Week"}
-                </button>
-              </div>
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: generatingNewReport ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                  padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                }}>{generatingNewReport ? "Generating…" : "Generate This Week"}</button>
+              </>}
+            />
+
+            <StatStrip items={[
+              { icon: Wrench, value: equipmentReports.length, label: "Total reports", tone: "neutral" },
+              { icon: FileText, value: equipmentReports.filter(r => r.pdf_url).length, label: "PDF ready", tone: "success" },
+              { icon: Clock, value: equipmentReports.filter(r => r.generated_by !== "auto").length, label: "Manual pulls", tone: "neutral" },
+            ]} />
 
             {showManualPull && (
-              <div style={{ background: "#1A1A1A", border: "1.5px solid #242424", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: "#D4D4D8", fontWeight: 600 }}>Pull this week's data up to:</div>
+              <div style={{ background: C.panelInset, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: C.text.body, fontWeight: 600 }}>Pull this week's data up to:</div>
                 <input
                   type="datetime-local"
                   value={manualPullUntil}
                   onChange={e => setManualPullUntil(e.target.value)}
-                  style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #242424", fontSize: 13 }}
+                  style={{ padding: "6px 8px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panel, color: C.text.primary }}
                 />
                 <button onClick={requestManualPull} disabled={requestingManualPull} style={{
-                  background: requestingManualPull ? "#71717A" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                  background: requestingManualPull ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
                   padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                 }}>
                   {requestingManualPull ? "Pulling…" : "Pull Now"}
                 </button>
-                <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
+                <div style={{ fontSize: 11, color: C.text.faint, width: "100%" }}>
                   Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
                 </div>
-                {manualPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {manualPullError}</div>}
+                {manualPullError && <div style={{ fontSize: 12, color: C.status.danger.text, width: "100%", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{manualPullError}</div>}
               </div>
             )}
 
@@ -4273,24 +4699,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             )}
 
             {loadingEquipmentReports ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
             ) : sortedEquipmentReports.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🔧</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Wrench size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 No equipment reports yet.
               </div>
             ) : (
               sortedEquipmentReports.map((r, i) => (
                 <div key={r.id} style={{
-                  padding: "12px 14px", borderBottom: i < sortedEquipmentReports.length - 1 ? "1px solid #242424" : "none",
-                  cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+                  padding: "12px 4px", borderBottom: i < sortedEquipmentReports.length - 1 ? `1px solid ${C.line}` : "none",
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: 10
                 }} onClick={() => openEquipmentReport(r)}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.week_start} to {r.week_end}</div>
-                    <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                  </div>
-                  <div style={{ fontSize: 11, color: r.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                    {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                  <RowIconTile icon={Wrench} color={r.pdf_url ? C.status.success.text : C.text.faint} />
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.week_start} to {r.week_end}</div>
+                      <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                    </div>
+                    <div style={{ fontSize: 11, color: r.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                      {r.pdf_url && <FileText size={11} />}{r.pdf_url ? "PDF ready" : "No PDF yet"} →
+                    </div>
                   </div>
                 </div>
               ))
@@ -4300,95 +4729,106 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "maintenance" && TAB_VISIBLE.maintenance && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Preventative Maintenance
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 14 }}>
-              Every registered machine, flagged by usage since last service. Set up tracking on a machine to start flagging it.
-            </div>
+            <PanelHeader
+              icon={TAB_ICON.maintenance}
+              title={`${company?.name || ""} — Preventative Maintenance`}
+              subtitle="Every registered machine, flagged by usage since last service — set up tracking on a machine to start flagging it"
+            />
+
+            {maintenanceStatus.length > 0 && (
+              <StatStrip items={[
+                { icon: AlertTriangle, value: maintenanceStatus.filter(e => e.status === "overdue").length, label: "Overdue", tone: maintenanceStatus.filter(e => e.status === "overdue").length > 0 ? "danger" : "neutral" },
+                { icon: Settings2, value: maintenanceStatus.filter(e => e.status === "due_soon").length, label: "Due soon", tone: maintenanceStatus.filter(e => e.status === "due_soon").length > 0 ? "warning" : "neutral" },
+                { icon: CircleCheckBig, value: maintenanceStatus.filter(e => e.status === "ok").length, label: "OK", tone: "success" },
+              ]} />
+            )}
 
             {maintenanceStatus.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🛠️</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Settings2 size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 No equipment registered yet. Add machines from Admin Panel → Equipment.
               </div>
             ) : (
               maintenanceStatus.map((eq, i) => {
                 const STATUS = {
-                  overdue: { label: "Overdue", color: "#F87171", bg: "rgba(239,68,68,0.14)", border: "rgba(239,68,68,0.4)" },
-                  due_soon: { label: "Due Soon", color: "#FBBF24", bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.4)" },
-                  ok: { label: "OK", color: "#4ADE80", bg: "rgba(34,197,94,0.14)", border: "rgba(34,197,94,0.4)" },
-                  unit_mismatch: { label: "Unit mismatch — check readings", color: "#A1A1AA", bg: "#242424", border: "#333333" },
-                  not_started: { label: "No baseline reading", color: "#A1A1AA", bg: "#242424", border: "#333333" },
-                  not_tracked: { label: "Not tracked", color: "#71717A", bg: "#1A1A1A", border: "#242424" },
+                  overdue: { label: "Overdue", ...C.status.danger },
+                  due_soon: { label: "Due Soon", ...C.status.warning },
+                  ok: { label: "OK", ...C.status.success },
+                  unit_mismatch: { label: "Unit mismatch — check readings", text: C.text.faint, bg: C.panelInset, border: C.line },
+                  not_started: { label: "No baseline reading", text: C.text.faint, bg: C.panelInset, border: C.line },
+                  not_tracked: { label: "Not tracked", text: C.text.faint, bg: C.panelInset, border: C.line },
                 };
                 const sc = STATUS[eq.status] || STATUS.not_tracked;
+                const swatch = sc.solid || sc.text;
                 const pct = eq.usageSinceService != null && eq.pmInterval ? Math.min(100, Math.round((eq.usageSinceService / eq.pmInterval) * 100)) : null;
                 return (
-                  <div key={eq.id} style={{ padding: "12px 0", borderBottom: i < maintenanceStatus.length - 1 ? "1px solid #242424" : "none" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{eq.label}</div>
-                        {eq.status !== "not_tracked" && (
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>
-                            {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}` : "No readings recorded yet"}
-                            {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
-                          </div>
-                        )}
-                        {pct != null && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-                            <div style={{ flex: 1, background: "#242424", borderRadius: 6, height: 6 }}>
-                              <div style={{ width: `${pct}%`, background: sc.color, height: 6, borderRadius: 6 }} />
+                  <div key={eq.id} style={{ padding: "12px 4px", borderBottom: i < maintenanceStatus.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <RowIconTile icon={Settings2} color={swatch} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{eq.label}</div>
+                          {eq.status !== "not_tracked" && (
+                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
+                              {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}` : "No readings recorded yet"}
+                              {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
                             </div>
-                            <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0 }}>{eq.usageSinceService} / {eq.pmInterval} {eq.lastService?.reading_unit}</div>
-                          </div>
-                        )}
+                          )}
+                          {pct != null && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                              <div style={{ flex: 1, background: C.panelInset, borderRadius: 6, height: 6 }}>
+                                <div style={{ width: `${pct}%`, background: swatch, height: 6, borderRadius: 6 }} />
+                              </div>
+                              <div style={{ fontSize: 11, color: C.text.faint, flexShrink: 0 }}>{eq.usageSinceService} / {eq.pmInterval} {eq.lastService?.reading_unit}</div>
+                            </div>
+                          )}
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: sc.text, background: sc.bg, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>{sc.label}</span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: 20, flexShrink: 0 }}>{sc.label}</span>
-                    </div>
 
-                    {eq.status === "not_tracked" ? (
-                      pmSetupFor === eq.id ? (
-                        <div style={{ marginTop: 10, background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
+                      {eq.status === "not_tracked" ? (
+                        pmSetupFor === eq.id ? (
+                          <div style={{ marginTop: 10, background: C.panelInset, borderRadius: RAD.md, padding: 10 }}>
+                            <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                              <input type="number" placeholder="Interval (e.g. 250)" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }} value={pmSetupForm.interval} onChange={e => setPmSetupForm(p => ({ ...p, interval: e.target.value }))} />
+                              <select style={{ padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", width: 90, background: C.panel, color: C.text.body, cursor: "pointer" }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
+                                <option value="Hours">Hours</option>
+                                <option value="KM">KM</option>
+                              </select>
+                            </div>
+                            <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box", background: C.panel, color: C.text.primary }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button onClick={() => savePmSetup(eq)} disabled={savingPmSetup} style={{ flex: 1, background: C.status.success.solid, color: "#fff", border: "none", borderRadius: RAD.sm, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingPmSetup ? "Saving…" : "Start Tracking"}</button>
+                              <button onClick={() => { setPmSetupFor(null); setPmSetupForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: C.panel, color: C.text.body, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setPmSetupFor(eq.id); setPmSetupForm({ interval: "", unit: eq.current?.readingUnit || "Hours", startingReading: "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", marginTop: 8, padding: 0 }}>+ Set Up Tracking</button>
+                        )
+                      ) : logServiceFor === eq.id ? (
+                        <div style={{ marginTop: 10, background: C.panelInset, borderRadius: RAD.md, padding: 10 }}>
                           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                            <input type="number" placeholder="Interval (e.g. 250)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={pmSetupForm.interval} onChange={e => setPmSetupForm(p => ({ ...p, interval: e.target.value }))} />
-                            <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 90, background: C.panelInset, color: C.text.body, cursor: "pointer" }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
+                            <input type="date" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }} value={logServiceForm.serviceDate} onChange={e => setLogServiceForm(p => ({ ...p, serviceDate: e.target.value }))} />
+                            <input type="number" placeholder="Reading (optional if today)" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }} value={logServiceForm.serviceReading} onChange={e => setLogServiceForm(p => ({ ...p, serviceReading: e.target.value }))} />
+                            <select style={{ padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", width: 80, background: C.panel, color: C.text.body, cursor: "pointer" }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
                               <option value="Hours">Hours</option>
                               <option value="KM">KM</option>
                             </select>
                           </div>
-                          <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
+                          <input placeholder="Performed by" style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box", background: C.panel, color: C.text.primary }} value={logServiceForm.performedBy} onChange={e => setLogServiceForm(p => ({ ...p, performedBy: e.target.value }))} />
+                          <input placeholder="Notes (optional)" style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box", background: C.panel, color: C.text.primary }} value={logServiceForm.notes} onChange={e => setLogServiceForm(p => ({ ...p, notes: e.target.value }))} />
                           <div style={{ display: "flex", gap: 8 }}>
-                            <button onClick={() => savePmSetup(eq)} disabled={savingPmSetup} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingPmSetup ? "Saving…" : "✓ Start Tracking"}</button>
-                            <button onClick={() => { setPmSetupFor(null); setPmSetupForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                            <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? C.text.faint : C.status.success.solid, color: "#fff", border: "none", borderRadius: RAD.sm, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : "Log Service"}</button>
+                            <button onClick={() => { setLogServiceFor(null); setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" }); }} style={{ background: C.panel, color: C.text.body, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                           </div>
                         </div>
                       ) : (
-                        <button onClick={() => { setPmSetupFor(eq.id); setPmSetupForm({ interval: "", unit: eq.current?.readingUnit || "Hours", startingReading: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", marginTop: 8, padding: 0 }}>+ Set Up Tracking</button>
-                      )
-                    ) : logServiceFor === eq.id ? (
-                      <div style={{ marginTop: 10, background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                          <input type="date" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={logServiceForm.serviceDate} onChange={e => setLogServiceForm(p => ({ ...p, serviceDate: e.target.value }))} />
-                          <input type="number" placeholder="Reading (optional if today)" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }} value={logServiceForm.serviceReading} onChange={e => setLogServiceForm(p => ({ ...p, serviceReading: e.target.value }))} />
-                          <select style={{ padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", width: 80, background: C.panelInset, color: C.text.body, cursor: "pointer" }} value={logServiceForm.readingUnit} onChange={e => setLogServiceForm(p => ({ ...p, readingUnit: e.target.value }))}>
-                            <option value="Hours">Hours</option>
-                            <option value="KM">KM</option>
-                          </select>
+                        <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
+                          <button onClick={() => { setLogServiceFor(eq.id); setLogServiceForm({ serviceDate: new Date().toISOString().slice(0, 10), serviceReading: "", readingUnit: eq.current?.readingUnit || "Hours", performedBy: "", notes: "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Log Service</button>
+                          <button onClick={() => disablePmTracking(eq)} style={{ background: "transparent", border: "none", color: C.text.faint, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Turn off tracking</button>
                         </div>
-                        <input placeholder="Performed by" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }} value={logServiceForm.performedBy} onChange={e => setLogServiceForm(p => ({ ...p, performedBy: e.target.value }))} />
-                        <input placeholder="Notes (optional)" style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} value={logServiceForm.notes} onChange={e => setLogServiceForm(p => ({ ...p, notes: e.target.value }))} />
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => submitLogService(eq)} disabled={savingService || !logServiceForm.performedBy.trim()} style={{ flex: 1, background: !logServiceForm.performedBy.trim() ? "#71717A" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingService ? "Saving…" : "✓ Log Service"}</button>
-                          <button onClick={() => { setLogServiceFor(null); setLogServiceForm({ serviceDate: "", serviceReading: "", readingUnit: "Hours", performedBy: "", notes: "" }); }} style={{ background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
-                        <button onClick={() => { setLogServiceFor(eq.id); setLogServiceForm({ serviceDate: new Date().toISOString().slice(0, 10), serviceReading: "", readingUnit: eq.current?.readingUnit || "Hours", performedBy: "", notes: "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Log Service</button>
-                        <button onClick={() => disablePmTracking(eq)} style={{ background: "transparent", border: "none", color: "#71717A", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Turn off tracking</button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -4400,15 +4840,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           <>
             {userId && (
               <div style={{ ...styles.card, textAlign: "center" }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 10 }}>My Time</div>
+                <PanelHeader icon={Clock} title="My Time" />
                 {myTimeLoading ? (
-                  <div style={{ color: "#9CA3AF", padding: "12px 0" }}>Loading…</div>
+                  <div style={{ color: C.text.faint, padding: "12px 0" }}>Loading…</div>
                 ) : (
                   <>
                     {myTimeStatus?.open ? (
                       <>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#A1A1AA", textTransform: "uppercase", letterSpacing: 0.5 }}>Clocked in since {new Date(myTimeStatus.open.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
-                        <div style={{ fontSize: 32, fontWeight: 800, color: "#0E7490", margin: "8px 0", fontVariantNumeric: "tabular-nums" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Clocked in since {new Date(myTimeStatus.open.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}</div>
+                        <div style={{ fontFamily: FONT.heading, fontSize: 32, fontWeight: 800, color: C.status.info.text, margin: "8px 0", fontVariantNumeric: "tabular-nums" }}>
                           {(() => {
                             const totalSec = Math.max(0, Math.floor((myTimeNow - new Date(myTimeStatus.open.clock_in).getTime()) / 1000));
                             const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
@@ -4419,33 +4859,32 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         </div>
                       </>
                     ) : (
-                      <div style={{ fontSize: 13, color: "#A1A1AA", margin: "8px 0 14px" }}>You're not clocked in.</div>
+                      <div style={{ fontSize: 13, color: C.text.muted, margin: "8px 0 14px" }}>You're not clocked in.</div>
                     )}
                     <button onClick={toggleMyClock} disabled={myTimeWorking} style={{
-                      padding: "12px 28px", borderRadius: 10, border: "none", cursor: "pointer",
+                      padding: "12px 28px", borderRadius: RAD.md, border: "none", cursor: "pointer",
                       fontWeight: 800, fontSize: 15, color: "#fff",
-                      background: myTimeWorking ? "#71717A" : myTimeStatus?.open ? "#DC2626" : "#16A34A",
+                      background: myTimeWorking ? C.text.faint : myTimeStatus?.open ? C.status.danger.solid : C.status.success.solid,
                     }}>
                       {myTimeGettingLocation ? "Getting location…" : myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
                     </button>
-                    {myTimeError && <div style={{ marginTop: 10, color: "#DC2626", fontSize: 13, fontWeight: 600 }}>{myTimeError}</div>}
+                    {myTimeError && <div style={{ marginTop: 10, color: C.status.danger.text, fontSize: 13, fontWeight: 600 }}>{myTimeError}</div>}
                   </>
                 )}
               </div>
             )}
 
             <div style={styles.card}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-                Punch Locations{timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}
-              </div>
-              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-                Captured at the moment of clock in/out. Green = clock in, red = clock out. Manual entries have no location.
-              </div>
+              <PanelHeader
+                icon={MapPin}
+                title={`Punch Locations${timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}`}
+                subtitle="Captured at the moment of clock in/out — green = clock in, red = clock out; manual entries have no location"
+              />
               <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 <select
                   value={mapFilterPersonId}
                   onChange={e => setMapFilterPersonId(e.target.value)}
-                  style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", background: C.panelInset, color: C.text.body, cursor: "pointer" }}
+                  style={{ ...styles.select, flex: "1 1 160px" }}
                 >
                   <option value="">All People</option>
                   {timeClockRoster.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -4454,19 +4893,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   type="date"
                   value={mapFilterDate}
                   onChange={e => setMapFilterDate(e.target.value)}
-                  style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", background: C.panelInset, color: C.text.body, colorScheme: "dark" }}
+                  style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panelInset, color: C.text.body, colorScheme: "dark" }}
                 />
                 {(mapFilterPersonId || mapFilterDate) && (
                   <button
                     onClick={() => { setMapFilterPersonId(""); setMapFilterDate(""); }}
-                    style={{ background: "transparent", color: "#A1A1AA", border: "1.5px solid #242424", borderRadius: 7, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                    style={{ background: "transparent", color: C.text.muted, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                   >
                     Clear
                   </button>
                 )}
               </div>
               {loadingTimeClockEntries ? (
-                <div style={{ textAlign: "center", padding: "28px 0", color: "#9CA3AF" }}>Loading…</div>
+                <div style={{ textAlign: "center", padding: "28px 0", color: C.text.faint }}>Loading…</div>
               ) : (
                 <TimeClockMap
                   entries={timeClockEntries.filter(e => {
@@ -4484,41 +4923,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             <div style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
-                  {company?.name} — Everyone's Time{timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}
-                </div>
-                <button onClick={() => setAddEntryOpen(o => !o)} style={{ background: "#0891B2", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
-                  {addEntryOpen ? "Cancel" : "+ Add Entry"}
-                </button>
-              </div>
-              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>Only you can edit or add a punch — workers can't change their own time.</div>
+              <PanelHeader
+                icon={CircleUserRound}
+                title={`${company?.name || ""} — Everyone's Time${timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}`}
+                subtitle="Only you can edit or add a punch — workers can't change their own time"
+                actions={<button onClick={() => setAddEntryOpen(o => !o)} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: addEntryOpen ? "transparent" : C.orange, color: addEntryOpen ? C.text.muted : C.text.onOrange,
+                  border: addEntryOpen ? `1.5px solid ${C.line}` : "none", borderRadius: RAD.sm,
+                  padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer"
+                }}>{addEntryOpen ? "Cancel" : "+ Add Entry"}</button>}
+              />
 
               {addEntryOpen && (
-                <div style={{ background: "#1A1A1A", borderRadius: 8, padding: 10, marginBottom: 14 }}>
-                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box", background: C.panelInset, color: C.text.body, cursor: "pointer" }}>
+                <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: 10, marginBottom: 14 }}>
+                  <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box", background: C.panel, color: C.text.body, cursor: "pointer" }}>
                     <option value="">Select person…</option>
                     {timeClockRoster.filter(m => m.active).map(m => <option key={m.id} value={m.id}>{m.name} ({m.role})</option>)}
                   </select>
                   <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
+                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }}
                       value={toDatetimeLocal(addEntryForm.clockIn)}
                       onChange={e => setAddEntryForm(f => ({ ...f, clockIn: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
-                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
+                    <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }}
                       value={toDatetimeLocal(addEntryForm.clockOut)}
                       onChange={e => setAddEntryForm(f => ({ ...f, clockOut: e.target.value ? new Date(e.target.value).toISOString() : "" }))} />
                   </div>
-                  <button onClick={submitAddEntry} disabled={savingEntry || !addEntryForm.rosterId || !addEntryForm.clockIn} style={{ width: "100%", background: (!addEntryForm.rosterId || !addEntryForm.clockIn) ? "#71717A" : "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                    {savingEntry ? "Saving…" : "✓ Add Entry"}
+                  <button onClick={submitAddEntry} disabled={savingEntry || !addEntryForm.rosterId || !addEntryForm.clockIn} style={{ width: "100%", background: (!addEntryForm.rosterId || !addEntryForm.clockIn) ? C.text.faint : C.status.success.solid, color: "#fff", border: "none", borderRadius: RAD.sm, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                    {savingEntry ? "Saving…" : "Add Entry"}
                   </button>
                 </div>
               )}
 
               {loadingTimeClockEntries ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
               ) : timeClockRoster.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>⏱️</div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                  <div style={{ marginBottom: 8 }}><Clock size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                   No one on the roster yet.
                 </div>
               ) : (
@@ -4531,55 +4972,58 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     return (
                       <CollapsibleGroup
                         key={member.id}
-                        icon={member.role === "supervisor" ? "🦺" : "👷"}
+                        icon={member.role === "supervisor" ? <HardHat size={12} /> : <CircleUserRound size={12} />}
                         label={`${member.name} — ${totalHours.toFixed(1)} hrs`}
                         count={memberEntries.length}
                         colorPreset={member.role === "supervisor" ? "indigo" : "purple"}
                         defaultOpen={true}
                       >
                         {memberEntries.length === 0 ? (
-                          <div style={{ color: "#9CA3AF", padding: "10px 0", fontSize: 13 }}>No entries this week.</div>
+                          <div style={{ color: C.text.faint, padding: "10px 0", fontSize: 13 }}>No entries this week.</div>
                         ) : memberEntries.map((e, i, arr) => (
-                          <div key={e.id} style={{ padding: "10px 0", borderBottom: i < arr.length - 1 ? "1px solid #242424" : "none" }}>
+                          <div key={e.id} style={{ padding: "10px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
                             {editingEntryId === e.id ? (
-                              <div style={{ background: "#1A1A1A", borderRadius: 8, padding: 10 }}>
+                              <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: 10 }}>
                                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
+                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }}
                                     value={toDatetimeLocal(editEntryForm.clockIn)}
                                     onChange={ev => setEditEntryForm(f => ({ ...f, clockIn: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
-                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #242424", fontSize: 13, outline: "none" }}
+                                  <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }}
                                     value={toDatetimeLocal(editEntryForm.clockOut)}
                                     onChange={ev => setEditEntryForm(f => ({ ...f, clockOut: ev.target.value ? new Date(ev.target.value).toISOString() : "" }))} />
                                 </div>
                                 <div style={{ display: "flex", gap: 8 }}>
-                                  <button onClick={() => saveEditEntry(e.id)} disabled={savingEntry} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingEntry ? "Saving…" : "✓ Save"}</button>
-                                  <button onClick={() => setEditingEntryId(null)} style={{ background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                                  <button onClick={() => saveEditEntry(e.id)} disabled={savingEntry} style={{ flex: 1, background: C.status.success.solid, color: "#fff", border: "none", borderRadius: RAD.sm, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingEntry ? "Saving…" : "Save"}</button>
+                                  <button onClick={() => setEditingEntryId(null)} style={{ background: C.panel, color: C.text.body, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                                 </div>
                               </div>
                             ) : (
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <div>
-                                  <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4" }}>
-                                    {new Date(e.clock_in).toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric" })}
-                                  </div>
-                                  <div style={{ fontSize: 12, color: "#A1A1AA", display: "flex", alignItems: "center", gap: 5 }}>
-                                    <span>
-                                      {new Date(e.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {e.clock_out ? new Date(e.clock_out).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "in progress"}
-                                      {e.edited_at ? " · edited" : ""}
-                                    </span>
-                                    {typeof e.clock_in_lat === "number" ? (
-                                      <MapPin size={12} color="#38BDF8" title="Location captured" />
-                                    ) : (
-                                      <span style={{ fontSize: 11, color: "#71717A" }}>· no location</span>
-                                    )}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 }}>
+                                  <RowIconTile icon={Clock} color={e.clock_out ? C.status.success.text : C.status.info.text} />
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, fontSize: 13, color: C.text.primary }}>
+                                      {new Date(e.clock_in).toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric" })}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: C.text.muted, display: "flex", alignItems: "center", gap: 5 }}>
+                                      <span>
+                                        {new Date(e.clock_in).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })} – {e.clock_out ? new Date(e.clock_out).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "in progress"}
+                                        {e.edited_at ? " · edited" : ""}
+                                      </span>
+                                      {typeof e.clock_in_lat === "number" ? (
+                                        <MapPin size={12} color={C.status.info.text} title="Location captured" />
+                                      ) : (
+                                        <span style={{ fontSize: 11, color: C.text.faint }}>· no location</span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                  <div style={{ fontWeight: 700, fontSize: 13, color: "#0891B2" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 13, color: C.status.info.text }}>
                                     {e.clock_out ? `${((new Date(e.clock_out) - new Date(e.clock_in)) / 3600000).toFixed(2)} hrs` : "—"}
                                   </div>
-                                  <button onClick={() => { setEditingEntryId(e.id); setEditEntryForm({ clockIn: e.clock_in, clockOut: e.clock_out || "" }); }} style={{ background: "transparent", border: "none", color: "#0369A1", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
-                                  <button onClick={() => deleteTimeClockEntry(e.id)} style={{ background: "transparent", border: "none", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Delete</button>
+                                  <button onClick={() => { setEditingEntryId(e.id); setEditEntryForm({ clockIn: e.clock_in, clockOut: e.clock_out || "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
+                                  <button onClick={() => deleteTimeClockEntry(e.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Delete</button>
                                 </div>
                               </div>
                             )}
@@ -4593,68 +5037,73 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             <div style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
-                  {company?.name} — Weekly Time Clock Reports
-                </div>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <PanelHeader
+                icon={FileText}
+                title={`${company?.name || ""} — Weekly Time Clock Reports`}
+                subtitle="A new report is generated automatically every Sunday at 11:59pm for the week just finished — tap any report to view or download"
+                actions={<>
                   <button onClick={() => { setShowTimeClockManualPull(s => !s); setTimeClockPullError(""); }} style={{
-                    background: "#1D1D1D", color: "#38BDF8", border: "1.5px solid #38BDF8", borderRadius: 8,
-                    padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-                  }}>
-                    🕐 Request Manual Pull
-                  </button>
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "transparent", color: C.status.info.text, border: `1.5px solid ${C.status.info.border}`, borderRadius: RAD.sm,
+                    padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer"
+                  }}><Clock size={14} strokeWidth={2.5} />Manual Pull</button>
                   <button onClick={generateThisWeeksTimeClockReport} disabled={generatingNewTimeClockReport} style={{
-                    background: generatingNewTimeClockReport ? "#71717A" : "#0891B2", color: "#fff", border: "none", borderRadius: 8,
-                    padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
-                  }}>
-                    {generatingNewTimeClockReport ? "Generating…" : "+ Generate This Week"}
-                  </button>
-                </div>
-              </div>
-              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 10 }}>A new report is generated automatically every Sunday at 11:59pm for the week just finished. Tap any report to view or download.</div>
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: generatingNewTimeClockReport ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                    padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer"
+                  }}>{generatingNewTimeClockReport ? "Generating…" : "Generate This Week"}</button>
+                </>}
+              />
+
+              <StatStrip items={[
+                { icon: FileText, value: timeClockReports.length, label: "Total reports", tone: "neutral" },
+                { icon: CircleCheckBig, value: timeClockReports.filter(r => r.pdf_url).length, label: "PDF ready", tone: "success" },
+              ]} />
 
               {showTimeClockManualPull && (
-                <div style={{ background: "#1A1A1A", border: "1.5px solid #242424", borderRadius: 8, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 12, color: "#D4D4D8", fontWeight: 600 }}>Pull this week's data up to:</div>
+                <div style={{ background: C.panelInset, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 12, color: C.text.body, fontWeight: 600 }}>Pull this week's data up to:</div>
                   <input
                     type="datetime-local"
                     value={timeClockPullUntil}
                     onChange={e => setTimeClockPullUntil(e.target.value)}
-                    style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #242424", fontSize: 13 }}
+                    style={{ padding: "6px 8px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panel, color: C.text.primary }}
                   />
                   <button onClick={requestTimeClockManualPull} disabled={requestingTimeClockPull} style={{
-                    background: requestingTimeClockPull ? "#71717A" : "#B45309", color: "#fff", border: "none", borderRadius: 8,
+                    background: requestingTimeClockPull ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
                     padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer"
                   }}>
                     {requestingTimeClockPull ? "Pulling…" : "Pull Now"}
                   </button>
-                  <div style={{ fontSize: 11, color: "#9CA3AF", width: "100%" }}>
+                  <div style={{ fontSize: 11, color: C.text.faint, width: "100%" }}>
                     Leave blank to pull up to right now. The standard full-week report still runs automatically every Sunday at 11:59pm regardless.
                   </div>
-                  {timeClockPullError && <div style={{ fontSize: 12, color: "#DC2626", width: "100%" }}>⚠ {timeClockPullError}</div>}
+                  {timeClockPullError && <div style={{ fontSize: 12, color: C.status.danger.text, width: "100%", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} />{timeClockPullError}</div>}
                 </div>
               )}
 
               {loadingTimeClockReports ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
               ) : timeClockReports.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                  <div style={{ marginBottom: 8 }}><FileText size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                   No time clock reports yet.
                 </div>
               ) : (
                 timeClockReports.map((r, i) => (
                   <div key={r.id} style={{
-                    padding: "12px 14px", borderBottom: i < timeClockReports.length - 1 ? "1px solid #242424" : "none",
-                    cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+                    padding: "12px 4px", borderBottom: i < timeClockReports.length - 1 ? `1px solid ${C.line}` : "none",
+                    cursor: "pointer", display: "flex", alignItems: "center", gap: 10
                   }} onClick={() => openTimeClockReport(r)}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{r.week_start} to {r.week_end}</div>
-                      <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
-                    </div>
-                    <div style={{ fontSize: 11, color: r.pdf_url ? "#0891B2" : "#9CA3AF" }}>
-                      {r.pdf_url ? "📄 PDF ready" : "No PDF yet"} →
+                    <RowIconTile icon={FileText} color={r.pdf_url ? C.status.success.text : C.text.faint} />
+                    <div style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.week_start} to {r.week_end}</div>
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{r.generated_by === "auto" ? "Auto-generated" : "Manually generated"} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: r.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                        {r.pdf_url && <FileText size={11} />}{r.pdf_url ? "PDF ready" : "No PDF yet"} →
+                      </div>
                     </div>
                   </div>
                 ))
@@ -4666,39 +5115,51 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "roster" && TAB_VISIBLE.roster && (
           <>
             {rosterRevealedPin && (
-              <div style={{ ...styles.card, background: "rgba(245,158,11,0.14)", border: "1.5px solid #F59E0B" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#FBBF24", marginBottom: 4 }}>PIN for {rosterRevealedPin.name} — shown once, write it down now</div>
+              <div style={{ ...styles.card, background: C.status.warning.bg, border: `1.5px solid ${C.status.warning.border}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.warning.text, marginBottom: 4 }}>PIN for {rosterRevealedPin.name} — shown once, write it down now</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 800, color: "#F97316", background: "#1D1D1D", border: "1.5px solid #242424", borderRadius: 8, padding: "6px 14px" }}>{rosterRevealedPin.pin}</span>
-                  <button onClick={() => setRosterRevealedPin(null)} style={{ background: "transparent", border: "none", color: "#A1A1AA", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
+                  <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 800, color: C.orange, background: C.panelInset, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 14px" }}>{rosterRevealedPin.pin}</span>
+                  <button onClick={() => setRosterRevealedPin(null)} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
                 </div>
               </div>
             )}
 
             <div style={styles.card}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>{company?.name} — Roster</div>
-              <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 14 }}>Reset a forgotten PIN below — it takes effect immediately and is shown once.</div>
+              <PanelHeader
+                icon={TAB_ICON.roster}
+                title={`${company?.name || ""} — Roster`}
+                subtitle="Reset a forgotten PIN below — it takes effect immediately and is shown once"
+              />
+
+              {rosterList.length > 0 && (
+                <StatStrip items={[
+                  { icon: HardHat, value: rosterList.filter(m => m.role === "supervisor" && m.active).length, label: "Supervisors", tone: "neutral" },
+                  { icon: CircleUserRound, value: rosterList.filter(m => m.role === "worker" && m.active).length, label: "Workers", tone: "neutral" },
+                  { icon: Users, value: rosterList.filter(m => m.active).length, label: "Total active", tone: "accent" },
+                ]} />
+              )}
 
               {loadingRosterList ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>Loading…</div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
               ) : rosterList.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>No one on the roster yet.</div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>No one on the roster yet.</div>
               ) : (
                 ["supervisor", "worker"].map(roleGroup => {
                   const group = rosterList.filter(m => m.role === roleGroup && m.active);
                   if (group.length === 0) return null;
                   return (
-                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? "🦺" : "👷"} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
+                    <CollapsibleGroup key={roleGroup} icon={roleGroup === "supervisor" ? <HardHat size={12} /> : <CircleUserRound size={12} />} label={`${roleGroup}s`} count={group.length} colorPreset={roleGroup === "supervisor" ? "indigo" : "purple"} defaultOpen={true}>
                       {group.map((m, i) => (
-                        <div key={m.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < group.length - 1 ? "1px solid #242424" : "none" }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#D4D4D8" }}>{m.name}</div>
-                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
+                        <div key={m.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "11px 4px", borderBottom: i < group.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                          <RowIconTile icon={roleGroup === "supervisor" ? HardHat : CircleUserRound} color={C.text.muted} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>{m.name}</div>
+                            <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                           </div>
                           <button
                             onClick={() => resetRosterMemberPin(m.id, m.name)}
                             disabled={resettingRosterId === m.id}
-                            style={{ background: "transparent", border: "1.5px solid #242424", color: "#D4D4D8", fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}
+                            style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}
                           >
                             {resettingRosterId === m.id ? "Resetting…" : "Reset PIN"}
                           </button>
@@ -4714,32 +5175,35 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "sops" && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 12 }}>
-              {company?.name} — Safety Policies
-            </div>
+            <PanelHeader
+              icon={TAB_ICON.sops}
+              title={`${company?.name || ""} — Safety Policies`}
+              subtitle={`${companySops.length} polic${companySops.length === 1 ? "y" : "ies"}`}
+            />
             {companySops.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><FileText size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 No SOPs loaded for this company.
               </div>
             ) : (
               companySops.map((s, i) => (
                 <div key={s.id} style={{
-                  padding: "10px 0", borderBottom: i < companySops.length - 1 ? "1px solid #242424" : "none",
+                  padding: "10px 4px", borderBottom: i < companySops.length - 1 ? `1px solid ${C.line}` : "none",
                   display: "flex", gap: 10, alignItems: "flex-start"
                 }}>
                   <div style={{
-                    width: 22, height: 22, borderRadius: "50%", background: "#F97316",
-                    color: "#0A0A0A", fontSize: 11, fontWeight: 700, flexShrink: 0,
+                    width: 22, height: 22, borderRadius: "50%", background: C.orangeSoft,
+                    color: C.orange, fontSize: 11, fontWeight: 700, flexShrink: 0,
                     display: "flex", alignItems: "center", justifyContent: "center"
                   }}>{i + 1}</div>
-                  <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5 }}>{s.policy_text}</div>
+                  <div style={{ fontSize: 14, color: C.text.body, lineHeight: 1.5 }}>{s.policy_text}</div>
                 </div>
               ))
             )}
           </div>
         )}
 
+      </div>
       </div>
     </div>
   );

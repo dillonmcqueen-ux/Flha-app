@@ -43,7 +43,7 @@ export default function CollapsibleGroup({
           display: "flex", justifyContent: "space-between", alignItems: "center",
         }}
       >
-        <span>{icon} {label} ({count})</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>{icon}{label} ({count})</span>
         <span style={{ fontSize: 11 }}>{open ? "▾" : "▸"}</span>
       </div>
       {open && children}
