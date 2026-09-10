@@ -9,9 +9,23 @@ import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
 import {
   Construction, Inbox, Building2, FileText, User, DollarSign, Brain, Sparkles,
   MapPin, Tractor, HardHat, Zap, ArrowUpRight, CircleCheckBig, Hourglass,
-  Check, Download,
+  Check, Download, Menu, KeyRound,
 } from "lucide-react";
 import { colors as T, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
+import Sidebar from "./Sidebar";
+
+// Persistent left-sidebar nav for the top-level Company Console (Overview /
+// Onboarding Requests / All Codes) — same Sidebar.jsx component and lookup
+// shape Dashboard.jsx uses, so Dillon's admin login gets the identical
+// sidebar+mobile-drawer nav pattern he asked for after seeing it on the
+// supervisor dashboard. `view` state below still drives which screen
+// renders; these just map the sidebar's tab keys onto that existing state
+// so nothing about data-loading/handlers underneath had to change.
+const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound };
+const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes" };
+const ADMIN_CATEGORY_ICON = { admin: Building2 };
+const ADMIN_CATEGORIES = [{ key: "admin", label: "Admin", tabs: ["onboarding", "codes"] }];
+const VIEW_TO_ADMIN_TAB = { home: "overview", onboardingRequests: "onboarding", allCodes: "codes" };
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -60,6 +74,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("home");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [manageTab, setManageTab] = useState("profile");
   const [saving, setSaving] = useState(false);
@@ -1025,6 +1040,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     sectionTitle: { display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 13, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12 },
   };
 
+  // Overview stat tile — same icon-tile-plus-number shape as Dashboard.jsx's
+  // Overview stat strip, built from numbers this component already computes
+  // (activeCompanies/setupCompanies/onboardingRequests/companies), nothing
+  // invented.
+  const AdminStatTile = ({ icon: Icon, value, label, tone = "neutral", onClick }) => {
+    const TONE = { accent: C.amber, danger: C.status.danger.solid, success: C.status.success.solid, neutral: C.muted };
+    const color = TONE[tone] || TONE.neutral;
+    return (
+      <div
+        onClick={onClick}
+        style={{
+          display: "flex", alignItems: "center", gap: 10, background: C.panelInset, border: `1px solid ${C.line}`,
+          borderRadius: RAD.md, padding: "10px 16px", flex: "1 1 170px", minWidth: 150,
+          cursor: onClick ? "pointer" : "default",
+        }}
+      >
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon size={16} color={color} strokeWidth={2.25} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 20, color: C.ink, lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 2, whiteSpace: "nowrap" }}>{label}</div>
+        </div>
+      </div>
+    );
+  };
+
   // Completeness meter — the signature element
   const Meter = ({ c }) => {
     const stp = steps(c);
@@ -1094,169 +1136,211 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
   if (loading) return <div style={{ ...st.wrap, padding: 30, color: C.inkSoft }}>Loading console…</div>;
 
-  // ═══ HOME ═════════════════════════════════════════════════
-  if (view === "home") {
+  // ═══ CONSOLE — Overview / Onboarding Requests / All Codes ═══════════════
+  // Persistent left sidebar (src/Sidebar.jsx) replacing the old full-screen
+  // view swap + "← Console" back button — same UX model Dashboard.jsx uses.
+  // `view` still drives which screen is active (other code below reads/sets
+  // it, e.g. openManage/addCompany), this block just maps its three
+  // "top-level destination" values onto sidebar tab keys instead of
+  // rendering each as its own <div style={st.wrap}> screen.
+  if (view === "home" || view === "allCodes" || view === "onboardingRequests") {
+    const activeAdminTab = VIEW_TO_ADMIN_TAB[view];
+    const newOnboardingCount = onboardingRequests.filter(r => r.status === "new").length;
+    const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
+    const STATUS_COLOR = { new: C.amberDark, in_progress: C.status.info.text, needs_info: C.status.danger.text, done: C.green };
+    const msgIsError = /(could not|couldn't|failed|error|enter)/.test(msg.toLowerCase());
+    const goToTab = (key) => {
+      setMsg("");
+      if (key === "onboarding") { setView("onboardingRequests"); loadOnboardingRequests(); }
+      else if (key === "codes") { setView("allCodes"); loadAllCodesView(); }
+      else setView("home");
+    };
+
     return (
       <div style={st.wrap}>
-        <div style={st.topbar}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <style>{`
+          .fora-mobile-menu-btn { display: none; }
+          .fora-sidebar-backdrop { display: none; }
+          @media (max-width: 768px) {
+            .fora-mobile-menu-btn { display: inline-flex !important; }
+            .fora-sidebar {
+              position: fixed !important; top: 57px !important; left: 0 !important;
+              z-index: 60; height: calc(100vh - 57px) !important;
+              transform: translateX(-100%); transition: transform 200ms ease;
+              box-shadow: 0 20px 60px -20px rgba(0,0,0,0.75);
+            }
+            .fora-sidebar.fora-sidebar-open { transform: translateX(0); }
+          }
+        `}</style>
+
+        <header style={{
+          position: "sticky", top: 0, zIndex: 40,
+          background: C.panel, borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              className="fora-mobile-menu-btn"
+              onClick={() => setMobileNavOpen(o => !o)}
+              aria-label="Toggle navigation"
+              style={{
+                alignItems: "center", justifyContent: "center", width: 32, height: 32,
+                border: `1px solid ${C.line}`, borderRadius: RAD.md, background: "transparent",
+                color: C.inkSoft, cursor: "pointer", marginRight: 2,
+              }}
+            ><Menu size={16} /></button>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: C.amber, textTransform: "uppercase" }}>FORA Admin</div>
-              <div style={{ fontWeight: 800, fontSize: 24, marginTop: 2 }}>Company Console</div>
-            </div>
-            {onLogout && <button style={st.ghost} onClick={onLogout}>Sign out</button>}
-          </div>
-          <div style={{ display: "flex", gap: 20, marginTop: 16 }}>
-            <div><span style={{ fontSize: 22, fontWeight: 800, color: C.green }}>{activeCompanies.length}</span> <span style={{ fontSize: 13, color: C.inkSoft }}>active</span></div>
-            <div><span style={{ fontSize: 22, fontWeight: 800, color: C.amber }}>{setupCompanies.length}</span> <span style={{ fontSize: 13, color: C.inkSoft }}>need setup</span></div>
-          </div>
-        </div>
-
-        <div style={st.body}>
-          {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("could not") || msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")) ? C.status.danger.bg : C.status.success.bg, color: (msg.toLowerCase().includes("could not") || msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")) ? C.status.danger.text : C.status.success.text, fontSize: 14 }}>{msg}</div>}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
-              <button style={st.darkBtn} onClick={() => { setView("allCodes"); setMsg(""); loadAllCodesView(); }}>All Codes</button>
-              <button style={st.darkBtn} onClick={() => { setView("onboardingRequests"); setMsg(""); loadOnboardingRequests(); }}>
-                Onboarding Requests{onboardingRequests.filter(r => r.status === "new").length > 0 ? ` (${onboardingRequests.filter(r => r.status === "new").length})` : ""}
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.ink, fontWeight: 600, cursor: "pointer", colorScheme: "dark" }}>
-                <option value="name">Name (A–Z)</option>
-                <option value="id">Account number</option>
-              </select>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>Company Console</div>
             </div>
           </div>
+          {onLogout && <button style={st.ghost} onClick={onLogout}>Sign out</button>}
+        </header>
 
-          {companies.length === 0 ? (
-            <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
-              <Construction size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
-              <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No companies yet</div>
-              <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 18 }}>Onboard your first company to get started.</div>
-              <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); }}>+ Onboard Company</button>
-            </div>
-          ) : (
-            <>
-              {/* Needs setup first — it's the actionable section */}
-              {setupCompanies.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ ...st.sectionTitle, color: C.amberDark }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 4, background: C.amber }} /> Needs setup ({setupCompanies.length})
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-                    {setupCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
-                  </div>
-                </div>
-              )}
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <Sidebar
+            categories={ADMIN_CATEGORIES}
+            categoryIcon={ADMIN_CATEGORY_ICON}
+            tabIcon={ADMIN_TAB_ICON}
+            tabLabel={ADMIN_TAB_LABEL}
+            tabVisible={{ onboarding: true, codes: true }}
+            tabCounts={{ onboarding: newOnboardingCount }}
+            activeTab={activeAdminTab}
+            onSelectTab={goToTab}
+            mobileOpen={mobileNavOpen}
+            onMobileClose={() => setMobileNavOpen(false)}
+          />
 
-              {activeCompanies.length > 0 && (
-                <div>
-                  <div style={{ ...st.sectionTitle, color: C.green }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Active ({activeCompanies.length})
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-                    {activeCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ═══ ALL CODES ════════════════════════════════════════════
-  if (view === "allCodes") {
-    return (
-      <div style={st.wrap}>
-        <div style={st.topbar}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 800, fontSize: 20 }}>All Codes</div>
-            <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); }}>← Console</button>
-          </div>
-        </div>
-        <div style={st.body}>
-          {msg && <div style={{ ...st.card, marginBottom: 14, background: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("enter")) ? C.status.danger.bg : C.status.success.bg, color: (msg.toLowerCase().includes("couldn't") || msg.toLowerCase().includes("enter")) ? C.status.danger.text : C.status.success.text, fontSize: 14 }}>{msg}</div>}
-
-          <div style={{ ...st.card, marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Every company's code(s)</div>
-            {companies.length === 0 ? (
-              <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No companies yet.</div>
-            ) : (
-              [...companies].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c, i, arr) => (
-                <div key={c.id} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: C.ink, marginBottom: 6 }}>{c.name}</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={st.code} onClick={() => copyText(c.company_code)}>{c.company_code || "—"}</span>
-                    {c.roster_enabled && <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: C.status.success.bg, padding: "3px 9px", borderRadius: 20 }}>ROSTER</span>}
-                    {(c.worker_code || c.supervisor_code) && (
-                      <>
-                        <span style={{ fontSize: 11, color: C.muted }}>legacy:</span>
-                        {c.worker_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.worker_code)}>{c.worker_code}</span>}
-                        {c.supervisor_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.supervisor_code)}>{c.supervisor_code}</span>}
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))
+          <div style={{ padding: 16, flex: 1, minWidth: 0 }}>
+            {msg && (
+              <div style={{ ...st.card, marginBottom: 14, background: msgIsError ? C.status.danger.bg : C.status.success.bg, color: msgIsError ? C.status.danger.text : C.status.success.text, fontSize: 14 }}>{msg}</div>
             )}
-          </div>
 
-          <div style={{ ...st.card, marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Master login code</div>
-            <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
-              Logs into any company, as either worker or supervisor, straight from the public login screen — no company code or PIN needed. Stored securely; the current value can't be viewed, only replaced.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="New master code" value={masterCodeInput} onChange={e => setMasterCodeInput(e.target.value)} />
-              <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={saveMasterCode} disabled={savingMasterCode}>{savingMasterCode ? "Saving…" : "Save"}</button>
-            </div>
-          </div>
-
-          <div style={st.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
-            {masterLoginLogs.length === 0 ? (
-              <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No master-code logins yet.</div>
-            ) : (
+            {/* ── Overview ───────────────────────────────────────────── */}
+            {activeAdminTab === "overview" && (
               <>
-                {masterLoginLogs.slice(0, logsShown).map((l, i, arr) => (
-                  <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
-                    <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
-                    <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+                  <AdminStatTile icon={CircleCheckBig} value={activeCompanies.length} label="Active" tone="success" />
+                  <AdminStatTile icon={Hourglass} value={setupCompanies.length} label="Need setup" tone="accent" />
+                  <AdminStatTile
+                    icon={Inbox} value={newOnboardingCount} label="New onboarding requests"
+                    tone={newOnboardingCount > 0 ? "accent" : "neutral"}
+                    onClick={() => goToTab("onboarding")}
+                  />
+                  <AdminStatTile icon={Building2} value={companies.length} label="Total companies" tone="neutral" />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
+                  <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); setMsg(""); }}>+ Onboard Company</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: C.inkSoft, fontWeight: 600 }}>Sort</span>
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.ink, fontWeight: 600, cursor: "pointer", colorScheme: "dark" }}>
+                      <option value="name">Name (A–Z)</option>
+                      <option value="id">Account number</option>
+                    </select>
                   </div>
-                ))}
-                {masterLoginLogs.length > logsShown && (
-                  <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
-                    Show more ({masterLoginLogs.length - logsShown} more)
-                  </button>
+                </div>
+
+                {companies.length === 0 ? (
+                  <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
+                    <Construction size={42} color={C.muted} strokeWidth={1.75} style={{ marginBottom: 10 }} />
+                    <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, marginBottom: 4 }}>No companies yet</div>
+                    <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 18 }}>Onboard your first company to get started.</div>
+                    <button style={st.amberBtn} onClick={() => { setView("addCompany"); handleNameChange(""); }}>+ Onboard Company</button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Needs setup first — it's the actionable section */}
+                    {setupCompanies.length > 0 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ ...st.sectionTitle, color: C.amberDark }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 4, background: C.amber }} /> Needs setup ({setupCompanies.length})
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                          {setupCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
+                        </div>
+                      </div>
+                    )}
+
+                    {activeCompanies.length > 0 && (
+                      <div>
+                        <div style={{ ...st.sectionTitle, color: C.green }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Active ({activeCompanies.length})
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                          {activeCompanies.map(c => <CompanyCard key={c.id} c={c} />)}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  // ═══ ONBOARDING REQUESTS ═════════════════════════════════
-  if (view === "onboardingRequests") {
-    const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
-    const STATUS_COLOR = { new: C.amberDark, in_progress: C.status.info.text, needs_info: C.status.danger.text, done: C.green };
-    return (
-      <div style={st.wrap}>
-        <div style={st.topbar}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 800, fontSize: 20 }}>Onboarding Requests</div>
-            <button style={st.ghost} onClick={() => { setView("home"); setMsg(""); }}>← Console</button>
-          </div>
-        </div>
-        <div style={st.body}>
-          {loadingOnboarding ? (
+            {/* ── All Codes ──────────────────────────────────────────── */}
+            {activeAdminTab === "codes" && (
+              <>
+                <div style={{ ...st.card, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Every company's code(s)</div>
+                  {companies.length === 0 ? (
+                    <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No companies yet.</div>
+                  ) : (
+                    [...companies].sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c, i, arr) => (
+                      <div key={c.id} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.ink, marginBottom: 6 }}>{c.name}</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={st.code} onClick={() => copyText(c.company_code)}>{c.company_code || "—"}</span>
+                          {c.roster_enabled && <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: C.status.success.bg, padding: "3px 9px", borderRadius: 20 }}>ROSTER</span>}
+                          {(c.worker_code || c.supervisor_code) && (
+                            <>
+                              <span style={{ fontSize: 11, color: C.muted }}>legacy:</span>
+                              {c.worker_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.worker_code)}>{c.worker_code}</span>}
+                              {c.supervisor_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.supervisor_code)}>{c.supervisor_code}</span>}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ ...st.card, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Master login code</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                    Logs into any company, as either worker or supervisor, straight from the public login screen — no company code or PIN needed. Stored securely; the current value can't be viewed, only replaced.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="New master code" value={masterCodeInput} onChange={e => setMasterCodeInput(e.target.value)} />
+                    <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={saveMasterCode} disabled={savingMasterCode}>{savingMasterCode ? "Saving…" : "Save"}</button>
+                  </div>
+                </div>
+
+                <div style={st.card}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
+                  {masterLoginLogs.length === 0 ? (
+                    <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No master-code logins yet.</div>
+                  ) : (
+                    <>
+                      {masterLoginLogs.slice(0, logsShown).map((l, i, arr) => (
+                        <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13 }}>
+                          <span style={{ color: C.ink, fontWeight: 600 }}>{l.company_name} <span style={{ color: C.muted, fontWeight: 400, textTransform: "uppercase", fontSize: 11 }}>{l.role}</span></span>
+                          <span style={{ color: C.muted }}>{new Date(l.created_at).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {masterLoginLogs.length > logsShown && (
+                        <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
+                          Show more ({masterLoginLogs.length - logsShown} more)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ── Onboarding Requests ────────────────────────────────── */}
+            {activeAdminTab === "onboarding" && (
+          loadingOnboarding ? (
             <div style={{ ...st.card, textAlign: "center", color: C.muted, padding: "30px 20px" }}>Loading…</div>
           ) : onboardingRequests.length === 0 ? (
             <div style={{ ...st.card, textAlign: "center", padding: "44px 20px" }}>
@@ -1450,7 +1534,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 </div>
               </div>
             ))
-          )}
+          ))}
+          </div>
         </div>
       </div>
     );
