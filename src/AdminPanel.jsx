@@ -9,7 +9,7 @@ import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
 import {
   Construction, Inbox, Building2, FileText, User, DollarSign, Brain, Sparkles,
   MapPin, Tractor, HardHat, Zap, ArrowUpRight, CircleCheckBig, Hourglass,
-  Check, Download, Menu, KeyRound,
+  Check, Download, Menu, KeyRound, AlertTriangle,
 } from "lucide-react";
 import { colors as T, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import Sidebar from "./Sidebar";
@@ -1434,8 +1434,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     checkout, and requested seats vs. that plan's cap — the two
                     things most likely to need a second look before approving. */}
                 {r.duplicateCount > 0 && (
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
-                    ⚠ {r.duplicateCount} other request{r.duplicateCount === 1 ? "" : "s"} from a company named "{r.company_name}" — check before approving to avoid creating a duplicate company.
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                    <AlertTriangle size={13} strokeWidth={2.5} style={{ flexShrink: 0 }} />
+                    {r.duplicateCount} other request{r.duplicateCount === 1 ? "" : "s"} from a company named "{r.company_name}" — check before approving to avoid creating a duplicate company.
                   </div>
                 )}
 
@@ -1588,7 +1589,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   </button>
                   {!r.created_company_id && (
                     <button
-                      style={{ ...st.ghost, color: "#B91C1C", border: "1.5px solid #FECACA", fontSize: 12, padding: "6px 10px" }}
+                      style={{ ...st.ghost, color: C.status.danger.text, border: `1.5px solid ${C.status.danger.border}`, fontSize: 12, padding: "6px 10px" }}
                       onClick={() => deleteOnboardingRequest(r.id)}
                     >
                       Delete
