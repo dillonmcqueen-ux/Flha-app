@@ -22,7 +22,7 @@ import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
-  Radio, CircleCheckBig,
+  Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -88,6 +88,72 @@ function RiskBadge({ risk }) {
       background: c.bg, border: `1px solid ${c.border}`, color: c.text,
       borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700
     }}>{risk}</span>
+  );
+}
+
+// ── Shared "document tab" chrome ────────────────────────────────────────
+// The five record-list tabs (FLHAs, Inspections, Toolbox, Near Misses,
+// Incidents) previously rendered as a bare title + search box + <select>s +
+// flat rows — the Overview panel's icon tiles, panel headers and stat
+// summaries never made it down to them. These three helpers give every
+// list tab the same visual language as Overview (icon-tile headers, real
+// stat chips fed by numbers the component already computes, icon-tile list
+// rows) without duplicating that markup five times.
+
+// Panel header: icon tile + title + subtitle, optional right-aligned
+// actions (bulk export/delete). Same icon-tile-plus-heading shape as the
+// Overview "Site Activity" / "Recent Activity" panel headers.
+function PanelHeader({ icon: Icon, title, subtitle, actions }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <div style={{ width: 34, height: 34, borderRadius: RAD.md, background: C.orangeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon size={17} color={C.orange} strokeWidth={2.25} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 15.5, color: C.text.primary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 12.5, color: C.text.faint, marginTop: 1 }}>{subtitle}</div>}
+        </div>
+      </div>
+      {actions && <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>{actions}</div>}
+    </div>
+  );
+}
+
+// A row of small stat readouts summarizing real, already-computed numbers
+// for this tab (e.g. "12 total · 3 awaiting sign-off"). Skipped entirely by
+// a tab if there's nothing genuine to summarize — see call sites.
+function StatStrip({ items }) {
+  const TONE = { accent: C.orange, danger: C.status.danger.solid, warning: C.status.warning.solid, success: C.status.success.solid, neutral: C.text.muted };
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+      {items.map(({ icon: Icon, value, label, tone = "neutral" }, i) => {
+        const color = TONE[tone] || TONE.neutral;
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: "9px 14px", flex: "1 1 150px", minWidth: 140 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Icon size={15} color={color} strokeWidth={2.25} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: FONT.heading, fontSize: 19, fontWeight: 700, color: C.text.primary, lineHeight: 1 }}>{value}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.text.faint, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Small rounded icon tile used to lead every list row — same 28px
+// icon-tile-on-C.panelInset pattern as the Overview "Recent Activity" feed,
+// carried down into every document list so a row reads as a record, not a
+// line of plain text.
+function RowIconTile({ icon: Icon, color = C.text.muted, size = 28 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: 8, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={size - 14} color={color} strokeWidth={2.25} />
+    </div>
   );
 }
 
@@ -733,8 +799,9 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
 function ReportRow({ rec, last, onClick, kind }) {
   const r = rec.report_json || {};
   const sevColors = {
-    Low: { c: "#4ADE80", bg: "rgba(34,197,94,0.14)" }, Medium: { c: "#FDE047", bg: "rgba(234,179,8,0.14)" },
-    High: { c: "#FB923C", bg: "rgba(249,115,22,0.14)" }, Critical: { c: "#fff", bg: "#DC2626" },
+    Low: C.status.success, Medium: { text: "#FDE047", bg: "rgba(234,179,8,0.14)", border: "rgba(234,179,8,0.4)" },
+    High: { text: "#FB923C", bg: "rgba(249,115,22,0.14)", border: "rgba(249,115,22,0.4)" },
+    Critical: { text: "#fff", bg: C.status.danger.solid, border: C.status.danger.solid },
   };
   const sev = r.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
@@ -742,21 +809,24 @@ function ReportRow({ rec, last, onClick, kind }) {
     ? (r.summary || rec.incident_type || "")
     : (r.whatHappened || rec.involved || "");
   const who = kind === "nearmiss" && rec.is_anonymous ? "Anonymous" : rec.reporter_name;
+  const Icon = kind === "incident" ? Siren : AlertTriangle;
+  const tileColor = kind === "incident" ? C.status.danger.text : C.status.warning.text;
   return (
-    <div onClick={onClick} style={{ padding: "12px 4px", borderBottom: last ? "none" : "1px solid #24242480", cursor: "pointer" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, paddingRight: 10 }}>
+    <div onClick={onClick} style={{ display: "flex", gap: 10, padding: "12px 4px", borderBottom: last ? "none" : `1px solid ${C.line}`, cursor: "pointer" }}>
+      <RowIconTile icon={Icon} color={tileColor} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, paddingRight: 10, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: sc.c, background: sc.bg, padding: "2px 9px", borderRadius: 20, border: sev === "Critical" ? "none" : `1px solid ${sc.c}30` }}>{sev.toUpperCase()}</span>
-            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: "#F87171", background: "rgba(239,68,68,0.14)", padding: "2px 8px", borderRadius: 20 }}>{rec.incident_type}</span>}
-            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{rec.site}</div>
+            <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "2px 9px", borderRadius: RAD.pill, border: sev === "Critical" ? "none" : `1px solid ${sc.border}` }}>{sev.toUpperCase()}</span>
+            {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "2px 8px", borderRadius: RAD.pill }}>{rec.incident_type}</span>}
+            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{rec.site}</div>
           </div>
-          <div style={{ fontSize: 13, color: "#D4D4D8" }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
-          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>🧑 {who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
-          {rec.reviewed && <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 700, marginTop: 2 }}>✓ Reviewed by {rec.reviewed_by}</div>}
+          <div style={{ fontSize: 13, color: C.text.body }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
+          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
+          {rec.reviewed && <div style={{ fontSize: 11, color: C.status.success.text, fontWeight: 700, marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}><ShieldCheck size={11} />Reviewed by {rec.reviewed_by}</div>}
         </div>
-        <div style={{ fontSize: 11, color: rec.pdf_url ? "#D97706" : "#9CA3AF", flexShrink: 0 }}>
-          {rec.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : ""} →
+        <div style={{ fontSize: 11, color: rec.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+          {rec.pdf_url && <FileText size={11} />}{rec.pdf_url ? "PDF" : ""} →
         </div>
       </div>
     </div>
@@ -3385,7 +3455,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       cursor: "pointer", fontWeight: 600, fontSize: 13,
       background: active ? "rgba(249,115,22,0.12)" : "transparent", color: active ? "#FB923C" : C.text.muted,
     }),
-    flhaRow: { padding: "12px 14px", borderBottom: `1px solid ${C.line}`, cursor: "pointer" },
     select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.text.body, cursor: "pointer", outline: "none" },
     searchInput: { width: "100%", padding: "9px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none", background: C.panelInset, color: C.text.primary },
   };
@@ -3699,35 +3768,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
           <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4" }}>
-                  {company?.name} — Field Assessments
-                </div>
-                <div style={{ fontSize: 13, color: "#A1A1AA" }}>
-                  {processedFlhas.length} of {companyFlhas.length} shown
-                </div>
-              </div>
-              {selectedIds.size > 0 && (
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <PanelHeader
+              icon={TAB_ICON.flhas}
+              title={`${company?.name || ""} — Field Assessments`}
+              subtitle={`${processedFlhas.length} of ${companyFlhas.length} shown`}
+              actions={selectedIds.size > 0 && (
+                <>
                   <button onClick={exportSelected} style={{
-                    background: "#F97316", color: "#0A0A0A", border: "none", borderRadius: 8,
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
                     padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
-                  }}>⬇ {selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
+                  }}><Download size={14} strokeWidth={2.5} />{selectedIds.size} PDF{selectedIds.size > 1 ? "s" : ""}</button>
                   <button onClick={deleteSelected} style={{
-                    background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8,
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.status.danger.bg, color: C.status.danger.text, border: `1.5px solid ${C.status.danger.border}`, borderRadius: RAD.sm,
                     padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
-                  }}>🗑 Delete</button>
-                </div>
+                  }}><Trash2 size={14} strokeWidth={2.5} />Delete</button>
+                </>
               )}
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search worker or site…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
             />
+
+            <StatStrip items={[
+              { icon: ClipboardList, value: companyFlhas.length, label: "Total FLHAs", tone: "neutral" },
+              { icon: AlertTriangle, value: awaitingSignOff, label: "Awaiting sign-off", tone: awaitingSignOff > 0 ? "warning" : "neutral" },
+              { icon: CircleCheckBig, value: flhaReviewStats.signedOff, label: "Signed off", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search worker or site…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={styles.select}>
@@ -3751,7 +3826,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedFlhas.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
                 <div style={{ marginBottom: 8 }}><ClipboardList size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyFlhas.length === 0 ? "No FLHAs submitted yet for this company." : "No FLHAs match your filters."}
               </div>
@@ -3764,33 +3839,35 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const medRisk = hazards.filter(h => h.risk === "Medium").length;
                   return (
                     <div key={f.id} style={{
-                      ...styles.flhaRow,
-                      borderBottom: i < groupFlhas.length - 1 ? "1px solid #242424" : "none",
+                      padding: "12px 4px",
+                      borderBottom: i < groupFlhas.length - 1 ? `1px solid ${C.line}` : "none",
                       display: "flex", alignItems: "flex-start", gap: 10,
-                      background: selectedIds.has(f.id) ? "rgba(56,189,248,0.12)" : "transparent"
+                      background: selectedIds.has(f.id) ? "rgba(249,115,22,0.10)" : "transparent",
+                      borderRadius: RAD.sm,
                     }}>
                       <input type="checkbox" checked={selectedIds.has(f.id)}
                         onChange={() => toggleSelect(f.id)}
-                        style={{ marginTop: 4, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
+                        style={{ marginTop: 11, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
                         onClick={e => e.stopPropagation()}
                       />
-                      <div style={{ flex: 1 }} onClick={() => setSelectedFlha(f)}>
+                      <RowIconTile icon={ClipboardList} color={f.status === "pending_approval" ? C.status.warning.text : C.status.success.text} />
+                      <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelectedFlha(f)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{f.worker_name || "Unknown Worker"}</div>
-                            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{f.job_site || "No location"}</div>
-                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{f.worker_name || "Unknown Worker"}</div>
+                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{f.job_site || "No location"}</div>
+                            <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                               {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                             </div>
                           </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#DC2626", padding: "3px 9px", borderRadius: 20 }}>NEEDS SIGN-OFF</span>}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
+                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.danger.solid, padding: "3px 9px", borderRadius: RAD.pill }}>NEEDS SIGN-OFF</span>}
                             {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                             {highRisk > 0 && <RiskBadge risk="High" />}
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
                             {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
-                            <div style={{ fontSize: 11, color: f.pdf_url ? "#F97316" : "#9CA3AF" }}>
-                              {f.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF"} · {hazards.length} hazards →
+                            <div style={{ fontSize: 11, color: f.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3 }}>
+                              {f.pdf_url && <FileText size={11} />}{f.pdf_url ? "PDF ready" : "No PDF"} · {hazards.length} hazards →
                             </div>
                           </div>
                         </div>
@@ -3822,19 +3899,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "inspections" && TAB_VISIBLE.inspections && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Equipment Inspections
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedInspections.length} of {companyInspections.length} shown — tap any row to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search worker or equipment…"
-              value={inspSearch}
-              onChange={e => setInspSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.inspections}
+              title={`${company?.name || ""} — Equipment Inspections`}
+              subtitle={`${processedInspections.length} of ${companyInspections.length} shown — tap any row to view`}
             />
+
+            <StatStrip items={[
+              { icon: ClipboardCheck, value: companyInspections.length, label: "Total inspections", tone: "neutral" },
+              { icon: AlertTriangle, value: companyInspections.reduce((n, i) => n + (i.results_json?.defectiveCount || 0), 0), label: "Defective items", tone: "danger" },
+              { icon: Settings2, value: companyInspections.reduce((n, i) => n + (i.results_json?.monitorCount || 0), 0), label: "Flagged to monitor", tone: "warning" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search worker or equipment…"
+                value={inspSearch}
+                onChange={e => setInspSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={inspSortBy} onChange={e => setInspSortBy(e.target.value)} style={styles.select}>
@@ -3852,7 +3937,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedInspections.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
                 <div style={{ marginBottom: 8 }}><ClipboardCheck size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyInspections.length === 0 ? "No inspections submitted yet." : "No inspections match your filters."}
               </div>
@@ -3863,35 +3948,38 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const isPost = insp.trip_type === "posttrip";
                   const def = r.defectiveCount || 0;
                   const mon = r.monitorCount || 0;
+                  const statusTone = def > 0 ? C.status.danger : mon > 0 ? C.status.warning : C.status.success;
                   return (
                     <div key={insp.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
+                      display: "flex", gap: 10,
+                      padding: "12px 4px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedInspection(insp)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div>
+                      <RowIconTile icon={Wrench} color={statusTone.text} />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{insp.equipment_label || "Equipment"}</div>
-                            <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#7C3AED" : "#0369A1", background: isPost ? "#F3E8FF" : "#EFF6FF", padding: "2px 6px", borderRadius: 20 }}>{isPost ? "POST" : "PRE"}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{insp.equipment_label || "Equipment"}</div>
+                            <span style={{ fontSize: 9, fontWeight: 800, color: isPost ? "#C4B5FD" : C.status.info.text, background: isPost ? "rgba(124,58,237,0.16)" : C.status.info.bg, padding: "2px 6px", borderRadius: RAD.pill }}>{isPost ? "POST" : "PRE"}</span>
                           </div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{insp.worker_name || "Unknown"}</div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{insp.worker_name || "Unknown"}</div>
                           {(insp.start_reading || insp.end_reading) && (
-                            <div style={{ fontSize: 11, color: "#71717A", marginTop: 2 }}>
+                            <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                               {insp.start_reading ? `${insp.start_reading}` : "—"}{insp.end_reading ? ` → ${insp.end_reading}` : ""} {insp.reading_unit}
                             </div>
                           )}
-                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                             {new Date(insp.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
                           {def > 0
-                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(239,68,68,0.14)", padding: "3px 9px", borderRadius: 20 }}>{def} defective</span>
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{def} defective</span>
                             : mon > 0
-                              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "rgba(245,158,11,0.14)", padding: "3px 9px", borderRadius: 20 }}>{mon} monitor</span>
-                              : <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "rgba(34,197,94,0.14)", padding: "3px 9px", borderRadius: 20 }}>All good</span>}
-                          <div style={{ fontSize: 11, color: insp.pdf_url ? "#0369A1" : "#9CA3AF" }}>
-                            {insp.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF ready</> : "No PDF"} →
+                              ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{mon} monitor</span>
+                              : <span style={{ fontSize: 11, fontWeight: 700, color: C.status.success.text, background: C.status.success.bg, padding: "3px 9px", borderRadius: RAD.pill }}>All good</span>}
+                          <div style={{ fontSize: 11, color: insp.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3 }}>
+                            {insp.pdf_url && <FileText size={11} />}{insp.pdf_url ? "PDF ready" : "No PDF"} →
                           </div>
                         </div>
                       </div>
@@ -3922,19 +4010,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "toolbox" && TAB_VISIBLE.toolbox && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Toolbox Talks
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedToolbox.length} of {companyToolbox.length} shown — tap any meeting to view.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search presenter or site…"
-              value={tbtSearch}
-              onChange={e => setTbtSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.toolbox}
+              title={`${company?.name || ""} — Toolbox Talks`}
+              subtitle={`${processedToolbox.length} of ${companyToolbox.length} shown — tap any meeting to view`}
             />
+
+            <StatStrip items={[
+              { icon: Hammer, value: companyToolbox.length, label: "Total talks", tone: "neutral" },
+              { icon: CalendarClock, value: companyToolbox.filter(t => t.created_at && new Date(t.created_at) >= startOfWeek).length, label: "This week", tone: "accent" },
+              { icon: Users, value: companyToolbox.reduce((n, t) => n + (t.attendees_json || []).length, 0), label: "Attendees signed", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search presenter or site…"
+                value={tbtSearch}
+                onChange={e => setTbtSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={tbtSortBy} onChange={e => setTbtSortBy(e.target.value)} style={styles.select}>
@@ -3952,7 +4048,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedToolbox.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
                 <div style={{ marginBottom: 8 }}><Hammer size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyToolbox.length === 0 ? "No toolbox talks recorded yet." : "No toolbox talks match your filters."}
               </div>
@@ -3962,23 +4058,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   const attendees = t.attendees_json || [];
                   return (
                     <div key={t.id} style={{
-                      padding: "12px 14px", borderBottom: i < groupItems.length - 1 ? "1px solid #242424" : "none",
+                      display: "flex", gap: 10,
+                      padding: "12px 4px", borderBottom: i < groupItems.length - 1 ? `1px solid ${C.line}` : "none",
                       cursor: "pointer"
                     }} onClick={() => setSelectedToolbox(t)}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1 }}>
+                      <RowIconTile icon={Hammer} color="#C4B5FD" />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F3E8FF", padding: "2px 8px", borderRadius: 20 }}>{t.meeting_type}</span>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{t.site}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#C4B5FD", background: "rgba(124,58,237,0.16)", padding: "2px 8px", borderRadius: RAD.pill }}>{t.meeting_type}</span>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{t.site}</div>
                           </div>
-                          <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
-                          <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>🎤 {t.presenter_name} · 👥 {attendees.length} signed</div>
-                          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          <div style={{ fontSize: 13, color: C.text.body, marginTop: 4 }}>{t.talking_points_json?.summary || t.topic}</div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Mic size={11} />{t.presenter_name}</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Users size={11} />{attendees.length} signed</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: C.text.faint, marginTop: 2 }}>
                             {new Date(t.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
                           </div>
                         </div>
-                        <div style={{ fontSize: 11, color: t.pdf_url ? "#7C3AED" : "#9CA3AF" }}>
-                          {t.pdf_url ? <><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />PDF</> : "No PDF"} →
+                        <div style={{ fontSize: 11, color: t.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+                          {t.pdf_url && <FileText size={11} />}{t.pdf_url ? "PDF" : "No PDF"} →
                         </div>
                       </div>
                     </div>
@@ -4008,19 +4109,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "nearmiss" && TAB_VISIBLE.nearmiss && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Near Miss Reports
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedNearMisses.length} of {companyNearMisses.length} shown.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search reporter or site…"
-              value={nmSearch}
-              onChange={e => setNmSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.nearmiss}
+              title={`${company?.name || ""} — Near Miss Reports`}
+              subtitle={`${processedNearMisses.length} of ${companyNearMisses.length} shown`}
             />
+
+            <StatStrip items={[
+              { icon: AlertTriangle, value: companyNearMisses.length, label: "Total reports", tone: "neutral" },
+              { icon: Flag, value: nmAwaiting.length, label: "Awaiting review", tone: nmAwaiting.length > 0 ? "warning" : "neutral" },
+              { icon: ShieldCheck, value: nmReviewed.length, label: "Reviewed", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search reporter or site…"
+                value={nmSearch}
+                onChange={e => setNmSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={nmSortBy} onChange={e => setNmSortBy(e.target.value)} style={styles.select}>
@@ -4038,7 +4147,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedNearMisses.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
                 <div style={{ marginBottom: 8 }}><AlertTriangle size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyNearMisses.length === 0 ? "No near miss reports yet." : "No near miss reports match your filters."}
               </div>
@@ -4046,14 +4155,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <>
                 {nmAwaiting.length > 0 && (
                   <>
-                    <div style={{ background: "#B45309", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 22 }}>🚩</span>
+                    <div style={{ background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.lg, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 34, height: 34, borderRadius: RAD.md, background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Flag size={17} color={C.status.warning.text} strokeWidth={2.25} />
+                      </div>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{nmAwaiting.length} Awaiting Review</div>
-                        <div style={{ fontSize: 12, opacity: 0.9 }}>Tap to review and record action taken</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: C.status.warning.text }}>{nmAwaiting.length} Awaiting Review</div>
+                        <div style={{ fontSize: 12, color: C.text.muted }}>Tap to review and record action taken</div>
                       </div>
                     </div>
-                    <div style={{ background: "rgba(245,158,11,0.14)", borderRadius: 10, border: "1.5px solid #FDE68A", padding: "4px 12px", marginBottom: 20 }}>
+                    <div style={{ background: C.panelInset, borderRadius: RAD.lg, border: `1.5px solid ${C.status.warning.border}`, padding: "4px 12px", marginBottom: 20 }}>
                       {nmAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                       ))}
@@ -4062,7 +4173,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 )}
                 {nmReviewed.length > 0 && (
                   <>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
                     {nmReviewed.map((n, i, arr) => (
                       <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedNearMiss(n)} kind="nearmiss" />
                     ))}
@@ -4091,19 +4202,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "incident" && TAB_VISIBLE.incident && (
           <div style={styles.card}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#F5F5F4", marginBottom: 4 }}>
-              {company?.name} — Incident Reports
-            </div>
-            <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>
-              {processedIncidents.length} of {companyIncidents.length} shown.
-            </div>
-
-            <input
-              style={styles.searchInput}
-              placeholder="🔍 Search reporter, site, or type…"
-              value={incSearch}
-              onChange={e => setIncSearch(e.target.value)}
+            <PanelHeader
+              icon={TAB_ICON.incident}
+              title={`${company?.name || ""} — Incident Reports`}
+              subtitle={`${processedIncidents.length} of ${companyIncidents.length} shown`}
             />
+
+            <StatStrip items={[
+              { icon: Siren, value: companyIncidents.length, label: "Total reports", tone: "neutral" },
+              { icon: Flag, value: incAwaiting.length, label: "Awaiting review", tone: incAwaiting.length > 0 ? "danger" : "neutral" },
+              { icon: ShieldCheck, value: incReviewed.length, label: "Reviewed", tone: "success" },
+            ]} />
+
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
+                placeholder="Search reporter, site, or type…"
+                value={incSearch}
+                onChange={e => setIncSearch(e.target.value)}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <select value={incSortBy} onChange={e => setIncSortBy(e.target.value)} style={styles.select}>
@@ -4121,7 +4240,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             {processedIncidents.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 0", color: "#9CA3AF" }}>
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
                 <div style={{ marginBottom: 8 }}><Siren size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
                 {companyIncidents.length === 0 ? "No incident reports yet." : "No incident reports match your filters."}
               </div>
@@ -4129,14 +4248,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <>
                 {incAwaiting.length > 0 && (
                   <>
-                    <div style={{ background: "#F87171", color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 22 }}>🚩</span>
+                    <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.lg, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 34, height: 34, borderRadius: RAD.md, background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Flag size={17} color={C.status.danger.text} strokeWidth={2.25} />
+                      </div>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{incAwaiting.length} Awaiting Review</div>
-                        <div style={{ fontSize: 12, opacity: 0.9 }}>Incident reports require your review — tap to record action taken</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: C.status.danger.text }}>{incAwaiting.length} Awaiting Review</div>
+                        <div style={{ fontSize: 12, color: C.text.muted }}>Incident reports require your review — tap to record action taken</div>
                       </div>
                     </div>
-                    <div style={{ background: "rgba(239,68,68,0.14)", borderRadius: 10, border: "1.5px solid rgba(239,68,68,0.4)", padding: "4px 12px", marginBottom: 20 }}>
+                    <div style={{ background: C.panelInset, borderRadius: RAD.lg, border: `1.5px solid ${C.status.danger.border}`, padding: "4px 12px", marginBottom: 20 }}>
                       {incAwaiting.map((n, i, arr) => (
                         <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                       ))}
@@ -4145,7 +4266,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 )}
                 {incReviewed.length > 0 && (
                   <>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Reviewed</div>
                     {incReviewed.map((n, i, arr) => (
                       <ReportRow key={n.id} rec={n} last={i === arr.length - 1} onClick={() => setSelectedIncident(n)} kind="incident" />
                     ))}
