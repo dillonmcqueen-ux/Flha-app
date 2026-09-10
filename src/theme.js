@@ -159,5 +159,30 @@ export const glow = {
 
 export const motion = { fast: "120ms ease", base: "200ms ease" };
 
-const theme = { colors, font, spacing, radius, shadow, glow, motion };
+// ---------------------------------------------------------------------------
+// Sidebar — semantic slots, not new colors
+// ---------------------------------------------------------------------------
+//
+// Pulled from the next-shadcn-admin-dashboard template's theme-preset
+// pattern (a fixed set of `--sidebar-*` roles — bg/border/accent/accent-fg —
+// that every preset fills in, so a persistent nav rail always has the
+// contrast it needs regardless of which preset is active). FORA only ships
+// one preset today (this file *is* that preset), so this is just those
+// slots named and filled from the palette already defined above — no new
+// hex values, same as the rest of this file's "reuse, don't invent" rule.
+// A future preset only has to define this same shape.
+export const sidebar = {
+  bg: surface.panel,
+  bgActive: "rgba(249,115,22,0.12)", // matches styles.tab's active-pill fill elsewhere in the app
+  border: surface.line,
+  groupLabel: text.faint,
+  itemText: text.muted,
+  itemTextActive: "#FB923C", // matches styles.tab's active-pill text elsewhere in the app
+  itemTextHover: text.body,
+  accent: brand.orange,
+  badgeBg: "rgba(249,115,22,0.16)",
+  badgeText: "#FDBA74",
+};
+
+const theme = { colors, font, spacing, radius, shadow, glow, motion, sidebar };
 export default theme;

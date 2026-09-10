@@ -9,6 +9,7 @@ import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionP
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
+import Sidebar from "./Sidebar";
 import TimeClockMap from "./TimeClockMap";
 import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
@@ -47,6 +48,17 @@ const TAB_ICON = {
   workforcecustomdocs: FolderKanban,
 };
 const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
+
+// Sidebar nav labels — same strings the old two-row tab bar used, moved
+// here as a lookup table since the sidebar (src/Sidebar.jsx) renders every
+// visible tab at once instead of one category's worth on click.
+const TAB_LABEL = {
+  flhas: "FLHAs", toolbox: "Toolbox Talks", nearmiss: "Near Misses", incident: "Incidents",
+  monthly: "Monthly", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
+  inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance",
+  customdocs: "Custom Docs", analytics: "Equipment Analytics",
+  timeclock: "Time Clock", roster: "Roster", workforcecustomdocs: "Custom Docs",
+};
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
 // the browser's local time (matching how that input type always displays).
@@ -2065,9 +2077,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
     { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
-  const CATEGORY_OF = Object.fromEntries(CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
-  const activeCategory = CATEGORY_OF[activeTab] || CATEGORIES[0].key;
-
   // If the currently open tab just got deactivated (or the company changed
   // to one that doesn't have it active), bounce to the first tab that is.
   useEffect(() => {
@@ -3395,16 +3404,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     );
   };
 
-  const renderTabBtn = (key, label, count) => {
-    const Icon = TAB_ICON[key];
-    return (
-      <button key={key} style={styles.tab(activeTab === key)} onClick={() => setActiveTab(key)}>
-        {Icon && <Icon size={14} strokeWidth={2.25} />}
-        <span>{label}{count > 0 ? ` (${count})` : ""}</span>
-      </button>
-    );
-  };
-
   if (loading) return (
     <div style={{ ...styles.wrap, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
       <div style={{ textAlign: "center", color: "#A1A1AA" }}>
@@ -3471,7 +3470,24 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         )}
       </header>
 
-      <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-start" }}>
+        <Sidebar
+          categories={CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t]))}
+          categoryIcon={CATEGORY_ICON}
+          tabIcon={TAB_ICON}
+          tabLabel={TAB_LABEL}
+          tabVisible={TAB_VISIBLE}
+          tabCounts={{
+            nearmiss: companyNearMisses.filter(n => !n.reviewed).length,
+            incident: companyIncidents.filter(n => !n.reviewed).length,
+            monthly: openCorrectiveCount,
+            maintenance: maintenanceStatus.filter(e => e.status === "overdue").length,
+          }}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+        />
+
+      <div style={{ padding: 16, flex: 1, minWidth: 0 }}>
 
         {/* Hero / welcome moment — the thing the flat-white-card version didn't
             have at all. Company greeting up front, orange radial glow behind
@@ -3668,43 +3684,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               </div>
             )}
           </div>
-        </div>
-
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-          {CATEGORIES.filter(cat => cat.tabs.some(t => TAB_VISIBLE[t])).map(cat => {
-            const Icon = CATEGORY_ICON[cat.key];
-            const active = activeCategory === cat.key;
-            return (
-              <button
-                key={cat.key}
-                style={styles.tab(active)}
-                onClick={() => {
-                  const firstVisible = cat.tabs.find(t => TAB_VISIBLE[t]);
-                  if (firstVisible) setActiveTab(firstVisible);
-                }}
-              ><Icon size={14} strokeWidth={2.25} /> {cat.label}</button>
-            );
-          })}
-        </div>
-
-        <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TAB_VISIBLE.flhas && activeCategory === "safety" && renderTabBtn("flhas", "FLHAs")}
-          {TAB_VISIBLE.toolbox && activeCategory === "safety" && renderTabBtn("toolbox", "Toolbox Talks")}
-          {TAB_VISIBLE.nearmiss && activeCategory === "safety" && renderTabBtn("nearmiss", "Near Misses", companyNearMisses.filter(n => !n.reviewed).length)}
-          {TAB_VISIBLE.incident && activeCategory === "safety" && renderTabBtn("incident", "Incidents", companyIncidents.filter(n => !n.reviewed).length)}
-          {TAB_VISIBLE.monthly && activeCategory === "safety" && renderTabBtn("monthly", "Monthly", openCorrectiveCount)}
-          {activeCategory === "safety" && renderTabBtn("sops", "SOPs")}
-          {TAB_VISIBLE.safetycustomdocs && activeCategory === "safety" && renderTabBtn("safetycustomdocs", "Custom Docs")}
-          {activeCategory === "safety" && renderTabBtn("safetyanalytics", "Safety Analytics")}
-          {TAB_VISIBLE.inspections && activeCategory === "operations" && renderTabBtn("inspections", "Inspections")}
-          {TAB_VISIBLE.daily && activeCategory === "operations" && renderTabBtn("daily", "Daily")}
-          {TAB_VISIBLE.equipment && activeCategory === "operations" && renderTabBtn("equipment", "Equipment")}
-          {TAB_VISIBLE.maintenance && activeCategory === "operations" && renderTabBtn("maintenance", "Maintenance", maintenanceStatus.filter(e => e.status === "overdue").length)}
-          {TAB_VISIBLE.customdocs && activeCategory === "operations" && renderTabBtn("customdocs", "Custom Docs")}
-          {activeCategory === "operations" && renderTabBtn("analytics", "Equipment Analytics")}
-          {TAB_VISIBLE.timeclock && activeCategory === "workforce" && renderTabBtn("timeclock", "Time Clock")}
-          {TAB_VISIBLE.roster && activeCategory === "workforce" && renderTabBtn("roster", "Roster")}
-          {TAB_VISIBLE.workforcecustomdocs && activeCategory === "workforce" && renderTabBtn("workforcecustomdocs", "Custom Docs")}
         </div>
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
@@ -4981,6 +4960,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
+      </div>
       </div>
     </div>
   );
