@@ -22,7 +22,7 @@ import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
-  Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu,
+  Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu, Fuel,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -41,6 +41,7 @@ const TAB_ICON = {
   daily: ClipboardList,
   equipment: Wrench,
   maintenance: Settings2,
+  fuel: Fuel,
   customdocs: FolderKanban,
   analytics: BarChart3,
   timeclock: Clock,
@@ -55,7 +56,7 @@ const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
 const TAB_LABEL = {
   flhas: "FLHAs", toolbox: "Toolbox Talks", nearmiss: "Near Misses", incident: "Incidents",
   monthly: "Monthly", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
-  inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance",
+  inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance", fuel: "Fuel Logs",
   customdocs: "Custom Docs", analytics: "Equipment Analytics",
   timeclock: "Time Clock", roster: "Roster", workforcecustomdocs: "Custom Docs",
 };
@@ -2052,6 +2053,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
+  // Fuel logs (docs/scope-fuel-log-tracker.md Phase 2) — loaded on demand
+  // like the equipment-reports tab, not eagerly with everything else in
+  // loadAll, since it's its own tab a supervisor may never open.
+  const [fuelLogs, setFuelLogs] = useState([]);
+  const [loadingFuelLogs, setLoadingFuelLogs] = useState(false);
+  useEffect(() => {
+    async function loadFuelLogs() {
+      if (activeTab !== "fuel" || !selectedCompany) return;
+      setLoadingFuelLogs(true);
+      try {
+        const res = await fetch("/api/fuellogs", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list", token }),
+        });
+        const data = await res.json();
+        if (res.ok) setFuelLogs((data.records || []).filter(r => r.company_id === selectedCompany));
+      } catch (e) { /* leave list as-is if the request fails */ }
+      setLoadingFuelLogs(false);
+    }
+    loadFuelLogs();
+  }, [activeTab, selectedCompany, token]);
+
   const submitLogService = async (eq) => {
     setSavingService(true);
     try {
@@ -2133,6 +2156,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     safetycustomdocs: hasActiveCustomFormIn("safety"),
     workforcecustomdocs: hasActiveCustomFormIn("workforce"),
     maintenance: isDocActive("maintenance"),
+    fuel: isDocActive("fuellog"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     safetyanalytics: true,
@@ -2150,7 +2174,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
     { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
-    { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "customdocs", "analytics"] },
+    { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "fuel", "customdocs", "analytics"] },
     { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
   ];
   // If the currently open tab just got deactivated (or the company changed
@@ -4832,6 +4856,65 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   </div>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {activeTab === "fuel" && TAB_VISIBLE.fuel && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={TAB_ICON.fuel}
+              title={`${company?.name || ""} — Fuel Logs`}
+              subtitle="Every fuel-up, grouped by machine — burn rate compares each entry's reading to the most recent reading before it (from a fuel log or a pre/post-trip inspection, whichever's newer)"
+            />
+
+            {fuelLogs.length > 0 && (
+              <StatStrip items={[
+                { icon: Fuel, value: fuelLogs.length, label: "Fuel-ups logged", tone: "neutral" },
+                { icon: FileText, value: `$${fuelLogs.reduce((sum, f) => sum + (Number(f.cost) || 0), 0).toFixed(0)}`, label: "Total cost", tone: "neutral" },
+                { icon: Wrench, value: new Set(fuelLogs.map(f => f.equipment_label)).size, label: "Machines", tone: "neutral" },
+              ]} />
+            )}
+
+            {loadingFuelLogs ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+            ) : fuelLogs.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Fuel size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+                No fuel logged yet.
+              </div>
+            ) : (
+              Object.entries(
+                fuelLogs.reduce((groups, f) => {
+                  (groups[f.equipment_label] = groups[f.equipment_label] || []).push(f);
+                  return groups;
+                }, {})
+              ).map(([label, entries]) => (
+                <div key={label} style={{ marginBottom: 18 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 6 }}>{label}</div>
+                  {entries.map((f, i) => (
+                    <div key={f.id} style={{ padding: "10px 4px", borderBottom: i < entries.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "center", gap: 10 }}>
+                      <RowIconTile icon={Fuel} color={C.text.faint} />
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>
+                            {f.quantity} {f.quantity_unit}{f.cost ? ` · $${Number(f.cost).toFixed(2)}` : ""}
+                          </div>
+                          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
+                            {f.worker_name} · {new Date(f.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                            {f.hour_reading && ` · ${f.hour_reading} ${f.reading_unit || ""}`}
+                          </div>
+                        </div>
+                        {f.burn_rate != null && (
+                          <div style={{ fontSize: 11, fontWeight: 700, color: C.status.info.text, background: C.status.info.bg, border: `1px solid ${C.status.info.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            {f.burn_rate.toFixed(2)} {f.quantity_unit}/{f.reading_unit === "KM" ? "km" : "hr"}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))
             )}
           </div>
         )}

@@ -164,14 +164,68 @@ export default async function handler(req, res) {
       return res.status(200).json({ id: data?.[0]?.id || null });
     }
 
-    // ── Supervisor / Admin: load fuel logs ──────────────────────────
+    // ── Supervisor / Admin: load fuel logs, each with a computed burn rate ──
+    // Burn rate (docs/scope-fuel-log-tracker.md Phase 2) = quantity used /
+    // (this reading - the previous known reading for that same machine).
+    // "Previous known reading" is looked up across BOTH fuel_logs and
+    // inspections (pre/post-trip readings) — a fuel-up between two
+    // inspections still gets a real number, and vice versa — always keyed
+    // on (company_id, equipment_label) together, never equipment_label
+    // alone, so one tenant's machine history can never feed another's.
     if (action === 'list') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       let query = supabaseAdmin.from('fuel_logs').select(LIST_COLUMNS).order('created_at', { ascending: false });
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
-      const { data, error } = await query;
+      const { data: fuelRows, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load fuel logs.' });
-      return res.status(200).json({ records: data || [] });
+
+      const companyIds = session.role === 'supervisor'
+        ? [session.companyId]
+        : [...new Set((fuelRows || []).map(r => r.company_id))];
+
+      let inspRows = [];
+      if (companyIds.length > 0) {
+        const { data } = await supabaseAdmin
+          .from('inspections')
+          .select('company_id, equipment_label, start_reading, end_reading, reading_unit, created_at, trip_type')
+          .in('company_id', companyIds);
+        inspRows = data || [];
+      }
+
+      const timelineKey = (companyId, label) => `${companyId}::${label}`;
+      const timelines = new Map();
+      const addPoint = (companyId, label, reading, unit, at) => {
+        const value = parseFloat(reading);
+        if (!label || Number.isNaN(value)) return;
+        const k = timelineKey(companyId, label);
+        if (!timelines.has(k)) timelines.set(k, []);
+        timelines.get(k).push({ value, unit, at: new Date(at).getTime() });
+      };
+      inspRows.forEach(insp => {
+        const reading = insp.trip_type === 'posttrip' ? (insp.end_reading || insp.start_reading) : insp.start_reading;
+        addPoint(insp.company_id, insp.equipment_label, reading, insp.reading_unit, insp.created_at);
+      });
+      (fuelRows || []).forEach(f => addPoint(f.company_id, f.equipment_label, f.hour_reading, f.reading_unit, f.created_at));
+
+      const records = (fuelRows || []).map(f => {
+        const thisReading = parseFloat(f.hour_reading);
+        let burnRate = null;
+        if (!Number.isNaN(thisReading)) {
+          const points = timelines.get(timelineKey(f.company_id, f.equipment_label)) || [];
+          const at = new Date(f.created_at).getTime();
+          let prior = null;
+          for (const p of points) {
+            if (p.at < at && p.unit === f.reading_unit && (!prior || p.at > prior.at)) prior = p;
+          }
+          if (prior) {
+            const delta = thisReading - prior.value;
+            if (delta > 0) burnRate = Number(f.quantity) / delta;
+          }
+        }
+        return { ...f, burn_rate: burnRate };
+      });
+
+      return res.status(200).json({ records });
     }
 
     return res.status(400).json({ error: 'Unknown action.' });

@@ -1,9 +1,11 @@
 # Scope: fuel log tracker
 
-Status: **Phase 1 built.** Manual fuel-up logging is live — `src/FuelLog.jsx`
+Status: **Phases 1-2 built.** Manual fuel-up logging is live — `src/FuelLog.jsx`
 (own tile in the worker menu, per the confirmed decision below), `api/fuellogs.js`,
-and the `fuel_logs` table (migration applied to production). Not yet built:
-Phases 2-4 (burn rate/history, dashboard rollup, exception alerts) and the
+and the `fuel_logs` table (migration applied to production). Phase 2 added
+per-row burn rate calculation and a supervisor/admin-facing "Fuel Logs" tab
+in the Dashboard (Operations group), grouped by machine. Not yet built:
+Phases 3-4 (dashboard cost/PDF rollup, exception alerts) and the
 receipt-photo capture mentioned below — cut from Phase 1 to keep the first
 build small; see "Deferred from Phase 1" at the bottom.
 
@@ -128,11 +130,19 @@ compare against.
   document-toggle system (`fuellog` added to `BUILTIN_DOC_KEYS` in
   `api/customforms.js`), same as every other built-in document type.
 
-**Phase 2 — burn rate + per-machine history**
-- `api/fuellogs.js` computes burn rate on each new log using the lookup
-  above.
-- Equipment detail view (wherever equipment history lives today, or a new
-  tab) shows a fuel history list per machine with burn rate trend.
+**Phase 2 — burn rate + per-machine history (built)**
+- `api/fuellogs.js`'s `list` action computes burn rate per fuel log at
+  read time (not stored — recalculated from `fuel_logs` + `inspections`
+  each time a supervisor/admin opens the tab), using the lookup above.
+  Always double-keyed on `(company_id, equipment_label)`, never
+  `equipment_label` alone — confirmed by a second tenant-scope review
+  after this cross-table logic was added.
+- New "Fuel Logs" tab in the Dashboard's Operations group (next to
+  Maintenance), gated by the same `fuellog` document-toggle as the
+  worker-facing tile. Grouped by machine, newest entries first within each
+  group, each row showing quantity/cost/reading and the computed burn rate
+  where one exists (no prior reading yet on that machine = no rate shown,
+  not a zero or an error).
 
 **Phase 3 — dashboard/analytics rollup**
 - New stat card or `Analytics.jsx` section: total fuel cost this
