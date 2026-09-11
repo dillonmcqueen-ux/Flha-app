@@ -2058,17 +2058,22 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // loadAll, since it's its own tab a supervisor may never open.
   const [fuelLogs, setFuelLogs] = useState([]);
   const [loadingFuelLogs, setLoadingFuelLogs] = useState(false);
+  const [fuelSiteNames, setFuelSiteNames] = useState({});
   useEffect(() => {
     async function loadFuelLogs() {
-      if (activeTab !== "fuel" || !selectedCompany) return;
+      // Needed on both the Fuel Logs tab itself and Equipment Analytics
+      // (docs/scope-fuel-log-tracker.md Phase 3's cost/burn-rate rollup).
+      if ((activeTab !== "fuel" && activeTab !== "analytics") || !selectedCompany) return;
       setLoadingFuelLogs(true);
       try {
-        const res = await fetch("/api/fuellogs", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list", token }),
-        });
-        const data = await res.json();
-        if (res.ok) setFuelLogs((data.records || []).filter(r => r.company_id === selectedCompany));
+        const [fuelRes, siteRes] = await Promise.all([
+          fetch("/api/fuellogs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list", token }) }),
+          fetch("/api/companydata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_sites", token, companyId: selectedCompany }) }),
+        ]);
+        const fuelData = await fuelRes.json();
+        if (fuelRes.ok) setFuelLogs((fuelData.records || []).filter(r => r.company_id === selectedCompany));
+        const siteData = await siteRes.json();
+        if (siteRes.ok) setFuelSiteNames(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
       } catch (e) { /* leave list as-is if the request fails */ }
       setLoadingFuelLogs(false);
     }
@@ -2546,6 +2551,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         companyName: company?.name, companyLogo: company?.logo_url,
         inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
         customDocs: companyOperationsCustomDocs,
+        fuelLogs: TAB_VISIBLE.fuel ? fuelLogs : [], siteNames: fuelSiteNames,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
@@ -4661,6 +4667,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               daily={companyDaily}
               maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
               customDocs={companyOperationsCustomDocs}
+              fuelLogs={TAB_VISIBLE.fuel ? fuelLogs : []}
+              siteNames={fuelSiteNames}
             />
           </>
         )}

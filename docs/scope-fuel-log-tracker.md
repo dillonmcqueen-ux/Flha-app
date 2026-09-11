@@ -1,13 +1,17 @@
 # Scope: fuel log tracker
 
-Status: **Phases 1-2 built.** Manual fuel-up logging is live — `src/FuelLog.jsx`
+Status: **Phases 1-3 built.** Manual fuel-up logging is live — `src/FuelLog.jsx`
 (own tile in the worker menu, per the confirmed decision below), `api/fuellogs.js`,
 and the `fuel_logs` table (migration applied to production). Phase 2 added
 per-row burn rate calculation and a supervisor/admin-facing "Fuel Logs" tab
-in the Dashboard (Operations group), grouped by machine. Not yet built:
-Phases 3-4 (dashboard cost/PDF rollup, exception alerts) and the
-receipt-photo capture mentioned below — cut from Phase 1 to keep the first
-build small; see "Deferred from Phase 1" at the bottom.
+in the Dashboard (Operations group), grouped by machine. Phase 3 added a
+Fuel Cost & Consumption section to the Equipment Analytics tab (Advanced
+tier) and its PDF export — cost/quantity totals, cost and burn rate by
+machine, cost by site, and a plain "flagged" list for machines running
+25%+ above their own trailing burn rate. Not yet built: Phase 4 (turning
+that flag into a dashboard alert) and the receipt-photo capture mentioned
+below — cut from Phase 1 to keep the first build small; see "Deferred from
+Phase 1" at the bottom.
 
 Decisions locked in for Phase 1 (previously open questions): liters as the
 default unit (worker can switch to gal per entry), cost is optional, and
@@ -144,19 +148,35 @@ compare against.
   where one exists (no prior reading yet on that machine = no rate shown,
   not a zero or an error).
 
-**Phase 3 — dashboard/analytics rollup**
-- New stat card or `Analytics.jsx` section: total fuel cost this
-  period, cost per site, machines flagged for above-normal burn rate.
-- PDF export of a fuel report, following the existing per-document PDF
-  pattern (`src/generateEquipmentAnalyticsPDF.js` is the closest existing
-  template).
+**Phase 3 — dashboard/analytics rollup (built)**
+- `analyticsUtils.js`'s new `fuelSummary()` aggregates cost/quantity
+  totals, cost + burn rate by machine, and cost by site — same style as
+  the existing `maintenanceSummary()`/`equipmentIssueStats()` functions it
+  sits next to, so the on-screen tab and the PDF export share one source
+  of truth (same convention the file's own header comment calls out for
+  Safety vs. Equipment analytics).
+- `Analytics.jsx`'s `EquipmentAnalyticsPanel` (Advanced tier only, same
+  gate as Equipment Issue Detail and Preventative Maintenance) gained a
+  "Fuel Cost & Consumption" section — total cost/quantity, a "Machines
+  Flagged" tile, a per-machine table (fuel-ups, cost, avg/latest burn
+  rate), and a cost-by-site table.
+- `generateEquipmentAnalyticsPDF.js` mirrors the same two tables, so the
+  downloaded snapshot never drifts from what's on screen — confirmed by a
+  pdf-consistency-reviewer pass (shared jsPDF/header/footer boilerplate
+  untouched, same page-break convention reused).
+- "Machines flagged": a plain filter (not stored, not alerted) for a
+  machine with 3+ rated fuel-ups whose latest burn rate is 25%+ above its
+  own trailing average — the same 25% guess from this doc's first draft,
+  still unvalidated against real data. This is groundwork for Phase 4, not
+  Phase 4 itself: it only shows up inside the Analytics tab a supervisor
+  has to go open, not as a standing dashboard alert.
 
-**Phase 4 — exception alerts (optional, only if Phase 2/3 data shows it's
-worth it)**
-- Dashboard flag when a machine's latest burn rate crosses its own
-  threshold. Not a notification/push system, just a visible flag —
-  matches the existing defect-flag pattern rather than adding new
-  infrastructure.
+**Phase 4 — exception alerts (optional, only if Phase 3's flag data shows
+it's worth it)**
+- Turn the "Machines Flagged" count from something a supervisor has to
+  find in the Equipment Analytics tab into a visible flag on the main
+  Dashboard — matches the existing defect-flag pattern rather than adding
+  new infrastructure (still no push/notification system).
 
 ## Deferred from Phase 1
 
@@ -167,11 +187,8 @@ worth it)**
   fuel data flowing" rather than bundling a second feature into it. Worth
   its own short scoping pass if it turns out to matter to real users —
   don't build it speculatively.
-- **A place to actually view logged entries.** `api/fuellogs.js` has a
-  `list` action (supervisor/admin, company-scoped) so the data isn't a dead
-  end, but there's no screen calling it yet — that's Phase 2's "per-machine
-  history" and Phase 3's dashboard rollup. Until then, entries are visible
-  only via direct DB query.
+- ~~A place to actually view logged entries~~ — done as of Phase 2 (Fuel
+  Logs tab) and Phase 3 (Equipment Analytics rollup + PDF export).
 
 ## Remaining open question
 
@@ -182,9 +199,13 @@ anything built so far.
 
 ## TL;DR
 
-Phase 1 built: standalone "Log Fuel" tile, hour/KM reading pre-filled from
-whichever is more recent between the last fuel log and the last pre/post-trip
-inspection, offline-queue-backed submit, admin can hide it per company.
-Cut receipt photos and a viewing screen from this first pass to keep it
-tight — both are real scope on their own, not a five-minute add-on. Next up
-per the phase order: burn-rate calculation + per-machine history (Phase 2).
+Phases 1-3 built. Workers log fuel-ups from their own menu tile (hour/KM
+reading pre-filled from whichever's more recent between the last fuel log
+and the last pre/post-trip inspection); supervisors/admins see it three
+ways — a Fuel Logs tab grouped by machine, a Fuel Cost & Consumption
+section in Equipment Analytics (Advanced tier) with a per-machine and
+per-site cost/burn-rate breakdown, and the same numbers in the PDF export.
+Cut receipt photos from Phase 1 to keep the first build tight — real scope
+on its own, not a five-minute add-on. What's left: Phase 4, turning the
+"machines flagged" list into an actual dashboard alert, worth doing once
+there's enough real usage to trust the 25% threshold.
