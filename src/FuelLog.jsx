@@ -120,6 +120,11 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
   // still edit it.
   useEffect(() => {
     const label = equipmentLabel();
+    // Clear immediately on every equipment change — otherwise switching from
+    // machine A to machine B keeps A's reading in the field until (or even
+    // after) B's check_equipment call resolves, and a worker who doesn't
+    // notice submits B's fuel-up against A's meter reading.
+    setHourReading("");
     if (!label) { setLastReading(null); return; }
     let cancelled = false;
     setCheckingReading(true);
@@ -130,7 +135,7 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
         setLastReading(data.lastReading || null);
         if (data.lastReading) {
           setReadingUnit(data.lastReading.unit || "Hours");
-          setHourReading(prev => prev || data.lastReading.value || "");
+          setHourReading(data.lastReading.value || "");
         }
       })
       .catch(() => {})
