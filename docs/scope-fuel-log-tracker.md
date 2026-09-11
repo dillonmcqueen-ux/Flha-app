@@ -1,6 +1,16 @@
 # Scope: fuel log tracker
 
-Status: scoped, not built.
+Status: **Phase 1 built.** Manual fuel-up logging is live — `src/FuelLog.jsx`
+(own tile in the worker menu, per the confirmed decision below), `api/fuellogs.js`,
+and the `fuel_logs` table (migration applied to production). Not yet built:
+Phases 2-4 (burn rate/history, dashboard rollup, exception alerts) and the
+receipt-photo capture mentioned below — cut from Phase 1 to keep the first
+build small; see "Deferred from Phase 1" at the bottom.
+
+Decisions locked in for Phase 1 (previously open questions): liters as the
+default unit (worker can switch to gal per entry), cost is optional, and
+"Log Fuel" got its own tile in the worker menu rather than folding into
+post-trip.
 
 ## What this is
 
@@ -41,31 +51,36 @@ That second list is what this scope builds toward.
 
 ## Data model
 
-New table, same shape as the existing company-scoped tables
-(`inspection_forms`, `equipment_reports`):
+**Built as-is** (corrected from this doc's first draft: the real pre/post-trip
+table is `inspections`, not `inspection_forms` — checked against the live
+schema before writing the migration):
 
 ```sql
 create table fuel_logs (
   id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
   company_id bigint not null references companies(id),
   equipment_id bigint references equipment(id),
   equipment_label text not null,       -- fallback for "other" equipment not in the roster, same pattern as Inspection.jsx's eqMode
   worker_name text not null,
-  logged_at timestamptz not null default now(),
-  hour_reading numeric,                 -- meter reading at fill-up time (Hours or KM, same unit as that equipment's inspections)
+  hour_reading text,                    -- text, matching inspections.start_reading/end_reading's existing type
   reading_unit text,                    -- 'Hours' | 'KM'
   quantity numeric not null,            -- liters or gallons
-  quantity_unit text not null,          -- 'L' | 'gal'
+  quantity_unit text not null default 'L',
   cost numeric,                         -- optional, $ spent
   site_id bigint references sites(id),  -- optional, for per-site rollups
-  receipt_photo_url text,               -- optional, signed-upload pattern (src/uploadViaSignedUrl.js)
-  created_at timestamptz not null default now()
+  meta_json jsonb not null default '{}'::jsonb  -- carries client_submission_id for offline-queue idempotency, same convention as api/reports.js
 );
 ```
 
-RLS: deny-by-default with no policies, same as every other table (per
-README's documented model) — enforced entirely through `api/fuellogs.js`'s
-session checks, not client-side Supabase calls.
+No `receipt_photo_url` column — cut from Phase 1, see "Deferred" below.
+
+RLS: enabled with no policies, same deny-by-default backstop as every other
+table (per README's documented model) — enforced entirely through
+`api/fuellogs.js`'s session checks, not client-side Supabase calls.
+`equipment_id`/`site_id` are cross-checked against the caller's own
+`company_id` server-side before insert (caught in tenant-scope review),
+not just left to the foreign key.
 
 ## Burn rate calculation
 
@@ -79,9 +94,13 @@ burn_rate = quantity_used / (hour_reading_now - hour_reading_previous)
 
 Where `hour_reading_previous` comes from whichever is more recent for that
 equipment: the last fuel log, or the last pre/post-trip inspection reading
-(`inspection_forms.start_reading` / `end_reading`) — both already exist and
+(`inspections.start_reading` / `end_reading`) — both already exist and
 use the same `Hours`/`KM` unit per machine, so this is a straight lookup
-across two tables keyed on `equipment_id`, no new source of truth needed.
+across two tables keyed on `equipment_id` (and always double-keyed on
+`company_id` too, per the tenant-scope note above — a cross-tenant
+`equipment_id` must never feed into this lookup). `api/fuellogs.js`'s
+`check_equipment` action already does this lookup for the entry form's
+pre-fill; Phase 2 reuses the same query for the burn-rate calculation.
 
 Flagging: a machine's burn rate more than some threshold (e.g. 25%) above
 its own trailing average gets flagged on the dashboard, the same visual
@@ -92,17 +111,22 @@ compare against.
 
 ## Feature phases
 
-**Phase 1 — logging**
-- Standalone "Log Fuel" flow, same worker-facing shell as `Inspection.jsx`
-  (equipment picker, worker name, then the fuel fields).
-- Fields: equipment, hour/KM reading (pre-filled with the most recent known
-  reading, editable), quantity + unit, cost (optional), site (optional).
-- Optional receipt photo, reusing `uploadViaSignedUrl.js` — same offline
-  caveat as Incident's photo capture (queued, not instant, per
-  `docs/scope-offline-capability.md`).
+**Phase 1 — logging (built)**
+- Standalone "Log Fuel" flow (`src/FuelLog.jsx`), own tile in the worker
+  menu, same worker-facing shell/style as `Inspection.jsx`.
+- Fields: equipment (fleet picker or free text), worker name, hour/KM
+  reading (pre-filled from `api/fuellogs.js`'s `check_equipment` — whichever
+  is more recent between the last fuel log and the last pre/post-trip
+  inspection reading — editable), quantity + unit (L/gal), cost (optional),
+  site (optional, from the existing site list).
 - Goes through the offline queue like every other worker-facing submit
-  (`WorkerMenu.jsx`'s `RESUBMIT_HANDLERS` pattern) so a no-signal fill-up
-  at a remote site still saves.
+  (`WorkerMenu.jsx`'s `RESUBMIT_HANDLERS` pattern, `resubmitFuelLog`) so a
+  no-signal fill-up at a remote site still saves and sends automatically
+  once back online. Draft autosave included (single-screen form, so there's
+  no in-progress step to restore, just the field values).
+- Admin can hide the "Log Fuel" tile per company via the existing
+  document-toggle system (`fuellog` added to `BUILTIN_DOC_KEYS` in
+  `api/customforms.js`), same as every other built-in document type.
 
 **Phase 2 — burn rate + per-machine history**
 - `api/fuellogs.js` computes burn rate on each new log using the lookup
@@ -124,28 +148,33 @@ worth it)**
   matches the existing defect-flag pattern rather than adding new
   infrastructure.
 
-## Open questions to settle before building
+## Deferred from Phase 1
 
-1. **Unit default** — liters or gallons? Assuming liters (Canadian crews,
-   matches the existing metric-leaning app), but confirm.
-2. **Cost field mandatory or optional?** Recommend optional — some crews
-   fuel from a company tank with no per-fill cost, others buy at a pump
-   and have a receipt. Forcing it would block the tank-fuel case.
-3. **Where does "Log Fuel" live in the worker menu?** Own tile next to
-   Inspection, or folded into the post-trip inspection flow as an extra
-   step? Recommend its own tile — fuel-ups don't always happen at
-   post-trip (mid-shift fill-ups are common), so tying it to that flow
-   would miss most real entries.
-4. **Threshold for the burn-rate flag (Phase 4)** — 25% above trailing
-   average was a guess for this doc, not a researched number. Needs real
-   data from a few companies' first month of use before picking one.
+- **Receipt photo capture.** Scoped above as optional, but building the full
+  offline-photo path (a private storage bucket, signed-upload flow, and the
+  blob-queue handling Incident.jsx already has for its own photos) is real
+  added scope on its own. Cut from this first build to keep Phase 1 to "get
+  fuel data flowing" rather than bundling a second feature into it. Worth
+  its own short scoping pass if it turns out to matter to real users —
+  don't build it speculatively.
+- **A place to actually view logged entries.** `api/fuellogs.js` has a
+  `list` action (supervisor/admin, company-scoped) so the data isn't a dead
+  end, but there's no screen calling it yet — that's Phase 2's "per-machine
+  history" and Phase 3's dashboard rollup. Until then, entries are visible
+  only via direct DB query.
+
+## Remaining open question
+
+**Threshold for the burn-rate flag (Phase 4)** — 25% above trailing average
+was a guess for this doc, not a researched number. Needs real data from a
+few companies' first month of use before picking one. Not a blocker for
+anything built so far.
 
 ## TL;DR
 
-Standalone fuel-log entry (equipment, hour/KM reading, quantity, optional
-cost/photo), reusing the hour readings already captured by pre/post-trip
-inspections to compute burn rate per machine with no second data source.
-Build order: logging → burn rate/history → dashboard rollup → exception
-flags. Four things need your call before Phase 1 starts (unit, cost
-required or not, where it lives in the worker menu, and the flag
-threshold, though that last one can wait until Phase 4).
+Phase 1 built: standalone "Log Fuel" tile, hour/KM reading pre-filled from
+whichever is more recent between the last fuel log and the last pre/post-trip
+inspection, offline-queue-backed submit, admin can hide it per company.
+Cut receipt photos and a viewing screen from this first pass to keep it
+tight — both are real scope on their own, not a five-minute add-on. Next up
+per the phase order: burn-rate calculation + per-machine history (Phase 2).
