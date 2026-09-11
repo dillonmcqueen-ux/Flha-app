@@ -14,7 +14,8 @@ import { drainQueue } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   ClipboardList, ClipboardCheck, Hammer, AlertTriangle, Siren, CalendarClock,
-  Clock, LogOut, ChevronRight, FileText, Inbox, FolderClock, Fuel,
+  Clock, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
+  HardHat, Wrench, Layers,
 } from "lucide-react";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
@@ -37,16 +38,31 @@ const RESUBMIT_HANDLERS = {
 // worker and a supervisor should see the same glyph for "FLHA", etc.
 // Accent colors are untouched from the pre-redesign version (existing
 // precedent per-doc-type — not part of this pass's scope).
+//
+// `category` buckets each type into one of the three worker-facing menu
+// groups below. Timeclock has no category — it gets its own top-and-centered
+// button rather than living inside a category (see WorkerMenu below).
 const BUILTIN_TYPES = [
-  { key: "flha", icon: ClipboardList, title: "FLHA", desc: "Field Level Hazard Assessment", ready: true, accent: "#F97316" },
-  { key: "inspection", icon: ClipboardCheck, title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1" },
-  { key: "toolbox", icon: Hammer, title: "Toolbox Talk", desc: "Crew safety meeting record", ready: true, accent: "#7C3AED" },
-  { key: "nearmiss", icon: AlertTriangle, title: "Near Miss Report", desc: "Report a close call", ready: true, accent: "#D97706" },
-  { key: "incident", icon: Siren, title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626" },
-  { key: "daily", icon: ClipboardList, title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
-  { key: "monthly", icon: CalendarClock, title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
-  { key: "timeclock", icon: Clock, title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2" },
-  { key: "fuellog", icon: Fuel, title: "Log Fuel", desc: "Record a fuel-up", ready: true, accent: "#F59E0B" },
+  { key: "flha", icon: ClipboardList, title: "FLHA", desc: "Field Level Hazard Assessment", ready: true, accent: "#F97316", category: "safety" },
+  { key: "toolbox", icon: Hammer, title: "Toolbox Talk", desc: "Crew safety meeting record", ready: true, accent: "#7C3AED", category: "safety" },
+  { key: "nearmiss", icon: AlertTriangle, title: "Near Miss Report", desc: "Report a close call", ready: true, accent: "#D97706", category: "safety" },
+  { key: "incident", icon: Siren, title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626", category: "safety" },
+  { key: "inspection", icon: ClipboardCheck, title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1", category: "equipment" },
+  { key: "fuellog", icon: Fuel, title: "Log Fuel", desc: "Record a fuel-up", ready: true, accent: "#F59E0B", category: "equipment" },
+  { key: "daily", icon: ClipboardList, title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A", category: "general" },
+  { key: "monthly", icon: CalendarClock, title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA", category: "general" },
+  { key: "timeclock", icon: Clock, title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2", category: null },
+];
+
+// The three worker-facing menu categories. `formCategory` is the same
+// safety/operations/workforce value already set on custom forms in
+// CustomFormBuilder.jsx (drives Dashboard.jsx's admin tabs) — reusing it
+// here means an admin who tags a custom form "Operations" there sees it
+// land under "Equipment" here, with no second place to configure it.
+const CATEGORIES = [
+  { key: "safety", formCategory: "safety", label: "Safety", icon: HardHat, accent: "#DC2626", blurb: "Hazard assessments, toolbox talks, near miss & incident reports" },
+  { key: "equipment", formCategory: "operations", label: "Equipment", icon: Wrench, accent: "#0369A1", blurb: "Equipment inspections and fuel logging" },
+  { key: "general", formCategory: "workforce", label: "General", icon: Layers, accent: "#7C3AED", blurb: "Daily reports and site inspections" },
 ];
 
 export default function WorkerMenu({ companyId, companyName, userName = "", userId = null, onLogout, token, backLabel = "Sign out" }) {
@@ -55,6 +71,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [builtinActive, setBuiltinActive] = useState(null); // null = loading
   const [customForms, setCustomForms] = useState([]);
   const [showMyDocs, setShowMyDocs] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
 
   useEffect(() => {
     async function loadDocs() {
@@ -171,40 +188,126 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     }),
   };
 
-  const visibleBuiltins = (builtinActive
+  const visibleBuiltins = builtinActive
     ? BUILTIN_TYPES.filter(d => builtinActive[d.key] !== false)
-    : BUILTIN_TYPES // show everything while loading, then narrow once loaded
-  ).filter(d => d.key !== "timeclock" || userId); // needs a real per-person identity, regardless of loading state
+    : BUILTIN_TYPES; // show everything while loading, then narrow once loaded
+
+  const timeclockItem = visibleBuiltins.find(d => d.key === "timeclock" && userId); // needs a real per-person identity, regardless of loading state
+  const categorizedBuiltins = visibleBuiltins.filter(d => d.category);
 
   const loading = builtinActive === null;
 
-  return (
-    <div style={s.wrap}>
-      <header style={{
-        position: "sticky", top: 0, zIndex: 40,
-        background: "rgba(10,10,10,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
-        borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)", flexShrink: 0 }} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.text.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {companyName || "FORA"}
-            </div>
-            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, letterSpacing: "-0.01em" }}>Choose a form</div>
-          </div>
+  // Bucket each category's items (built-in + matching custom forms) once,
+  // so both the home screen's subtitle and the sub-menu screen read off the
+  // same list.
+  const categoryItems = (cat) => ({
+    builtins: categorizedBuiltins.filter(d => d.category === cat.key),
+    forms: customForms.filter(f => (f.category || "operations") === cat.formCategory),
+  });
+
+  const visibleCategories = CATEGORIES
+    .map(cat => ({ ...cat, ...categoryItems(cat) }))
+    .filter(cat => cat.builtins.length > 0 || cat.forms.length > 0);
+
+  const totalItems = categorizedBuiltins.length + customForms.length + (timeclockItem ? 1 : 0);
+
+  const renderItemCard = (d) => {
+    const Icon = d.icon;
+    return (
+      <div key={d.key} style={s.card(d.accent, d.ready)} onClick={() => d.ready && setDoc(d.key)}>
+        <div style={s.iconTile(d.accent)}>
+          <Icon size={22} color={d.accent} strokeWidth={2.25} />
         </div>
-        {onLogout && (
-          <button onClick={onLogout} style={{
-            display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
-            border: `1px solid ${C.line}`, background: "transparent", padding: "8px 14px",
-            borderRadius: RAD.md, cursor: "pointer", fontWeight: 600, flexShrink: 0, minHeight: 36,
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{d.title}</div>
+          <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>{d.desc}</div>
+        </div>
+        {d.ready
+          ? <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+          : <span style={{ fontSize: 11, fontWeight: 700, color: C.text.muted, background: C.panelInset, border: `1px solid ${C.line}`, padding: "4px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>SOON</span>}
+      </div>
+    );
+  };
+
+  const renderFormCard = (f) => (
+    <div key={f.id} style={s.card(f.accent_color || "#4338CA", true)} onClick={() => { setCustomFormId(f.id); setDoc("custom"); }}>
+      <div style={s.iconTile(f.accent_color || "#4338CA")}>
+        {f.icon
+          ? <span style={{ fontSize: 22 }}>{f.icon}</span>
+          : <FileText size={22} color={f.accent_color || "#4338CA"} strokeWidth={2.25} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{f.title}</div>
+        <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>Custom document</div>
+      </div>
+      <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+    </div>
+  );
+
+  const header = (title, onBack) => (
+    <header style={{
+      position: "sticky", top: 0, zIndex: 40,
+      background: "rgba(10,10,10,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+      borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            width: 32, height: 32, borderRadius: RAD.md, border: `1px solid ${C.line}`,
+            background: "transparent", color: C.text.body, cursor: "pointer",
           }}>
-            <LogOut size={14} /> {backLabel}
+            <ChevronLeft size={18} />
           </button>
         )}
-      </header>
+        {!onBack && <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)", flexShrink: 0 }} />}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.text.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {companyName || "FORA"}
+          </div>
+          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, letterSpacing: "-0.01em" }}>{title}</div>
+        </div>
+      </div>
+      {onLogout && !onBack && (
+        <button onClick={onLogout} style={{
+          display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
+          border: `1px solid ${C.line}`, background: "transparent", padding: "8px 14px",
+          borderRadius: RAD.md, cursor: "pointer", fontWeight: 600, flexShrink: 0, minHeight: 36,
+        }}>
+          <LogOut size={14} /> {backLabel}
+        </button>
+      )}
+    </header>
+  );
+
+  // ── CATEGORY SUB-MENU ────────────────────────────────────
+  if (activeCategory) {
+    const cat = visibleCategories.find(c => c.key === activeCategory);
+    if (!cat) { setActiveCategory(null); return null; }
+    return (
+      <div style={s.wrap}>
+        {header(cat.label, () => setActiveCategory(null))}
+        <div style={s.body}>
+          <div style={{ margin: "18px 0" }}>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: "clamp(22px,6vw,28px)", color: C.text.primary, letterSpacing: "-0.02em" }}>
+              {cat.label}
+            </div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginTop: 4 }}>{cat.blurb}</div>
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {cat.builtins.map(renderItemCard)}
+            {cat.forms.map(renderFormCard)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── HOME SCREEN ──────────────────────────────────────────
+  return (
+    <div style={s.wrap}>
+      {header("Home")}
 
       <div style={s.body}>
         {/* Same hero-glow language as Dashboard.jsx's welcome moment — this
@@ -229,10 +332,35 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
               {userName ? `Hey, ${userName.split(" ")[0]}` : "Welcome"}
             </div>
             <div style={{ fontSize: 13, color: C.text.muted, marginTop: 4 }}>
-              Pick a document to fill out below.
+              Clock in below, or pick what you need to fill out.
             </div>
           </div>
         </div>
+
+        {/* Time Clock — top and centered, its own thing, not buried in a
+            category. This is the button most workers reach for first and
+            last on every shift. */}
+        {timeclockItem && (
+          <button
+            onClick={() => setDoc("timeclock")}
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+              width: "100%", cursor: "pointer", textAlign: "center",
+              background: `linear-gradient(160deg, ${C.panelRaised} 0%, ${C.panel} 100%)`,
+              border: `1px solid ${timeclockItem.accent}55`, borderRadius: RAD.xl,
+              padding: "22px 18px", boxShadow: `${SHAD.lg}, 0 0 32px -12px ${timeclockItem.accent}66`,
+              marginBottom: 20, boxSizing: "border-box",
+            }}
+          >
+            <div style={{ ...s.iconTile(timeclockItem.accent), width: 56, height: 56 }}>
+              <Clock size={28} color={timeclockItem.accent} strokeWidth={2.25} />
+            </div>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 20, color: C.text.primary, letterSpacing: "-0.01em" }}>
+              Time Clock
+            </div>
+            <div style={{ fontSize: 13, color: C.text.muted }}>Clock in and out</div>
+          </button>
+        )}
 
         <div
           onClick={() => setShowMyDocs(true)}
@@ -254,40 +382,38 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
         </div>
 
         <div style={{ display: "grid", gap: 12 }}>
-          {visibleBuiltins.map(d => {
-            const Icon = d.icon;
+          {visibleCategories.map(cat => {
+            const Icon = cat.icon;
+            const items = [...cat.builtins.map(d => d.title), ...cat.forms.map(f => f.title)];
             return (
-              <div key={d.key} style={s.card(d.accent, d.ready)} onClick={() => d.ready && setDoc(d.key)}>
-                <div style={s.iconTile(d.accent)}>
-                  <Icon size={22} color={d.accent} strokeWidth={2.25} />
+              <div
+                key={cat.key}
+                onClick={() => setActiveCategory(cat.key)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 16, cursor: "pointer",
+                  background: `linear-gradient(160deg, ${C.panelRaised} 0%, ${C.panel} 100%)`,
+                  border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "18px 18px",
+                  boxShadow: SHAD.md, minHeight: 88, boxSizing: "border-box",
+                  borderLeft: `3px solid ${cat.accent}`,
+                }}
+              >
+                <div style={{ ...s.iconTile(cat.accent), width: 52, height: 52 }}>
+                  <Icon size={26} color={cat.accent} strokeWidth={2.25} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{d.title}</div>
-                  <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>{d.desc}</div>
+                  <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 19, color: C.text.primary, letterSpacing: "-0.01em" }}>
+                    {cat.label}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {items.join(" · ")}
+                  </div>
                 </div>
-                {d.ready
-                  ? <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
-                  : <span style={{ fontSize: 11, fontWeight: 700, color: C.text.muted, background: C.panelInset, border: `1px solid ${C.line}`, padding: "4px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>SOON</span>}
+                <ChevronRight size={22} color={C.text.faint} style={{ flexShrink: 0 }} />
               </div>
             );
           })}
 
-          {customForms.map(f => (
-            <div key={f.id} style={s.card(f.accent_color || "#4338CA", true)} onClick={() => { setCustomFormId(f.id); setDoc("custom"); }}>
-              <div style={s.iconTile(f.accent_color || "#4338CA")}>
-                {f.icon
-                  ? <span style={{ fontSize: 22 }}>{f.icon}</span>
-                  : <FileText size={22} color={f.accent_color || "#4338CA"} strokeWidth={2.25} />}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{f.title}</div>
-                <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>Custom document</div>
-              </div>
-              <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
-            </div>
-          ))}
-
-          {!loading && visibleBuiltins.length === 0 && customForms.length === 0 && (
+          {!loading && totalItems === 0 && (
             <div style={{ textAlign: "center", padding: "40px 0", color: C.text.muted }}>
               <Inbox size={32} style={{ marginBottom: 8, color: C.text.faint }} />
               <div>No forms are currently set up for your company. Ask your admin.</div>
