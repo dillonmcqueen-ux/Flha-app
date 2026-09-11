@@ -16,7 +16,7 @@ import WorkerMenu from "./WorkerMenu";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
-import { reviewBacklog, fieldSiteActivity } from "./analyticsUtils";
+import { reviewBacklog, fieldSiteActivity, fuelSummary } from "./analyticsUtils";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
@@ -2053,17 +2053,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
-  // Fuel logs (docs/scope-fuel-log-tracker.md Phase 2) — loaded on demand
-  // like the equipment-reports tab, not eagerly with everything else in
-  // loadAll, since it's its own tab a supervisor may never open.
+  // Fuel logs (docs/scope-fuel-log-tracker.md Phase 2) — loaded per company
+  // like maintenanceStatus, not gated to one tab: Phase 4's Overview alert
+  // tile needs this live on the landing page too, not just when a
+  // supervisor happens to open Fuel Logs or Equipment Analytics.
   const [fuelLogs, setFuelLogs] = useState([]);
   const [loadingFuelLogs, setLoadingFuelLogs] = useState(false);
   const [fuelSiteNames, setFuelSiteNames] = useState({});
   useEffect(() => {
     async function loadFuelLogs() {
-      // Needed on both the Fuel Logs tab itself and Equipment Analytics
-      // (docs/scope-fuel-log-tracker.md Phase 3's cost/burn-rate rollup).
-      if ((activeTab !== "fuel" && activeTab !== "analytics") || !selectedCompany) return;
+      if (!selectedCompany) return;
       setLoadingFuelLogs(true);
       try {
         const [fuelRes, siteRes] = await Promise.all([
@@ -2078,7 +2077,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       setLoadingFuelLogs(false);
     }
     loadFuelLogs();
-  }, [activeTab, selectedCompany, token]);
+  }, [selectedCompany, token]);
 
   const submitLogService = async (eq) => {
     setSavingService(true);
@@ -2782,6 +2781,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   ];
   const docsSpark = bucketByDay(overviewAllDocs, 7);
   const correctiveSpark = bucketByDay(companyMonthlyActions, 7);
+  // docs/scope-fuel-log-tracker.md Phase 4 — the "machines flagged" list
+  // fuelSummary() already computes (Phase 3) surfaced as a standing
+  // Overview tile instead of something a supervisor has to go find inside
+  // Equipment Analytics. Still just a flag, no push/notification system.
+  const fuelFlagged = fuelSummary(fuelLogs, fuelSiteNames).flagged;
+  const fuelSpark = bucketByDay(fuelLogs, 7);
 
   const recentActivityList = [
     ...companyFlhas.map(doc => ({ type: "flha", doc })),
@@ -3736,6 +3741,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
                 openCorrectiveCount > 0 ? "accent" : "neutral")}
               {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "neutral")}
+              {sparkTile(Fuel, fuelFlagged.length, "Fuel Alerts", fuelSpark,
+                () => { if (TAB_VISIBLE.fuel) setActiveTab("fuel"); else if (TAB_VISIBLE.analytics) setActiveTab("analytics"); },
+                fuelFlagged.length > 0 ? "warning" : "neutral")}
             </div>
 
             {/* Site activity — FORA's own take on a "live operations" centerpiece:
@@ -4881,6 +4889,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 { icon: Fuel, value: fuelLogs.length, label: "Fuel-ups logged", tone: "neutral" },
                 { icon: FileText, value: `$${fuelLogs.reduce((sum, f) => sum + (Number(f.cost) || 0), 0).toFixed(0)}`, label: "Total cost", tone: "neutral" },
                 { icon: Wrench, value: new Set(fuelLogs.map(f => f.equipment_label)).size, label: "Machines", tone: "neutral" },
+                { icon: AlertTriangle, value: fuelFlagged.length, label: "Flagged", tone: fuelFlagged.length > 0 ? "warning" : "neutral" },
               ]} />
             )}
 
@@ -4897,9 +4906,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   (groups[f.equipment_label] = groups[f.equipment_label] || []).push(f);
                   return groups;
                 }, {})
-              ).map(([label, entries]) => (
+              ).map(([label, entries]) => {
+                const flag = fuelFlagged.find(f => f.label === label);
+                return (
                 <div key={label} style={{ marginBottom: 18 }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 6 }}>{label}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: C.text.muted, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
+                    {flag && (
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, padding: "2px 8px", borderRadius: RAD.pill, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <AlertTriangle size={10} strokeWidth={2.5} /> Latest burn rate {flag.latestBurnRate.toFixed(2)} vs. avg {flag.avgBurnRate.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                   {entries.map((f, i) => (
                     <div key={f.id} style={{ padding: "10px 4px", borderBottom: i < entries.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "center", gap: 10 }}>
                       <RowIconTile icon={Fuel} color={C.text.faint} />
@@ -4922,7 +4940,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     </div>
                   ))}
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
