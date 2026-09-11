@@ -8,16 +8,18 @@ import DailyReport, { resubmitDaily } from "./DailyReport.jsx";
 import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
+import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import MyDocuments from "./MyDocuments.jsx";
 import { drainQueue } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   ClipboardList, ClipboardCheck, Hammer, AlertTriangle, Siren, CalendarClock,
-  Clock, LogOut, ChevronRight, FileText, Inbox, FolderClock,
+  Clock, LogOut, ChevronRight, FileText, Inbox, FolderClock, Fuel,
 } from "lucide-react";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
-// docs/scope-offline-capability.md Phase 1) — now all 8 worker-facing forms.
+// docs/scope-offline-capability.md Phase 1) — now all 8 worker-facing forms
+// plus fuel logging (docs/scope-fuel-log-tracker.md Phase 1).
 const RESUBMIT_HANDLERS = {
   daily: resubmitDaily,
   nearmiss: resubmitNearMiss,
@@ -27,6 +29,7 @@ const RESUBMIT_HANDLERS = {
   inspection: resubmitInspection,
   monthly: resubmitMonthly,
   customform: resubmitCustomForm,
+  fuellog: resubmitFuelLog,
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
@@ -43,6 +46,7 @@ const BUILTIN_TYPES = [
   { key: "daily", icon: ClipboardList, title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A" },
   { key: "monthly", icon: CalendarClock, title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA" },
   { key: "timeclock", icon: Clock, title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2" },
+  { key: "fuellog", icon: Fuel, title: "Log Fuel", desc: "Record a fuel-up", ready: true, accent: "#F59E0B" },
 ];
 
 export default function WorkerMenu({ companyId, companyName, userName = "", userId = null, onLogout, token, backLabel = "Sign out" }) {
@@ -139,6 +143,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   }
   if (doc === "timeclock") {
     return <TimeClock companyId={companyId} companyName={companyName} userName={userName} userId={userId} onBack={() => setDoc(null)} token={token} />;
+  }
+  if (doc === "fuellog") {
+    return <FuelLog companyId={companyId} userName={userName} onBack={() => setDoc(null)} token={token} />;
   }
 
   // Same design system as Dashboard.jsx (src/theme.js) — dark surfaces,

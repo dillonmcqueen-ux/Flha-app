@@ -2,12 +2,12 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, Cell,
 } from "recharts";
-import { HardHat, Wrench } from "lucide-react";
+import { HardHat, Wrench, Fuel } from "lucide-react";
 import {
   severityBreakdown, nearMissIncidentRatio, reviewBacklog, highRiskFlhaRate,
   equipmentIssueStats, fieldSiteActivity, scheduledSiteActivity, monthlyTrend,
   correctiveActionAging, reporterLeaderboard, monthlyPassRate, toolboxAvgAttendance,
-  maintenanceSummary,
+  maintenanceSummary, fuelSummary,
 } from "./analyticsUtils";
 import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
 
@@ -300,11 +300,12 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
 // ── Equipment Analytics — pretrip/posttrip inspection issues and
 // preventative maintenance. Mirrors the Operations menu group and
 // generateEquipmentAnalyticsPDF.js's section split.
-export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [], customDocs = [] }) {
+export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [], customDocs = [], fuelLogs = [], siteNames = {} }) {
   const isAdvanced = tier === "advanced";
 
   const equipStats = equipmentIssueStats(inspections);
   const maintenance = maintenanceSummary(maintenanceStatus);
+  const fuel = fuelSummary(fuelLogs, siteNames);
   const pretripCount = inspections.filter(i => i.trip_type === "pretrip").length;
   const topEquipment = equipStats.slice(0, 5).map(e => ({ label: e.label, count: e.defective + e.monitor }));
 
@@ -318,6 +319,8 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
           <StatTile label="Overdue Maintenance" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
           <StatTile label="Maintenance Due Soon" value={maintenance.dueSoon} tone={maintenance.dueSoon > 0 ? "warn" : "good"} />
           <StatTile label="Custom Operations Docs" value={customDocs.length} />
+          <StatTile label="Fuel-Ups Logged" value={fuel.count} />
+          <StatTile label="Fuel Cost" value={`$${fuel.totalCost.toFixed(0)}`} />
         </div>
       </SectionCard>
 
@@ -350,12 +353,47 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
               </div>
             </SectionCard>
           )}
+
+          {fuel.count > 0 && (
+            <>
+              <SectionCard title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Fuel size={16} color={C.orange} strokeWidth={2.25} />Fuel Cost & Consumption</span>} subtitle="Cost and burn rate by machine and by site">
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                  <StatTile label="Total Fuel Cost" value={`$${fuel.totalCost.toFixed(0)}`} />
+                  <StatTile label="Total Quantity" value={fuel.totalQuantity.toFixed(0)} />
+                  <StatTile label="Machines Flagged" value={fuel.flagged.length} tone={fuel.flagged.length > 0 ? "warn" : "good"} sub="Burn rate 25%+ above their own average" />
+                </div>
+                <SimpleTable
+                  emptyLabel="No fuel logged yet."
+                  columns={[
+                    { key: "label", label: "Equipment" },
+                    { key: "count", label: "Fuel-Ups", align: "right" },
+                    { key: "cost", label: "Cost", align: "right", render: r => `$${r.cost.toFixed(2)}` },
+                    { key: "avgBurnRate", label: "Avg Burn Rate", align: "right", render: r => r.avgBurnRate != null ? r.avgBurnRate.toFixed(2) : "—" },
+                    { key: "latestBurnRate", label: "Latest Burn Rate", align: "right", render: r => r.latestBurnRate != null ? r.latestBurnRate.toFixed(2) : "—" },
+                  ]}
+                  rows={fuel.equipmentSummary}
+                />
+              </SectionCard>
+
+              <SectionCard title="Fuel Cost by Site">
+                <SimpleTable
+                  emptyLabel="No site-tagged fuel logs yet."
+                  columns={[
+                    { key: "label", label: "Site" },
+                    { key: "count", label: "Fuel-Ups", align: "right" },
+                    { key: "cost", label: "Cost", align: "right", render: r => `$${r.cost.toFixed(2)}` },
+                  ]}
+                  rows={fuel.siteSummary}
+                />
+              </SectionCard>
+            </>
+          )}
         </>
       )}
 
       {!isAdvanced && (
         <div style={{ textAlign: "center", fontSize: 12, color: C.text.faint, padding: "10px 4px" }}>
-          Ask your admin to enable Advanced Analytics for equipment issue detail and preventative maintenance tracking.
+          Ask your admin to enable Advanced Analytics for equipment issue detail, preventative maintenance tracking, and fuel cost/consumption breakdowns.
         </div>
       )}
     </div>

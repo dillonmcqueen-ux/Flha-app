@@ -188,3 +188,49 @@ export function maintenanceSummary(maintenanceStatus) {
   const dueSoon = tracked.filter(e => e.status === "due_soon").length;
   return { total: tracked.length, overdue, dueSoon };
 }
+
+// docs/scope-fuel-log-tracker.md Phase 3 — cost/burn-rate rollup for the
+// Equipment Analytics tab and its PDF export. `fuelLogs` rows already carry
+// a computed `burn_rate` (api/fuellogs.js's `list` action); this just
+// aggregates by equipment and site. `siteNames` is an { id: name } map —
+// fuel_logs stores `site_id`, not a free-text site name.
+export function fuelSummary(fuelLogs, siteNames = {}) {
+  const totalCost = fuelLogs.reduce((sum, f) => sum + (Number(f.cost) || 0), 0);
+  const totalQuantity = fuelLogs.reduce((sum, f) => sum + (Number(f.quantity) || 0), 0);
+
+  const byEquipment = {};
+  fuelLogs.forEach(f => {
+    const label = f.equipment_label || "Unlabeled equipment";
+    if (!byEquipment[label]) byEquipment[label] = { label, cost: 0, count: 0, rates: [] };
+    const b = byEquipment[label];
+    b.cost += Number(f.cost) || 0;
+    b.count += 1;
+    if (f.burn_rate != null) b.rates.push({ value: f.burn_rate, at: f.created_at });
+  });
+
+  const equipmentSummary = Object.values(byEquipment).map(e => {
+    const sorted = [...e.rates].sort((a, b) => new Date(a.at) - new Date(b.at));
+    const avgBurnRate = sorted.length ? sorted.reduce((sum, r) => sum + r.value, 0) / sorted.length : null;
+    const latestBurnRate = sorted.length ? sorted[sorted.length - 1].value : null;
+    return { label: e.label, cost: e.cost, count: e.count, avgBurnRate, latestBurnRate, readingCount: sorted.length };
+  }).sort((a, b) => b.cost - a.cost);
+
+  // A machine's latest burn rate running well above its own trailing
+  // average — a plain flag, not an alert (Phase 4 groundwork). Needs at
+  // least 3 rated fuel-ups before "trailing average" means anything.
+  const flagged = equipmentSummary.filter(e => e.readingCount >= 3 && e.avgBurnRate && e.latestBurnRate > e.avgBurnRate * 1.25);
+
+  const bySite = {};
+  fuelLogs.forEach(f => {
+    const label = f.site_id ? (siteNames[f.site_id] || "Unknown site") : "No site recorded";
+    if (!bySite[label]) bySite[label] = { label, cost: 0, count: 0 };
+    bySite[label].cost += Number(f.cost) || 0;
+    bySite[label].count += 1;
+  });
+
+  return {
+    totalCost, totalQuantity, count: fuelLogs.length,
+    equipmentSummary, flagged,
+    siteSummary: Object.values(bySite).sort((a, b) => b.cost - a.cost),
+  };
+}
