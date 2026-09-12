@@ -386,6 +386,70 @@ export default async function handler(req, res) {
     return res.status(200).json({ session: payload, token });
   }
 
+  // ── Onboarding wallet (Phase 2): redeem a single-use invite link ────────
+  // Opening the unique link a supervisor/admin generated and shared
+  // (api/companydata.js's create_wallet_invite) is treated as proof of
+  // identity, same as typing the right PIN — it mints an ordinary session,
+  // scoped to the roster row the token belongs to, never to anything the
+  // client itself sends. The token is single-use: cleared the moment it's
+  // redeemed, so re-sharing the link after first use does nothing further.
+  if (action === 'redeem_wallet_invite') {
+    const { inviteToken } = req.body;
+    if (!inviteToken) return res.status(400).json({ error: 'Missing invite link.' });
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('roster')
+      .select('id, name, role, company_id, active, wallet_enabled, wallet_invite_token_expires_at')
+      .eq('wallet_invite_token', inviteToken)
+      .limit(1);
+    if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
+    const member = rows && rows[0];
+    if (!member) return res.status(404).json({ error: "That invite link isn't valid." });
+    if (!member.active || !member.wallet_enabled) {
+      return res.status(403).json({ error: 'This invite is no longer active. Contact your employer for a new one.' });
+    }
+    if (!member.wallet_invite_token_expires_at || new Date(member.wallet_invite_token_expires_at) < new Date()) {
+      return res.status(400).json({ error: 'This invite link has expired — ask your employer to send a new one.' });
+    }
+
+    const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type, suspended').eq('id', member.company_id).limit(1);
+    const company = coRows && coRows[0];
+    if (!company) return res.status(404).json({ error: 'Company not found.' });
+    // Same suspension gate as roster_login: a suspended company's workers
+    // don't get in even with a valid, unexpired invite link.
+    if (company.suspended && member.role === 'worker') {
+      return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
+    }
+
+    // Conditioned on the token still matching (not just the row's id), so
+    // two near-simultaneous redemptions of the same link can't both pass —
+    // whichever request's update actually clears a row wins the race; the
+    // loser's returned row is empty and it's rejected below instead of also
+    // minting a session.
+    const { data: cleared, error: clearError } = await supabaseAdmin
+      .from('roster')
+      .update({ wallet_invite_token: null, wallet_invite_token_expires_at: null })
+      .eq('id', member.id)
+      .eq('wallet_invite_token', inviteToken)
+      .select('id');
+    if (clearError || !cleared || cleared.length === 0) {
+      return res.status(400).json({ error: 'This invite link was already used.' });
+    }
+
+    const payload = {
+      role: member.role,
+      companyId: company.id,
+      companyName: company.name,
+      appType: company.app_type || 'safety',
+      userId: member.id,
+      userName: member.name,
+      suspended: !!company.suspended,
+      issuedAt: Date.now(),
+    };
+    const token = signSession(payload);
+    return res.status(200).json({ session: payload, token });
+  }
+
   // ── Master code, step 2: pick a company + role ──────────────────────────
   if (action === 'master_login') {
     const { masterTicket, companyId, role: pickedRole } = req.body;

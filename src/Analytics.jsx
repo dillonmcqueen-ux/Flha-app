@@ -133,6 +133,7 @@ export function SafetyAnalyticsPanel({
   tier, companyName,
   flhas = [], toolbox = [], nearMisses = [], incidents = [],
   daily = [], monthlyRecords = [], monthlyActions = [], customDocs = [],
+  certAlerts = null,
 }) {
   const isAdvanced = tier === "advanced";
 
@@ -198,6 +199,29 @@ export function SafetyAnalyticsPanel({
           </div>
         )}
       </SectionCard>
+
+      {certAlerts && (
+        <SectionCard title="Certification Compliance" subtitle="Worker safety tickets nearing or past their expiry date">
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: (certAlerts.expired.length + certAlerts.expiringSoon.length) > 0 ? 12 : 0 }}>
+            <StatTile label="Expired" value={certAlerts.expiredCount} tone={certAlerts.expiredCount > 0 ? "bad" : "good"} />
+            <StatTile label="Expiring within 30 days" value={certAlerts.expiringSoonCount} tone={certAlerts.expiringSoonCount > 0 ? "warn" : "good"} />
+          </div>
+          {(certAlerts.expired.length + certAlerts.expiringSoon.length) === 0 ? (
+            <div style={{ color: C.status.success.solid, fontWeight: 700, fontSize: 14 }}>✓ No certifications expired or expiring soon</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {[...certAlerts.expired, ...certAlerts.expiringSoon].map((c) => (
+                <div key={c.id} style={{ fontSize: 13, color: C.text.body, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span><strong>{c.workerName || "Unknown"}</strong> — {c.certName}</span>
+                  <span style={{ color: new Date(c.expiryDate) < new Date() ? C.status.danger.text : C.status.warning.text }}>
+                    {new Date(c.expiryDate).toLocaleDateString("en-CA")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
 
       {isAdvanced && <SafetyAdvancedSections
         nearMisses={nearMisses} incidents={incidents} fieldSites={fieldSites}

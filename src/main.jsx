@@ -4,14 +4,16 @@ import { Analytics } from '@vercel/analytics/react'
 import Login from './Login.jsx'
 import Onboarding from './Onboarding.jsx'
 import ClaimAccount from './ClaimAccount.jsx'
+import WalletInvite from './WalletInvite.jsx'
 
 const path = window.location.pathname.replace(/\/+$/, '')
 const isOnboarding = path === '/onboarding'
 const isClaim = path === '/claim'
+const isWalletInvite = path === '/wallet'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {isClaim ? <ClaimAccount /> : isOnboarding ? <Onboarding /> : <Login />}
+    {isWalletInvite ? <WalletInvite /> : isClaim ? <ClaimAccount /> : isOnboarding ? <Onboarding /> : <Login />}
     <Analytics />
   </React.StrictMode>,
 )

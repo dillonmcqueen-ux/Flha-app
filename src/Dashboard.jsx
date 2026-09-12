@@ -1711,6 +1711,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [pmSetupForm, setPmSetupForm] = useState({ interval: "", unit: "Hours", startingReading: "" });
   const [savingPmSetup, setSavingPmSetup] = useState(false);
 
+  // ── Certification expiry alerts (onboarding wallet, Phase 3) ───────────
+  const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
+
   // ── Time Clock: my own status + everyone's entries + reports ──────────
   const [myTimeStatus, setMyTimeStatus] = useState(null);
   const [myTimeLoading, setMyTimeLoading] = useState(true);
@@ -2051,6 +2054,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   useEffect(() => {
     loadMaintenanceStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, token]);
+
+  useEffect(() => {
+    if (!selectedCompany || !token) { setCertAlerts({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] }); return; }
+    (async () => {
+      try {
+        const res = await fetch("/api/certifications", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "certification_summary", token, companyId: selectedCompany }),
+        });
+        const data = await res.json();
+        if (res.ok) setCertAlerts(data);
+      } catch (e) { /* leave alerts as-is if the request fails */ }
+    })();
   }, [selectedCompany, token]);
 
   // Fuel logs (docs/scope-fuel-log-tracker.md Phase 2) — loaded per company
@@ -3680,6 +3697,30 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
+        {(certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
+          <div style={{ background: "rgba(234,88,12,0.14)", border: "1.5px solid rgba(234,88,12,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#FB923C", marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+              <AlertTriangle size={14} strokeWidth={2.5} />
+              Certification alerts
+            </div>
+            <div style={{ fontSize: 13, color: "#FDBA74", marginBottom: certAlerts.expired.length + certAlerts.expiringSoon.length > 0 ? 8 : 0 }}>
+              {certAlerts.expiredCount > 0 && <span>{certAlerts.expiredCount} certification{certAlerts.expiredCount === 1 ? "" : "s"} expired</span>}
+              {certAlerts.expiredCount > 0 && certAlerts.expiringSoonCount > 0 && <span> — </span>}
+              {certAlerts.expiringSoonCount > 0 && <span>{certAlerts.expiringSoonCount} expiring within 30 days</span>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {[...certAlerts.expired, ...certAlerts.expiringSoon].slice(0, 6).map((c) => (
+                <div key={c.id} style={{ fontSize: 12.5, color: "#FDBA74" }}>
+                  <strong>{c.workerName || "Unknown"}</strong> — {c.certName} ({new Date(c.expiryDate).toLocaleDateString("en-CA")})
+                </div>
+              ))}
+              {(certAlerts.expired.length + certAlerts.expiringSoon.length) > 6 && (
+                <div style={{ fontSize: 12, color: "#FDBA74", opacity: 0.8 }}>+ {(certAlerts.expired.length + certAlerts.expiringSoon.length) - 6} more — see Analytics for the full list.</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {isAdmin && companies.length > 1 && (
           <div style={styles.card}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#A1A1AA", marginBottom: 8 }}>COMPANY</div>
@@ -4646,6 +4687,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               monthlyRecords={companyMonthlyRecords}
               monthlyActions={companyMonthlyActions}
               customDocs={companySafetyCustomDocs}
+              certAlerts={certAlerts}
             />
           </>
         )}
