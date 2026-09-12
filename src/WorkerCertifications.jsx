@@ -20,7 +20,7 @@ export default function WorkerCertifications({ companyId, userId, userName, toke
     try {
       const res = await fetch("/api/certifications", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_certifications", token, companyId }),
+        body: JSON.stringify({ action: "list_certifications", token, companyId, rosterId: userId }),
       });
       const data = await res.json();
       if (res.ok) setCerts(data.certifications || []);
