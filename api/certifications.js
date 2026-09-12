@@ -16,7 +16,16 @@ const supabaseAdmin = createClient(
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const BUCKET = 'worker-certifications';
+const PHOTO_BUCKET = 'worker-photos';
 const EXPIRING_SOON_DAYS = 30;
+
+function genSalt() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function hashPin(pin, salt) {
+  return crypto.scryptSync(String(pin), salt, 64).toString('hex');
+}
 
 // v1 scope is display/notification only (see the migration's decision
 // notes) — this never blocks a submission, it only classifies a cert so
@@ -173,7 +182,7 @@ export default async function handler(req, res) {
 
       let query = supabaseAdmin
         .from('worker_certifications')
-        .select('id, roster_id, cert_type, cert_name, issue_date, expiry_date, file_path, created_at')
+        .select('id, roster_id, cert_type, cert_name, issue_date, expiry_date, file_path, uploaded_by_role, created_at')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false });
       if (targetRosterId) query = query.eq('roster_id', targetRosterId);
@@ -181,13 +190,66 @@ export default async function handler(req, res) {
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load certifications.' });
 
+      // "Unverified" is a display-only disclaimer, not a separate approval
+      // workflow or a submission gate — a cert the worker uploaded
+      // themselves (as opposed to one a supervisor/admin added on their
+      // behalf) hasn't been looked at by anyone yet.
       const certs = await Promise.all(
         (data || []).map(async (row) => {
           const { data: signed } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(row.file_path, 3600);
-          return { ...row, status: classifyExpiry(row.expiry_date), fileUrl: signed?.signedUrl || null };
+          return { ...row, status: classifyExpiry(row.expiry_date), unverified: row.uploaded_by_role === 'worker', fileUrl: signed?.signedUrl || null };
         })
       );
       return res.status(200).json({ certifications: certs });
+    }
+
+    // ── Full company directory for supervisors/admins: every active
+    // roster member with their photo, onboarding status, and certs in one
+    // call — backs the Dashboard's "Certifications" tab ──────────────────
+    if (action === 'list_employee_directory') {
+      if (session.role === 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company.' });
+
+      const { data: members, error: rosterError } = await supabaseAdmin
+        .from('roster')
+        .select('id, name, role, email, photo_path, onboarding_completed_at, active')
+        .eq('company_id', companyId)
+        .eq('active', true)
+        .order('role', { ascending: true })
+        .order('name', { ascending: true });
+      if (rosterError) return res.status(500).json({ error: 'Could not load the roster.' });
+
+      const { data: certRows, error: certError } = await supabaseAdmin
+        .from('worker_certifications')
+        .select('id, roster_id, cert_type, cert_name, issue_date, expiry_date, file_path, uploaded_by_role, created_at')
+        .eq('company_id', companyId);
+      if (certError) return res.status(500).json({ error: 'Could not load certifications.' });
+
+      const certsByRoster = {};
+      for (const row of certRows || []) {
+        (certsByRoster[row.roster_id] = certsByRoster[row.roster_id] || []).push(row);
+      }
+
+      const employees = await Promise.all(
+        (members || []).map(async (m) => {
+          const photoUrl = m.photo_path
+            ? (await supabaseAdmin.storage.from(PHOTO_BUCKET).createSignedUrl(m.photo_path, 3600)).data?.signedUrl || null
+            : null;
+          const certs = await Promise.all(
+            (certsByRoster[m.id] || []).map(async (row) => {
+              const { data: signed } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(row.file_path, 3600);
+              return { ...row, status: classifyExpiry(row.expiry_date), unverified: row.uploaded_by_role === 'worker', fileUrl: signed?.signedUrl || null };
+            })
+          );
+          return {
+            id: m.id, name: m.name, role: m.role, email: m.email,
+            photoUrl, onboardingCompletedAt: m.onboarding_completed_at,
+            certifications: certs,
+          };
+        })
+      );
+      return res.status(200).json({ employees });
     }
 
     // ── Expiry summary for notifications: a worker gets their own
@@ -266,6 +328,61 @@ export default async function handler(req, res) {
       await supabaseAdmin.storage.from(BUCKET).remove([cert.file_path]);
       const { error } = await supabaseAdmin.from('worker_certifications').delete().eq('id', certId);
       if (error) return res.status(500).json({ error: 'Could not delete the certification.' });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ── Onboarding wallet (Phase 4): the invited person's own actions, all
+    // scoped to session.userId's own row — never another roster id, even
+    // for a supervisor/admin session, since these are self-service edits
+    // the new hire makes about themselves during their one-time invite
+    // visit ─────────────────────────────────────────────────────────────
+    if (action === 'update_own_profile') {
+      if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const name = (req.body.name || '').trim();
+      const email = (req.body.email || '').trim();
+      if (!name) return res.status(400).json({ error: 'Enter a name.' });
+      const { error } = await supabaseAdmin.from('roster').update({ name, email: email || null }).eq('id', session.userId);
+      if (error) return res.status(500).json({ error: 'Could not save your details.' });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'set_own_pin') {
+      if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const { pin } = req.body;
+      if (!/^\d{4}$/.test(String(pin || ''))) return res.status(400).json({ error: 'Enter a 4-digit PIN.' });
+      const salt = genSalt();
+      const { error } = await supabaseAdmin
+        .from('roster')
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+        .eq('id', session.userId);
+      if (error) return res.status(500).json({ error: 'Could not save your PIN.' });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'create_photo_upload_url') {
+      if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const { filename } = req.body;
+      const namespacedName = `${session.companyId}/${session.userId}/${Date.now()}-${filename}`;
+      const result = await createUploadUrl(supabaseAdmin, PHOTO_BUCKET, namespacedName);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
+    if (action === 'set_profile_photo') {
+      if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const { photoPath } = req.body;
+      if (!photoPath || !photoPath.startsWith(`${session.companyId}/${session.userId}/`)) {
+        return res.status(400).json({ error: 'Invalid file path.' });
+      }
+      const { error } = await supabaseAdmin.from('roster').update({ photo_path: photoPath }).eq('id', session.userId);
+      if (error) return res.status(500).json({ error: 'Could not save your photo.' });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'complete_onboarding') {
+      if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const { error } = await supabaseAdmin.from('roster').update({ onboarding_completed_at: new Date().toISOString() }).eq('id', session.userId);
+      if (error) return res.status(500).json({ error: 'Could not finish onboarding.' });
       return res.status(200).json({ ok: true });
     }
 

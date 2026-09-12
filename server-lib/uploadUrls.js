@@ -45,6 +45,7 @@ const ALLOWED_EXTENSIONS = {
   'onboarding-uploads': ['pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg'],
   'gatehouse-uploads': ['jpg', 'jpeg', 'png', 'webp'],
   'worker-certifications': ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
+  'worker-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
 };
 
 export async function createUploadUrl(supabaseAdmin, bucket, filename) {

@@ -46,6 +46,7 @@ const TAB_ICON = {
   analytics: BarChart3,
   timeclock: Clock,
   roster: KeyRound,
+  certifications: ShieldCheck,
   workforcecustomdocs: FolderKanban,
 };
 const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
@@ -58,7 +59,7 @@ const TAB_LABEL = {
   monthly: "Monthly", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
   inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance", fuel: "Fuel Logs",
   customdocs: "Custom Docs", analytics: "Equipment Analytics",
-  timeclock: "Time Clock", roster: "Roster", workforcecustomdocs: "Custom Docs",
+  timeclock: "Time Clock", roster: "Roster", certifications: "Certifications", workforcecustomdocs: "Custom Docs",
 };
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
@@ -1747,6 +1748,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [loadingRosterList, setLoadingRosterList] = useState(false);
   const [rosterRevealedPin, setRosterRevealedPin] = useState(null); // { name, pin }
   const [resettingRosterId, setResettingRosterId] = useState(null);
+  const [togglingWalletId, setTogglingWalletId] = useState(null);
+  const [rosterInviteLink, setRosterInviteLink] = useState(null); // { name, url }
+
+  // ── Onboard New Employee (onboarding wallet, Phase 4) ───────────────────
+  const [showOnboardForm, setShowOnboardForm] = useState(false);
+  const [onboardForm, setOnboardForm] = useState({ name: "", role: "worker", email: "" });
+  const [onboardingEmployee, setOnboardingEmployee] = useState(false);
+  const [onboardError, setOnboardError] = useState("");
+  const [onboardResult, setOnboardResult] = useState(null); // { name, email, emailSent, inviteUrl }
+
+  // ── Certifications tab: full company directory (name, photo, certs) ────
+  const [employeeDirectory, setEmployeeDirectory] = useState([]);
+  const [loadingDirectory, setLoadingDirectory] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -2180,6 +2194,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     fuel: isDocActive("fuellog"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    certifications: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     safetyanalytics: true,
     analytics: true,
     sops: true,
@@ -2196,7 +2211,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const CATEGORIES = [
     { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
     { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "fuel", "customdocs", "analytics"] },
-    { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "workforcecustomdocs"] },
+    { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "certifications", "workforcecustomdocs"] },
   ];
   // If the currently open tab just got deactivated (or the company changed
   // to one that doesn't have it active), bounce to the first tab that is.
@@ -2407,6 +2422,78 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { alert("Couldn't reset PIN. Try again."); }
     setResettingRosterId(null);
   };
+
+  const toggleRosterWallet = async (id, enabled) => {
+    setTogglingWalletId(id);
+    setRosterList(prev => prev.map(m => m.id === id ? { ...m, wallet_enabled: enabled } : m));
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_wallet_enabled", token, id, enabled }),
+      });
+      if (!res.ok) await loadRosterList(); // revert the optimistic flip if it didn't actually save
+    } catch (e) { await loadRosterList(); }
+    setTogglingWalletId(null);
+  };
+
+  const createRosterWalletInvite = async (id, name) => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_wallet_invite", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Couldn't create the invite link."); return; }
+      setRosterInviteLink({ name, url: data.inviteUrl });
+    } catch (e) { alert("Couldn't create the invite link. Try again."); }
+  };
+
+  const onboardNewEmployee = async () => {
+    setOnboardError("");
+    const name = onboardForm.name.trim();
+    const email = onboardForm.email.trim();
+    if (!name) { setOnboardError("Enter a name."); return; }
+    if (!email) { setOnboardError("Enter an email address."); return; }
+    setOnboardingEmployee(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "onboard_new_employee", token, companyId: selectedCompany, name, role: onboardForm.role, email }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setOnboardError(data.error || "Couldn't onboard this person."); setOnboardingEmployee(false); return; }
+      setOnboardResult({ name, email, emailSent: data.emailSent, inviteUrl: data.inviteUrl });
+      setOnboardForm({ name: "", role: "worker", email: "" });
+      setShowOnboardForm(false);
+      await loadRosterList();
+    } catch (e) {
+      setOnboardError("Couldn't onboard this person. Try again.");
+    }
+    setOnboardingEmployee(false);
+  };
+
+  const loadEmployeeDirectory = async () => {
+    if (!selectedCompany) return;
+    setLoadingDirectory(true);
+    try {
+      const res = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_employee_directory", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setEmployeeDirectory(data.employees || []);
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingDirectory(false);
+  };
+
+  // Loaded on company selection (not gated to the Certifications tab) since
+  // the Overview tab's Recent Activity feed also draws on this directory
+  // for recent certification uploads and onboarding completions.
+  useEffect(() => {
+    if (!selectedCompany || !token) { setEmployeeDirectory([]); return; }
+    loadEmployeeDirectory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, token]);
 
   const saveEditEntry = async (entryId) => {
     if (!editEntryForm.clockIn) return;
@@ -2769,6 +2856,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     daily: { icon: ClipboardList, label: "Daily Report", primary: d => d.site || "", secondary: d => d.reporter_name || "" },
     monthly: { icon: CalendarClock, label: "Monthly Inspection", primary: d => d.form_title || d.site_name || "", secondary: d => d.submitted_by || "" },
     customdoc: { icon: FolderKanban, label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
+    certification: { icon: ShieldCheck, label: "Certification", primary: d => `${d.worker_name} — ${d.cert_name}`, secondary: d => d.cert_type || "" },
+    onboarding: { icon: CircleCheckBig, label: "Onboarding", primary: d => `${d.name} completed onboarding`, secondary: () => "" },
   };
 
   const openWeekDoc = (type, doc) => {
@@ -2781,6 +2870,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     else if (type === "daily") setSelectedDaily(doc);
     else if (type === "monthly") openMonthlyRecord(doc);
     else if (type === "customdoc") openCustomDocRecord(doc);
+    else if (type === "certification" && doc.fileUrl) window.open(doc.fileUrl, "_blank");
+    else if (type === "onboarding") setActiveTab("certifications");
   };
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
@@ -2805,6 +2896,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const fuelFlagged = fuelSummary(fuelLogs, fuelSiteNames).flagged;
   const fuelSpark = bucketByDay(fuelLogs, 7);
 
+  // Onboarding-wallet activity — certification uploads (each one carries
+  // its own expiry status, so an expiring/expired ticket shows up here for
+  // the employee it belongs to, not just in the standalone alert banner)
+  // and onboarding completions, both derived from the same directory
+  // fetch the Certifications tab uses.
+  const walletActivity = employeeDirectory.flatMap(emp => [
+    ...emp.certifications.map(c => ({ type: "certification", doc: { ...c, worker_name: emp.name } })),
+    ...(emp.onboardingCompletedAt ? [{ type: "onboarding", doc: { name: emp.name, created_at: emp.onboardingCompletedAt } }] : []),
+  ]);
+
   const recentActivityList = [
     ...companyFlhas.map(doc => ({ type: "flha", doc })),
     ...companyInspections.map(doc => ({ type: "inspection", doc })),
@@ -2814,6 +2915,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     ...companyDaily.map(doc => ({ type: "daily", doc })),
     ...companyMonthlyRecords.map(doc => ({ type: "monthly", doc })),
     ...companyCustomDocs.map(doc => ({ type: "customdoc", doc })),
+    ...walletActivity,
   ].filter(x => x.doc.created_at)
    .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
    .slice(0, 8);
@@ -3852,6 +3954,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   } else if (type === "nearmiss" || type === "incident") {
                     statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
                     statusColor = doc.reviewed ? C.status.success.text : C.status.warning.text;
+                  } else if (type === "certification") {
+                    statusLabel = doc.status === "expired" ? "Expired" : doc.status === "expiring_soon" ? "Expiring soon" : doc.unverified ? "Unverified" : "Uploaded";
+                    statusColor = doc.status === "expired" ? C.status.danger.text : doc.status === "expiring_soon" || doc.unverified ? C.status.warning.text : C.status.success.text;
+                  } else if (type === "onboarding") {
+                    statusLabel = "Completed";
+                    statusColor = C.status.success.text;
                   }
                   return (
                     <div
@@ -5276,11 +5384,73 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               </div>
             )}
 
+            {onboardResult && (
+              <div style={{ ...styles.card, background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.success.text, marginBottom: 4 }}>
+                  {onboardResult.emailSent ? `Invite sent to ${onboardResult.email}` : `Couldn't send the email to ${onboardResult.email} — share this link with them directly`}
+                </div>
+                {!onboardResult.emailSent && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                    <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text.body, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 10px", wordBreak: "break-all" }}>{onboardResult.inviteUrl}</span>
+                    <button onClick={() => navigator.clipboard?.writeText(onboardResult.inviteUrl)} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Copy link</button>
+                  </div>
+                )}
+                <button onClick={() => setOnboardResult(null)} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, cursor: "pointer", fontWeight: 600, marginTop: 8 }}>Done</button>
+              </div>
+            )}
+
+            {rosterInviteLink && (
+              <div style={{ ...styles.card, background: C.status.warning.bg, border: `1.5px solid ${C.status.warning.border}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.warning.text, marginBottom: 4 }}>Onboarding wallet invite for {rosterInviteLink.name} — single-use, send it to them now</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text.body, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 10px", wordBreak: "break-all" }}>{rosterInviteLink.url}</span>
+                  <button onClick={() => navigator.clipboard?.writeText(rosterInviteLink.url)} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Copy link</button>
+                  <button onClick={() => setRosterInviteLink(null)} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
+                </div>
+              </div>
+            )}
+
+            {showOnboardForm && (
+              <div style={styles.card}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.text.primary, marginBottom: 4 }}>Onboard New Employee</div>
+                <div style={{ fontSize: 12, color: C.text.faint, marginBottom: 12 }}>
+                  Adds them to the roster and emails a one-time link to get their safety tickets and profile on file — no PIN needed for that first step.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <input placeholder="Full name" value={onboardForm.name} onChange={e => setOnboardForm(f => ({ ...f, name: e.target.value }))}
+                    style={{ flex: "1 1 200px", padding: "10px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panelInset, color: C.text.primary, fontSize: 14 }} />
+                  <select value={onboardForm.role} onChange={e => setOnboardForm(f => ({ ...f, role: e.target.value }))}
+                    style={{ padding: "10px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panelInset, color: C.text.primary, fontSize: 14, fontWeight: 600 }}>
+                    <option value="worker">Worker</option>
+                    <option value="supervisor">Supervisor</option>
+                  </select>
+                </div>
+                <input placeholder="Email address" type="email" value={onboardForm.email} onChange={e => setOnboardForm(f => ({ ...f, email: e.target.value }))}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panelInset, color: C.text.primary, fontSize: 14, marginBottom: 10 }} />
+                {onboardError && <div style={{ fontSize: 12, color: C.status.danger.text, marginBottom: 8 }}>{onboardError}</div>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={onboardNewEmployee} disabled={onboardingEmployee} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: onboardingEmployee ? 0.6 : 1 }}>
+                    {onboardingEmployee ? "Sending…" : "Confirm & Send Invite"}
+                  </button>
+                  <button onClick={() => { setShowOnboardForm(false); setOnboardError(""); }} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, borderRadius: RAD.sm, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
             <div style={styles.card}>
               <PanelHeader
                 icon={TAB_ICON.roster}
                 title={`${company?.name || ""} — Roster`}
                 subtitle="Reset a forgotten PIN below — it takes effect immediately and is shown once"
+                actions={!showOnboardForm && (
+                  <button onClick={() => setShowOnboardForm(true)} style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                    padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer"
+                  }}>
+                    <FilePlus2 size={14} strokeWidth={2.5} />Onboard New Employee
+                  </button>
+                )}
               />
 
               {rosterList.length > 0 && (
@@ -5308,6 +5478,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>{m.name}</div>
                             <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                           </div>
+                          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title="Lets this person upload their own safety tickets/certifications">
+                            <input type="checkbox" checked={!!m.wallet_enabled} disabled={togglingWalletId === m.id} onChange={e => toggleRosterWallet(m.id, e.target.checked)} />
+                            Wallet
+                          </label>
+                          {m.wallet_enabled && (
+                            <button onClick={() => createRosterWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
+                          )}
                           <button
                             onClick={() => resetRosterMemberPin(m.id, m.name)}
                             disabled={resettingRosterId === m.id}
@@ -5323,6 +5500,60 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               )}
             </div>
           </>
+        )}
+
+        {activeTab === "certifications" && TAB_VISIBLE.certifications && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={TAB_ICON.certifications}
+              title={`${company?.name || ""} — Certifications`}
+              subtitle="Every active employee's safety tickets, at a glance — expiry status and verification"
+            />
+            {loadingDirectory ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+            ) : employeeDirectory.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>No one on the roster yet.</div>
+            ) : (
+              employeeDirectory.map((emp, i) => (
+                <div key={emp.id} style={{ padding: "14px 4px", borderBottom: i < employeeDirectory.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: emp.certifications.length > 0 ? 10 : 0 }}>
+                    {emp.photoUrl ? (
+                      <img src={emp.photoUrl} alt="" style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                    ) : (
+                      <RowIconTile icon={emp.role === "supervisor" ? HardHat : CircleUserRound} color={C.text.muted} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>{emp.name}</div>
+                      <div style={{ fontSize: 12, color: C.text.faint }}>
+                        {emp.email || "No email on file"} · {emp.onboardingCompletedAt ? `Onboarding complete ${new Date(emp.onboardingCompletedAt).toLocaleDateString()}` : "Onboarding not yet completed"}
+                      </div>
+                    </div>
+                  </div>
+                  {emp.certifications.length === 0 ? (
+                    <div style={{ fontSize: 12, color: C.text.faint, paddingLeft: 46 }}>No certifications uploaded yet.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingLeft: 46 }}>
+                      {emp.certifications.map(c => (
+                        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13 }}>
+                          <span style={{ color: C.text.body, fontWeight: 600 }}>{c.cert_name}</span>
+                          <span style={{ color: C.text.faint, fontSize: 12 }}>({c.cert_type})</span>
+                          {c.expiry_date && (
+                            <span style={{ fontSize: 12, color: c.status === "expired" ? C.status.danger.text : c.status === "expiring_soon" ? C.status.warning.text : C.text.faint }}>
+                              {c.status === "expired" ? "Expired" : c.status === "expiring_soon" ? "Expires" : "Valid to"} {new Date(c.expiry_date).toLocaleDateString("en-CA")}
+                            </span>
+                          )}
+                          {c.unverified && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.pill, padding: "2px 8px" }}>UNVERIFIED</span>
+                          )}
+                          {c.fileUrl && <a href={c.fileUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: C.orange, fontWeight: 700, textDecoration: "none" }}>View</a>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         )}
 
         {activeTab === "sops" && (

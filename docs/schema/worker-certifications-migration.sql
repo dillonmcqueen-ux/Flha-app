@@ -81,3 +81,31 @@ alter table roster
 
 create unique index if not exists roster_wallet_invite_token_idx
   on roster (wallet_invite_token) where wallet_invite_token is not null;
+
+-- ── Phase 4: supervisor-initiated onboarding ─────────────────────────────
+-- APPLIED as a follow-up migration, "worker_certifications_onboarding_v4".
+-- A supervisor now creates the roster row directly from the Dashboard's
+-- Roster tab ("Onboard New Employee") with a real email address, which
+-- api/companydata.js's onboard_new_employee sends the wallet-invite link
+-- to via Resend (server-lib/email.js) instead of a supervisor copying a
+-- link by hand. The new hire's own page (src/WalletInvite.jsx) lets them
+-- confirm/edit name and email, upload a profile photo (new private
+-- `worker-photos` bucket, same signed-upload-URL pattern as
+-- worker-certifications), set their own PIN before finishing (never
+-- emailed in plaintext — same self-serve-PIN precedent as
+-- claim_set_roster_pin), and mark onboarding_completed_at once done.
+--
+-- "Unverified" certification status is deliberately NOT a new column: a
+-- cert is treated as unverified in the UI whenever its existing
+-- uploaded_by_role = 'worker' (i.e., the new hire uploaded it themselves
+-- during onboarding, as opposed to a supervisor/admin adding one on their
+-- behalf) — confirmed as "just a disclaimer," not a blocking gate or a
+-- separate verify/approve workflow.
+alter table roster
+  add column if not exists email text,
+  add column if not exists photo_path text,
+  add column if not exists onboarding_completed_at timestamptz;
+
+-- insert into storage.buckets (id, name, public)
+--   values ('worker-photos', 'worker-photos', false)
+--   on conflict (id) do nothing;
