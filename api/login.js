@@ -416,10 +416,20 @@ export default async function handler(req, res) {
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
 
-    await supabaseAdmin
+    // Conditioned on the token still matching (not just the row's id), so
+    // two near-simultaneous redemptions of the same link can't both pass —
+    // whichever request's update actually clears a row wins the race; the
+    // loser's returned row is empty and it's rejected below instead of also
+    // minting a session.
+    const { data: cleared, error: clearError } = await supabaseAdmin
       .from('roster')
       .update({ wallet_invite_token: null, wallet_invite_token_expires_at: null })
-      .eq('id', member.id);
+      .eq('id', member.id)
+      .eq('wallet_invite_token', inviteToken)
+      .select('id');
+    if (clearError || !cleared || cleared.length === 0) {
+      return res.status(400).json({ error: 'This invite link was already used.' });
+    }
 
     const payload = {
       role: member.role,
