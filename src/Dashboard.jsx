@@ -5478,7 +5478,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <PanelHeader
                 icon={TAB_ICON.roster}
                 title={`${company?.name || ""} — Roster`}
-                subtitle="Reset a forgotten PIN below — it takes effect immediately and is shown once"
+                subtitle={isDocActive("certifications")
+                  ? 'Reset a forgotten PIN below, or turn on "Wallet" for someone already on the roster. Onboarding someone new? Use the button below instead — it adds them and emails the invite in one step.'
+                  : "Reset a forgotten PIN below — it takes effect immediately and is shown once"}
                 actions={isDocActive("certifications") && !showOnboardForm && (
                   <button onClick={() => setShowOnboardForm(true)} style={{
                     display: "flex", alignItems: "center", gap: 6,
@@ -5516,7 +5518,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                           </div>
                           {isDocActive("certifications") && (
-                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title="Lets this person upload their own safety tickets/certifications">
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title={`Lets ${m.name.split(" ")[0]} upload their own safety tickets. Turn this on, then use "Invite" to send them a one-time link.`}>
                               <input type="checkbox" checked={!!m.wallet_enabled} disabled={togglingWalletId === m.id} onChange={e => toggleRosterWallet(m.id, e.target.checked)} />
                               Wallet
                             </label>
