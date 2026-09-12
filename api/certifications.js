@@ -341,7 +341,7 @@ export default async function handler(req, res) {
       const name = (req.body.name || '').trim();
       const email = (req.body.email || '').trim();
       if (!name) return res.status(400).json({ error: 'Enter a name.' });
-      const { error } = await supabaseAdmin.from('roster').update({ name, email: email || null }).eq('id', session.userId);
+      const { error } = await supabaseAdmin.from('roster').update({ name, email: email || null }).eq('id', session.userId).eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your details.' });
       return res.status(200).json({ ok: true });
     }
@@ -354,7 +354,8 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin
         .from('roster')
         .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
-        .eq('id', session.userId);
+        .eq('id', session.userId)
+        .eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your PIN.' });
       return res.status(200).json({ ok: true });
     }
@@ -374,14 +375,14 @@ export default async function handler(req, res) {
       if (!photoPath || !photoPath.startsWith(`${session.companyId}/${session.userId}/`)) {
         return res.status(400).json({ error: 'Invalid file path.' });
       }
-      const { error } = await supabaseAdmin.from('roster').update({ photo_path: photoPath }).eq('id', session.userId);
+      const { error } = await supabaseAdmin.from('roster').update({ photo_path: photoPath }).eq('id', session.userId).eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your photo.' });
       return res.status(200).json({ ok: true });
     }
 
     if (action === 'complete_onboarding') {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
-      const { error } = await supabaseAdmin.from('roster').update({ onboarding_completed_at: new Date().toISOString() }).eq('id', session.userId);
+      const { error } = await supabaseAdmin.from('roster').update({ onboarding_completed_at: new Date().toISOString() }).eq('id', session.userId).eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not finish onboarding.' });
       return res.status(200).json({ ok: true });
     }
