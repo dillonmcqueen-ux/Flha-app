@@ -104,7 +104,8 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // check; a shared-code login has no roster row to scope one to.
   useEffect(() => {
     if (!token || !userId) return;
-    if (builtinActive && builtinActive.certifications === false) return; // admin turned the feature off for this company
+    if (builtinActive === null) return; // still loading — wait, rather than fetching before we know if the feature is even on
+    if (builtinActive.certifications === false) { setCertAlerts({ expiredCount: 0, expiringSoonCount: 0 }); return; } // admin turned the feature off for this company
     (async () => {
       try {
         const res = await fetch("/api/certifications", {
@@ -356,7 +357,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           </div>
         </div>
 
-        {(certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
+        {builtinActive?.certifications !== false && (certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
           <div style={{ background: "rgba(234,88,12,0.14)", border: "1.5px solid rgba(234,88,12,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#FB923C", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
               <AlertTriangle size={14} strokeWidth={2.5} />Certification alert
