@@ -104,6 +104,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // check; a shared-code login has no roster row to scope one to.
   useEffect(() => {
     if (!token || !userId) return;
+    if (builtinActive && builtinActive.certifications === false) return; // admin turned the feature off for this company
     (async () => {
       try {
         const res = await fetch("/api/certifications", {
@@ -114,7 +115,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
         if (res.ok) setCertAlerts(data);
       } catch (e) { /* leave alert as-is if the request fails */ }
     })();
-  }, [token, userId, companyId]);
+  }, [token, userId, companyId, builtinActive]);
 
   // Drain any queued offline submissions (docs/scope-offline-capability.md
   // Phase 1) whenever a worker lands back on this menu — covers reopening
