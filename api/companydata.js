@@ -324,7 +324,7 @@ export default async function handler(req, res) {
         await sendEmail({
           to: email,
           subject: `Welcome to ${companyName} — let's get you set up with FORA`,
-          text: `Hi ${name},\n\nWelcome to ${companyName}! To get started with FORA we need some information from you — your safety tickets/certifications and a quick profile photo.\n\nClick here to get started: ${inviteUrl}\n\nThis link is single-use and just for you. It doesn't require a password.\n\n— ${companyName}, via FORA`,
+          text: `Hi ${name},\n\nWelcome to ${companyName}! Tap the link below to confirm your details and set up your own PIN — takes about a minute. You can add your safety tickets and a profile photo now, or anytime later.\n\nClick here to get started: ${inviteUrl}\n\nThis link is single-use and just for you. It doesn't require a password.\n\n— ${companyName}, via FORA`,
         });
         emailSent = true;
       } catch (e) {

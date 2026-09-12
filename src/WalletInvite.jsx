@@ -233,8 +233,8 @@ export default function WalletInvite() {
         <div style={styles.card}>
           <div style={styles.h1}>Welcome to {session.companyName}</div>
           <div style={styles.hint}>
-            To get started with FORA we need some information from you — confirm your details below, add your safety
-            tickets, and choose a PIN for next time. This link is single-use.
+            Confirm your details below and choose a PIN — that's all that's required. Adding your safety tickets and a
+            photo now is optional, and you can always add them later. This link is single-use.
           </div>
         </div>
 
@@ -328,6 +328,7 @@ export default function WalletInvite() {
             placeholder="1234" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} />
         </div>
 
+        <div style={{ ...styles.hint, textAlign: "center" }}>No tickets yet? No problem — you can finish now and add them anytime from "My Certifications" once you're logged in.</div>
         {finishError && <div style={{ fontSize: 13, color: "#F87171", marginBottom: 10 }}>{finishError}</div>}
         <button style={{ ...styles.primaryBtn, width: "100%", padding: "14px 16px", fontSize: 15, opacity: finishing ? 0.6 : 1 }} onClick={finishSetup} disabled={finishing}>
           {finishing ? "Finishing…" : "Finish Setup"}

@@ -17,6 +17,7 @@ import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { reviewBacklog, fieldSiteActivity, fuelSummary } from "./analyticsUtils";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
@@ -1761,6 +1762,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // ── Certifications tab: full company directory (name, photo, certs) ────
   const [employeeDirectory, setEmployeeDirectory] = useState([]);
   const [loadingDirectory, setLoadingDirectory] = useState(false);
+  const [addCertFor, setAddCertFor] = useState(null); // roster id of the employee currently being added for
+  const [addCertForm, setAddCertForm] = useState({ certType: "", certName: "", issueDate: "", expiryDate: "" });
+  const [addCertFile, setAddCertFile] = useState(null);
+  const [addCertUploading, setAddCertUploading] = useState(false);
+  const [addCertError, setAddCertError] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -2484,6 +2490,37 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       if (res.ok) setEmployeeDirectory(data.employees || []);
     } catch (e) { /* leave as-is if the request fails */ }
     setLoadingDirectory(false);
+  };
+
+  const addCertForEmployee = async (rosterId) => {
+    setAddCertError("");
+    if (!addCertForm.certType.trim() || !addCertForm.certName.trim()) { setAddCertError("Enter a ticket type and name."); return; }
+    if (!addCertFile) { setAddCertError("Choose a file to upload."); return; }
+    setAddCertUploading(true);
+    try {
+      const { path } = await uploadViaSignedUrl({
+        endpoint: "/api/certifications", action: "create_certification_upload_url", token,
+        bucket: "worker-certifications", filename: addCertFile.name, file: addCertFile, contentType: addCertFile.type,
+        extra: { rosterId, companyId: selectedCompany },
+      });
+      const res = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_certification", token, companyId: selectedCompany, rosterId,
+          certType: addCertForm.certType.trim(), certName: addCertForm.certName.trim(),
+          issueDate: addCertForm.issueDate || null, expiryDate: addCertForm.expiryDate || null, filePath: path,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setAddCertError(data.error || "Couldn't save that ticket."); setAddCertUploading(false); return; }
+      setAddCertForm({ certType: "", certName: "", issueDate: "", expiryDate: "" });
+      setAddCertFile(null);
+      setAddCertFor(null);
+      await loadEmployeeDirectory();
+    } catch (e) {
+      setAddCertError(e.message || "Upload failed. Please try again.");
+    }
+    setAddCertUploading(false);
   };
 
   // Loaded on company selection (not gated to the Certifications tab) since
@@ -5441,7 +5478,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <PanelHeader
                 icon={TAB_ICON.roster}
                 title={`${company?.name || ""} — Roster`}
-                subtitle="Reset a forgotten PIN below — it takes effect immediately and is shown once"
+                subtitle={isDocActive("certifications")
+                  ? 'Reset a forgotten PIN below, or turn on "Wallet" for someone already on the roster. Onboarding someone new? Use the button below instead — it adds them and emails the invite in one step.'
+                  : "Reset a forgotten PIN below — it takes effect immediately and is shown once"}
                 actions={isDocActive("certifications") && !showOnboardForm && (
                   <button onClick={() => setShowOnboardForm(true)} style={{
                     display: "flex", alignItems: "center", gap: 6,
@@ -5479,7 +5518,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                           </div>
                           {isDocActive("certifications") && (
-                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title="Lets this person upload their own safety tickets/certifications">
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title={`Lets ${m.name.split(" ")[0]} upload their own safety tickets. Turn this on, then use "Invite" to send them a one-time link.`}>
                               <input type="checkbox" checked={!!m.wallet_enabled} disabled={togglingWalletId === m.id} onChange={e => toggleRosterWallet(m.id, e.target.checked)} />
                               Wallet
                             </label>
@@ -5530,7 +5569,40 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         {emp.email || "No email on file"} · {emp.onboardingCompletedAt ? `Onboarding complete ${new Date(emp.onboardingCompletedAt).toLocaleDateString()}` : "Onboarding not yet completed"}
                       </div>
                     </div>
+                    <button
+                      onClick={() => { setAddCertFor(addCertFor === emp.id ? null : emp.id); setAddCertError(""); }}
+                      style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}
+                    >
+                      {addCertFor === emp.id ? "Cancel" : "+ Add"}
+                    </button>
                   </div>
+
+                  {addCertFor === emp.id && (
+                    <div style={{ background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                        <input placeholder="Type (e.g. Fall Protection)" value={addCertForm.certType} onChange={e => setAddCertForm(f => ({ ...f, certType: e.target.value }))}
+                          style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panel, color: C.text.primary, fontSize: 13 }} />
+                        <input placeholder="Name on card (e.g. WHMIS 2015)" value={addCertForm.certName} onChange={e => setAddCertForm(f => ({ ...f, certName: e.target.value }))}
+                          style={{ flex: "1 1 160px", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panel, color: C.text.primary, fontSize: 13 }} />
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                        <input type="date" value={addCertForm.issueDate} onChange={e => setAddCertForm(f => ({ ...f, issueDate: e.target.value }))}
+                          style={{ flex: "1 1 140px", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panel, color: C.text.primary, fontSize: 13 }} />
+                        <input type="date" value={addCertForm.expiryDate} onChange={e => setAddCertForm(f => ({ ...f, expiryDate: e.target.value }))}
+                          style={{ flex: "1 1 140px", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panel, color: C.text.primary, fontSize: 13 }} />
+                      </div>
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={e => setAddCertFile(e.target.files?.[0] || null)}
+                        style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panel, color: C.text.primary, fontSize: 13, marginBottom: 8 }} />
+                      {addCertError && <div style={{ fontSize: 12, color: C.status.danger.text, marginBottom: 8 }}>{addCertError}</div>}
+                      <button onClick={() => addCertForEmployee(emp.id)} disabled={addCertUploading} style={{
+                        background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                        padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: addCertUploading ? 0.6 : 1,
+                      }}>
+                        {addCertUploading ? "Uploading…" : "Save ticket"}
+                      </button>
+                    </div>
+                  )}
+
                   {emp.certifications.length === 0 ? (
                     <div style={{ fontSize: 12, color: C.text.faint, paddingLeft: 46 }}>No certifications uploaded yet.</div>
                   ) : (

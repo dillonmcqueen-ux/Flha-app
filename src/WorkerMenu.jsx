@@ -10,12 +10,13 @@ import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import MyDocuments from "./MyDocuments.jsx";
+import WorkerCertifications from "./WorkerCertifications.jsx";
 import { drainQueue } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   ClipboardList, ClipboardCheck, Hammer, AlertTriangle, Siren, CalendarClock,
   Clock, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
-  HardHat, Wrench, Layers,
+  HardHat, Wrench, Layers, ShieldCheck,
 } from "lucide-react";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
@@ -52,6 +53,7 @@ const BUILTIN_TYPES = [
   { key: "daily", icon: ClipboardList, title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A", category: "general" },
   { key: "monthly", icon: CalendarClock, title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA", category: "general" },
   { key: "timeclock", icon: Clock, title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2", category: null },
+  { key: "certifications", icon: ShieldCheck, title: "My Certifications", desc: "View and add your safety tickets", ready: true, accent: "#0D9488", category: "safety" },
 ];
 
 // The three worker-facing menu categories. `formCategory` is the same
@@ -184,6 +186,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   if (doc === "fuellog") {
     return <FuelLog companyId={companyId} userName={userName} onBack={() => setDoc(null)} token={token} />;
   }
+  if (doc === "certifications") {
+    return <WorkerCertifications companyId={companyId} userId={userId} userName={userName} token={token} onBack={() => setDoc(null)} />;
+  }
 
   // Same design system as Dashboard.jsx (src/theme.js) — dark surfaces,
   // two-part shadows for real elevation, orange glow accent. This screen
@@ -213,7 +218,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     : BUILTIN_TYPES; // show everything while loading, then narrow once loaded
 
   const timeclockItem = visibleBuiltins.find(d => d.key === "timeclock" && userId); // needs a real per-person identity, regardless of loading state
-  const categorizedBuiltins = visibleBuiltins.filter(d => d.category);
+  // Certifications also needs a real per-person identity — a shared-code
+  // login has no roster row for a cert wallet to belong to.
+  const categorizedBuiltins = visibleBuiltins.filter(d => d.category && (d.key !== "certifications" || userId));
 
   const loading = builtinActive === null;
 
