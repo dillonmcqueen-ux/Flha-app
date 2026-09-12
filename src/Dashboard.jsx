@@ -2194,7 +2194,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     fuel: isDocActive("fuellog"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
-    certifications: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
     safetyanalytics: true,
     analytics: true,
     sops: true,
@@ -3799,7 +3799,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {(certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
+        {isDocActive("certifications") && (certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
           <div style={{ background: "rgba(234,88,12,0.14)", border: "1.5px solid rgba(234,88,12,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#FB923C", marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
               <AlertTriangle size={14} strokeWidth={2.5} />
@@ -4795,7 +4795,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               monthlyRecords={companyMonthlyRecords}
               monthlyActions={companyMonthlyActions}
               customDocs={companySafetyCustomDocs}
-              certAlerts={certAlerts}
+              certAlerts={isDocActive("certifications") ? certAlerts : null}
             />
           </>
         )}
@@ -5410,7 +5410,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               </div>
             )}
 
-            {showOnboardForm && (
+            {showOnboardForm && isDocActive("certifications") && (
               <div style={styles.card}>
                 <div style={{ fontWeight: 800, fontSize: 15, color: C.text.primary, marginBottom: 4 }}>Onboard New Employee</div>
                 <div style={{ fontSize: 12, color: C.text.faint, marginBottom: 12 }}>
@@ -5442,7 +5442,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 icon={TAB_ICON.roster}
                 title={`${company?.name || ""} — Roster`}
                 subtitle="Reset a forgotten PIN below — it takes effect immediately and is shown once"
-                actions={!showOnboardForm && (
+                actions={isDocActive("certifications") && !showOnboardForm && (
                   <button onClick={() => setShowOnboardForm(true)} style={{
                     display: "flex", alignItems: "center", gap: 6,
                     background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
@@ -5478,11 +5478,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>{m.name}</div>
                             <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                           </div>
-                          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title="Lets this person upload their own safety tickets/certifications">
-                            <input type="checkbox" checked={!!m.wallet_enabled} disabled={togglingWalletId === m.id} onChange={e => toggleRosterWallet(m.id, e.target.checked)} />
-                            Wallet
-                          </label>
-                          {m.wallet_enabled && (
+                          {isDocActive("certifications") && (
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title="Lets this person upload their own safety tickets/certifications">
+                              <input type="checkbox" checked={!!m.wallet_enabled} disabled={togglingWalletId === m.id} onChange={e => toggleRosterWallet(m.id, e.target.checked)} />
+                              Wallet
+                            </label>
+                          )}
+                          {isDocActive("certifications") && m.wallet_enabled && (
                             <button onClick={() => createRosterWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
                           )}
                           <button
