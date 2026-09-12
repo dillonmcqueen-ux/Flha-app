@@ -412,9 +412,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'This invite link has expired — ask your employer to send a new one.' });
     }
 
-    const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type').eq('id', member.company_id).limit(1);
+    const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type, suspended').eq('id', member.company_id).limit(1);
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
+    // Same suspension gate as roster_login: a suspended company's workers
+    // don't get in even with a valid, unexpired invite link.
+    if (company.suspended && member.role === 'worker') {
+      return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
+    }
 
     // Conditioned on the token still matching (not just the row's id), so
     // two near-simultaneous redemptions of the same link can't both pass —
@@ -438,7 +443,7 @@ export default async function handler(req, res) {
       appType: company.app_type || 'safety',
       userId: member.id,
       userName: member.name,
-      suspended: false,
+      suspended: !!company.suspended,
       issuedAt: Date.now(),
     };
     const token = signSession(payload);
