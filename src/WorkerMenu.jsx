@@ -72,6 +72,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [customForms, setCustomForms] = useState([]);
   const [showMyDocs, setShowMyDocs] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
+  const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
 
   useEffect(() => {
     async function loadDocs() {
@@ -97,6 +98,23 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     }
     loadDocs();
   }, [token]);
+
+  // Certification expiry notification (onboarding wallet, Phase 3) — only
+  // an individually-identified roster login (real userId) has a wallet to
+  // check; a shared-code login has no roster row to scope one to.
+  useEffect(() => {
+    if (!token || !userId) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/certifications", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "certification_summary", token, companyId }),
+        });
+        const data = await res.json();
+        if (res.ok) setCertAlerts(data);
+      } catch (e) { /* leave alert as-is if the request fails */ }
+    })();
+  }, [token, userId, companyId]);
 
   // Drain any queued offline submissions (docs/scope-offline-capability.md
   // Phase 1) whenever a worker lands back on this menu — covers reopening
@@ -336,6 +354,20 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             </div>
           </div>
         </div>
+
+        {(certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
+          <div style={{ background: "rgba(234,88,12,0.14)", border: "1.5px solid rgba(234,88,12,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#FB923C", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
+              <AlertTriangle size={14} strokeWidth={2.5} />Certification alert
+            </div>
+            <div style={{ fontSize: 13, color: "#FDBA74" }}>
+              {certAlerts.expiredCount > 0 && <span>{certAlerts.expiredCount} of your certifications {certAlerts.expiredCount === 1 ? "has" : "have"} expired</span>}
+              {certAlerts.expiredCount > 0 && certAlerts.expiringSoonCount > 0 && <span> and </span>}
+              {certAlerts.expiringSoonCount > 0 && <span>{certAlerts.expiringSoonCount} {certAlerts.expiringSoonCount === 1 ? "is" : "are"} expiring within 30 days</span>}
+              . Contact your supervisor to renew.
+            </div>
+          </div>
+        )}
 
         {/* Time Clock — top and centered, its own thing, not buried in a
             category. This is the button most workers reach for first and

@@ -16,6 +16,20 @@ const supabaseAdmin = createClient(
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const BUCKET = 'worker-certifications';
+const EXPIRING_SOON_DAYS = 30;
+
+// v1 scope is display/notification only (see the migration's decision
+// notes) — this never blocks a submission, it only classifies a cert so
+// the Dashboard/Analytics/worker-profile alerts below know what to flag.
+function classifyExpiry(expiryDate) {
+  if (!expiryDate) return null;
+  const expiry = new Date(expiryDate);
+  const now = new Date();
+  const soonCutoff = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
+  if (expiry < now) return 'expired';
+  if (expiry <= soonCutoff) return 'expiring_soon';
+  return 'valid';
+}
 
 function safeEqual(a, b) {
   const ah = crypto.createHash('sha256').update(String(a)).digest();
@@ -170,10 +184,63 @@ export default async function handler(req, res) {
       const certs = await Promise.all(
         (data || []).map(async (row) => {
           const { data: signed } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(row.file_path, 3600);
-          return { ...row, fileUrl: signed?.signedUrl || null };
+          return { ...row, status: classifyExpiry(row.expiry_date), fileUrl: signed?.signedUrl || null };
         })
       );
       return res.status(200).json({ certifications: certs });
+    }
+
+    // ── Expiry summary for notifications: a worker gets their own
+    // expired/expiring-soon certs; a supervisor/admin gets the whole
+    // company's, with each entry's worker name attached — this is the
+    // data behind the Supervisor Dashboard alert, the Analytics rollup,
+    // and the worker-profile notification ────────────────────────────────
+    if (action === 'certification_summary') {
+      const { companyId: requestedCompanyId } = req.body;
+      const companyId = resolveCompanyId(session, requestedCompanyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company.' });
+
+      const isWorker = session.role === 'worker';
+      let query = supabaseAdmin
+        .from('worker_certifications')
+        .select('id, roster_id, cert_type, cert_name, expiry_date')
+        .eq('company_id', companyId)
+        .not('expiry_date', 'is', null);
+      if (isWorker) query = query.eq('roster_id', session.userId);
+
+      const { data, error } = await query;
+      if (error) return res.status(500).json({ error: 'Could not load certification status.' });
+
+      const expired = [];
+      const expiringSoon = [];
+      for (const row of data || []) {
+        const status = classifyExpiry(row.expiry_date);
+        if (status === 'expired') expired.push(row);
+        else if (status === 'expiring_soon') expiringSoon.push(row);
+      }
+
+      let rosterNames = {};
+      if (!isWorker && (expired.length || expiringSoon.length)) {
+        const ids = [...new Set([...expired, ...expiringSoon].map((r) => r.roster_id))];
+        const { data: rosterRows } = await supabaseAdmin.from('roster').select('id, name').in('id', ids);
+        rosterNames = Object.fromEntries((rosterRows || []).map((r) => [r.id, r.name]));
+      }
+
+      const shape = (row) => ({
+        id: row.id,
+        rosterId: row.roster_id,
+        workerName: isWorker ? null : rosterNames[row.roster_id] || null,
+        certType: row.cert_type,
+        certName: row.cert_name,
+        expiryDate: row.expiry_date,
+      });
+
+      return res.status(200).json({
+        expiredCount: expired.length,
+        expiringSoonCount: expiringSoon.length,
+        expired: expired.map(shape),
+        expiringSoon: expiringSoon.map(shape),
+      });
     }
 
     // ── Delete a cert: worker may remove their own; supervisor/admin may
