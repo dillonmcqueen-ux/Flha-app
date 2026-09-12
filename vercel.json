@@ -1,4 +1,5 @@
 {
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ':(exclude)website' ':(exclude)docs' ':(exclude).claude' ':(exclude).agents' ':(exclude).github' ':(exclude)tests' ':(exclude)*.md'",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ],
