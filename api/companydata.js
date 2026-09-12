@@ -9,6 +9,8 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
+import { randomToken } from '../server-lib/onboardingHelpers.js';
+import { siteOrigin } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -16,6 +18,7 @@ const supabaseAdmin = createClient(
 );
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const WALLET_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — matches SESSION_TTL_MS since redeeming just mints an ordinary session
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -201,7 +204,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -316,6 +319,55 @@ export default async function handler(req, res) {
         .eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
       return res.status(200).json({ ok: true, pin });
+    }
+
+    // ── Onboarding wallet (Phase 2): opt-in per roster row. Off by default
+    // — see docs/schema/worker-certifications-migration.sql — so no
+    // existing company suddenly exposes an upload flow it didn't ask for.
+    if (action === 'toggle_wallet_enabled') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, enabled } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+
+      const { error } = await supabaseAdmin.from('roster').update({ wallet_enabled: !!enabled }).eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't update." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ── Generate a single-use onboarding-wallet invite link for one roster
+    // member — same raw-token-stored-on-the-row pattern as
+    // onboarding_requests.claim_token (see api/admin.js's get_claim_link).
+    // The admin/supervisor copies and sends this themselves (roster has no
+    // email address on file to send it to automatically); opening it
+    // redeems the token for an ordinary session (api/login.js's
+    // redeem_wallet_invite), same as if they'd typed their PIN.
+    if (action === 'create_wallet_invite') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, active, wallet_enabled').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      const member = rows[0];
+      if (session.role === 'supervisor' && member.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+      if (!member.active) return res.status(400).json({ error: 'This person is deactivated.' });
+      if (!member.wallet_enabled) return res.status(400).json({ error: 'Turn on the wallet for this person first.' });
+
+      const inviteToken = randomToken();
+      const { error } = await supabaseAdmin.from('roster').update({
+        wallet_invite_token: inviteToken,
+        wallet_invite_token_expires_at: new Date(Date.now() + WALLET_INVITE_TTL_MS).toISOString(),
+      }).eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't create the invite link." });
+      return res.status(200).json({ ok: true, inviteUrl: `${siteOrigin(req)}/wallet?token=${inviteToken}` });
     }
 
     // Admin-only: regenerate every active roster member's PIN in one shot

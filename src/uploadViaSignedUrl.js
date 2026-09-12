@@ -8,11 +8,11 @@
 // that token.
 import { supabase } from "./supabaseClient.js";
 
-export async function uploadViaSignedUrl({ endpoint, action, token, bucket, filename, file, contentType }) {
+export async function uploadViaSignedUrl({ endpoint, action, token, bucket, filename, file, contentType, extra = {} }) {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, token, bucket, filename }),
+    body: JSON.stringify({ action, token, bucket, filename, ...extra }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Couldn't prepare the upload.");

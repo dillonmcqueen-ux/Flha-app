@@ -311,6 +311,32 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { setMsg("Couldn't reset PIN. Try again."); }
   };
 
+  // ── Onboarding wallet (Phase 2): per-person opt-in + invite link ────────
+  const [walletInviteLink, setWalletInviteLink] = useState(null); // { name, url }
+
+  const toggleWalletEnabled = async (id, enabled) => {
+    setRosterMembers(prev => prev.map(m => m.id === id ? { ...m, wallet_enabled: enabled } : m));
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_wallet_enabled", token, id, enabled }),
+      });
+      if (!res.ok) await loadRoster(activeId); // revert the optimistic flip if it didn't actually save
+    } catch (e) { await loadRoster(activeId); }
+  };
+
+  const createWalletInvite = async (id, name) => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_wallet_invite", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't create the invite link."); return; }
+      setWalletInviteLink({ name, url: data.inviteUrl });
+    } catch (e) { setMsg("Couldn't create the invite link. Try again."); }
+  };
+
   const regenerateAllPins = async () => {
     if (!window.confirm(`Regenerate PINs for all ${rosterActiveCount} active roster member(s)? Everyone's current PIN stops working immediately.`)) return;
     setMsg("");
@@ -2168,6 +2194,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               </div>
             )}
 
+            {walletInviteLink && (
+              <div style={{ ...st.card, background: C.status.warning.bg, border: `1.5px solid ${C.amber}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 4 }}>Onboarding wallet invite for {walletInviteLink.name} — single-use, send it to them now</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ ...st.code, fontSize: 12, wordBreak: "break-all" }} onClick={() => copyText(walletInviteLink.url)}>{walletInviteLink.url}</span>
+                  <button onClick={() => copyText(walletInviteLink.url)} style={{ ...st.darkBtn, padding: "6px 12px", fontSize: 12 }}>Copy link</button>
+                  <button onClick={() => setWalletInviteLink(null)} style={{ background: "transparent", border: "none", color: C.inkSoft, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
+                </div>
+              </div>
+            )}
+
             {allPinsResult && (
               <div style={{ ...st.card, background: C.status.warning.bg, border: `1.5px solid ${C.amber}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 10 }}>
@@ -2241,6 +2278,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                               {m.active ? (m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in") : "Deactivated"}
                             </div>
                           </div>
+                          {m.active && (
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.muted, flexShrink: 0, cursor: "pointer" }} title="Lets this person upload their own safety tickets/certifications">
+                              <input type="checkbox" checked={!!m.wallet_enabled} onChange={e => toggleWalletEnabled(m.id, e.target.checked)} />
+                              Wallet
+                            </label>
+                          )}
+                          {m.active && m.wallet_enabled && (
+                            <button onClick={() => createWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
+                          )}
                           {m.active && (
                             <button onClick={() => resetRosterPin(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Reset PIN</button>
                           )}

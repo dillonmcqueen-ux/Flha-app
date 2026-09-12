@@ -64,3 +64,20 @@ alter table worker_certifications enable row level security;
 -- insert into storage.buckets (id, name, public)
 --   values ('worker-certifications', 'worker-certifications', false)
 --   on conflict (id) do nothing;
+
+-- ── Phase 2: onboarding-wallet invite links ──────────────────────────────
+-- APPLIED as a follow-up migration, "worker_certifications_wallet_invite".
+-- A raw random token (server-lib/onboardingHelpers.js's randomToken,
+-- unhashed) stored directly on the roster row, exactly like
+-- onboarding_requests.claim_token — looked up by equality, not decoded.
+-- Single-use: api/login.js's redeem_wallet_invite clears both columns the
+-- moment the link is opened, then hands back an ordinary signed session
+-- (same shape as roster_login's) that's valid on its own for the rest of
+-- its normal TTL. Generating a new invite (api/companydata.js's
+-- create_wallet_invite) overwrites any unused prior token for that person.
+alter table roster
+  add column if not exists wallet_invite_token text,
+  add column if not exists wallet_invite_token_expires_at timestamptz;
+
+create unique index if not exists roster_wallet_invite_token_idx
+  on roster (wallet_invite_token) where wallet_invite_token is not null;
