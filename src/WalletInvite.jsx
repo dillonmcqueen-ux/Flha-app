@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 
-// Public onboarding-wallet invite page — no PIN required. A new hire (or
-// an existing worker being asked to get their tickets on file) lands here
-// from a link their employer generated and sent them (Admin Panel's
-// Roster tab, "Invite" button — api/companydata.js's create_wallet_invite).
+// Public onboarding-wallet invite page — no PIN required. A new hire lands
+// here from a link their supervisor generated (Dashboard's Roster tab,
+// "Onboard New Employee" — api/companydata.js's onboard_new_employee, sent
+// by email — or the per-person "Invite" button, same underlying token).
 // Opening the link redeems it for an ordinary session, scoped server-side
 // to the roster row the token belongs to (api/login.js's
 // redeem_wallet_invite) — this page never sends a companyId/rosterId of
-// its own for anything but the upload calls that session already permits.
-// The link is single-use; after this, the person logs back in with their
-// normal name + PIN like any other roster login (their PIN was already
-// set when the admin added them).
+// its own for anything but the calls that session already permits.
+// The link is single-use; "Finish Setup" below has them choose their own
+// PIN (never emailed in plaintext) for every login after this one.
 
 const styles = {
   wrap: {
@@ -44,6 +43,11 @@ const styles = {
     display: "flex", justifyContent: "space-between", alignItems: "center",
     padding: "10px 0", borderBottom: "1px solid #2A2A2A", gap: 10,
   },
+  disclaimer: {
+    fontSize: 11, color: "#FDBA74", background: "#F9731614", border: "1px solid #F9731633",
+    borderRadius: 6, padding: "6px 10px", marginBottom: 10,
+  },
+  code: { fontFamily: "monospace", background: "#1E1E1E", padding: "2px 8px", borderRadius: 6, color: "#F97316", fontWeight: 700 },
 };
 
 export default function WalletInvite() {
@@ -53,11 +57,18 @@ export default function WalletInvite() {
   const [error, setError] = useState("");
   const [session, setSession] = useState(null); // { userId, userName, companyId, companyName }
   const [token, setToken] = useState("");
+  const [profile, setProfile] = useState({ name: "", email: "" });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [pin, setPin] = useState("");
   const [certs, setCerts] = useState([]);
   const [form, setForm] = useState({ certType: "", certName: "", issueDate: "", expiryDate: "" });
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [finishing, setFinishing] = useState(false);
+  const [finishError, setFinishError] = useState("");
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     if (!inviteToken) { setError("Missing invite link."); setLoading(false); return; }
@@ -71,6 +82,7 @@ export default function WalletInvite() {
         if (!res.ok) { setError(data.error || "That invite link isn't valid."); setLoading(false); return; }
         setSession(data.session);
         setToken(data.token);
+        setProfile({ name: data.session.userName || "", email: data.email || "" });
         await loadCerts(data.token, data.session);
       } catch (e) {
         setError("Couldn't load your invite. Please try again.");
@@ -132,6 +144,59 @@ export default function WalletInvite() {
     } catch (e) { /* leave list as-is */ }
   };
 
+  const onPhotoChange = (e) => {
+    const f = e.target.files?.[0] || null;
+    setPhotoFile(f);
+    setPhotoPreview(f ? URL.createObjectURL(f) : null);
+  };
+
+  const finishSetup = async () => {
+    setFinishError("");
+    const name = profile.name.trim();
+    const email = profile.email.trim();
+    if (!name) { setFinishError("Enter your name."); return; }
+    if (!/^\d{4}$/.test(pin)) { setFinishError("Choose a 4-digit PIN — you'll use this to log in next time."); return; }
+    setFinishing(true);
+    try {
+      const profileRes = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_own_profile", token, name, email }),
+      });
+      const profileData = await profileRes.json();
+      if (!profileRes.ok) { setFinishError(profileData.error || "Couldn't save your details."); setFinishing(false); return; }
+
+      if (photoFile) {
+        const { path } = await uploadViaSignedUrl({
+          endpoint: "/api/certifications", action: "create_photo_upload_url", token,
+          bucket: "worker-photos", filename: photoFile.name, file: photoFile, contentType: photoFile.type,
+        });
+        const photoRes = await fetch("/api/certifications", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "set_profile_photo", token, photoPath: path }),
+        });
+        const photoData = await photoRes.json();
+        if (!photoRes.ok) { setFinishError(photoData.error || "Couldn't save your photo."); setFinishing(false); return; }
+      }
+
+      const pinRes = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_own_pin", token, pin }),
+      });
+      const pinData = await pinRes.json();
+      if (!pinRes.ok) { setFinishError(pinData.error || "Couldn't save your PIN."); setFinishing(false); return; }
+
+      await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete_onboarding", token }),
+      });
+
+      setDone(true);
+    } catch (e) {
+      setFinishError(e.message || "Something went wrong. Please try again.");
+    }
+    setFinishing(false);
+  };
+
   if (loading) return <div style={styles.wrap}><div style={{ color: "#9CA3AF", marginTop: 60 }}>Loading…</div></div>;
 
   if (error) {
@@ -145,19 +210,58 @@ export default function WalletInvite() {
     );
   }
 
+  if (done) {
+    return (
+      <div style={styles.wrap}>
+        <div style={styles.card}>
+          <div style={styles.h1}>You're all set, {profile.name.split(" ")[0]}!</div>
+          <div style={{ ...styles.hint, marginTop: 10 }}>
+            Your details and tickets are on file with {session.companyName}. Next time, open the app and log in with your name and this PIN:
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
+            <span style={{ ...styles.code, fontSize: 20, padding: "6px 14px" }}>{pin}</span>
+          </div>
+          <div style={{ ...styles.hint, marginTop: 14, marginBottom: 0 }}>You can close this page now.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.wrap}>
       <div style={{ width: "100%", maxWidth: 560 }}>
         <div style={styles.card}>
-          <div style={styles.h1}>Welcome, {session.userName?.split(" ")[0] || "there"}</div>
+          <div style={styles.h1}>Welcome to {session.companyName}</div>
           <div style={styles.hint}>
-            Upload your safety tickets/certifications for {session.companyName}. This link is single-use —
-            after today, log back in with your usual name and PIN to add more or check on these anytime.
+            To get started with FORA we need some information from you — confirm your details below, add your safety
+            tickets, and choose a PIN for next time. This link is single-use.
+          </div>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.h2}>Your details</div>
+          <div style={styles.row}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <label style={styles.label}>Name</label>
+              <input style={styles.input} value={profile.name} onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} />
+            </div>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <label style={styles.label}>Email</label>
+              <input style={styles.input} type="email" value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} />
+            </div>
+          </div>
+          <div style={styles.row}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <label style={styles.label}>Profile photo (optional)</label>
+              {photoPreview && <img src={photoPreview} alt="" style={{ width: 56, height: 56, borderRadius: "50%", objectFit: "cover", display: "block", marginBottom: 8 }} />}
+              <input style={{ ...styles.input, padding: "8px 10px" }} type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif" onChange={onPhotoChange} />
+            </div>
           </div>
         </div>
 
         <div style={styles.card}>
           <div style={styles.h2}>Add a ticket</div>
+          <div style={styles.disclaimer}>Tickets you upload here are marked "Unverified" until your supervisor has had a chance to look them over.</div>
           <div style={styles.row}>
             <div style={{ flex: 1, minWidth: 160 }}>
               <label style={styles.label}>Type</label>
@@ -193,29 +297,41 @@ export default function WalletInvite() {
           <button style={{ ...styles.primaryBtn, opacity: uploading ? 0.6 : 1 }} onClick={addCertification} disabled={uploading}>
             {uploading ? "Uploading…" : "Add ticket"}
           </button>
+
+          {certs.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              {certs.map(c => (
+                <div key={c.id} style={styles.certRow}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#E5E7EB" }}>
+                      {c.cert_name}
+                      {c.unverified && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#FDBA74", background: "#F9731622", border: "1px solid #F9731644", borderRadius: 20, padding: "2px 8px" }}>UNVERIFIED</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                      {c.cert_type}{c.expiry_date ? ` · expires ${new Date(c.expiry_date).toLocaleDateString("en-CA")}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                    {c.fileUrl && <a href={c.fileUrl} target="_blank" rel="noreferrer" style={{ ...styles.ghostBtn, textDecoration: "none" }}>View</a>}
+                    <button style={{ background: "transparent", border: "none", color: "#F87171", fontSize: 13, cursor: "pointer", fontWeight: 700 }} onClick={() => removeCertification(c.id)}>Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={styles.card}>
-          <div style={styles.h2}>Your tickets ({certs.length})</div>
-          {certs.length === 0 ? (
-            <div style={{ color: "#6B7280", padding: "10px 0" }}>Nothing uploaded yet.</div>
-          ) : (
-            certs.map(c => (
-              <div key={c.id} style={styles.certRow}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#E5E7EB" }}>{c.cert_name}</div>
-                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                    {c.cert_type}{c.expiry_date ? ` · expires ${new Date(c.expiry_date).toLocaleDateString("en-CA")}` : ""}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-                  {c.fileUrl && <a href={c.fileUrl} target="_blank" rel="noreferrer" style={{ ...styles.ghostBtn, textDecoration: "none" }}>View</a>}
-                  <button style={{ background: "transparent", border: "none", color: "#F87171", fontSize: 13, cursor: "pointer", fontWeight: 700 }} onClick={() => removeCertification(c.id)}>Remove</button>
-                </div>
-              </div>
-            ))
-          )}
+          <div style={styles.h2}>Choose your PIN</div>
+          <div style={styles.hint}>You'll use your name and this 4-digit PIN to log in from now on — write it down.</div>
+          <input style={{ ...styles.input, maxWidth: 140, fontFamily: "monospace", fontSize: 18, letterSpacing: 2 }} inputMode="numeric" maxLength={4}
+            placeholder="1234" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} />
         </div>
+
+        {finishError && <div style={{ fontSize: 13, color: "#F87171", marginBottom: 10 }}>{finishError}</div>}
+        <button style={{ ...styles.primaryBtn, width: "100%", padding: "14px 16px", fontSize: 15, opacity: finishing ? 0.6 : 1 }} onClick={finishSetup} disabled={finishing}>
+          {finishing ? "Finishing…" : "Finish Setup"}
+        </button>
       </div>
     </div>
   );

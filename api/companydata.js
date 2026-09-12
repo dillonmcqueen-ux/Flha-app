@@ -9,8 +9,8 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
-import { randomToken } from '../server-lib/onboardingHelpers.js';
-import { siteOrigin } from '../server-lib/email.js';
+import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { siteOrigin, sendEmail } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -265,6 +265,73 @@ export default async function handler(req, res) {
         .single();
       if (error) { console.error("roster add failed:", error.message); return res.status(500).json({ error: "Couldn't add to the roster. Try again." }); }
       return res.status(200).json({ ok: true, member: data, pin });
+    }
+
+    // ── Onboarding wallet (Phase 4): a supervisor/admin creates the roster
+    // row and emails the new hire a wallet-invite link directly — same seat
+    // cap / name-collision checks as add_roster_member, plus an email
+    // address and an auto-generated initial PIN the new hire replaces with
+    // their own during onboarding (never emailed in plaintext). Delivery is
+    // best-effort: sendEmail() is a no-op if RESEND_API_KEY isn't set, and a
+    // send failure doesn't undo the roster row already created — the
+    // supervisor can still fall back to the existing Admin Panel "Invite"
+    // button for that person.
+    if (action === 'onboard_new_employee') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const name = (req.body.name || '').trim();
+      const role = req.body.role;
+      const email = (req.body.email || '').trim();
+      if (!name) return res.status(400).json({ error: 'Enter a name.' });
+      if (role !== 'worker' && role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+
+      const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('name, plan_tier').eq('id', companyId).limit(1);
+      if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
+      const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';
+      const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
+      const cap = SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic;
+
+      const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized').eq('company_id', companyId).eq('active', true);
+      if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
+      if ((activeRows || []).length >= cap) {
+        return res.status(400).json({ error: `Seat limit reached for this plan (${cap} on ${tier === 'advanced' ? 'Advanced' : 'Basic'}). Upgrade the plan or deactivate someone first.` });
+      }
+      if ((activeRows || []).some(r => r.name_normalized === name.toLowerCase())) {
+        return res.status(400).json({ error: `"${name}" is already active on this roster. Add a last initial to tell them apart.` });
+      }
+
+      const salt = genSalt();
+      const pin = genPin(); // replaced by the new hire's own PIN during onboarding — never sent in this email
+      const inviteToken = randomToken();
+      const { data, error } = await supabaseAdmin
+        .from('roster')
+        .insert({
+          company_id: companyId, name, role, email,
+          pin_hash: hashPin(pin, salt), pin_salt: salt,
+          wallet_enabled: true,
+          wallet_invite_token: inviteToken,
+          wallet_invite_token_expires_at: new Date(Date.now() + WALLET_INVITE_TTL_MS).toISOString(),
+        })
+        .select('id, name, role, email, created_at')
+        .single();
+      if (error) { console.error("onboard_new_employee failed:", error.message); return res.status(500).json({ error: "Couldn't add to the roster. Try again." }); }
+
+      const inviteUrl = `${siteOrigin(req)}/wallet?token=${inviteToken}`;
+      let emailSent = false;
+      try {
+        await sendEmail({
+          to: email,
+          subject: `Welcome to ${companyName} — let's get you set up with FORA`,
+          text: `Hi ${name},\n\nWelcome to ${companyName}! To get started with FORA we need some information from you — your safety tickets/certifications and a quick profile photo.\n\nClick here to get started: ${inviteUrl}\n\nThis link is single-use and just for you. It doesn't require a password.\n\n— ${companyName}, via FORA`,
+        });
+        emailSent = true;
+      } catch (e) {
+        console.error('onboard_new_employee email failed:', e.message);
+      }
+
+      return res.status(200).json({ ok: true, member: data, inviteUrl, emailSent });
     }
 
     if (action === 'deactivate_roster_member' || action === 'reactivate_roster_member') {

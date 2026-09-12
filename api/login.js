@@ -399,7 +399,7 @@ export default async function handler(req, res) {
 
     const { data: rows, error } = await supabaseAdmin
       .from('roster')
-      .select('id, name, role, company_id, active, wallet_enabled, wallet_invite_token_expires_at')
+      .select('id, name, email, role, company_id, active, wallet_enabled, wallet_invite_token_expires_at')
       .eq('wallet_invite_token', inviteToken)
       .limit(1);
     if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
@@ -447,7 +447,7 @@ export default async function handler(req, res) {
       issuedAt: Date.now(),
     };
     const token = signSession(payload);
-    return res.status(200).json({ session: payload, token });
+    return res.status(200).json({ session: payload, token, email: member.email || '' });
   }
 
   // ── Master code, step 2: pick a company + role ──────────────────────────
