@@ -99,7 +99,7 @@ export default function WalletInvite() {
     try {
       const { path } = await uploadViaSignedUrl({
         endpoint: "/api/certifications", action: "create_certification_upload_url", token,
-        filename: file.name, file, contentType: file.type,
+        bucket: "worker-certifications", filename: file.name, file, contentType: file.type,
         extra: { rosterId: session.userId, companyId: session.companyId },
       });
       const res = await fetch("/api/certifications", {
