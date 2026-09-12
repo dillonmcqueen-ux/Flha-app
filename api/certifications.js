@@ -84,6 +84,16 @@ export default async function handler(req, res) {
   const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Please log in again.' });
 
+  // Every action here is scoped to an individually-identified roster row —
+  // a legacy/shared-code worker or supervisor session (no userId) has no
+  // roster row to scope to, so it can't use this endpoint at all. Without
+  // this, a falsy session.userId would fall through canActOnRosterId's
+  // truthy-guarded checks in list_certifications and return the whole
+  // company's certifications instead of "not allowed" or "none."
+  if (session.role !== 'admin' && !session.userId) {
+    return res.status(403).json({ error: 'Not available for this login.' });
+  }
+
   try {
     // ── Step 1: request a signed upload slot for one cert file ──────────
     if (action === 'create_certification_upload_url') {

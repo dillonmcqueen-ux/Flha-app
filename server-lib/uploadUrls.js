@@ -13,8 +13,18 @@
 // files directly under api/ into functions, and this is imported by
 // several of them.
 
+// Sanitizes each path segment independently rather than the whole string,
+// so callers that need a per-tenant subpath (e.g. `${companyId}/${rosterId}/
+// ${filename}` in api/certifications.js) keep their directory structure —
+// a single blanket regex would strip every "/" and silently flatten the
+// path, breaking any prefix check built on it. Empty/"."/".." segments are
+// dropped so this can't be used for path traversal or a leading slash.
 function sanitizeFilename(name) {
-  return String(name || '').replace(/[^a-zA-Z0-9_.\-]/g, '');
+  return String(name || '')
+    .split('/')
+    .map((segment) => segment.replace(/[^a-zA-Z0-9_.\-]/g, ''))
+    .filter((segment) => segment && segment !== '.' && segment !== '..')
+    .join('/');
 }
 
 // Extension allow-list per bucket, matching the file types each upload flow
