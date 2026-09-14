@@ -211,11 +211,15 @@ export async function generateAndUploadIncident(data) {
   const filename = `INCIDENT_${companyName || "co"}_${ts}.pdf`.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\-.]/g, "");
   const blob = doc.output("blob");
   try {
-    const { publicUrl } = await uploadViaSignedUrl({
+    const { receipt } = await uploadViaSignedUrl({
       endpoint: "/api/reports", action: "create_upload_url", token,
       bucket: "flha-reports", filename, file: blob, contentType: "application/pdf",
     });
-    return publicUrl || null;
+    // Returns the server's signed upload receipt, not a URL the browser
+    // assembled. The endpoint that stores this swaps it for the real path
+    // via storedUrlForReceipt(), so a caller can never name a path of its
+    // own — see server-lib/uploadUrls.js.
+    return receipt || null;
   } catch (e) {
     console.error("incident pdf upload failed", e.message);
     return null;

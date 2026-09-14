@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -104,9 +104,9 @@ export default async function handler(req, res) {
   try {
     // ── Generated PDF uploads for custom form reports ────────────────────
     if (action === 'create_upload_url') {
-      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename);
+      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename, session.companyId);
       if (result.error) return res.status(500).json({ error: result.error });
-      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken, receipt: result.receipt });
     }
 
     // ══ ADMIN: custom form builder ═══════════════════════════════════
@@ -478,7 +478,7 @@ export default async function handler(req, res) {
         .from('custom_form_records')
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
-          ai_summary: aiSummary || null, pdf_url: pdfUrl || null, status: 'complete',
+          ai_summary: aiSummary || null, pdf_url: storedUrlFromClientReceipt(pdfUrl, session.companyId), status: 'complete',
           client_submission_id: clientSubmissionId || null,
           // docs/scope-offline-capability.md Phase 2 — flags a record
           // submitted without AI-generated content (worker filled it in by
@@ -626,7 +626,8 @@ export default async function handler(req, res) {
 
       const recordUpdate = {};
       if (aiSummary !== undefined) recordUpdate.ai_summary = aiSummary || null;
-      if (pdfUrl) recordUpdate.pdf_url = pdfUrl;
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (resolvedPdfUrl) recordUpdate.pdf_url = resolvedPdfUrl;
       if (Object.keys(recordUpdate).length > 0) {
         const { error: updErr } = await supabaseAdmin.from('custom_form_records').update(recordUpdate).eq('id', recordId);
         if (updErr) return res.status(500).json({ error: 'Update failed.' });

@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -130,9 +130,9 @@ export default async function handler(req, res) {
   try {
     // ── Generated PDF uploads for inspections, toolbox talks, daily reports ─
     if (action === 'create_upload_url') {
-      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename);
+      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename, session.companyId);
       if (result.error) return res.status(500).json({ error: result.error });
-      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken, receipt: result.receipt });
     }
 
     const table = TABLES[type];
@@ -196,7 +196,14 @@ export default async function handler(req, res) {
         }
       }
 
+        // pdf_url arrives as an upload receipt, not a URL the browser
+        // assembled. storedUrlFromClientReceipt turns it into the path this
+        // server actually issued, so a caller can't store another company's
+        // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
+        recordToInsert.pdf_url = storedUrlFromClientReceipt(recordToInsert.pdf_url, session.companyId);
+      }
       if (clientSubmissionId && table.jsonColumn) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }
@@ -289,7 +296,8 @@ export default async function handler(req, res) {
         if (Object.prototype.hasOwnProperty.call(fields, key)) update[key] = fields[key];
       }
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
-      if (pdfUrl) update.pdf_url = pdfUrl;
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
 
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
@@ -364,7 +372,8 @@ export default async function handler(req, res) {
         signedAt: new Date().toISOString(),
       }];
       const update = { attendees_json: attendees };
-      if (pdfUrl) update.pdf_url = pdfUrl;
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
       const { error } = await supabaseAdmin.from('toolbox_talks').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Could not save your signature. Try again.' });
       return res.status(200).json({ ok: true });
