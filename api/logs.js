@@ -97,6 +97,28 @@ const TABLES = {
   },
 };
 
+// Column allow-list for client-supplied `record` bodies on submit. The
+// `update` action has always whitelisted its fields so a client "can't
+// smuggle company_id, status, or supervisor sign-off fields through
+// `fields`" — submit never got the same treatment, so `{ ...record }`
+// let a worker set reviewed/reviewed_by to self-clear an injury report
+// off a supervisor's action list, or backdate created_at. Server-owned
+// columns (id, company_id, created_at, reviewed*) are absent on purpose.
+function pickAllowed(record, allowed) {
+  const out = {};
+  if (!record || typeof record !== 'object') return out;
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) out[key] = record[key];
+  }
+  return out;
+}
+
+const SUBMITTABLE_FIELDS = {
+  inspection: ['worker_name', 'equipment_label', 'results_json', 'signed_by', 'pdf_url', 'trip_type', 'linked_inspection_id', 'start_reading', 'end_reading', 'reading_unit', 'has_changes'],
+  toolbox: ['presenter_name', 'meeting_type', 'site', 'topic', 'talking_points_json', 'attendees_json', 'pdf_url'],
+  daily: ['reporter_name', 'site', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json', 'pdf_url'],
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -174,7 +196,7 @@ export default async function handler(req, res) {
         }
       }
 
-      const recordToInsert = { ...record };
+      const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
       if (clientSubmissionId && table.jsonColumn) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }
@@ -271,7 +293,16 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
-      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
+      // client sent. Signing a request-supplied path turned this endpoint
+      // into an oracle: `flha-reports` is one flat bucket shared by every
+      // tenant with deterministic, second-granularity filenames, so a
+      // caller could hand over another company's report path and get a
+      // working signed URL back for it. Re-reading the row means the only
+      // path that can be signed is the one this record actually points at.
+      const { data: afterRows } = await supabaseAdmin.from(table.name).select('pdf_url').eq('id', id).limit(1);
+      const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
+      const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
     }
 

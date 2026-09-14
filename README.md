@@ -64,9 +64,11 @@ Set these on Vercel (Project Settings → Environment Variables):
 | `SESSION_SECRET` | Yes | Signs session and login-ticket tokens |
 | `ANTHROPIC_API_KEY` | Yes | `/api/generate-flha` (AI hazard generation); also `api/admin.js`/`api/login.js` via `server-lib/onboardingDrafting.js` (AI-drafted equipment/SOPs on the claim-link page) — silently skipped (draft_status `'none'`) if unset |
 | `ADMIN_CODE` | No | A bootstrap admin login code, separate from the in-app admin-settable master code |
-| `CRON_SECRET` | No | Secures the weekly equipment-report cron job (`vercel.json`) |
-| `STRIPE_SECRET_KEY` | Yes (for billing) | `/api/cron-equipment-reports` (Stripe webhook handling) and `/api/admin.js` (subscription lookup on onboarding approval) |
-| `STRIPE_WEBHOOK_SECRET` | Yes (for billing) | `/api/cron-equipment-reports` — verifies the `Stripe-Signature` header on incoming Stripe events |
+| `CRON_SECRET` | No | Secures both cron jobs in `vercel.json` (`/api/cron-equipment-reports`, `/api/cron-company-brain-summary`) |
+| `STRIPE_SECRET_KEY` | Yes (for billing) | `/api/stripe-webhook` (Stripe webhook handling) and `/api/admin.js` (subscription lookup on onboarding approval) |
+| `STRIPE_WEBHOOK_SECRET` | Yes (for billing) | `/api/stripe-webhook` — verifies the `Stripe-Signature` header on incoming Stripe events |
+| `RESEND_API_KEY` | No | `server-lib/email.js` (Resend transactional email API) — onboarding/claim-link and certification-expiry email delivery. `sendEmail()` is silently a no-op and logs a warning if unset |
+| `SLACK_ONBOARDING_WEBHOOK_URL` | No | `server-lib/slack.js` — Slack Incoming Webhook for onboarding-submission and auto-approve notifications from `api/login.js`. Silently a no-op if unset |
 
 ## Stripe billing
 

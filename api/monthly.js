@@ -517,7 +517,16 @@ export default async function handler(req, res) {
         if (updErr) return res.status(500).json({ error: 'Update failed.' });
       }
 
-      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
+      // client sent. Signing a request-supplied path turned this endpoint
+      // into an oracle: `flha-reports` is one flat bucket shared by every
+      // tenant with deterministic, second-granularity filenames, so a
+      // caller could hand over another company's report path and get a
+      // working signed URL back for it. Re-reading the row means the only
+      // path that can be signed is the one this record actually points at.
+      const { data: afterRows } = await supabaseAdmin.from('inspection_records').select('pdf_url').eq('id', recordId).limit(1);
+      const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
+      const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
     }
 

@@ -43,32 +43,75 @@ const MASTER_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MASTER_CODE_THROTTLE_MAX_ATTEMPTS = 20;
 
 function clientIp(req) {
+  // Vercel sets x-vercel-forwarded-for itself and a client cannot forge it,
+  // so prefer it. Falling back to x-forwarded-for, take the RIGHTMOST entry:
+  // the proxy appends the real peer, so the leftmost entry is whatever the
+  // caller put there. Reading [0] let an attacker send a fresh random first
+  // entry per request and get a brand-new throttle bucket every time,
+  // nullifying every IP-based limit built on this helper.
+  const vercelFwd = req.headers['x-vercel-forwarded-for'];
+  if (typeof vercelFwd === 'string' && vercelFwd.trim()) {
+    const parts = vercelFwd.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
   const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.trim()) return fwd.split(',')[0].trim();
+  if (typeof fwd === 'string' && fwd.trim()) {
+    const parts = fwd.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
   return req.socket?.remoteAddress || 'unknown';
 }
 
-// Fixed-window per-IP counter for long (master-code-shaped) attempts only
-// — see docs/schema/master-code-throttle-migration.sql. Same non-atomic
-// read-then-write discipline as the existing PIN lockout.
-async function checkMasterCodeThrottle(ip) {
+// Fixed-window per-IP counter backed by master_code_ip_limits (see
+// docs/schema/master-code-throttle-migration.sql). Originally master-code
+// only; now shared by three buckets, kept apart by key prefix — a bare IP
+// for master-code attempts, `code:<ip>` for failed company-code attempts,
+// and `pin:<ip>` for PIN guesses. `ip` is the table's primary key, so the
+// prefixes can never collide with a bare address.
+//
+// Still a non-atomic read-then-write, so a burst of simultaneous requests
+// can slip a few attempts past the cap. That is acceptable here (these are
+// coarse ceilings measured in dozens, not a precise lockout) and is not
+// the same problem as the PIN lockout race, where the counter never
+// advanced at all — that one is now atomic, see record_failed_pin_attempt.
+async function checkIpThrottle(key, maxAttempts, windowMs) {
   const now = Date.now();
   const { data: rows } = await supabaseAdmin
     .from('master_code_ip_limits')
     .select('window_start, count')
-    .eq('ip', ip)
+    .eq('ip', key)
     .limit(1);
   const row = rows && rows[0];
-  if (!row || now - new Date(row.window_start).getTime() > MASTER_CODE_THROTTLE_WINDOW_MS) {
+  if (!row || now - new Date(row.window_start).getTime() > windowMs) {
     await supabaseAdmin
       .from('master_code_ip_limits')
-      .upsert({ ip, window_start: new Date(now).toISOString(), count: 1 });
+      .upsert({ ip: key, window_start: new Date(now).toISOString(), count: 1 });
     return true;
   }
-  if (row.count >= MASTER_CODE_THROTTLE_MAX_ATTEMPTS) return false;
-  await supabaseAdmin.from('master_code_ip_limits').update({ count: row.count + 1 }).eq('ip', ip);
+  if (row.count >= maxAttempts) return false;
+  await supabaseAdmin.from('master_code_ip_limits').update({ count: row.count + 1 }).eq('ip', key);
   return true;
 }
+
+async function checkMasterCodeThrottle(ip) {
+  return checkIpThrottle(ip, MASTER_CODE_THROTTLE_MAX_ATTEMPTS, MASTER_CODE_THROTTLE_WINDOW_MS);
+}
+
+// Counts only FAILED company-code attempts, and only short ones — the
+// length band the master-code throttle above deliberately ignores. That
+// exemption left auto-provisioned company codes (3 derivable initials +
+// 3 random chars, so ~29,791 candidates) enumerable at full speed, and a
+// valid code hands back a ticket that lists the whole roster. The cap is
+// set high so a jobsite full of workers behind one NAT address never
+// reaches it on ordinary typos; a scripted sweep does, immediately.
+const COMPANY_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
+const COMPANY_CODE_THROTTLE_MAX_FAILURES = 50;
+
+// Per-IP ceiling on PIN guesses. The per-account lockout is the primary
+// control; this is what stops an attacker spreading guesses across many
+// roster ids to stay under it.
+const PIN_IP_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
+const PIN_IP_THROTTLE_MAX_FAILURES = 50;
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -334,6 +377,9 @@ export default async function handler(req, res) {
     if (!ticket) return res.status(401).json({ error: 'That took too long — please start over.' });
     if (!rosterId || !pin) return res.status(400).json({ error: 'Missing details.' });
 
+    const pinIpAllowed = await checkIpThrottle(`pin:${clientIp(req)}`, PIN_IP_THROTTLE_MAX_FAILURES, PIN_IP_THROTTLE_WINDOW_MS);
+    if (!pinIpAllowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+
     const { data: rows, error } = await supabaseAdmin
       .from('roster')
       .select('*')
@@ -358,12 +404,30 @@ export default async function handler(req, res) {
     }
 
     if (!verifyPin(pin, member.pin_salt, member.pin_hash)) {
-      const attempts = (member.failed_pin_attempts || 0) + 1;
-      const updates = { failed_pin_attempts: attempts };
-      if (attempts >= PIN_LOCKOUT_AFTER_ATTEMPTS) {
-        updates.pin_locked_until = new Date(Date.now() + PIN_LOCKOUT_MS).toISOString();
+      // Increment atomically in the database. The old read-then-write used
+      // the `member` row fetched above, so N concurrent guesses all read
+      // the same starting count and all wrote back count+1 — the lockout
+      // never tripped and a 4-digit PIN space could be exhausted in a
+      // single parallel burst. The UPDATE inside this function takes a row
+      // lock, so concurrent attempts serialize and the threshold holds.
+      const { data: lockRows, error: lockErr } = await supabaseAdmin.rpc('record_failed_pin_attempt', {
+        p_roster_id: member.id,
+        p_lockout_after: PIN_LOCKOUT_AFTER_ATTEMPTS,
+        p_lockout_seconds: Math.round(PIN_LOCKOUT_MS / 1000),
+      });
+      if (lockErr) {
+        // Fallback to the legacy non-atomic path so that a deploy landing
+        // before docs/schema/pin-lockout-atomic-migration.sql is applied
+        // degrades to the old behavior instead of locking everyone out.
+        console.error('record_failed_pin_attempt RPC unavailable, using non-atomic fallback:', lockErr.message);
+        const attempts = (member.failed_pin_attempts || 0) + 1;
+        const updates = { failed_pin_attempts: attempts };
+        if (attempts >= PIN_LOCKOUT_AFTER_ATTEMPTS) {
+          updates.pin_locked_until = new Date(Date.now() + PIN_LOCKOUT_MS).toISOString();
+        }
+        await supabaseAdmin.from('roster').update(updates).eq('id', member.id);
       }
-      await supabaseAdmin.from('roster').update(updates).eq('id', member.id);
+      void lockRows;
       return res.status(401).json({ error: 'Incorrect PIN.' });
     }
 
@@ -843,6 +907,12 @@ export default async function handler(req, res) {
   }
 
   if (!company) {
+    // Count the failure before answering, so repeated wrong codes from one
+    // address burn the budget even though a correct code never does.
+    if (entered.length < MASTER_CODE_THROTTLE_MIN_LENGTH) {
+      const allowed = await checkIpThrottle(`code:${clientIp(req)}`, COMPANY_CODE_THROTTLE_MAX_FAILURES, COMPANY_CODE_THROTTLE_WINDOW_MS);
+      if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+    }
     return res.status(401).json({ error: 'Code not recognized. Check with your supervisor.' });
   }
 

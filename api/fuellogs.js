@@ -52,6 +52,27 @@ async function verifySession(token) {
 
 const LIST_COLUMNS = 'id, created_at, company_id, equipment_id, equipment_label, worker_name, hour_reading, reading_unit, quantity, quantity_unit, cost, site_id';
 
+// Column allow-list for client-supplied `record` bodies on submit. The
+// `update` action has always whitelisted its fields so a client "can't
+// smuggle company_id, status, or supervisor sign-off fields through
+// `fields`" — submit never got the same treatment, so `{ ...record }`
+// let a worker set reviewed/reviewed_by to self-clear an injury report
+// off a supervisor's action list, or backdate created_at. Server-owned
+// columns (id, company_id, created_at, reviewed*) are absent on purpose.
+function pickAllowed(record, allowed) {
+  const out = {};
+  if (!record || typeof record !== 'object') return out;
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) out[key] = record[key];
+  }
+  return out;
+}
+
+const SUBMITTABLE_FIELDS = [
+  'equipment_label', 'equipment_id', 'worker_name', 'hour_reading',
+  'reading_unit', 'quantity', 'quantity_unit', 'cost', 'site_id',
+];
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -150,7 +171,7 @@ export default async function handler(req, res) {
         }
       }
 
-      const recordToInsert = { ...record };
+      const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS);
       if (clientSubmissionId) {
         recordToInsert.meta_json = { ...(recordToInsert.meta_json || {}), client_submission_id: clientSubmissionId };
       }

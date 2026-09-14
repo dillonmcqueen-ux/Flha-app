@@ -414,6 +414,17 @@ export default async function handler(req, res) {
       const updates = { company_code: companyCode.trim() };
 
       if (workerCode?.trim() || supervisorCode?.trim()) {
+        // These values are interpolated into a PostgREST `.or()` filter
+        // string, the one place in the codebase that bypasses the
+        // parameterized query builder. A `,` or `)` in the input would
+        // alter the filter's semantics and could defeat this very
+        // uniqueness check, so reject anything that isn't a plain code.
+        const CODE_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+        for (const candidate of [workerCode, supervisorCode]) {
+          if (candidate?.trim() && !CODE_SHAPE.test(candidate.trim())) {
+            return res.status(400).json({ error: 'Codes may only contain letters, numbers, hyphens and underscores.' });
+          }
+        }
         const orParts = [];
         if (workerCode?.trim()) orParts.push(`worker_code.eq.${workerCode.trim()}`, `supervisor_code.eq.${workerCode.trim()}`);
         if (supervisorCode?.trim()) orParts.push(`worker_code.eq.${supervisorCode.trim()}`, `supervisor_code.eq.${supervisorCode.trim()}`);

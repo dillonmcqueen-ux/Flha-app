@@ -735,10 +735,21 @@ export default async function handler(req, res) {
   // completes, per the proposal's "daily, then rolls into the 15th/
   // month-end" cadence). ─────────────────────────────────────────────────
   if (action === 'send_daily_report') {
+    // This renders the station's full cash-reconciliation PDF (per-load
+    // detail, revenue, cash variance) and mails it to a caller-supplied
+    // address from FORA's verified domain. With no role check, a booth
+    // operator could send the day's takings anywhere — so gate it to a
+    // supervisor, the same bar mark_reconciliation_reviewed uses.
+    if (session.role !== 'supervisor' && session.role !== 'admin') {
+      return res.status(403).json({ error: 'Only a supervisor can email the daily report.' });
+    }
     const { stationId, businessDate, recipientEmail } = req.body;
     const station = await loadOwnedStation(companyId, stationId);
     if (!station) return res.status(404).json({ error: 'Station not found.' });
     if (!recipientEmail) return res.status(400).json({ error: 'Missing recipient email.' });
+    if (typeof recipientEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail.trim())) {
+      return res.status(400).json({ error: 'Enter a valid recipient email address.' });
+    }
 
     const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
     const companyName = (coRows && coRows[0] && coRows[0].name) || 'Gatehouse';
