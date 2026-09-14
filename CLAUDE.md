@@ -133,9 +133,18 @@ verification intact. That sweep's `pentest-mindset-auditor` pass did find
 real exploitable issues in application code — an unauthenticated
 code-enumeration → roster-disclosure → PIN-race chain, mass assignment on
 every `submit` action, and a signed-URL oracle — all fixed under branch →
-draft PR. **Known and deliberately still open:** Supabase Storage objects
+draft PR. Also found in that sweep and since fixed: `storage.objects` carried
+PUBLIC/anon INSERT policies on five buckets, so anyone holding the anon key
+that ships in the client bundle could write files into them with no session
+at all — the exact opposite of what `server-lib/uploadUrls.js` documented.
+Four are dropped (`signatures`, `incident-photos`, `onboarding-uploads`,
+`flha-reports`); `src/generatePDF.js`, the last caller depending on one, was
+migrated onto signed upload tokens first and verified with a real FLHA
+submit. **Known and deliberately still open:** Supabase Storage objects
 are not namespaced by company, which is the root of the upload-path and
-signed-URL findings; tracked in `TODO.md`. **Found and
+signed-URL findings; and `company-logos` still carries a PUBLIC INSERT
+policy (nothing depends on it — it was left out of scope by explicit
+decision, not oversight). Both tracked in `TODO.md`. **Found and
 fixed as of this writing:** Vercel preview-deployment protection was off
 on `flha-app`, meaning every PR's preview URL — posted openly in GitHub
 comments — was publicly reachable running the live app; enabled

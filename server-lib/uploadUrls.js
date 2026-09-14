@@ -13,15 +13,15 @@
 // files directly under api/ into functions, and this is imported by
 // several of them.
 
-// On INSERT policies specifically: as of 2026-09-14 only flha-reports and
-// company-logos still carry one (both PUBLIC, so both still accept an
-// unauthenticated write). signatures, incident-photos and onboarding-uploads
+// On INSERT policies specifically: as of 2026-09-14 only company-logos still
+// carries one (PUBLIC, so that bucket still accepts an unauthenticated
+// write). signatures, incident-photos, onboarding-uploads and flha-reports
 // had theirs dropped — see docs/schema/drop-anon-storage-insert-policies.sql.
 // An earlier version of this comment claimed a direct anon .upload() would
 // fail RLS everywhere; that was not true, which is how src/generatePDF.js
-// has been uploading FLHA PDFs with the anon key all along. That file is the
-// last such caller, and flha-reports' policy stays until it is migrated onto
-// this module.
+// uploaded FLHA PDFs with the anon key for months. That file is now on this
+// module like every other caller, so nothing in the codebase depends on an
+// anon INSERT policy any more.
 
 // Sanitizes each path segment independently rather than the whole string,
 // so callers that need a per-tenant subpath (e.g. `${companyId}/${rosterId}/

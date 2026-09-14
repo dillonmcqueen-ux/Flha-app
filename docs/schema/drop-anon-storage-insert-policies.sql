@@ -27,16 +27,17 @@
 -- which rejects before RLS is reached, so the probe had to use image/png to
 -- actually exercise the policy.
 --
+-- flha-reports was held back in the first pass and dropped in the second (see
+-- the second statement block at the bottom of this file), once
+-- src/generatePDF.js had been migrated onto uploadViaSignedUrl in #99 and a
+-- real FLHA submit had proven the new path end to end.
+--
 -- Deliberately NOT dropped:
---   "Allow public insert 1ly6hwx_0" -> flha-reports. src/generatePDF.js:470-472
---     is the last remaining direct anon .upload() in the codebase and would
---     break. Migrate it to uploadViaSignedUrl first — that needs a
---     create_upload_url action added to api/flhas.js, which doesn't have one —
---     then drop this policy too.
 --   "Allow logo insert 1y3lpeg_0" -> company-logos. Same class, and nothing
 --     depends on it either (onboarding and AdminPanel both use signed tokens),
 --     but it was outside the agreed scope of this change. company-logos is
 --     public for READ by design; that is unrelated to this write policy.
+--     This is now the ONLY remaining unauthenticated write into storage.
 --
 -- APPLIED to the live FORA Supabase project (wzyvbtzxxdcxgvbkcqmt) on
 -- 2026-09-14. Reversible: re-create any policy with the same name, command and
@@ -45,3 +46,23 @@
 drop policy if exists "Allow public insert signatures" on storage.objects;
 drop policy if exists "public_insert_incident_photos" on storage.objects;
 drop policy if exists "onboarding uploads anon insert" on storage.objects;
+
+
+-- ── Second pass, 2026-09-14, after #99 deployed ───────────────────────────
+-- flha-reports' policy, held back above until src/generatePDF.js stopped
+-- uploading with the anon key.
+--
+-- Proven before dropping, from a real FLHA submitted on the #99 deploy
+-- (dpl_D5pTW9NUM5jEEQQ78zZ14Gx3UwSN):
+--   01:35:06  POST /api/flhas 200   <- the new create_upload_url action
+--   01:35:07  665,926-byte application/pdf written to flha-reports
+--   01:35:08  flhas row 67 created with a matching pdf_url
+--   01:35:14  POST /api/flhas 200   <- the submit
+-- The /api/flhas call one second before the storage write is what proves the
+-- signed-token path ran rather than a cached old bundle: the old anon path
+-- uploaded straight to Supabase with no server round-trip at all.
+--
+-- Verified after dropping, with the published anon key: an anonymous write to
+-- flha-reports returns 403 "new row violates row-level security policy".
+
+drop policy if exists "Allow public insert 1ly6hwx_0" on storage.objects;
