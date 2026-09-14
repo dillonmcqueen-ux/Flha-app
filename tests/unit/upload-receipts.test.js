@@ -17,7 +17,9 @@ process.env.SUPABASE_URL ||= 'https://example.supabase.co';
 
 const {
   signUploadReceipt, resolveUploadReceipt, storedUrlForReceipt, storedUrlFromClientReceipt,
+  withUnguessableSegment,
 } = await import('../../server-lib/uploadUrls.js');
+const { pathFromStoredUrl } = await import('../../server-lib/signedUrls.js');
 
 const PATH = 'deadbeefdeadbeefdeadbeefdeadbeef-FLHA_Acme_2026-09-10T14-22-05.pdf';
 const COMPANY_A = 7;
@@ -99,8 +101,62 @@ test('company binding is fail-closed: an unbound receipt never satisfies a bound
   assert.equal(resolveUploadReceipt(unbound, 'flha-reports', COMPANY_A), null);
 });
 
+test('a null expected company means "no company", not "skip the check"', () => {
+  // Admin sessions carry companyId: null. Treating that as "don't verify"
+  // silently degraded the check to bucket-only for them, so a tenant's
+  // receipt could be replayed onto any record.
+  const boundToA = signUploadReceipt('flha-reports', PATH, COMPANY_A);
+  assert.equal(resolveUploadReceipt(boundToA, 'flha-reports', null), null);
+  assert.equal(resolveUploadReceipt(boundToA, 'flha-reports', undefined), null);
+  assert.equal(resolveUploadReceipt(boundToA, 'flha-reports'), null);
+
+  // An admin's own unbound receipt still resolves for an admin.
+  const unbound = signUploadReceipt('flha-reports', PATH);
+  assert.equal(resolveUploadReceipt(unbound, 'flha-reports', null), PATH);
+});
+
 test('company ids compare as strings, so a numeric id and its text form match', () => {
   const receipt = signUploadReceipt('flha-reports', PATH, COMPANY_A);
   assert.equal(resolveUploadReceipt(receipt, 'flha-reports', String(COMPANY_A)), PATH);
   assert.equal(resolveUploadReceipt(receipt, 'flha-reports', COMPANY_A), PATH);
+});
+
+
+test('withUnguessableSegment randomizes the filename but keeps the directory prefix', () => {
+  // api/certifications.js validates uploads with
+  // `filePath.startsWith(`${companyId}/${rosterId}/`)`, so the random part
+  // has to go in the last segment and nowhere else.
+  const out = withUnguessableSegment('12/345/1757000000000-ticket.pdf');
+  assert.ok(out.startsWith('12/345/'), out);
+  assert.equal(out.split('/').length, 3);
+  assert.match(out, /^12\/345\/[0-9a-f]{32}-1757000000000-ticket\.pdf$/);
+});
+
+test('withUnguessableSegment handles a flat path and never repeats itself', () => {
+  const a = withUnguessableSegment('FLHA_Acme.pdf');
+  const b = withUnguessableSegment('FLHA_Acme.pdf');
+  assert.match(a, /^[0-9a-f]{32}-FLHA_Acme\.pdf$/);
+  assert.notEqual(a, b);
+});
+
+test('pathFromStoredUrl refuses a path that escapes its bucket', () => {
+  // The bucket name is not a boundary: Supabase builds
+  // `object/sign/<bucket>/<path>` as a URL string and dot segments collapse
+  // before the request goes out, so `../flha-reports/x.pdf` stored against
+  // gatehouse-uploads would have signed a file in flha-reports.
+  const escape = 'https://example.supabase.co/storage/v1/object/public/gatehouse-uploads/'
+    + '../flha-reports/FLHA_Acme_2026-03-04T14-22-05.pdf';
+  assert.equal(pathFromStoredUrl(escape, 'gatehouse-uploads'), null);
+
+  for (const bad of ['../x.pdf', 'a/../../x.pdf', './x.pdf', 'a/./x.pdf', '/x.pdf']) {
+    const url = `https://example.supabase.co/storage/v1/object/public/flha-reports/${bad}`;
+    assert.equal(pathFromStoredUrl(url, 'flha-reports'), null, bad);
+  }
+});
+
+test('pathFromStoredUrl still resolves a normal path', () => {
+  const url = `https://example.supabase.co/storage/v1/object/public/flha-reports/${PATH}`;
+  assert.equal(pathFromStoredUrl(url, 'flha-reports'), PATH);
+  const nested = 'https://example.supabase.co/storage/v1/object/public/worker-certifications/12/345/abc-t.pdf';
+  assert.equal(pathFromStoredUrl(nested, 'worker-certifications'), '12/345/abc-t.pdf');
 });
