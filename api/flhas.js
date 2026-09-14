@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
+import { createUploadUrl } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -137,6 +138,21 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
+    // ── Generated PDF uploads ────────────────────────────────────────
+    // Mirrors the same action in api/logs.js, api/monthly.js,
+    // api/customforms.js and api/reports.js. Added so src/generatePDF.js
+    // can stop uploading with the browser's anon key: it was the last
+    // caller in the codebase still doing a direct storage .upload(), and
+    // it only worked because flha-reports carried a PUBLIC INSERT policy
+    // on storage.objects — i.e. anyone could write to that bucket with no
+    // session at all. Routing it through a service-role signed token here
+    // lets that policy be dropped.
+    if (action === 'create_upload_url') {
+      const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename);
+      if (result.error) return res.status(500).json({ error: result.error });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
     // ── Worker: find today's FLHA to resume/amend ─────────────────────
     if (action === 'resume') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });

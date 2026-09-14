@@ -1,7 +1,7 @@
 // generatePDF.js — builds a full FLHA report PDF and uploads to Supabase Storage
 // Uses jsPDF loaded from CDN via dynamic import (no build step needed)
 
-import { supabase } from "./supabaseClient";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { getForaLogoDataUrl } from "./foraLogo.js";
 
 async function loadJsPDF() {
@@ -25,7 +25,7 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval, crewSignatures }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval, crewSignatures, token = null }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -467,18 +467,24 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
 
   const pdfBlob = doc.output("blob");
 
-  const { data, error } = await supabase.storage
-    .from("flha-reports")
-    .upload(filename, pdfBlob, { contentType: "application/pdf", upsert: false });
-
-  if (error) {
-    console.error("PDF upload failed:", error.message);
+  // Was a direct anon-key .upload() — the last one in the codebase. It only
+  // worked because flha-reports carried a PUBLIC INSERT policy on
+  // storage.objects, which also meant anyone holding the published anon key
+  // could write to that bucket without logging in. Now goes through the same
+  // service-role signed-token path as every other generator.
+  try {
+    const { publicUrl } = await uploadViaSignedUrl({
+      endpoint: "/api/flhas",
+      action: "create_upload_url",
+      token,
+      bucket: "flha-reports",
+      filename,
+      file: pdfBlob,
+      contentType: "application/pdf",
+    });
+    return publicUrl || null;
+  } catch (err) {
+    console.error("PDF upload failed:", err.message);
     return null;
   }
-
-  const { data: urlData } = supabase.storage
-    .from("flha-reports")
-    .getPublicUrl(filename);
-
-  return urlData?.publicUrl || null;
 }
