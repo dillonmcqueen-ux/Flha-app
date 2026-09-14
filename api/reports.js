@@ -66,7 +66,18 @@ function pathFromStoredUrl(url, bucket) {
   const marker = `/storage/v1/object/public/${bucket}/`;
   const idx = url.indexOf(marker);
   if (idx === -1) return null;
-  return decodeURIComponent(url.slice(idx + marker.length));
+  const path = decodeURIComponent(url.slice(idx + marker.length));
+  // The bucket name is not a boundary. Supabase's createSignedUrl builds
+  // `object/sign/<bucket>/<path>` as a URL string, and WHATWG URL parsing
+  // collapses dot segments before the request goes out, so a stored path of
+  // `../flha-reports/x.pdf` in the gatehouse-uploads bucket resolves to
+  // `object/sign/flha-reports/x.pdf` and signs a file in a bucket the caller
+  // was never reading. Reject traversal and absolute paths outright —
+  // server-lib/uploadUrls.js's sanitizeFilename already drops these segments
+  // on the write side, so no legitimately issued path contains one.
+  if (!path || path.startsWith('/')) return null;
+  if (path.split('/').some((segment) => segment === '.' || segment === '..')) return null;
+  return path;
 }
 
 async function signStoredUrl(url, bucket, ttlSeconds = 3600) {

@@ -35,7 +35,9 @@ import crypto from 'crypto';
 // segment rather than prepended to the whole path so callers that namespace
 // by directory (api/certifications.js's `${companyId}/${rosterId}/...`, and
 // the `startsWith` prefix checks built on it) keep their structure intact.
-function withUnguessableSegment(path) {
+// Exported for tests/unit/upload-receipts.test.js — the prefix-preservation
+// property is what api/certifications.js's `startsWith` checks depend on.
+export function withUnguessableSegment(path) {
   const segments = path.split('/');
   const name = segments.pop();
   segments.push(`${crypto.randomBytes(16).toString('hex')}-${name}`);
@@ -83,12 +85,24 @@ export function signUploadReceipt(bucket, path, companyId = null) {
 // with, or was issued for a different bucket. base64url never contains a
 // ".", so the first one is unambiguously the separator.
 //
-// Pass `expectedCompanyId` to also require that the receipt was issued to
-// that company. This is fail-closed: a receipt minted without a company
-// (the pre-auth onboarding flow, which has no session yet) never satisfies
-// a caller that asks for one. It closes replay — without it, a receipt is
-// a bearer statement that *someone* was issued this path, so one that
-// leaked out of another tenant's browser would still resolve.
+// The company on the receipt must equal the company being asked about, in
+// both directions. "No company" is a distinct value here rather than "skip
+// the check" — an earlier version of this treated a null `expectedCompanyId`
+// as "don't verify", which silently degraded to a bucket-only check for
+// admin sessions (they carry `companyId: null`, see api/login.js) and would
+// have done the same for any future caller that happened to pass null.
+//
+// The four cases this gives:
+//   worker in company 7, receipt for 7   → resolves
+//   worker in company 7, receipt for 9   → rejected (cross-tenant replay)
+//   worker in company 7, unbound receipt → rejected (no downgrade)
+//   admin (no company), unbound receipt  → resolves
+//   admin (no company), receipt for 7    → rejected
+//
+// Receipts deliberately carry no expiry: the offline queue can drain a
+// submission days after its PDF was uploaded, so a TTL would silently drop
+// exactly the records that offline support exists to save. The company
+// binding is what bounds a leaked receipt instead.
 export function resolveUploadReceipt(receipt, expectedBucket, expectedCompanyId = null) {
   if (!receipt || typeof receipt !== 'string') return null;
   const idx = receipt.indexOf('.');
@@ -103,8 +117,11 @@ export function resolveUploadReceipt(receipt, expectedBucket, expectedCompanyId 
   if (!payload || typeof payload !== 'object') return null;
   if (payload.b !== expectedBucket) return null;
   if (typeof payload.p !== 'string' || !payload.p) return null;
-  if (expectedCompanyId !== null && expectedCompanyId !== undefined
-      && payload.c !== String(expectedCompanyId)) return null;
+  const claimCompany = Object.prototype.hasOwnProperty.call(payload, 'c') ? payload.c : null;
+  const wantCompany = (expectedCompanyId === null || expectedCompanyId === undefined)
+    ? null
+    : String(expectedCompanyId);
+  if (claimCompany !== wantCompany) return null;
   return payload.p;
 }
 
