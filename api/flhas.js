@@ -105,10 +105,57 @@ function pickAllowed(record, allowed) {
   return out;
 }
 
+// `status` is deliberately absent: it is derived from hazards_json by
+// deriveFlhaStatus() below, never taken from the client. The browser used to
+// send it (src/App.jsx computes the same thing to drive its own UI), which
+// meant the extreme-risk supervisor gate lived entirely in code the worker
+// controls — posting `status: 'complete'` alongside an Extreme hazard marked
+// the FLHA done and skipped sign-off. Server-side derivation is the gate.
 const SUBMITTABLE_FIELDS = [
   'worker_name', 'job_site', 'task_description', 'hazards_json',
-  'signed_by', 'pdf_url', 'status', 'worker_signature', 'crew_signatures',
+  'signed_by', 'pdf_url', 'worker_signature', 'crew_signatures',
 ];
+
+// `hazards_json` arrives as untrusted client input. Coerce it to the plain
+// `{ hazards: [...] }` object every reader expects (src/Dashboard.jsx,
+// src/analyticsUtils.js, the PDF generators) before anything spreads it or
+// derives status from it. Without this, a string or array payload spreads
+// into a character-indexed object with no `hazards` key on the
+// clientSubmissionId path below, and an Extreme-risk FLHA derives as
+// 'complete' — the exact bypass deriveFlhaStatus exists to close.
+// Returns { ok: false } for anything that isn't a plain object (or a string
+// parsing to one); `value: null` means "no hazard payload supplied", which
+// is a legitimate absence rather than malformed input.
+// Exported for tests/unit/flha-status.test.js.
+export function normalizeHazardsJson(raw) {
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+  let parsed = raw;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch (e) { return { ok: false, value: null }; }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, value: null };
+  return { ok: true, value: parsed };
+}
+
+// The extreme-risk approval rule, enforced server-side. Mirrors the client's
+// `hasExtreme` check in src/App.jsx (resubmitFLHA + saveFLHA) — that copy
+// still exists, but only to decide what the worker is shown; this one decides
+// what is stored. An FLHA carrying any Extreme-risk hazard cannot reach
+// 'complete' except through the `approve` action below, which is
+// supervisor/admin-only. Matching is looser than the client's exact
+// `=== "Extreme"` on purpose, so nothing the browser would gate slips past.
+// Exported for tests/unit/flha-status.test.js.
+export function deriveFlhaStatus(hazardsJson) {
+  let parsed = hazardsJson;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch (e) { parsed = null; }
+  }
+  const hazards = parsed && Array.isArray(parsed.hazards) ? parsed.hazards : [];
+  const hasExtreme = hazards.some(
+    (h) => h && typeof h.risk === 'string' && h.risk.trim().toLowerCase() === 'extreme'
+  );
+  return hasExtreme ? 'pending_approval' : 'complete';
+}
 
 function sanitizeAiEditSignal(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -193,7 +240,7 @@ export default async function handler(req, res) {
       if (amendingId) {
         // Confirm this record actually belongs to the worker's own company first.
         const { data: existing, error: findErr } = await supabaseAdmin
-          .from('flhas').select('id, company_id, worker_name').eq('id', amendingId).limit(1);
+          .from('flhas').select('id, company_id, worker_name, hazards_json').eq('id', amendingId).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
@@ -210,9 +257,34 @@ export default async function handler(req, res) {
         if (!claimedName || claimedName !== ownerName) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
-        const { error } = await supabaseAdmin.from('flhas').update(pickAllowed(record, SUBMITTABLE_FIELDS)).eq('id', amendingId);
+        const amendUpdate = pickAllowed(record, SUBMITTABLE_FIELDS);
+        // Derive from the hazards being written; fall back to the hazards
+        // already on the row when an amendment doesn't touch them.
+        let amendedHazards;
+        if (Object.prototype.hasOwnProperty.call(amendUpdate, 'hazards_json')) {
+          const normalized = normalizeHazardsJson(amendUpdate.hazards_json);
+          if (!normalized.ok) return res.status(400).json({ error: 'Invalid hazard data.' });
+          amendUpdate.hazards_json = normalized.value;
+          amendedHazards = normalized.value;
+        } else {
+          amendedHazards = normalizeHazardsJson(existing[0].hazards_json).value;
+        }
+        amendUpdate.status = deriveFlhaStatus(amendedHazards);
+        if (amendUpdate.status === 'pending_approval') {
+          // An amendment that (re)introduces Extreme risk sends the record
+          // back for sign-off, so any earlier supervisor signature no longer
+          // applies to what the record now says. Leaving it in place would
+          // show a supervisor's name against content they never approved.
+          amendUpdate.supervisor_signed_by = null;
+          amendUpdate.supervisor_signed_at = null;
+        }
+        // The 403 above already proved this row belongs to the caller's
+        // company; the redundant company_id filter is so a future reordering
+        // of that check can't silently turn this into a cross-tenant write.
+        const { error } = await supabaseAdmin
+          .from('flhas').update(amendUpdate).eq('id', amendingId).eq('company_id', session.companyId);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-        return res.status(200).json({ id: amendingId });
+        return res.status(200).json({ id: amendingId, status: amendUpdate.status });
       } else {
         // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
         // offline FLHA gets retried, possibly more than once. Only applies
@@ -232,13 +304,18 @@ export default async function handler(req, res) {
           }
         }
         const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS);
+        const normalized = normalizeHazardsJson(recordToInsert.hazards_json);
+        if (!normalized.ok) return res.status(400).json({ error: 'Invalid hazard data.' });
         if (clientSubmissionId) {
-          recordToInsert.hazards_json = { ...(recordToInsert.hazards_json || {}), client_submission_id: clientSubmissionId };
+          recordToInsert.hazards_json = { ...(normalized.value || {}), client_submission_id: clientSubmissionId };
+        } else if (Object.prototype.hasOwnProperty.call(recordToInsert, 'hazards_json')) {
+          recordToInsert.hazards_json = normalized.value;
         }
+        recordToInsert.status = deriveFlhaStatus(recordToInsert.hazards_json);
         const { data, error } = await supabaseAdmin
           .from('flhas')
           .insert({ ...recordToInsert, company_id: session.companyId })
-          .select('id')
+          .select('id, status')
           .limit(1);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
         const newId = data?.[0]?.id || null;
@@ -259,7 +336,7 @@ export default async function handler(req, res) {
           if (signalErr) console.error('company_signals insert failed for FLHA', newId, signalErr.message);
         }
 
-        return res.status(200).json({ id: newId });
+        return res.status(200).json({ id: newId, status: data?.[0]?.status || null });
       }
     }
 
@@ -290,11 +367,17 @@ export default async function handler(req, res) {
       const { id, fields, pdfUrl } = req.body;
       if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
 
-      if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from('flhas').select('id, company_id').eq('id', id).limit(1);
-        if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
-          return res.status(403).json({ error: 'Not allowed to edit this record.' });
-        }
+      // Fetched for every caller now, not just supervisors: the approval
+      // re-derivation below needs to know whether this record already carries
+      // a supervisor signature.
+      const { data: existing, error: findErr } = await supabaseAdmin
+        .from('flhas').select('id, company_id, supervisor_signed_at').eq('id', id).limit(1);
+      // One indistinguishable 403 for "no such record" and "not your
+      // company's record", same as before — a supervisor shouldn't be able to
+      // probe which ids exist outside their own company.
+      if (findErr || !existing || existing.length === 0
+          || (session.role === 'supervisor' && existing[0].company_id !== session.companyId)) {
+        return res.status(403).json({ error: 'Not allowed to edit this record.' });
       }
 
       const EDITABLE_FIELDS = ['worker_name', 'job_site', 'hazards_json'];
@@ -305,6 +388,21 @@ export default async function handler(req, res) {
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
       if (pdfUrl) update.pdf_url = pdfUrl;
 
+      // `hazards_json` is the column the approval gate reads, so an edit here
+      // has to re-derive status the same way a worker's submit does —
+      // otherwise a supervisor raising a hazard to Extreme leaves the record
+      // sitting at 'complete' with nobody ever signing it. Escalate only:
+      // a record that already carries a supervisor signature keeps its
+      // approval, so fixing a typo on an approved extreme-risk FLHA doesn't
+      // silently revoke the sign-off that's already on it.
+      if (Object.prototype.hasOwnProperty.call(update, 'hazards_json')) {
+        const normalized = normalizeHazardsJson(update.hazards_json);
+        if (!normalized.ok) return res.status(400).json({ error: 'Invalid hazard data.' });
+        update.hazards_json = normalized.value;
+        const derived = deriveFlhaStatus(normalized.value);
+        if (derived === 'complete' || !existing[0].supervisor_signed_at) update.status = derived;
+      }
+
       const { error } = await supabaseAdmin.from('flhas').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
       // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
@@ -314,10 +412,10 @@ export default async function handler(req, res) {
       // caller could hand over another company's report path and get a
       // working signed URL back for it. Re-reading the row means the only
       // path that can be signed is the one this record actually points at.
-      const { data: afterRows } = await supabaseAdmin.from('flhas').select('pdf_url').eq('id', id).limit(1);
+      const { data: afterRows } = await supabaseAdmin.from('flhas').select('pdf_url, status').eq('id', id).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, status: afterRows?.[0]?.status || null });
     }
 
     // ── Supervisor / Admin: delete one or more FLHAs ────────────────────
