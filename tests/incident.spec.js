@@ -1,12 +1,21 @@
 import { test, expect } from '@playwright/test';
-import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas } from './helpers.js';
+import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas, openForm } from './helpers.js';
+import { colors as C } from '../src/theme.js';
+
+// The selected incident type reads its colour straight off theme.js's danger
+// token. Asserting the token rather than a literal rgb() means a palette
+// change can't silently fail this test the way the hardcoded one did.
+const hexToRgb = (hex) => {
+  const [, r, g, b] = /^#(\w{2})(\w{2})(\w{2})$/.exec(hex);
+  return `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`;
+};
 
 test.describe('Incident report', () => {
   test.beforeEach(async ({ page }) => {
     await mockWorkerApis(page);
     await mockExternalServices(page);
     await loginAsWorker(page);
-    await page.getByText('Incident Report').click();
+    await openForm(page, 'Incident Report');
   });
 
   test('gates the setup step on reporter and site', async ({ page }) => {
@@ -21,7 +30,7 @@ test.describe('Incident report', () => {
 
     // Incident type selection updates the active option.
     await page.getByRole('button', { name: 'Vehicle Incident' }).click();
-    await expect(page.getByRole('button', { name: 'Vehicle Incident' })).toHaveCSS('color', 'rgb(153, 27, 27)');
+    await expect(page.getByRole('button', { name: 'Vehicle Incident' })).toHaveCSS('color', hexToRgb(C.status.danger.text));
   });
 
   test('walks a signed incident through details, description, review, and submission', async ({ page }) => {
@@ -68,7 +77,7 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     await mockWorkerApis(page);
     await mockExternalServices(page);
     await loginAsWorker(page);
-    await page.getByText('Incident Report').click();
+    await openForm(page, 'Incident Report');
     await page.getByPlaceholder('Reporter name').fill('Jamie Worker');
     await page.locator('select').selectOption('Test Site');
     await page.getByRole('button', { name: 'Continue →' }).click();
@@ -94,7 +103,7 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
       { name: 'scene.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(2 * 1024 * 1024, 1) },
     ]);
 
-    await expect(page.getByText('📶 Queued', { exact: true })).toBeVisible();
+    await expect(page.getByText('Queued', { exact: true })).toBeVisible();
     await expect(page.getByText('Queued photos will upload automatically')).toBeVisible();
     expect(createUploadCalls).toBe(1);
 
@@ -103,10 +112,10 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     // would after a dropped connection (not a raw reload mid-render).
     await page.waitForTimeout(1200);
     await page.reload();
-    await expect(page.getByText('Choose a form')).toBeVisible();
-    await page.getByText('Incident Report').click();
+    await expect(page.getByText('Safety', { exact: true })).toBeVisible();
+    await openForm(page, 'Incident Report');
     await expect(page.getByText('People & evidence')).toBeVisible();
-    await expect(page.getByText('📶 Queued', { exact: true })).toBeVisible();
+    await expect(page.getByText('Queued', { exact: true })).toBeVisible();
   });
 
   test('blocks a photo that would exceed the on-device pending-photo storage budget', async ({ page }) => {
@@ -143,7 +152,7 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     await page.setInputFiles('input[type="file"]', [
       { name: 'scene.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(2 * 1024 * 1024, 1) },
     ]);
-    await expect(page.getByText('📶 Queued', { exact: true })).toBeVisible();
+    await expect(page.getByText('Queued', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Continue →' }).click();
     await expect(page.getByText('What happened?')).toBeVisible();

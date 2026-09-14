@@ -228,8 +228,35 @@ export async function loginAsWorker(page) {
   await page.goto('/');
   await page.getByRole('button', { name: /Worker/ }).click();
   await page.getByPlaceholder('Company code').fill('TESTCODE');
-  await page.getByRole('button', { name: 'Continue →' }).click();
-  await expect(page.getByText('Choose a form')).toBeVisible();
+  // src/Login.jsx renders `Continue <ChevronRight />` — the arrow is a lucide
+  // icon component, not the literal "→" this used to match. Matching on the
+  // word alone survives the next icon swap.
+  await page.getByRole('button', { name: /^Continue/ }).click();
+  await expect(page.getByText('Safety', { exact: true })).toBeVisible();
+}
+
+// src/WorkerMenu.jsx groups the built-in forms under three category cards
+// (CATEGORIES there) instead of the old flat "Choose a form" list, so getting
+// to a form is now two clicks. Time Clock is deliberately uncategorised and
+// sits on the home screen itself, hence the null.
+const FORM_CATEGORY = {
+  'FLHA': 'Safety',
+  'Toolbox Talk': 'Safety',
+  'Near Miss Report': 'Safety',
+  'Incident Report': 'Safety',
+  'My Certifications': 'Safety',
+  'Equipment Inspection': 'Equipment',
+  'Log Fuel': 'Equipment',
+  'Daily Report': 'General',
+  'Monthly Site Inspection': 'General',
+  'Time Clock': null,
+};
+
+export async function openForm(page, title) {
+  const category = FORM_CATEGORY[title];
+  if (category === undefined) throw new Error(`openForm: no category mapped for "${title}" — add it to FORM_CATEGORY in tests/helpers.js`);
+  if (category) await page.getByText(category, { exact: true }).click();
+  await page.getByText(title, { exact: true }).click();
 }
 
 export async function signCanvas(page) {
