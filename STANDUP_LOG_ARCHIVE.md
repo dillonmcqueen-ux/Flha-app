@@ -3,6 +3,24 @@
 Completed days move here from `STANDUP_LOG.md` each morning after the 9am summary is sent.
 Newest day on top.
 
+## 2026-09-03 (rolled in from the previous "Today" section)
+
+_Never archived at the time because the 9am reporter Routine wasn't running. Moved here on
+2026-09-14 so the live log starts clean again._
+
+- Reviewed this file and its archive against the actual repo state. Found and fixed a real
+  problem: the automated hourly/daily standup-logging system had stopped running around
+  2026-08-13 and nobody had noticed, because the file only auto-updates when it fires — it
+  wasn't visibly broken, just silent. Recreated both scheduled jobs.
+- Corrected a stale claim in Outstanding Items: offline support for FLHA, Inspection,
+  MonthlyInspection, and CustomForm was already finished, not still pending — verified directly
+  against the code rather than trusting the old note.
+- Ran the full 5-point recurring security audit (storage exposure, RLS coverage, secret hygiene,
+  public URL discipline, external surface/Vercel+Stripe). All five came back clean — no fixes
+  needed. One FYI: a new Storage bucket (`gatehouse-uploads`) turned up that wasn't on the
+  previously known-good list; it's already private and correctly signed, just noted above for
+  awareness.
+
 ## 2026-08-13 through 2026-08-24 (backfilled, rolled in from the previous "Today" section)
 
 _The automated logger had stopped firing after 2026-08-13 (see the 2026-08-25 review entry in
