@@ -1,0 +1,47 @@
+-- Removes three storage.objects INSERT policies that granted UNAUTHENTICATED
+-- writes into private buckets.
+--
+-- Found during the 2026-09-14 security audit follow-up. server-lib/uploadUrls.js
+-- documents an assumption that a direct anon .upload() fails RLS on these
+-- buckets. It did not: storage.objects carried PUBLIC/anon INSERT policies, and
+-- the anon key ships in the client bundle (src/supabaseClient.js), so anyone who
+-- viewed source could write files into these buckets with no session at all.
+-- That meant free file hosting on FORA's Supabase storage (an unbounded cost on
+-- the project owner's bill) and a complete bypass of the signed-upload-token
+-- design these buckets were supposed to be behind.
+--
+-- Dropped:
+--   "Allow public insert signatures"   -> signatures
+--   "public_insert_incident_photos"    -> incident-photos
+--   "onboarding uploads anon insert"   -> onboarding-uploads
+--
+-- Verified safe before dropping: every upload to these three buckets goes
+-- through src/uploadViaSignedUrl.js, and a signed upload token carries its own
+-- authorization rather than consulting RLS, so signed uploads are unaffected.
+-- There are zero direct anon .upload() calls to these buckets anywhere in src/.
+-- Server-side writes in api/* use the service role, which bypasses RLS entirely.
+--
+-- Verified after dropping, with the published anon key against the live project:
+-- all three now return 403 "new row violates row-level security policy". Note
+-- that signatures and incident-photos also enforce an allowed_mime_types list
+-- which rejects before RLS is reached, so the probe had to use image/png to
+-- actually exercise the policy.
+--
+-- Deliberately NOT dropped:
+--   "Allow public insert 1ly6hwx_0" -> flha-reports. src/generatePDF.js:470-472
+--     is the last remaining direct anon .upload() in the codebase and would
+--     break. Migrate it to uploadViaSignedUrl first — that needs a
+--     create_upload_url action added to api/flhas.js, which doesn't have one —
+--     then drop this policy too.
+--   "Allow logo insert 1y3lpeg_0" -> company-logos. Same class, and nothing
+--     depends on it either (onboarding and AdminPanel both use signed tokens),
+--     but it was outside the agreed scope of this change. company-logos is
+--     public for READ by design; that is unrelated to this write policy.
+--
+-- APPLIED to the live FORA Supabase project (wzyvbtzxxdcxgvbkcqmt) on
+-- 2026-09-14. Reversible: re-create any policy with the same name, command and
+-- with_check expression to restore the previous behavior.
+
+drop policy if exists "Allow public insert signatures" on storage.objects;
+drop policy if exists "public_insert_incident_photos" on storage.objects;
+drop policy if exists "onboarding uploads anon insert" on storage.objects;
