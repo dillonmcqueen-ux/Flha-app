@@ -124,9 +124,18 @@ fixes still go through branch → draft PR, same as everywhere else in this
 repo; only live-infrastructure toggles that meet the "only tightens
 access, easily reversible" bar happen directly.
 
-**Verified clean as of this writing:** storage buckets (only
-`company-logos` public), RLS coverage (all 30 tables correctly enabled
-with no policies), no hardcoded secrets in tracked files. **Found and
+**Verified clean as of the 2026-09-14 sweep:** storage buckets (only
+`company-logos` public, confirmed live against all 8 buckets with
+unauthenticated probes, not just from code comments), RLS coverage (all 43
+tables correctly enabled with no policies), no hardcoded secrets in tracked
+files, Vercel preview protection still on, Stripe webhook signature
+verification intact. That sweep's `pentest-mindset-auditor` pass did find
+real exploitable issues in application code — an unauthenticated
+code-enumeration → roster-disclosure → PIN-race chain, mass assignment on
+every `submit` action, and a signed-URL oracle — all fixed under branch →
+draft PR. **Known and deliberately still open:** Supabase Storage objects
+are not namespaced by company, which is the root of the upload-path and
+signed-URL findings; tracked in `TODO.md`. **Found and
 fixed as of this writing:** Vercel preview-deployment protection was off
 on `flha-app`, meaning every PR's preview URL — posted openly in GitHub
 comments — was publicly reachable running the live app; enabled

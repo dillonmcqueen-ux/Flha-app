@@ -11,9 +11,13 @@ should ever be public.** As of the last verified check (run
 `select id, name, public, created_at from storage.buckets order by name;`
 via `mcp__Supabase__execute_sql` against the project from
 `mcp__Supabase__list_projects` to get current truth — don't rely on a
-stale list), the buckets are: `company-logos` (public=true, correct),
-`flha-reports`, `incident-photos`, `onboarding-uploads`, `signatures`
-(all public=false, correct).
+stale list), as of 2026-09-14 the buckets are: `company-logos`
+(public=true, correct), plus `flha-reports`, `gatehouse-uploads`,
+`incident-photos`, `onboarding-uploads`, `signatures`,
+`worker-certifications`, `worker-photos` (all public=false, correct).
+New private buckets appearing here is normal growth — confirm each one
+is intentional against `docs/schema/*-migration.sql`, don't flag it as
+drift on count alone.
 
 ## What to check
 

@@ -21,8 +21,10 @@ API layer.
    project from `mcp__Supabase__list_projects`.
 2. Every table should produce exactly one `rls_enabled_no_policy` (INFO
    level) finding — that's the expected, correct state, not a problem.
-   As of the last verified check, all 30 `public.*` tables matched this
-   pattern cleanly.
+   As of the last verified check (2026-09-14), all 43 `public.*` tables
+   matched this pattern cleanly. The count grows as the schema does —
+   a higher number is normal growth, not a discrepancy. What matters is
+   that the enabled count equals the total table count.
 3. Flag anything that deviates from that pattern:
    - A table with **no RLS-related finding at all** likely means RLS is
      disabled outright (check `mcp__Supabase__list_tables` for the

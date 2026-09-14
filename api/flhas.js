@@ -86,6 +86,29 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
 // company_signals — caps array lengths and coerces every value to a short
 // string, same discipline as the AI-drafting code in
 // server-lib/onboardingDrafting.js caps its own model output.
+// Column allow-list for client-supplied record bodies (submit + amend).
+// Without this, `{ ...record }` is a mass-assignment sink: a worker could
+// set supervisor_signed_by/supervisor_signed_at to forge an approval the
+// `approve` action is supposed to gate, or backdate created_at on an
+// inspection that never happened. The `update` action has always
+// whitelisted its fields for exactly this reason — submit and amend
+// didn't, which is the drift this closes. Server-controlled columns
+// (id, company_id, created_at, supervisor_signed_*) are absent on
+// purpose: they are set by the server or not at all.
+function pickAllowed(record, allowed) {
+  const out = {};
+  if (!record || typeof record !== 'object') return out;
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) out[key] = record[key];
+  }
+  return out;
+}
+
+const SUBMITTABLE_FIELDS = [
+  'worker_name', 'job_site', 'task_description', 'hazards_json',
+  'signed_by', 'pdf_url', 'status', 'worker_signature', 'crew_signatures',
+];
+
 function sanitizeAiEditSignal(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const strList = (arr) => (Array.isArray(arr) ? arr : [])
@@ -171,7 +194,7 @@ export default async function handler(req, res) {
         if (!claimedName || claimedName !== ownerName) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
-        const { error } = await supabaseAdmin.from('flhas').update(record).eq('id', amendingId);
+        const { error } = await supabaseAdmin.from('flhas').update(pickAllowed(record, SUBMITTABLE_FIELDS)).eq('id', amendingId);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
         return res.status(200).json({ id: amendingId });
       } else {
@@ -192,7 +215,7 @@ export default async function handler(req, res) {
             return res.status(200).json({ id: existingRows[0].id });
           }
         }
-        const recordToInsert = { ...record };
+        const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS);
         if (clientSubmissionId) {
           recordToInsert.hazards_json = { ...(recordToInsert.hazards_json || {}), client_submission_id: clientSubmissionId };
         }
@@ -268,7 +291,16 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('flhas').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
-      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
+      // client sent. Signing a request-supplied path turned this endpoint
+      // into an oracle: `flha-reports` is one flat bucket shared by every
+      // tenant with deterministic, second-granularity filenames, so a
+      // caller could hand over another company's report path and get a
+      // working signed URL back for it. Re-reading the row means the only
+      // path that can be signed is the one this record actually points at.
+      const { data: afterRows } = await supabaseAdmin.from('flhas').select('pdf_url').eq('id', id).limit(1);
+      const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
+      const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
     }
 
@@ -306,7 +338,16 @@ export default async function handler(req, res) {
       if (pdfUrl) update.pdf_url = pdfUrl;
       const { error } = await supabaseAdmin.from('flhas').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Approval failed.' });
-      const signedPdfUrl = pdfUrl ? await signStoredUrl(pdfUrl, 'flha-reports') : null;
+      // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
+      // client sent. Signing a request-supplied path turned this endpoint
+      // into an oracle: `flha-reports` is one flat bucket shared by every
+      // tenant with deterministic, second-granularity filenames, so a
+      // caller could hand over another company's report path and get a
+      // working signed URL back for it. Re-reading the row means the only
+      // path that can be signed is the one this record actually points at.
+      const { data: afterRows } = await supabaseAdmin.from('flhas').select('pdf_url').eq('id', id).limit(1);
+      const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
+      const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
       return res.status(200).json({ ok: true, supervisor_signed_at: now, pdfUrl: signedPdfUrl });
     }
 

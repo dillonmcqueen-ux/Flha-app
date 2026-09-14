@@ -37,6 +37,10 @@ export default async function handler(req, res) {
     const result = await runCompanyBrainSummary(supabaseAdmin);
     return res.status(200).json(result);
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Cron job failed.' });
+    // Raw exception text can carry Supabase/Anthropic internals (table and
+    // constraint names). Log it, return a generic message — the same
+    // discipline the other 17 handlers already follow.
+    console.error('Cron job failed:', e.message);
+    return res.status(500).json({ error: 'Cron job failed.' });
   }
 }
