@@ -114,7 +114,7 @@ function pickAllowed(record, allowed) {
 }
 
 const SUBMITTABLE_FIELDS = {
-  inspection: ['worker_name', 'equipment_label', 'results_json', 'signed_by', 'pdf_url', 'trip_type', 'linked_inspection_id', 'start_reading', 'end_reading', 'reading_unit', 'has_changes'],
+  inspection: ['worker_name', 'equipment_label', 'equipment_id', 'results_json', 'signed_by', 'pdf_url', 'trip_type', 'linked_inspection_id', 'start_reading', 'end_reading', 'reading_unit', 'has_changes'],
   toolbox: ['presenter_name', 'meeting_type', 'site', 'topic', 'talking_points_json', 'attendees_json', 'pdf_url'],
   daily: ['reporter_name', 'site', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json', 'pdf_url'],
 };

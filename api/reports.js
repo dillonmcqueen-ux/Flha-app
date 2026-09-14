@@ -106,8 +106,8 @@ function pickAllowed(record, allowed) {
 }
 
 const SUBMITTABLE_FIELDS = {
-  incident: ['reporter_name', 'site', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json', 'photo_urls', 'pdf_url', 'signature_url'],
-  nearmiss: ['reporter_name', 'is_anonymous', 'site', 'occurred_at', 'involved', 'report_json', 'pdf_url', 'signature_url'],
+  incident: ['reporter_name', 'site', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json', 'signed_by', 'photo_urls', 'pdf_url', 'signature_url'],
+  nearmiss: ['reporter_name', 'is_anonymous', 'site', 'occurred_at', 'involved', 'report_json', 'signed_by', 'pdf_url', 'signature_url'],
 };
 
 export default async function handler(req, res) {
