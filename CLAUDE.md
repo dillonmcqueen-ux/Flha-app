@@ -170,6 +170,30 @@ been updated by hand** to `https://portal.forafieldsolutions.com/api/stripe-webh
 `customer.subscription.updated`, `customer.subscription.deleted`) — this
 step is done, no further action needed.
 
+**A third Hobby-era leftover, found later and now unwound: preview deployments
+were switched off entirely.** `vercel.json`'s `ignoreCommand` opened with
+`if [ "$VERCEL_ENV" != "production" ]; then exit 0; fi`, and Vercel's ignore
+step treats **exit 0 as "skip this build"** (exit 1 means "build it"). So every
+non-production build was cancelled — confirmed against the deployment history,
+where every deployment with `target: null` is `CANCELED` and only `main` ever
+reaches `READY`. Nothing in this file had recorded it, and it meant there was
+no way to exercise a change against a real deploy before it reached the
+customer-facing app. The non-production branch is now `exit 1`.
+
+Previews deliberately do **not** get the path filter that production has. That
+filter compares `HEAD^..HEAD`, which is the right question for a squashed merge
+into `main` but the wrong one for a branch: a docs-only or test-only follow-up
+commit would cancel the preview for a branch whose earlier commits changed real
+app code, which is exactly when a preview is wanted. Previews always build;
+production still skips a commit that only touches `website/`, `docs/`,
+`.claude/`, `.agents/`, `.github/`, `tests/` or `*.md` (verified against commit
+`2ce406b`, which is markdown-only and still skips).
+
+This costs build minutes on every branch push, which is a deliberate trade
+rather than an oversight — preview deployments already have `ssoProtection`
+enabled (see the security sweep notes above), so they are not publicly
+reachable.
+
 ## Weekly competitive intelligence
 
 Two more agents form a market-research pipeline, distinct from the
