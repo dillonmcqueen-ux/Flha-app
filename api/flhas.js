@@ -240,9 +240,20 @@ export default async function handler(req, res) {
       if (amendingId) {
         // Confirm this record actually belongs to the worker's own company first.
         const { data: existing, error: findErr } = await supabaseAdmin
-          .from('flhas').select('id, company_id, worker_name, hazards_json').eq('id', amendingId).limit(1);
+          .from('flhas').select('id, company_id, worker_name, hazards_json, created_at').eq('id', amendingId).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
+        }
+        // Same-day only, matching the window `resume` above will even offer:
+        // it lists today's records and nothing older, so the real client
+        // never amends anything else. Enforced here because this action
+        // takes `amendingId` directly — without it a worker could reach an
+        // arbitrarily old record of their own and, now that an amendment
+        // reverting to pending_approval clears the sign-off below, wipe a
+        // supervisor signature off a months-old compliance record.
+        const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+        if (!existing[0].created_at || new Date(existing[0].created_at) < dayStart) {
+          return res.status(403).json({ error: 'This FLHA is no longer open for amendment.' });
         }
         // Same identity check the `resume` action already applies when
         // deciding which of today's records a worker is even shown to amend
