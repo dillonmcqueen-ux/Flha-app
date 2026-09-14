@@ -19,8 +19,14 @@
 -- falls back to the old non-atomic path if the function is missing, so
 -- the two can be deployed in either order without locking anyone out.
 --
--- NOT YET APPLIED to the live FORA Supabase project (wzyvbtzxxdcxgvbkcqmt)
--- — apply it before or alongside merging this branch.
+-- APPLIED to the live FORA Supabase project (wzyvbtzxxdcxgvbkcqmt) via
+-- mcp__Supabase__apply_migration, migration name "pin_lockout_atomic",
+-- 2026-09-14. Verified after applying: signature is
+-- (bigint, int, int) matching the RPC call in api/login.js, prosecdef is
+-- true, search_path is pinned to public, and EXECUTE is granted only to
+-- postgres and service_role (anon and authenticated have none). Called
+-- with a non-existent roster id to confirm it runs without error and
+-- returns zero rows, so api/login.js's fallback path stays dormant.
 
 create or replace function record_failed_pin_attempt(
   p_roster_id bigint,
