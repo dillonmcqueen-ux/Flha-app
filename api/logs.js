@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -212,8 +212,11 @@ export default async function handler(req, res) {
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+      let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
-        recordToInsert.pdf_url = storedUrlFromClientReceipt(recordToInsert.pdf_url, session.companyId);
+        const submittedPdf = recordToInsert.pdf_url;
+        recordToInsert.pdf_url = storedUrlFromClientReceipt(submittedPdf, session.companyId);
+        pdfLinked = !receiptWasDropped(submittedPdf, recordToInsert.pdf_url);
       }
       if (clientSubmissionId && table.jsonColumn) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
@@ -246,7 +249,7 @@ export default async function handler(req, res) {
         }
       }
 
-      return res.status(200).json({ id: newId });
+      return res.status(200).json({ id: newId, pdfLinked });
     }
 
     // ── Supervisor / Admin: load records for the dashboard ──────────
@@ -309,6 +312,7 @@ export default async function handler(req, res) {
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
 
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
@@ -322,7 +326,7 @@ export default async function handler(req, res) {
       const { data: afterRows } = await supabaseAdmin.from(table.name).select('pdf_url').eq('id', id).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
     // ── Toolbox Talk: list recent talks someone can still sign ──────
@@ -385,6 +389,7 @@ export default async function handler(req, res) {
       const update = { attendees_json: attendees };
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
       const { error } = await supabaseAdmin.from('toolbox_talks').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Could not save your signature. Try again.' });
       return res.status(200).json({ ok: true });

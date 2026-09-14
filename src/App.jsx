@@ -67,6 +67,11 @@ export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest)
     err.isServerError = true;
     throw err;
   }
+  // The server reports whether the generated PDF actually got attached to
+  // the saved record — see receiptWasDropped() in server-lib/uploadUrls.js.
+  // Returned so the caller (a live submit, or offlineQueue's drainQueue)
+  // can say so instead of the record quietly having no PDF link.
+  return await res.json().catch(() => ({}));
 }
 
 // Fallback used only if Supabase has no data yet (e.g. first run)
@@ -587,6 +592,10 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [amendingId, setAmendingId] = useState(null);
   const [amendSignature, setAmendSignature] = useState(null);
   const [pendingApproval, setPendingApproval] = useState(false);
+  // Set when the server saved the FLHA but couldn't attach its PDF — see
+  // receiptWasDropped() in server-lib/uploadUrls.js. The record is safe;
+  // only the link is missing, and re-saving from the dashboard rebuilds it.
+  const [pdfUnlinked, setPdfUnlinked] = useState(false);
   const [resumeName, setResumeName] = useState("");
   const [resumeError, setResumeError] = useState("");
   const [resumeChoices, setResumeChoices] = useState([]);
@@ -881,6 +890,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           setSavingFLHA(false);
           return false;
         }
+        const amendBody = await res.json().catch(() => ({}));
+        setPdfUnlinked(amendBody?.pdfLinked === false);
       } catch (e) {
         console.error("FLHA save failed:", e);
         setSaveError(true);
@@ -915,7 +926,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     }
 
     try {
-      await resubmitFLHA(payload, clientSubmissionId, token);
+      const saved = await resubmitFLHA(payload, clientSubmissionId, token);
+      setPdfUnlinked(saved?.pdfLinked === false);
       setSavingFLHA(false);
       setPendingApproval(newStatus === "pending_approval");
       clearDraft("flha", forcedCompanyId);
@@ -1538,6 +1550,16 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
+            {pdfUnlinked && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 16, textAlign: "left" }}>
+                <AlertTriangle size={16} color={C.status.warning.text} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ fontSize: 13, color: C.text.body, lineHeight: 1.5 }}>
+                  <strong style={{ color: C.status.warning.text }}>This FLHA saved without its PDF.</strong>{" "}
+                  Nothing was lost — every hazard and signature is recorded. Ask your supervisor to open it in the dashboard and re-save, which regenerates the PDF.
+                </div>
+              </div>
+            )}
+
             <div style={{ background: C.status.success.bg, border: `1px solid ${C.status.success.border}`, borderRadius: RAD.md, padding: 16, marginBottom: 16, textAlign: "left" }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.status.success.text, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.03em" }}>Submitted Successfully</div>
               {(pendingApproval
@@ -1564,7 +1586,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center", minHeight: 48, boxSizing: "border-box",
             }}>View Dashboard <ChevronRight size={16} /></a>
-            <button style={styles.ghost} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.ghost} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setPdfUnlinked(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>

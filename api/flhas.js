@@ -7,7 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
-import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -291,8 +291,11 @@ export default async function handler(req, res) {
         } else {
           amendedHazards = normalizeHazardsJson(existing[0].hazards_json).value;
         }
+        let amendPdfLinked = true;
         if (Object.prototype.hasOwnProperty.call(amendUpdate, 'pdf_url')) {
-          amendUpdate.pdf_url = storedUrlFromClientReceipt(amendUpdate.pdf_url, session.companyId);
+          const submitted = amendUpdate.pdf_url;
+          amendUpdate.pdf_url = storedUrlFromClientReceipt(submitted, session.companyId);
+          amendPdfLinked = !receiptWasDropped(submitted, amendUpdate.pdf_url);
         }
         amendUpdate.status = deriveFlhaStatus(amendedHazards);
         if (amendUpdate.status === 'pending_approval') {
@@ -309,7 +312,7 @@ export default async function handler(req, res) {
         const { error } = await supabaseAdmin
           .from('flhas').update(amendUpdate).eq('id', amendingId).eq('company_id', session.companyId);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
-        return res.status(200).json({ id: amendingId, status: amendUpdate.status });
+        return res.status(200).json({ id: amendingId, status: amendUpdate.status, pdfLinked: amendPdfLinked });
       } else {
         // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
         // offline FLHA gets retried, possibly more than once. Only applies
@@ -340,8 +343,11 @@ export default async function handler(req, res) {
         // assembled. storedUrlFromClientReceipt turns it into the path this
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
+        let pdfLinked = true;
         if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
-          recordToInsert.pdf_url = storedUrlFromClientReceipt(recordToInsert.pdf_url, session.companyId);
+          const submitted = recordToInsert.pdf_url;
+          recordToInsert.pdf_url = storedUrlFromClientReceipt(submitted, session.companyId);
+          pdfLinked = !receiptWasDropped(submitted, recordToInsert.pdf_url);
         }
         recordToInsert.status = deriveFlhaStatus(recordToInsert.hazards_json);
         const { data, error } = await supabaseAdmin
@@ -368,7 +374,7 @@ export default async function handler(req, res) {
           if (signalErr) console.error('company_signals insert failed for FLHA', newId, signalErr.message);
         }
 
-        return res.status(200).json({ id: newId, status: data?.[0]?.status || null });
+        return res.status(200).json({ id: newId, status: data?.[0]?.status || null, pdfLinked });
       }
     }
 
@@ -420,6 +426,7 @@ export default async function handler(req, res) {
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
 
       // `hazards_json` is the column the approval gate reads, so an edit here
       // has to re-derive status the same way a worker's submit does —
@@ -448,7 +455,7 @@ export default async function handler(req, res) {
       const { data: afterRows } = await supabaseAdmin.from('flhas').select('pdf_url, status').eq('id', id).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, status: afterRows?.[0]?.status || null });
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, status: afterRows?.[0]?.status || null, pdfLinked });
     }
 
     // ── Supervisor / Admin: delete one or more FLHAs ────────────────────
@@ -484,6 +491,7 @@ export default async function handler(req, res) {
       const update = { status: 'complete', supervisor_signed_by: supName, supervisor_signed_at: now };
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
       const { error } = await supabaseAdmin.from('flhas').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Approval failed.' });
       // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
@@ -496,7 +504,7 @@ export default async function handler(req, res) {
       const { data: afterRows } = await supabaseAdmin.from('flhas').select('pdf_url').eq('id', id).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, supervisor_signed_at: now, pdfUrl: signedPdfUrl });
+      return res.status(200).json({ ok: true, supervisor_signed_at: now, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
     // ── Admin: count FLHAs per company (used on the onboarding console) ─
