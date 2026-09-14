@@ -113,6 +113,25 @@ const COMPANY_CODE_THROTTLE_MAX_FAILURES = 50;
 const PIN_IP_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
 const PIN_IP_THROTTLE_MAX_FAILURES = 50;
 
+// Per-IP ceilings on the two PUBLIC onboarding endpoints. Both sit above
+// every auth check, by design — a prospect filling in the intake form has no
+// account yet. But that left them fully unmetered:
+//
+//   submit_onboarding_intake  inserts a DB row, can call the Stripe API, and
+//     sends mail via Resend to a CALLER-SUPPLIED address from FORA's verified
+//     sending domain, plus a Slack ping. Scripted, that's a phishing relay
+//     authenticated as forafieldsolutions.com (SPF/DKIM pass), a wrecked
+//     sender reputation, an unusable Slack channel, and amplified spend.
+//   create_onboarding_upload_url  mints a signed upload token for a
+//     caller-chosen path, i.e. unauthenticated write access to storage.
+//
+// Caps are per-IP fixed windows, generous enough that a real prospect
+// retrying a form never notices, low enough that a script dies immediately.
+// A genuine submitter needs one or two attempts, not twenty.
+const ONBOARDING_THROTTLE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const ONBOARDING_INTAKE_MAX_PER_HOUR = 10;
+const ONBOARDING_UPLOAD_MAX_PER_HOUR = 40;
+
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
 // digests sidestep that while still comparing in constant time.
@@ -334,6 +353,9 @@ export default async function handler(req, res) {
   // reasoning as submit_onboarding_intake below). Restricted to the two
   // buckets the onboarding form actually uses. ───────────────────────────
   if (action === 'create_onboarding_upload_url') {
+    const uploadAllowed = await checkIpThrottle(`onbup:${clientIp(req)}`, ONBOARDING_UPLOAD_MAX_PER_HOUR, ONBOARDING_THROTTLE_WINDOW_MS);
+    if (!uploadAllowed) return res.status(429).json({ error: 'Too many uploads. Please wait and try again.' });
+
     const { bucket, filename } = req.body;
     if (bucket !== 'company-logos' && bucket !== 'onboarding-uploads') {
       return res.status(400).json({ error: 'Invalid bucket.' });
@@ -553,6 +575,9 @@ export default async function handler(req, res) {
   // new one — see get_onboarding_intake below for how the submitter gets
   // back to their own submission. ─────────────────────────────────────────
   if (action === 'submit_onboarding_intake') {
+    const intakeAllowed = await checkIpThrottle(`onbint:${clientIp(req)}`, ONBOARDING_INTAKE_MAX_PER_HOUR, ONBOARDING_THROTTLE_WINDOW_MS);
+    if (!intakeAllowed) return res.status(429).json({ error: 'Too many submissions. Please wait and try again.' });
+
     const {
       companyName, contactName, contactEmail, contactPhone, address,
       sitesList, unitsList, usersList, customRequest, sopFilePaths, sopPathTokens, logoUrl,

@@ -1892,6 +1892,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         amendedNote: null,
         pendingApproval: false,
         supervisorApproval: { name: supName, date: now.toLocaleString("en-CA"), signature: supSignature },
+        token,
       });
     } catch (e) { /* keep old pdf if regen fails */ }
 
@@ -1936,6 +1937,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         supervisorApproval: record.supervisor_signed_by
           ? { name: record.supervisor_signed_by, date: record.supervisor_signed_at, signature: null }
           : undefined,
+        token,
       });
     } catch (e) { /* keep old pdf if regen fails */ }
     try {

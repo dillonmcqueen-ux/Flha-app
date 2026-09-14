@@ -31,6 +31,7 @@ export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest)
   const pdfUrl = await generateAndUploadFLHA({
     flha, workerName, jobSite, signName: workerName, companyName, signatureDataUrl, companyLogo,
     amendedNote: null, pendingApproval: newStatus === "pending_approval", crewSignatures: crew,
+    token: tokenForRequest,
   });
 
   let res;
@@ -851,6 +852,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           amendedNote,
           pendingApproval: newStatus === "pending_approval",
           crewSignatures: crew,
+          token,
         });
 
         const res = await fetch("/api/flhas", {
