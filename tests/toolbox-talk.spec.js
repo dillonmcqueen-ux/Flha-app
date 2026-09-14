@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas } from './helpers.js';
+import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas, openForm } from './helpers.js';
 
 test.describe('Toolbox Talk', () => {
   test.beforeEach(async ({ page }) => {
     await mockWorkerApis(page);
     await mockExternalServices(page);
     await loginAsWorker(page);
-    await page.getByText('Toolbox Talk').click();
+    await openForm(page, 'Toolbox Talk');
   });
 
   test('supports the "After Incident" meeting type and walks through to a saved talk', async ({ page }) => {
@@ -30,7 +30,7 @@ test.describe('Toolbox Talk', () => {
 
     await expect(page.getByText('Attendance & Sign-Off')).toBeVisible();
     await signCanvas(page);
-    await page.getByRole('button', { name: '✓ Presenter Sign' }).click();
+    await page.getByRole('button', { name: /Presenter Sign/ }).click();
 
     const finishBtn = page.getByRole('button', { name: /Finish & Save/ });
     await expect(finishBtn).toBeVisible();

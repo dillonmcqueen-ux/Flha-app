@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas } from './helpers.js';
+import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas, openForm } from './helpers.js';
 
 test.describe('Near Miss report', () => {
   test.beforeEach(async ({ page }) => {
     await mockWorkerApis(page);
     await mockExternalServices(page);
     await loginAsWorker(page);
-    await page.getByText('Near Miss Report').click();
+    await openForm(page, 'Near Miss Report');
   });
 
   test('gates continue on required fields and lets anonymous reports skip the signature', async ({ page }) => {

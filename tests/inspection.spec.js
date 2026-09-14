@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas } from './helpers.js';
+import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas, openForm } from './helpers.js';
 
 test.describe('Equipment Inspection', () => {
   test.beforeEach(async ({ page }) => {
     await mockWorkerApis(page);
     await mockExternalServices(page);
     await loginAsWorker(page);
-    await page.getByText('Equipment Inspection').click();
+    await openForm(page, 'Equipment Inspection');
   });
 
   test('picks the excavator checklist for a fleet machine and completes a signed submission', async ({ page }) => {
