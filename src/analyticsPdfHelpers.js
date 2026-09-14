@@ -6,16 +6,10 @@
 
 import { getForaLogoDataUrl } from "./foraLogo.js";
 
-export function loadJsPDF() {
-  if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-    script.onload = () => resolve(window.jspdf.jsPDF);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
+// Re-exported so the three analytics/profile generators that import from
+// this module keep a single import site; the loader itself lives in
+// src/loadJsPDF.js with every other generator's.
+export { loadJsPDF } from "./loadJsPDF.js";
 
 export const PAGE = { W: 210, H: 297, margin: 16 };
 

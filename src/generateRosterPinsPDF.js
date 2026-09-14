@@ -5,17 +5,7 @@
 // the moment it's generated, same "shown once" rule as everywhere else.
 
 import { getForaLogoDataUrl } from "./foraLogo.js";
-
-async function loadJsPDF() {
-  if (window.jspdf) return window.jspdf.jsPDF;
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-    script.onload = () => resolve(window.jspdf.jsPDF);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
+import { loadJsPDF } from "./loadJsPDF.js";
 
 export async function generateRosterPinsPDF({ companyName, companyCode, roster }) {
   const JsPDF = await loadJsPDF();
