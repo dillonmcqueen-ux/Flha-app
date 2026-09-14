@@ -27,17 +27,23 @@ const PHOTO_BUDGET_BYTES = 28 * 1024 * 1024;
 // drained). Throws on failure so the caller can tell success from failure —
 // deliberately doesn't delete the blob on failure, so it stays available
 // for the next attempt.
+// Returns both halves on purpose: `url` is what generateAndUploadIncident
+// fetches to embed the photo into the PDF, `receipt` is what the server
+// accepts for the photo_urls column. The browser can't be trusted to name a
+// storage path, so the URL never leaves the browser (see
+// server-lib/uploadUrls.js).
 async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
   const stored = await getPhoto(pendingPhotoId);
   if (!stored) return null; // already uploaded and cleaned up, or never existed — nothing to do
   const ext = (stored.contentType || "").split("/")[1] || "jpg";
   const filename = `incident_${companyId}_${pendingPhotoId}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-  const { publicUrl } = await uploadViaSignedUrl({
+  const { publicUrl, receipt } = await uploadViaSignedUrl({
     endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
     bucket: "incident-photos", filename, file: stored.blob, contentType: stored.contentType,
   });
   await deletePhoto(pendingPhotoId);
-  return publicUrl || null;
+  if (!publicUrl) return null;
+  return { url: publicUrl, receipt: receipt || null };
 }
 
 // Redoes the entire submission (signature + PDF upload + the final POST)
@@ -50,25 +56,33 @@ async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
 // `sig` is a data: URL string, not a File/Blob, so it's plain JSON and safe
 // to persist in the queue.
 export async function resubmitIncident(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, pendingPhotoIds } = payload;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, pendingPhotoIds } = payload;
 
-  const uploadedPending = [];
+  // `photoUrls` and `photoReceipts` are parallel arrays, same pattern
+  // api/login.js's onboarding flow already uses for `paths`/`pathTokens`.
+  // A payload queued before receipts existed carries urls and no receipts;
+  // those photos still make it into the PDF, but the server has nothing to
+  // verify so they won't be listed on the record separately.
+  const allPhotoUrls = [...(photoUrls || [])];
+  const allPhotoReceipts = [...(photoReceipts || [])];
   for (const id of (pendingPhotoIds || [])) {
-    const url = await uploadPendingPhoto(id, companyId, tokenForRequest);
-    if (url) uploadedPending.push(url);
+    const uploaded = await uploadPendingPhoto(id, companyId, tokenForRequest);
+    if (uploaded) {
+      allPhotoUrls.push(uploaded.url);
+      if (uploaded.receipt) allPhotoReceipts.push(uploaded.receipt);
+    }
   }
-  const allPhotoUrls = [...(photoUrls || []), ...uploadedPending];
 
-  let signatureUrl = null;
+  let signatureReceipt = null;
   if (sig) {
     try {
       const blob = await (await fetch(sig)).blob();
       const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-      const { publicUrl } = await uploadViaSignedUrl({
+      const { receipt } = await uploadViaSignedUrl({
         endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
         bucket: "signatures", filename, file: blob, contentType: "image/png",
       });
-      signatureUrl = publicUrl || null;
+      signatureReceipt = receipt || null;
     } catch (e) { /* signature upload failure shouldn't block submission */ }
   }
 
@@ -87,6 +101,8 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
         action: "submit",
         token: tokenForRequest,
         clientSubmissionId,
+        photoReceipts: allPhotoReceipts,
+        signatureReceipt,
         record: {
           reporter_name: reporter,
           site, occurred_at: occurredAt, incident_type: incidentType,
@@ -95,8 +111,6 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
           report_json: { ...report, customFields },
           signed_by: reporter,
           pdf_url: pdfUrl || null,
-          photo_urls: allPhotoUrls,
-          signature_url: signatureUrl,
         },
       }),
     });
@@ -298,11 +312,13 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
       try {
         const ext = (entry.file.name.split(".").pop() || "jpg").toLowerCase();
         const filename = `incident_${companyId}_${entry.id}.${ext}`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-        const { publicUrl } = await uploadViaSignedUrl({
+        const { publicUrl, receipt } = await uploadViaSignedUrl({
           endpoint: "/api/reports", action: "create_upload_url", token,
           bucket: "incident-photos", filename, file: entry.file, contentType: entry.file.type,
         });
-        setPhotos(prev => prev.map(p => p.id === entry.id ? { ...p, uploading: false, uploadedUrl: publicUrl || null } : p));
+        setPhotos(prev => prev.map(p => p.id === entry.id
+          ? { ...p, uploading: false, uploadedUrl: publicUrl || null, uploadedReceipt: receipt || null }
+          : p));
       } catch (e) {
         // docs/scope-offline-capability.md Phase 3: an immediate upload
         // failure (offline, or just a bad moment for the connection) used
@@ -339,6 +355,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   };
 
   const uploadedPhotoUrls = () => photos.filter(p => p.uploadedUrl).map(p => p.uploadedUrl);
+  const uploadedPhotoReceipts = () => photos.filter(p => p.uploadedUrl && p.uploadedReceipt).map(p => p.uploadedReceipt);
   const pendingPhotoIds = () => photos.filter(p => p.pending && p.pendingPhotoId).map(p => p.pendingPhotoId);
 
   const generateReport = async () => {
@@ -431,9 +448,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const photoUrls = uploadedPhotoUrls();
+    const photoReceipts = uploadedPhotoReceipts();
     const pendingIds = pendingPhotoIds();
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, pendingPhotoIds: pendingIds };
+    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, pendingPhotoIds: pendingIds };
 
     if (!navigator.onLine) {
       await enqueueSubmission("incident", clientSubmissionId, payload);

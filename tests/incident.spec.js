@@ -93,7 +93,7 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
         if (createUploadCalls === 1) return route.abort('connectionfailed');
         return route.fulfill({
           status: 200, contentType: 'application/json',
-          body: JSON.stringify({ path: `${body.bucket}/${body.filename}`, uploadToken: 'test-token' }),
+          body: JSON.stringify({ path: `${body.bucket}/${body.filename}`, uploadToken: 'test-token', receipt: `receipt:${body.bucket}:${body.filename}` }),
         });
       }
       return route.fallback();
@@ -134,7 +134,7 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     await expect(page.getByText('Failed', { exact: true })).toBeVisible();
   });
 
-  test('drains a queued photo and includes its uploaded URL when submitting back online', async ({ page }) => {
+  test('drains a queued photo and includes its upload receipt when submitting back online', async ({ page }) => {
     let createUploadCalls = 0;
     await page.route('**/api/reports', async route => {
       const body = route.request().postDataJSON();
@@ -143,7 +143,7 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
         if (createUploadCalls === 1) return route.abort('connectionfailed'); // immediate upload fails → queued
         return route.fulfill({
           status: 200, contentType: 'application/json',
-          body: JSON.stringify({ path: `${body.bucket}/${body.filename}`, uploadToken: 'test-token' }),
+          body: JSON.stringify({ path: `${body.bucket}/${body.filename}`, uploadToken: 'test-token', receipt: `receipt:${body.bucket}:${body.filename}` }),
         });
       }
       return route.fallback();
@@ -175,9 +175,15 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     // create_upload_url is also hit for the signature and the generated PDF
     // during submit, so this only checks it went beyond the single failed
     // immediate attempt — the real proof the photo was drained is the
-    // uploaded URL and the cleared IndexedDB blob checked below.
+    // receipt and the cleared IndexedDB blob checked below.
     expect(createUploadCalls).toBeGreaterThan(1);
-    expect(submittedBody.record.photo_urls.some(u => u.includes('/storage/v1/object/public/incident-photos/'))).toBe(true);
+    // The photo travels as the server-issued receipt, never as a URL the
+    // browser assembled: api/reports.js dropped photo_urls from
+    // SUBMITTABLE_FIELDS and resolves photoReceipts itself, so a caller
+    // can't name an incident-photos path it was never issued.
+    expect(submittedBody.record.photo_urls).toBeUndefined();
+    expect(submittedBody.photoReceipts.some(r => r.startsWith('receipt:incident-photos:'))).toBe(true);
+    expect(submittedBody.signatureReceipt).toMatch(/^receipt:signatures:/);
 
     // The drained blob should be cleaned out of IndexedDB, not leaked.
     const remainingPhotoIds = await page.evaluate(async () => {
