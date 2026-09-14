@@ -27,6 +27,17 @@ const PHOTO_BUDGET_BYTES = 28 * 1024 * 1024;
 // drained). Throws on failure so the caller can tell success from failure —
 // deliberately doesn't delete the blob on failure, so it stays available
 // for the next attempt.
+function blobToDataUrl(blob) {
+  return new Promise((resolve) => {
+    try {
+      const r = new FileReader();
+      r.onloadend = () => resolve(typeof r.result === "string" ? r.result : null);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(blob);
+    } catch (e) { resolve(null); }
+  });
+}
+
 // Returns both halves on purpose: `url` is what generateAndUploadIncident
 // fetches to embed the photo into the PDF, `receipt` is what the server
 // accepts for the photo_urls column. The browser can't be trusted to name a
@@ -41,9 +52,13 @@ async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
     endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
     bucket: "incident-photos", filename, file: stored.blob, contentType: stored.contentType,
   });
+  // Read the bytes before deleting the local copy: the PDF needs them, and
+  // the uploaded photo lives in a PRIVATE bucket that can't be fetched back
+  // from an unsigned URL.
+  const dataUrl = await blobToDataUrl(stored.blob);
   await deletePhoto(pendingPhotoId);
   if (!publicUrl) return null;
-  return { url: publicUrl, receipt: receipt || null };
+  return { url: publicUrl, receipt: receipt || null, dataUrl };
 }
 
 // Redoes the entire submission (signature + PDF upload + the final POST)
@@ -56,7 +71,7 @@ async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
 // `sig` is a data: URL string, not a File/Blob, so it's plain JSON and safe
 // to persist in the queue.
 export async function resubmitIncident(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, pendingPhotoIds } = payload;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, photoImages, pendingPhotoIds } = payload;
 
   // `photoUrls` and `photoReceipts` are parallel arrays, same pattern
   // api/login.js's onboarding flow already uses for `paths`/`pathTokens`.
@@ -65,9 +80,14 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
   // verify so they won't be listed on the record separately.
   const allPhotoUrls = [...(photoUrls || [])];
   const allPhotoReceipts = [...(photoReceipts || [])];
+  // Parallel to allPhotoUrls. A slot is undefined when the browser doesn't
+  // hold that photo's bytes — a submission queued online-uploaded photos and
+  // drained later — and the generator falls back to fetching that one.
+  const allPhotoImages = [...(photoImages || [])];
   for (const id of (pendingPhotoIds || [])) {
     const uploaded = await uploadPendingPhoto(id, companyId, tokenForRequest);
     if (uploaded) {
+      allPhotoImages[allPhotoUrls.length] = uploaded.dataUrl || undefined;
       allPhotoUrls.push(uploaded.url);
       if (uploaded.receipt) allPhotoReceipts.push(uploaded.receipt);
     }
@@ -88,7 +108,8 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
 
   const pdfUrl = await generateAndUploadIncident({
     reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields,
-    report, companyName, companyLogo, signatureDataUrl: sig, photoUrls: allPhotoUrls, token: tokenForRequest,
+    report, companyName, companyLogo, signatureDataUrl: sig, photoUrls: allPhotoUrls,
+    photoImages: allPhotoImages, token: tokenForRequest,
   });
 
   let res;
@@ -361,6 +382,12 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
 
   const uploadedPhotoUrls = () => photos.filter(p => p.uploadedUrl).map(p => p.uploadedUrl);
   const uploadedPhotoReceipts = () => photos.filter(p => p.uploadedUrl && p.uploadedReceipt).map(p => p.uploadedReceipt);
+  // The File is still in memory here, which is the only way the PDF can show
+  // the photo: incident-photos is a private bucket, so the public-shaped URL
+  // the upload hands back is not fetchable. Parallel to uploadedPhotoUrls().
+  const uploadedPhotoImages = () => Promise.all(
+    photos.filter(p => p.uploadedUrl).map(p => (p.file ? blobToDataUrl(p.file) : Promise.resolve(undefined)))
+  );
   const pendingPhotoIds = () => photos.filter(p => p.pending && p.pendingPhotoId).map(p => p.pendingPhotoId);
 
   const generateReport = async () => {
@@ -457,6 +484,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const pendingIds = pendingPhotoIds();
     const clientSubmissionId = newClientSubmissionId();
     const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, pendingPhotoIds: pendingIds };
+    // Deliberately NOT part of `payload`, so it never reaches the offline
+    // queue: these are full-size photos as base64, and the queue already
+    // budgets 28MB for pending photo blobs. A queued submission therefore
+    // drains without them, and its PDF is missing those photos — but the
+    // record and the photos themselves are safe in storage, and a supervisor
+    // regenerating from the dashboard gets them, because the dashboard's
+    // list endpoint hands back signed URLs that ARE fetchable.
+    const photoImages = await uploadedPhotoImages();
 
     if (!navigator.onLine) {
       await enqueueSubmission("incident", clientSubmissionId, payload);
@@ -467,7 +502,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     }
 
     try {
-      await resubmitIncident(payload, clientSubmissionId, token);
+      await resubmitIncident({ ...payload, photoImages }, clientSubmissionId, token);
       setSaving(false);
       clearDraft("incident", companyId);
       setStep("done");

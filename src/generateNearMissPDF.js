@@ -51,15 +51,19 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   };
   const sev = report?.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
+  // Same fix as generateIncidentPDF.js: the reason wraps and the banner grows
+  // to fit, instead of taking splitTextToSize(...)[0] and cutting the rest of
+  // the sentence off at the top of the report.
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  const sevLines = report?.severityReason ? doc.splitTextToSize(report.severityReason, contentW - 10) : [];
+  const sevBannerH = 14 + Math.max(0, sevLines.length - 1) * 4;
   doc.setFillColor(...sc);
-  doc.roundedRect(margin, y, contentW, 14, 2, 2, "F");
+  doc.roundedRect(margin, y, contentW, sevBannerH, 2, 2, "F");
   doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
   doc.text(`POTENTIAL SEVERITY: ${sev.toUpperCase()}`, margin + 5, y + 6);
-  if (report?.severityReason) {
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-    doc.text(doc.splitTextToSize(report.severityReason, contentW - 10)[0], margin + 5, y + 11);
-  }
-  y += 20;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  sevLines.forEach((line, i) => doc.text(line, margin + 5, y + 11 + i * 4));
+  y += sevBannerH + 6;
   y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [180, 83, 9] });
 
   const section = (title, body) => {
