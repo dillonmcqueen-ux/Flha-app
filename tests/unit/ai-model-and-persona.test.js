@@ -68,6 +68,16 @@ test('an unknown or missing documentType falls back to the stronger model', () =
   }
 });
 
+test('documentType is bounded and single-line before it reaches the logs', () => {
+  // Every other client-supplied field on this endpoint is bounded (`prompt`
+  // by MAX_PROMPT_CHARS). Unbounded, this one lets a caller pad log volume or
+  // smuggle newlines in to forge plausible-looking extra log lines.
+  const src = readFileSync(new URL('../../api/generate-flha.js', import.meta.url), 'utf8');
+  assert.match(src, /logSafeDocumentType\(documentType\)/);
+  // The raw value must not be what gets logged.
+  assert.ok(!src.includes('"documentType:", documentType'));
+});
+
 test('every caller sends a documentType the routing table knows', () => {
   // The failure this catches is silent: a caller that sends nothing, or a
   // near-miss spelling, still works — it just quietly runs the slow model.

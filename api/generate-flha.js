@@ -154,6 +154,17 @@ export const MODEL_BY_DOCUMENT_TYPE = {
 // from this table, so nothing a client sends here widens what it can reach.
 export const DEFAULT_MODEL = OPUS;
 
+// documentType reaches the logs, and every other client-supplied field on
+// this endpoint is bounded before it gets anywhere (`prompt` by
+// MAX_PROMPT_CHARS). Unbounded it would let a caller pad the log volume or
+// smuggle newlines in to forge plausible-looking extra log lines. It is only
+// ever an identifier from a fixed table, so a short single-line slice loses
+// nothing that would help debug a misspelling.
+function logSafeDocumentType(documentType) {
+  if (typeof documentType !== 'string' || documentType === '') return '(none)';
+  return JSON.stringify(documentType.slice(0, 40));
+}
+
 export function modelForDocumentType(documentType) {
   if (typeof documentType !== 'string') return DEFAULT_MODEL;
   return Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType)
@@ -303,7 +314,7 @@ export default async function handler(req, res) {
     }
 
     // Log key details for debugging in Vercel logs
-    console.log("Anthropic model:", model, "documentType:", documentType || "(none)");
+    console.log("Anthropic model:", model, "documentType:", logSafeDocumentType(documentType));
     console.log("Anthropic stop_reason:", data.stop_reason);
     // A truncated response is the failure mode that looks like a model
     // problem but isn't: every caller slices between the first `{` and the
