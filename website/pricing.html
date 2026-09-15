@@ -271,7 +271,7 @@
       </div>
     </div>
 
-    <p class="table-note">Take all five add-ons and 10% comes off the monthly total. The discount applies to the recurring price only, not the one-time setup fee, and the setup fee does not change with how many add-ons you take. The discount holds only while all five are active, so dropping one ends it: on a 10-seat company, dropping the $12 monthly inspections module takes you from $243 to $258. If you are thinking about dropping an add-on, ask us first and we will tell you which way your bill actually moves. Add-ons are set up by hand rather than through a checkout link, so the total is confirmed by email before anything is charged. Credit card payments are subject to the same 3% processing fee as the plans above, so the totals here are the pre-authorized-debit price.</p>
+    <p class="table-note">Take all five add-ons and 10% comes off the monthly total, rounded down to a whole dollar in your favour. The discount applies to the recurring price only, not the one-time setup fee, and the setup fee does not change with how many add-ons you take. The discount holds only while all five are active, so dropping one ends it: on a 10-seat company, dropping the $12 monthly inspections module takes you from $243 to $258. If you are thinking about dropping an add-on, ask us first and we will tell you which way your bill actually moves. Add-ons are set up by hand rather than through a checkout link, so the total is confirmed by email before anything is charged. Credit card payments are subject to the same 3% processing fee as the plans above, so the totals here are the pre-authorized-debit price.</p>
   </div>
 </section>
 
@@ -314,7 +314,7 @@
           <tr><th>You'd know them as</th><th class="num">Per seat / mo</th><th class="num">10 seats</th><th>What they're for</th></tr>
         </thead>
         <tbody>
-          <tr class="fora-col"><td class="lead" style="color:var(--orange); font-weight:700;">FORA</td><td class="num">Flat, not per seat</td><td class="num">$150 &ndash; $243/mo</td><td>Up to 10 users: $150 for the Big 5, $243 for all ten. 11 to 50 users: $350 and $560.70</td></tr>
+          <tr class="fora-col"><td class="lead" style="color:var(--orange); font-weight:700;">FORA</td><td class="num">Flat, not per seat</td><td class="num">$150 &ndash; $243/mo</td><td>Up to 10 users: $150 for the Big 5, $243 for all ten. 11 to 50 users: $350 and $560</td></tr>
           <tr><td class="lead">The big inspection platform everyone's heard of</td><td class="num">$0 – $29</td><td class="num">$0 – $290</td><td>Inspections and org-wide workflows. Free under 10 seats, then it climbs</td></tr>
           <tr><td class="lead">The construction safety binder specialist</td><td class="num">$29 – $49</td><td class="num">$290 – $490</td><td>Safety forms and worker records. Your crew still fills them out</td></tr>
           <tr><td class="lead">The daily reporting app the supers like</td><td class="num">$12 – $46</td><td class="num">$120 – $460</td><td>Daily logs, time and photos. Safety is thin</td></tr>
@@ -324,7 +324,7 @@
         </tbody>
       </table>
     </div>
-    <p class="table-note">FORA's figures are for a 10-seat company: $150 for the Big 5 plan, $243 for all ten document types with the 10% bundle discount applied. An 11 to 50 user company is on Advanced, at $350 for the Big 5 and $560.70 for all ten. All FORA figures exclude the one-time setup fee ($350 on Basic, $500 on Advanced) and are the pre-authorized-debit price, since credit card payments add 3%; competitor figures are monthly list prices only. <strong style="color:var(--text);">Accuracy disclaimer:</strong> these figures were compiled in September 2026 from publicly available listings, vendor websites and review-site pricing pages. Most vendors in this market do not publish real rates and gate an actual quote behind a sales call, so treat every range above as directional rather than a quoted price. Prices change. FORA's do too, but ours are always on this page.</p>
+    <p class="table-note">FORA's figures are for a 10-seat company: $150 for the Big 5 plan, $243 for all ten document types with the 10% bundle discount applied. An 11 to 50 user company is on Advanced, at $350 for the Big 5 and $560 for all ten. All FORA figures exclude the one-time setup fee ($350 on Basic, $500 on Advanced) and are the pre-authorized-debit price, since credit card payments add 3%; competitor figures are monthly list prices only. <strong style="color:var(--text);">Accuracy disclaimer:</strong> these figures were compiled in September 2026 from publicly available listings, vendor websites and review-site pricing pages. Most vendors in this market do not publish real rates and gate an actual quote behind a sales call, so treat every range above as directional rather than a quoted price. Prices change. FORA's do too, but ours are always on this page.</p>
 
     <div style="height:56px;"></div>
 
@@ -463,8 +463,11 @@
 
     var subtotal = picked.reduce(function(a, m){ return a + m.price; }, plan);
     var allTen = picked.length === mods.length;
-    var discount = allTen ? subtotal * BUNDLE_DISCOUNT : 0;
-    var total = subtotal - discount;
+    // Floor to a whole dollar so the bundle price is never quoted with cents.
+    // Rounding down means the customer gets slightly more than 10% off, and
+    // deriving the discount from the rounded total keeps the lines adding up.
+    var total = allTen ? Math.floor(subtotal * (1 - BUNDLE_DISCOUNT)) : subtotal;
+    var discount = subtotal - total;
 
     lines.innerHTML = '';
     function add(label, amount, cls){
@@ -476,14 +479,14 @@
     }
     add(PLAN_NAME[tier] + ' (the Big 5)', money(plan) + '/mo');
     picked.forEach(function(m){ add(m.name, money(m.price) + '/mo'); });
-    if (allTen) add('All ten, 10% off', '\u2212' + money(discount) + '/mo');
+    if (allTen) add('All ten, bundle discount', '\u2212' + money(discount) + '/mo');
 
     totalEl.textContent = money(total);
     setupEl.textContent = '+ ' + money(SETUP[tier]) + ' one-time setup';
 
     flagEl.hidden = false;
     if (allTen) {
-      flagEl.innerHTML = '<b>All ten document types.</b> The 10% bundle discount is on, saving you ' +
+      flagEl.innerHTML = '<b>All ten document types.</b> The bundle discount is on, saving you ' +
         money(discount) + '/mo, or ' + money(discount * 12) + ' a year.';
     } else {
       var remaining = mods.length - picked.length;
