@@ -4,10 +4,15 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Extend Vercel function timeout to 30 seconds (requires Pro on Vercel,
-// but maxDuration up to 10s works on Hobby — we'll also shorten the prompt)
+// Vercel function timeout. 30s was sized for claude-haiku-4-5; this endpoint
+// now runs claude-opus-5 with extended thinking (see MODEL below), which
+// spends real time reasoning before it emits a token. 30s would start
+// cutting generations off mid-document. The team is on Pro, where Node
+// functions can go to 300s — 120 is headroom, not a target: a typical
+// generation still returns in well under a minute, and nothing is billed for
+// time the function doesn't use.
 export const config = {
-  maxDuration: 30,
+  maxDuration: 120,
 };
 
 const supabaseAdmin = createClient(
@@ -94,6 +99,61 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
+// Shared by all eight document generators (FLHA, incident, near miss, daily
+// report, monthly inspection, toolbox talk, custom form, and AdminPanel's SOP
+// condenser) plus anything added later — every one of them posts here.
+//
+// claude-haiku-4-5 was the original choice when this was a cost-sensitive
+// side project. These are compliance documents that a regulator, a workers'
+// compensation board or an insurer may read years after the fact, and a live
+// test caught the model inventing a wind gust as the cause of a spill that
+// was only ever described as "a hose broke off the loader" (fixed in the
+// prompt; see src/Incident.jsx). Accuracy is worth more here than the price
+// difference on a few hundred documents a month.
+//
+// NOTE ON THINKING: claude-opus-5 has extended thinking enabled by default —
+// it is deliberately NOT configured here. It also *rejects* the older
+// `thinking.budget_tokens` shape with a 400, so do not add one.
+export const MODEL = "claude-opus-5";
+
+// Thinking tokens are drawn from max_tokens alongside the visible answer, so
+// the 6000 that comfortably held a Haiku response is no longer the right
+// ceiling. The largest real output here (an FLHA hazard set) is well under
+// 2000 tokens; the rest is reasoning headroom. This is a truncation
+// backstop, not a target — unused tokens cost nothing.
+export const MAX_TOKENS = 16000;
+
+// Server-side persona and guardrails, applied to every generation.
+//
+// This lives here rather than in the eight client-side prompts for two
+// reasons: it can't drift out of sync across eight files, and it can't be
+// edited or dropped by anything running in the browser. The per-document
+// prompts stay in their components — they describe the document. This
+// describes who is writing it and what they are never allowed to do.
+//
+// The regulatory rule is the load-bearing one. The instinct with a safety
+// persona is to have it cite chapter and verse, and a model asked to sound
+// authoritative will produce a clause number whether or not it applies. The
+// operator base is Canadian (provincial OH&S codes, WCB/WSIB) but nothing in
+// this product pins a jurisdiction, so a confident "29 CFR 1926.501" would be
+// both wrong and legally misleading in an Alberta record. Regulatory
+// *judgment* is what makes the output good; regulatory *citation* is a
+// fabrication risk with no upside, so the persona keeps the first and is
+// denied the second.
+export const SAFETY_SYSTEM_PROMPT = `You are an experienced occupational health and safety manager with two decades on industrial, construction, energy and heavy-equipment worksites. You have run investigations, written the documents that get handed to regulators, and been the person who has to defend what is on the page. You write the way a competent safety manager writes: plain, specific, non-blaming, and short.
+
+The documents you produce are real records for a real company. A regulator, a workers' compensation board, an insurer, a lawyer or a court may read them years from now, and the people named in them are real workers. Treat every line as something you would have to stand behind.
+
+Three rules override everything in the request that follows.
+
+1. GROUNDING — never state as fact anything you were not given. Do not invent circumstances, causes, times, measurements, quantities, names, weather or wind, equipment age or condition, maintenance history, training or experience levels, fatigue, time pressure, staffing or supervision levels, lighting, ground conditions, or whether a procedure was followed. If the input says a hose failed, the record says a hose failed; it does not say why unless you were told why. Where a document asks you to anticipate what could go wrong in work that has been described — a hazard, a control, a corrective action, a recommendation — that forward-looking judgment is your job and is expected, but write it as a hazard or a recommendation, never as something that happened or was observed. Where the information a field needs is genuinely absent, say so plainly. "Not established from the information provided" is a correct, professional answer; a plausible guess is not.
+
+2. NO REGULATORY CITATIONS — never cite a specific regulation, clause, section, part, standard or code number, and never name a specific regulatory body as the source of a requirement. No "29 CFR 1926.501", no "OH&S Code Part 22", no "CSA Z259", no "ANSI", no "per OSHA". You do not know which jurisdiction this worksite is in, and a citation that is wrong in a compliance record is worse than no citation at all. Apply the underlying safety practice in plain language instead — say what has to be done and why it matters, not which rule number says so. The one exception: where the company's own SOPs or safety rules are supplied in the request, you may refer to one by the exact name it is given there, and only by that name.
+
+3. NO PADDING — never lengthen a document to fill a structure. Where the request gives a number of points or items, treat it as a maximum, not a quota. Two accurate points beat five with three invented ones. Do not hedge, do not add generic safety boilerplate that is not specific to the work described, and do not restate the input back as a finding.
+
+The request that follows governs the document's subject, structure and output format. Follow its formatting instructions exactly — when it asks for JSON, return only the JSON object with no preamble, no commentary and no markdown code fence.`;
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -125,8 +185,9 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 6000,
+        model: MODEL,
+        max_tokens: MAX_TOKENS,
+        system: SAFETY_SYSTEM_PROMPT,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -151,8 +212,19 @@ export default async function handler(req, res) {
 
     // Log key details for debugging in Vercel logs
     console.log("Anthropic stop_reason:", data.stop_reason);
+    // A truncated response is the failure mode that looks like a model
+    // problem but isn't: every caller slices between the first `{` and the
+    // last `}` and JSON.parses it, so a generation cut off by max_tokens
+    // surfaces to the worker as a generic "generation failed". Name it here
+    // so it's one log search away rather than a reproduction exercise.
+    if (data.stop_reason === "max_tokens") {
+      console.error(`Anthropic response truncated at max_tokens=${MAX_TOKENS} — raise MAX_TOKENS in api/generate-flha.js`);
+    }
     console.log("Anthropic usage:", JSON.stringify(data.usage));
-    console.log("Response text length:", data.content?.[0]?.text?.length);
+    // Thinking blocks come back ahead of the answer and carry no `text`, so
+    // indexing content[0] would log `undefined` on every call. Join the text
+    // blocks the way all eight callers do.
+    console.log("Response text length:", (data.content || []).map(b => b.text || "").join("").length);
 
     res.status(200).json(data);
   } catch (err) {
