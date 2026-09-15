@@ -207,12 +207,15 @@ Who/what was involved: ${involved || "not specified"}
 Worker's description of what happened: "${description}"
 
 INSTRUCTIONS:
-- Write a clear, factual, professional report based ONLY on what the worker described. Do not invent specifics that weren't provided, but you may reasonably infer contributing factors and sensible corrective steps.
+- Write a clear, factual, professional report based ONLY on what the worker described.
+- GROUNDING RULE, which overrides every length guide below. Every statement of fact must trace back to the worker's description or the fields above. NEVER introduce a circumstance that was not stated — no weather or wind, no equipment age or condition, no maintenance history, no training or experience level, no fatigue, no time pressure, no staffing or supervision level, no lighting, no ground conditions, no procedure that was or wasn't followed.
+- The counts below are MAXIMUMS, not targets. A thin description should produce a short report. An empty contributingFactors list is correct when the description does not identify any. Never pad a list to reach a number.
+- "potentialOutcome" and "nextSteps" are the places forward-looking judgement is allowed, because they are assessments and recommendations rather than statements of fact about what occurred.
 - Keep a neutral, non-blaming tone — near-miss reporting is about learning, not fault.
 - "severity": rate the POTENTIAL severity — how bad it realistically could have been if it had gone wrong — as one of "Low", "Medium", "High", or "Critical". Critical = potential fatality or life-altering injury; High = potential serious injury; Medium = potential injury needing medical treatment; Low = minor potential injury.
 - "severityReason": one short sentence explaining the rating.
 - "whatHappened": a clear 2-4 sentence write-up of the event.
-- "contributingFactors": the conditions or actions that led to the near miss (2-4 short points).
+- "contributingFactors": conditions or actions stated in the description that led to the near miss (up to 4 short points). Return [] if the description does not identify any — do not infer them.
 - "potentialOutcome": one or two sentences on what could realistically have happened.
 - "immediateActions": what was or should have been done right away to make the situation safe (2-3 short points).
 - "nextSteps": longer-term recommended actions to prevent recurrence (2-4 short points).
