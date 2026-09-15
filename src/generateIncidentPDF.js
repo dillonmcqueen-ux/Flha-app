@@ -9,10 +9,21 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   return y;
 }
 
+// Only ever used for URLs that are actually fetchable: a signed URL from the
+// dashboard's list endpoint, or a data: URL the browser already holds. An
+// UNSIGNED public-shaped URL for a private bucket (incident-photos and
+// signatures are both private) comes back as a 400 with a JSON error body —
+// and without the resp.ok check below, that JSON became a
+// `data:application/json;base64,...` string which addImage either threw on or
+// embedded as garbage, silently, leaving an empty bordered box where the
+// photo should be. Checking the status and the content type means a photo
+// that can't be fetched is simply skipped, and the caller can tell.
 async function fetchAsDataUrl(url) {
   try {
     const resp = await fetch(url, { mode: "cors" });
+    if (!resp.ok) return null;
     const blob = await resp.blob();
+    if (!blob.type.startsWith("image/")) return null;
     return await new Promise((res, rej) => {
       const r = new FileReader();
       r.onloadend = () => res({ dataUrl: r.result, type: blob.type });
@@ -25,7 +36,7 @@ async function fetchAsDataUrl(url) {
 }
 
 export async function generateAndUploadIncident(data) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields, photoUrls, reviewed, token } = data;
+  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, report, companyName, companyLogo, signatureDataUrl, customFields, photoUrls, photoImages = [], reviewed, token } = data;
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -53,11 +64,18 @@ export async function generateAndUploadIncident(data) {
   const sevColors = { Low: [22, 163, 74], Medium: [217, 119, 6], High: [220, 38, 38], Critical: [127, 29, 29] };
   const sev = report?.severity || "Medium";
   const sc = sevColors[sev] || sevColors.Medium;
-  doc.setFillColor(...sc); doc.roundedRect(margin, y, contentW, 14, 2, 2, "F");
+  // The reason wraps and the banner grows to fit it. It used to take
+  // splitTextToSize(...)[0] — the first line only — so any reason longer than
+  // one line was silently cut mid-sentence at the very top of the report.
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  const sevLines = report?.severityReason ? doc.splitTextToSize(report.severityReason, contentW - 10) : [];
+  const sevBannerH = 14 + Math.max(0, sevLines.length - 1) * 4;
+  doc.setFillColor(...sc); doc.roundedRect(margin, y, contentW, sevBannerH, 2, 2, "F");
   doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
   doc.text(`SEVERITY: ${sev.toUpperCase()}`, margin + 5, y + 6);
-  if (report?.severityReason) { doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.text(doc.splitTextToSize(report.severityReason, contentW - 10)[0], margin + 5, y + 11); }
-  y += 20;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  sevLines.forEach((line, i) => doc.text(line, margin + 5, y + 11 + i * 4));
+  y += sevBannerH + 6;
   y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [153, 27, 27] });
 
   // details box
@@ -118,8 +136,18 @@ export async function generateAndUploadIncident(data) {
 
     const colW = (contentW - 6) / 2, imgH = 55;
     let col = 0;
-    for (const url of photoUrls) {
-      const fetched = await fetchAsDataUrl(url);
+    for (let i = 0; i < photoUrls.length; i++) {
+      // `photoImages` carries bytes the browser already has (the File the
+      // worker just picked, or the blob drained out of the offline queue).
+      // Preferred over refetching, because on the worker's own submit path
+      // photoUrls are unsigned public-shaped URLs for the PRIVATE
+      // incident-photos bucket and can never be fetched back. The fetch is
+      // still the right path for the dashboard's regenerate flow, where
+      // record.photo_urls arrived already signed by signRows.
+      const local = photoImages[i];
+      const fetched = local
+        ? { dataUrl: local, type: local.slice(5, local.indexOf(";")) }
+        : await fetchAsDataUrl(photoUrls[i]);
       if (y + imgH > 280) { doc.addPage(); y = 20; col = 0; }
       const x = margin + col * (colW + 6);
       if (fetched) {

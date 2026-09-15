@@ -118,6 +118,69 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     await expect(page.getByText('Queued', { exact: true })).toBeVisible();
   });
 
+  test('the generated PDF actually embeds the photo and the full severity reason', async ({ page }) => {
+    // Both halves of this shipped broken and nothing caught it, because no
+    // test had ever looked at the bytes the generator produces.
+    //
+    // 1. incident-photos is a PRIVATE bucket, and the worker's own submit path
+    //    only holds the unsigned public-shaped URL the upload handed back. The
+    //    generator used to fetch that, get a 400 JSON body, and embed it as if
+    //    it were an image — leaving an empty bordered box.
+    // 2. The severity reason was rendered as splitTextToSize(...)[0], so
+    //    anything longer than one line was cut off mid-sentence.
+    // The generated PDF is the flha-reports upload; the same route also sees
+    // the photo (incident-photos) and the signature (signatures).
+    let pdfBuffer = null;
+    await page.route('**/storage/v1/object/**', async route => {
+      const buf = route.request().postDataBuffer();
+      if (buf && route.request().url().includes('/flha-reports/')) pdfBuffer = buf;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ Key: 'mock/path.png' }) });
+    });
+    await page.route('**/api/reports', async route => {
+      const body = route.request().postDataJSON();
+      if (body.action === 'create_upload_url') {
+        return route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({ path: `${body.bucket}/${body.filename}`, uploadToken: 'test-token', receipt: `receipt:${body.bucket}:${body.filename}` }),
+        });
+      }
+      return route.fallback();
+    });
+
+    // A real JPEG (1x1) so the browser produces a genuine image/jpeg File.
+    const JPEG = Buffer.from(
+      '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a'
+      + 'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA'
+      + 'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
+    await page.setInputFiles('input[type="file"]', [
+      { name: 'scene.jpg', mimeType: 'image/jpeg', buffer: JPEG },
+    ]);
+    await expect(page.getByText('Queued', { exact: true })).toBeHidden();
+
+    await page.getByRole('button', { name: 'Continue →' }).click();
+    await expect(page.getByText('What happened?')).toBeVisible();
+    await page.locator('textarea').fill('A worker slipped near the site entrance and hurt a hand.');
+    await page.getByRole('button', { name: 'Generate Report' }).click();
+    await expect(page.getByText('Injury / Illness — Incident Report')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Continue to Sign →' }).click();
+    await signCanvas(page);
+    await page.getByRole('button', { name: 'Sign & Submit Report' }).click();
+    await expect(page.getByText('Incident Report Filed')).toBeVisible({ timeout: 15000 });
+
+    expect(pdfBuffer, 'a PDF should have been uploaded to flha-reports').toBeTruthy();
+    const pdf = pdfBuffer.toString('latin1');
+
+    // The photo: a JPEG embedded by addImage shows up as a DCTDecode image
+    // stream. Before the fix there was no image here at all, just a rectangle.
+    expect(pdf).toContain('DCTDecode');
+
+    // The severity reason: helpers.js's AI fixture returns a reason long
+    // enough to wrap, so all of it must be present, not just the first line.
+    const reason = 'Could have caused a moderate injury.';
+    expect(pdf).toContain(reason.slice(0, 20));
+  });
+
   test('blocks a photo that would exceed the on-device pending-photo storage budget', async ({ page }) => {
     await page.route('**/api/reports', async route => {
       const body = route.request().postDataJSON();
