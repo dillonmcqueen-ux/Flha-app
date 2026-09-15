@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -186,16 +186,23 @@ export default async function handler(req, res) {
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+      let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
-        recordToInsert.pdf_url = storedUrlFromClientReceipt(recordToInsert.pdf_url, session.companyId);
+        const submittedPdf = recordToInsert.pdf_url;
+        recordToInsert.pdf_url = storedUrlFromClientReceipt(submittedPdf, session.companyId);
+        pdfLinked = !receiptWasDropped(submittedPdf, recordToInsert.pdf_url);
       }
       // Photos and the signature come in as receipts at the top level, never
       // as URLs inside `record` — see the SUBMITTABLE_FIELDS comment above.
       const { photoReceipts, signatureReceipt } = req.body;
+      let photosLinked = true;
       if (type === 'incident') {
         recordToInsert.photo_urls = storedUrlsFromClientReceipts(photoReceipts, session.companyId, 'incident-photos');
+        const sent = Array.isArray(photoReceipts) ? photoReceipts.length : 0;
+        photosLinked = recordToInsert.photo_urls.length === sent;
       }
       recordToInsert.signature_url = storedUrlFromClientReceipt(signatureReceipt, session.companyId, 'signatures');
+      const signatureLinked = !receiptWasDropped(signatureReceipt, recordToInsert.signature_url);
       if (clientSubmissionId && table.jsonColumn) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }
@@ -229,7 +236,7 @@ export default async function handler(req, res) {
         }
       }
 
-      return res.status(200).json({ id: newId });
+      return res.status(200).json({ id: newId, pdfLinked, photosLinked, signatureLinked });
     }
 
     // ── Supervisor / Admin: load reports for the dashboard ──────────
@@ -266,6 +273,7 @@ export default async function handler(req, res) {
       const update = { reviewed: true, reviewed_by: reviewedBy, reviewed_at: now, review_notes: notes || null };
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Review failed.' });
       // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
@@ -278,7 +286,7 @@ export default async function handler(req, res) {
       const { data: afterRows } = await supabaseAdmin.from(table.name).select('pdf_url').eq('id', id).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, reviewed_by: reviewedBy, reviewed_at: now, pdfUrl: signedPdfUrl });
+      return res.status(200).json({ ok: true, reviewed_by: reviewedBy, reviewed_at: now, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
     // ── Supervisor / Admin: correct the submitted content of a report ──
@@ -311,6 +319,7 @@ export default async function handler(req, res) {
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
 
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
@@ -324,7 +333,7 @@ export default async function handler(req, res) {
       const { data: afterRows } = await supabaseAdmin.from(table.name).select('pdf_url').eq('id', id).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
     // ── Supervisor / Admin: delete a report ──────────────────────────

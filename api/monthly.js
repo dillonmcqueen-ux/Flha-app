@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -257,6 +257,10 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
       const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId, periodMonth } = req.body;
+      // Resolved up here so the response can tell the browser whether the
+      // PDF actually attached, rather than the drop only reaching a log.
+      const resolvedSubmitPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedSubmitPdfUrl);
       if (!siteId || !formId || !Array.isArray(answers) || !submittedBy) {
         return res.status(400).json({ error: 'Missing details.' });
       }
@@ -332,7 +336,7 @@ export default async function handler(req, res) {
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
           period_month: periodStart, ai_summary: aiSummary || null,
-          pdf_url: storedUrlFromClientReceipt(pdfUrl, session.companyId), status: 'complete',
+          pdf_url: resolvedSubmitPdfUrl, status: 'complete',
           client_submission_id: clientSubmissionId || null,
           // docs/scope-offline-capability.md Phase 2 — flags a record
           // submitted without AI-generated content (worker filled it in by
@@ -376,7 +380,7 @@ export default async function handler(req, res) {
         }
       }
 
-      return res.status(200).json({ id: record.id });
+      return res.status(200).json({ id: record.id, pdfLinked });
     }
 
     // ══ SUPERVISOR / ADMIN: viewing + corrective actions ════════════════
@@ -524,6 +528,7 @@ export default async function handler(req, res) {
       if (aiSummary !== undefined) recordUpdate.ai_summary = aiSummary || null;
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) recordUpdate.pdf_url = resolvedPdfUrl;
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
       if (Object.keys(recordUpdate).length > 0) {
         const { error: updErr } = await supabaseAdmin.from('inspection_records').update(recordUpdate).eq('id', recordId);
         if (updErr) return res.status(500).json({ error: 'Update failed.' });
@@ -539,7 +544,7 @@ export default async function handler(req, res) {
       const { data: afterRows } = await supabaseAdmin.from('inspection_records').select('pdf_url').eq('id', recordId).limit(1);
       const storedPdfUrl = afterRows?.[0]?.pdf_url || null;
       const signedPdfUrl = storedPdfUrl ? await signStoredUrl(storedPdfUrl, 'flha-reports') : null;
-      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
     if (action === 'list_corrective_actions') {

@@ -17,7 +17,7 @@ process.env.SUPABASE_URL ||= 'https://example.supabase.co';
 
 const {
   signUploadReceipt, resolveUploadReceipt, storedUrlForReceipt, storedUrlFromClientReceipt,
-  storedUrlsFromClientReceipts, withUnguessableSegment,
+  storedUrlsFromClientReceipts, withUnguessableSegment, receiptWasDropped,
 } = await import('../../server-lib/uploadUrls.js');
 const { pathFromStoredUrl } = await import('../../server-lib/signedUrls.js');
 
@@ -196,4 +196,21 @@ test('photo_urls: a non-array is an empty list, not a crash', () => {
   for (const bad of [null, undefined, 'a-string', 42, {}]) {
     assert.deepEqual(storedUrlsFromClientReceipts(bad, COMPANY_A, 'incident-photos'), [], JSON.stringify(bad));
   }
+});
+
+
+test('receiptWasDropped separates "no PDF sent" from "PDF sent and rejected"', () => {
+  // Both resolve to null, but they mean very different things: a PDF that
+  // failed to generate is already visible to the worker, a PDF that exists
+  // in storage but lost its link is not.
+  assert.equal(receiptWasDropped(null, null), false);
+  assert.equal(receiptWasDropped(undefined, null), false);
+  assert.equal(receiptWasDropped('', null), false);
+  assert.equal(receiptWasDropped('some-stale-receipt', null), true);
+
+  const good = signUploadReceipt('flha-reports', PATH, COMPANY_A);
+  assert.equal(receiptWasDropped(good, storedUrlFromClientReceipt(good, COMPANY_A)), false);
+
+  const otherCompany = signUploadReceipt('flha-reports', PATH, COMPANY_B);
+  assert.equal(receiptWasDropped(otherCompany, storedUrlFromClientReceipt(otherCompany, COMPANY_A)), true);
 });

@@ -74,6 +74,11 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     err.isServerError = true;
     throw err;
   }
+  // The server reports whether the generated PDF actually got attached to
+  // the saved record — see receiptWasDropped() in server-lib/uploadUrls.js.
+  // Returned so the caller (a live submit, or offlineQueue's drainQueue)
+  // can say so instead of the record quietly having no PDF link.
+  return await res.json().catch(() => ({}));
 }
 
 // Drawn from theme.js's status scale — Good/Monitor/Defective map to

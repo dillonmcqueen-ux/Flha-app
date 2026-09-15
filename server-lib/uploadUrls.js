@@ -151,6 +151,23 @@ export function storedUrlFromClientReceipt(value, companyId, bucket = 'flha-repo
   return url;
 }
 
+// Did the caller send something that got dropped? The resolvers above
+// return null both for "nothing was sent" and for "something was sent but
+// wasn't a valid receipt", and those mean very different things to the
+// browser: the first is a PDF that failed to generate (already handled and
+// visible), the second is a PDF sitting in storage whose link just got
+// thrown away. Submit responses carry the distinction back as `pdfLinked`
+// so it stops being a console.error nobody reads.
+//
+// The case this actually fires for is a receipt that no longer verifies —
+// most plausibly an offline submission drained after SESSION_SECRET was
+// rotated, since receipts deliberately carry no expiry. It cannot help a
+// browser left open across a deploy on an older bundle: that tab is running
+// old code and wouldn't read the flag anyway.
+export function receiptWasDropped(submittedValue, resolvedUrl) {
+  return !!submittedValue && resolvedUrl === null;
+}
+
 // Array form, for columns like incident_reports.photo_urls. Anything that
 // isn't a valid receipt for this company is dropped rather than failing the
 // whole submission, same reasoning as the single-value helper.

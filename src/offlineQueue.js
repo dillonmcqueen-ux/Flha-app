@@ -184,10 +184,17 @@ export async function totalPhotoBytes() {
 // event, on mount) — a no-op when the queue is empty.
 export async function drainQueue(formType, resubmit) {
   const items = await listQueued(formType);
-  const results = { succeeded: 0, remaining: items.length, lastError: null };
+  // `pdfUnlinked` counts drained submissions the server saved but couldn't
+  // attach a PDF to. Receipts deliberately carry no expiry so a queued
+  // submission can drain days later, which means the one realistic way this
+  // fires is SESSION_SECRET being rotated in between — the record is safe,
+  // its PDF link isn't, and without this it would only ever show up in a
+  // server log. See receiptWasDropped() in server-lib/uploadUrls.js.
+  const results = { succeeded: 0, remaining: items.length, lastError: null, pdfUnlinked: 0 };
   for (const item of items) {
     try {
-      await resubmit(item.payload, item.clientSubmissionId);
+      const response = await resubmit(item.payload, item.clientSubmissionId);
+      if (response && response.pdfLinked === false) results.pdfUnlinked += 1;
       await removeQueued(item.id);
       results.succeeded += 1;
       results.remaining -= 1;

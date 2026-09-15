@@ -126,11 +126,21 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // again on the browser's `online` event for whoever leaves the menu open.
   // Best-effort: a drain failure here just leaves the item queued for the
   // next opportunity, same as offlineQueue.drainQueue already handles.
+  // Set when a drained submission saved fine but its PDF couldn't be
+  // attached. The record itself is safe; only the link to its PDF is
+  // missing, and a supervisor can regenerate it from the dashboard. Shown
+  // here rather than swallowed because the alternative is a server log
+  // nobody reads (see receiptWasDropped in server-lib/uploadUrls.js).
+  const [pdfUnlinkedCount, setPdfUnlinkedCount] = useState(0);
+
   useEffect(() => {
     if (!token) return;
     const drainAll = () => {
       Object.entries(RESUBMIT_HANDLERS).forEach(([formType, resubmit]) => {
         drainQueue(formType, (payload, clientSubmissionId) => resubmit(payload, clientSubmissionId, token))
+          .then(({ pdfUnlinked }) => {
+            if (pdfUnlinked > 0) setPdfUnlinkedCount(prev => prev + pdfUnlinked);
+          })
           .catch(() => { /* best-effort — stays queued, tried again next time */ });
       });
     };
@@ -337,6 +347,22 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       {header("Home")}
 
       <div style={s.body}>
+        {pdfUnlinkedCount > 0 && (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: 10,
+            background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`,
+            borderRadius: RAD.md, padding: 14, marginTop: 16,
+          }}>
+            <AlertTriangle size={16} color={C.status.warning.text} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 13, color: C.text.body, lineHeight: 1.5 }}>
+              <strong style={{ color: C.status.warning.text }}>
+                {pdfUnlinkedCount === 1 ? "A queued submission" : `${pdfUnlinkedCount} queued submissions`} synced without {pdfUnlinkedCount === 1 ? "its" : "their"} PDF.
+              </strong>{" "}
+              The {pdfUnlinkedCount === 1 ? "report was" : "reports were"} saved and nothing was lost. Ask your supervisor to open {pdfUnlinkedCount === 1 ? "it" : "them"} in the dashboard and re-save, which regenerates the PDF.
+            </div>
+          </div>
+        )}
+
         {/* Same hero-glow language as Dashboard.jsx's welcome moment — this
             is the worker's landing screen, so it earns the same welcome
             treatment as the supervisor dashboard gets. */}
