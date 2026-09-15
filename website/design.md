@@ -127,9 +127,6 @@ colors, no new type families):
 - `.statement` — the large pull-quote block (anti-enterprise statement)
 - `.ideas` / `.idea` — the Custom Builds niche-example cards
 - `.bio-hero` — the About page portrait + body layout
-- `.pill` / `.pill-plan` — the "In every plan" vs "Add-on" tag on each
-  document-type card, since the ten built-in types are no longer all
-  included in the base plan
 - `.navitem` / `.dropdown` / `.navtoggle` / `.mobilenav` — the category nav
 
 ## Per-page allowances

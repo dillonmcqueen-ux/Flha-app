@@ -560,16 +560,6 @@ footer{ border-top:1px solid var(--line); padding:64px 0 40px; }
   .demo-cta{ flex-direction:column; align-items:flex-start; }
 }
 
-/* ── plan / add-on pills on feature cards ─────────────────────────── */
-.pill{
-  display:inline-block; font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
-  padding:3px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted);
-  margin-bottom:10px; white-space:nowrap;
-}
-.pill-plan{ color:var(--orange); border-color:var(--orange-dim); background:#F9731612; }
-.spec .spec-top .pill{ margin-bottom:0; }
-.spec .spec-top{ flex-wrap:wrap; }
-
 /* ── dropdown nav (N1b cluster, now with sub-categories) ──────────── */
 .navlinks{ position:relative; }
 .navitem{ position:relative; display:flex; align-items:center; }
