@@ -1947,7 +1947,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
       const data = await res.json();
       if (res.ok) {
-        setFlhas(prev => prev.map(f => f.id === id ? { ...f, ...edited, pdf_url: data.pdfUrl || f.pdf_url } : f));
+        // Take `status` from the response rather than assuming it's unchanged:
+        // api/flhas.js re-derives it from the edited hazards, so an edit that
+        // introduces Extreme risk moves the record back to pending_approval
+        // and the list has to show that without a reload.
+        setFlhas(prev => prev.map(f => f.id === id
+          ? { ...f, ...edited, pdf_url: data.pdfUrl || f.pdf_url, status: data.status || f.status }
+          : f));
       }
     } catch (e) { /* leave as-is if the request fails */ }
     setSelectedFlha(null);
