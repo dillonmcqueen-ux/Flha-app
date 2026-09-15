@@ -16,15 +16,28 @@ Five marketing pages, each answering the next question a visitor has.
   security model.
 - `custom-builds.html`: What a custom build is versus a form builder, six
   niche worked examples, how scoping actually happens, and pricing-by-scope.
-- `pricing.html`: The plans with their Stripe links, the interactive
-  build-your-own plan calculator, the anti-enterprise statement, the
-  cancel-any-time / seasonal-pause terms, and the market comparison tables.
-  The plans carry the Big 5; the other five built-in document types are
-  priced add-ons, and taking all ten applies a 10% discount to the monthly
-  total only (never the one-time setup fee). The prices live in the `PLAN`,
-  `SETUP` and `BUNDLE_DISCOUNT` constants at the top of the calculator
-  script and in the `data-s` / `data-l` attributes on each module — those
-  and the `.price-card` figures must be changed together.
+- `pricing.html`: The platform base fee, the module menu, the interactive
+  calculator, the anti-enterprise statement, the cancel-any-time /
+  seasonal-pause terms, and the market comparison tables. There is no plan
+  and no discount: a company pays the base fee and adds only the modules it
+  runs, each at its listed price.
+
+  **The prices here MIRROR `server-lib/pricing.js` in the app.** This is a
+  separate Vercel project and cannot import that module, so the two have to
+  be changed together: the `BASE` and `SETUP` constants at the top of the
+  calculator script, the `data-s` / `data-l` attributes on each module
+  checkbox, and the `.price-card` figures. A mismatch shows a wrong estimate
+  but can never produce a wrong charge, because what a customer is actually
+  billed is built server-side from the module keys in the checkout URL.
+
+  The Checkout button links to `api/checkout.js` on the app
+  (`https://portal.forafieldsolutions.com/api/checkout?tier=...&modules=...`),
+  which creates the Stripe session and redirects. That host is hardcoded in
+  two places: the no-JS fallback `href` and the `CHECKOUT` constant in the
+  script. A module with `data-requires` (currently only Preventative
+  Maintenance, which needs Equipment Inspections) is disabled and greyed
+  until its dependency is ticked, and unticked if the dependency is removed
+  underneath it, so nobody can build a selection the server will reject.
 - `about.html`: The founder page.
 - `privacy.html` / `terms.html`: Legal pages (self-contained styling; gated
   by the `legal-revision-date-updater` agent on substantive changes).

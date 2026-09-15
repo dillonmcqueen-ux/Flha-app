@@ -612,7 +612,7 @@ export default async function handler(req, res) {
     if (stripeSessionId) {
       const { data: checkoutRows } = await supabaseAdmin
         .from('stripe_checkouts')
-        .select('customer_id, plan_tier')
+        .select('customer_id, plan_tier, modules')
         .eq('session_id', stripeSessionId)
         .limit(1);
       const checkout = checkoutRows && checkoutRows[0];
@@ -620,6 +620,10 @@ export default async function handler(req, res) {
         record.stripe_checkout_session_id = stripeSessionId;
         record.stripe_customer_id = checkout.customer_id;
         record.plan_tier = checkout.plan_tier;
+        // Which modules were paid for. provisionCompanyFromRequest turns
+        // these into company_document_settings rows so the company sees
+        // exactly what it bought and nothing else.
+        record.modules = checkout.modules || null;
       }
     }
 

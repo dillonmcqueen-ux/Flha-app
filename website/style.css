@@ -492,7 +492,9 @@ footer{ border-top:1px solid var(--line); padding:64px 0 40px; }
   font-size:13px; font-weight:500; padding:10px 8px; cursor:pointer; transition:background .2s ease, color .2s ease;
 }
 .seat-toggle button.on{ background:var(--orange); color:var(--black); font-weight:600; }
-.cart-lines{ list-style:none; margin:0 0 4px; padding:0; max-height:260px; overflow-y:auto; }
+/* Tall enough for the base fee plus every module, so a customer always
+   sees every line they are paying for rather than a scrolled subset. */
+.cart-lines{ list-style:none; margin:0 0 4px; padding:0; }
 .cart-lines li{ display:flex; justify-content:space-between; gap:12px; font-size:13.5px; color:var(--muted); padding:8px 0; border-top:1px solid var(--line); }
 .cart-lines li:first-child{ border-top:none; }
 .cart-lines li .amt{ font-variant-numeric:tabular-nums; color:var(--text); white-space:nowrap; }
@@ -558,6 +560,14 @@ footer{ border-top:1px solid var(--line); padding:64px 0 40px; }
   .demo-stopwatch{ font-size:34px; }
   .demo-result{ padding:22px; }
   .demo-cta{ flex-direction:column; align-items:flex-start; }
+}
+
+/* ── locked module (dependency not met) + checkout error ──────────── */
+.mod.mod-locked{ opacity:.45; cursor:not-allowed; }
+.mod.mod-locked:hover{ border-color:var(--line); transform:none; }
+.cart-error{
+  background:#DC262618; border:1px solid #DC262655; border-radius:12px;
+  padding:14px 18px; margin-bottom:26px; font-size:14.5px; color:var(--text); max-width:820px;
 }
 
 /* ── dropdown nav (N1b cluster, now with sub-categories) ──────────── */

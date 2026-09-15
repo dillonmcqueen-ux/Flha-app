@@ -79,11 +79,23 @@ export default async function handler(req, res) {
   try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+      // `modules` is the comma-joined list api/checkout.js put on the
+      // session. It decides which document types the company gets switched
+      // on at approval, so it has to survive from here to
+      // server-lib/onboardingApproval.js. Older sessions (the retired
+      // Payment Links) carry no modules and stage NULL, which every reader
+      // treats as "unknown, leave the defaults alone".
+      const rawModules = session.metadata?.modules;
+      const modules = typeof rawModules === 'string' && rawModules.trim()
+        ? rawModules.split(',').map(m => m.trim()).filter(Boolean)
+        : null;
+
       await supabaseAdmin.from('stripe_checkouts').upsert({
         session_id: session.id,
         customer_id: session.customer || null,
         subscription_id: session.subscription || null,
         plan_tier: session.metadata?.plan_tier || null,
+        modules,
         email: session.customer_details?.email || null,
       });
     } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {

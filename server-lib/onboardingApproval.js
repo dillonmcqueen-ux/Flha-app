@@ -34,6 +34,7 @@ import crypto from 'crypto';
 import { parseSiteLines, parseUserLines, randomToken } from './onboardingHelpers.js';
 import { runOnboardingDrafts } from './onboardingDrafting.js';
 import { sendEmail, siteOrigin } from './email.js';
+import { documentSettingsFor } from './pricing.js';
 
 export const CLAIM_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
@@ -174,6 +175,31 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
       }
     } catch (e) {
       console.error('Could not look up Stripe subscription for approved company:', e.message);
+    }
+  }
+
+  // ── Switch on exactly what was bought ─────────────────────────────────
+  // api/customforms.js treats a missing company_document_settings row as
+  // "active", so a company with no rows at all sees every built-in document
+  // type. That was harmless when every plan included everything; under
+  // modular pricing it would hand a company modules it never paid for. So
+  // write an explicit row for every key any module can unlock: true for the
+  // ones this purchase covers, false for the rest.
+  //
+  // Only when the request actually carries a module list. A request with
+  // `modules` NULL predates modular pricing (or came in without a checkout,
+  // e.g. an admin creating a company by hand), and those keep the old
+  // everything-on default rather than being silently stripped back.
+  if (Array.isArray(request.modules) && request.modules.length > 0) {
+    const settings = documentSettingsFor(companyId, request.modules);
+    const { error: settingsErr } = await supabaseAdmin
+      .from('company_document_settings')
+      .upsert(settings, { onConflict: 'company_id,document_key' });
+    if (settingsErr) {
+      // Not fatal: the company exists and the admin can fix the toggles by
+      // hand. Failing the whole approval here would leave a paid customer
+      // with no account at all, which is strictly worse.
+      console.error('Could not apply purchased module settings:', settingsErr.message);
     }
   }
 

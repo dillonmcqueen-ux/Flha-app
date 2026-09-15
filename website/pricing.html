@@ -211,6 +211,8 @@
       <p>Every document type FORA ships is priced on its own. Take one, take all of them, take the three that matter to you. What you tick is what you pay, with no bundling games and no discount you have to chase.</p>
     </div>
 
+    <div class="cart-error" id="cartError" hidden></div>
+
     <div class="cart" data-reveal>
       <div>
         <div class="cart-modules">
@@ -223,43 +225,49 @@
           </div>
 
           <label class="mod">
-            <input type="checkbox" data-mod="Safety Forms Suite" data-s="70" data-l="160">
+            <input type="checkbox" data-key="safety" data-mod="Safety Forms Suite" data-s="70" data-l="160">
             <div class="m-top"><span class="box"></span><span class="m-name">Safety Forms Suite</span><span class="m-price" data-price>$70<span>/mo</span></span></div>
             <div class="m-desc">FLHA, Toolbox Talk, Incident Report and Near Miss. The AI-from-your-SOPs engine, four document types in one module.</div>
           </label>
 
           <label class="mod">
-            <input type="checkbox" data-mod="Equipment Inspections" data-s="30" data-l="70">
+            <input type="checkbox" data-key="inspections" data-mod="Equipment Inspections" data-s="30" data-l="70">
             <div class="m-top"><span class="box"></span><span class="m-name">Equipment Inspections</span><span class="m-price" data-price>$30<span>/mo</span></span></div>
             <div class="m-desc">Pre-use and post-trip checklists built per machine type, with defect flagging into the dashboard.</div>
           </label>
 
+          <label class="mod" id="modMaintenance">
+            <input type="checkbox" data-key="maintenance" data-mod="Preventative Maintenance" data-s="35" data-l="80" data-requires="inspections">
+            <div class="m-top"><span class="box"></span><span class="m-name">Preventative Maintenance</span><span class="m-price" data-price>$35<span>/mo</span></span></div>
+            <div class="m-desc">Service intervals by hours or mileage per machine, with due-soon flags. Runs off what your inspections report, so it needs Equipment Inspections switched on.</div>
+          </label>
+
           <label class="mod">
-            <input type="checkbox" data-mod="Time Clock + GPS" data-s="50" data-l="110">
+            <input type="checkbox" data-key="timeclock" data-mod="Time Clock + GPS" data-s="50" data-l="110">
             <div class="m-top"><span class="box"></span><span class="m-name">Time Clock + GPS</span><span class="m-price" data-price>$50<span>/mo</span></span></div>
             <div class="m-desc">Clock in and out against the roster, location on every punch, punch map, exportable hours.</div>
           </label>
 
           <label class="mod">
-            <input type="checkbox" data-mod="Daily Reports" data-s="25" data-l="60">
+            <input type="checkbox" data-key="daily" data-mod="Daily Reports" data-s="25" data-l="60">
             <div class="m-top"><span class="box"></span><span class="m-name">Daily Reports</span><span class="m-price" data-price>$25<span>/mo</span></span></div>
             <div class="m-desc">End-of-shift site summaries, grouped by site and crew, exportable for a client.</div>
           </label>
 
           <label class="mod">
-            <input type="checkbox" data-mod="Certification Tracking" data-s="18" data-l="40">
+            <input type="checkbox" data-key="certifications" data-mod="Certification Tracking" data-s="18" data-l="40">
             <div class="m-top"><span class="box"></span><span class="m-name">Certification Tracking</span><span class="m-price" data-price>$18<span>/mo</span></span></div>
             <div class="m-desc">Every ticket in one directory, with alerts before something lapses.</div>
           </label>
 
           <label class="mod">
-            <input type="checkbox" data-mod="Fuel &amp; Consumables Log" data-s="15" data-l="35">
+            <input type="checkbox" data-key="fuel" data-mod="Fuel &amp; Consumables Log" data-s="15" data-l="35">
             <div class="m-top"><span class="box"></span><span class="m-name">Fuel &amp; Consumables</span><span class="m-price" data-price>$15<span>/mo</span></span></div>
             <div class="m-desc">Fuel-ups and consumables logged against the actual unit, feeding equipment analytics.</div>
           </label>
 
           <label class="mod">
-            <input type="checkbox" data-mod="Monthly Site Inspections" data-s="12" data-l="28">
+            <input type="checkbox" data-key="monthly" data-mod="Monthly Site Inspections" data-s="12" data-l="28">
             <div class="m-top"><span class="box"></span><span class="m-name">Monthly Inspections</span><span class="m-price" data-price>$12<span>/mo</span></span></div>
             <div class="m-desc">Recurring compliance walk-throughs built from your own checklist, with corrective action tracking.</div>
           </label>
@@ -270,20 +278,22 @@
         <h3>Your plan</h3>
         <div class="ct-sub">Pick your headcount, then your modules.</div>
         <div class="seat-toggle" role="group" aria-label="Team size">
-          <button type="button" class="on" data-tier="s">Up to 10 users</button>
-          <button type="button" data-tier="l">11 to 50 users</button>
+          <button type="button" class="on" data-tier="basic">Up to 10 users</button>
+          <button type="button" data-tier="advanced">11 to 50 users</button>
         </div>
         <ul class="cart-lines" id="cartLines"></ul>
         <div class="cart-sum">
           <div class="row"><span id="cartTotal">$60</span><span>/ month</span></div>
           <div class="setup" id="cartSetup">+ $350 one-time setup</div>
+          <div class="setup" id="cartCard">With the 3% card fee: $61.80/mo and $360.50 setup</div>
         </div>
         <div class="cart-flag" id="cartFlag" hidden></div>
-        <a href="mailto:forafieldsolutions@gmail.com?subject=My%20FORA%20plan&amp;body=Hey%2C%20here%20is%20the%20plan%20I%20want%3A%0A%0A" class="cta-btn" id="cartCta">Email me this plan</a>
+        <a href="https://portal.forafieldsolutions.com/api/checkout?tier=basic&amp;modules=" class="cta-btn" id="cartCta">Checkout</a>
+        <a href="mailto:forafieldsolutions@gmail.com?subject=My%20FORA%20plan&amp;body=Hey%2C%20here%20is%20the%20plan%20I%20want%3A%0A%0A" class="cta-ghost" id="cartEmail" style="display:block; text-align:center; margin-top:10px;">Or email it to us first</a>
       </div>
     </div>
 
-    <p class="table-note">Every module is priced the same whether you take one or all seven, so adding one always costs exactly its listed price and dropping one always saves exactly that. Nothing here changes based on how much else you buy. Credit card payments are subject to the same 3% processing fee as above, so the totals here are the pre-authorized-debit price.</p>
+    <p class="table-note">Every module is priced the same whether you take one or all eight, so adding one always costs exactly its listed price and dropping one always saves exactly that. Nothing here changes based on how much else you buy. The figures above are the pre-authorized-debit price; checkout takes a card and adds the 3% processing fee, which is shown alongside the total before you go. Prefer to pay by pre-authorized debit at the listed price? <a href="mailto:forafieldsolutions@gmail.com" style="color:var(--orange);">Email us</a> for an invoice instead.</p>
   </div>
 </section>
 
@@ -326,7 +336,7 @@
           <tr><th>You'd know them as</th><th class="num">Per seat / mo</th><th class="num">10 seats</th><th>What they're for</th></tr>
         </thead>
         <tbody>
-          <tr class="fora-col"><td class="lead" style="color:var(--orange); font-weight:700;">FORA</td><td class="num">Flat, not per seat</td><td class="num">$60 &ndash; $280/mo</td><td>Up to 10 users: $60 base, $280 for every module. 11 to 50 users: $140 and $643</td></tr>
+          <tr class="fora-col"><td class="lead" style="color:var(--orange); font-weight:700;">FORA</td><td class="num">Flat, not per seat</td><td class="num">$60 &ndash; $315/mo</td><td>Up to 10 users: $60 base, $315 for every module. 11 to 50 users: $140 and $723</td></tr>
           <tr><td class="lead">The big inspection platform everyone's heard of</td><td class="num">$0 – $29</td><td class="num">$0 – $290</td><td>Inspections and org-wide workflows. Free under 10 seats, then it climbs</td></tr>
           <tr><td class="lead">The construction safety binder specialist</td><td class="num">$29 – $49</td><td class="num">$290 – $490</td><td>Safety forms and worker records. Your crew still fills them out</td></tr>
           <tr><td class="lead">The daily reporting app the supers like</td><td class="num">$12 – $46</td><td class="num">$120 – $460</td><td>Daily logs, time and photos. Safety is thin</td></tr>
@@ -336,7 +346,7 @@
         </tbody>
       </table>
     </div>
-    <p class="table-note">FORA's figures are for a 10-seat company: $60 for the platform base and $280 for every module, so most companies land somewhere between. An 11 to 50 user company pays $140 and $643 at those two ends. All FORA figures exclude the one-time setup fee ($350 on Basic, $500 on Advanced) and are the pre-authorized-debit price, since credit card payments add 3%; competitor figures are monthly list prices only. <strong style="color:var(--text);">Accuracy disclaimer:</strong> these figures were compiled in September 2026 from publicly available listings, vendor websites and review-site pricing pages. Most vendors in this market do not publish real rates and gate an actual quote behind a sales call, so treat every range above as directional rather than a quoted price. Prices change. FORA's do too, but ours are always on this page.</p>
+    <p class="table-note">FORA's figures are for a 10-seat company: $60 for the platform base and $315 for all eight modules, so most companies land somewhere between. An 11 to 50 user company pays $140 and $723 at those two ends. All FORA figures exclude the one-time setup fee ($350 on Basic, $500 on Advanced) and are the pre-authorized-debit price, since a card adds 3%; competitor figures are monthly list prices only. <strong style="color:var(--text);">Accuracy disclaimer:</strong> these figures were compiled in September 2026 from publicly available listings, vendor websites and review-site pricing pages. Most vendors in this market do not publish real rates and gate an actual quote behind a sales call, so treat every range above as directional rather than a quoted price. Prices change. FORA's do too, but ours are always on this page.</p>
 
     <div style="height:56px;"></div>
 
@@ -424,35 +434,63 @@
 (function(){
   // Build-your-own plan calculator. There is no mandatory plan and no bundle
   // discount: a company pays the platform base fee and then adds only the
-  // modules it runs, each at its listed price. BASE and SETUP below must stay
-  // in sync with the .price-card figures above, and every module price lives
-  // in the data-s / data-l attributes on its checkbox.
-  var BASE  = { s: 60,  l: 140 };   // platform base fee, by seat tier
-  var SETUP = { s: 350, l: 500 };   // one-time, flat regardless of modules
-  var TIER  = { s: 'Up to 10 users', l: '11 to 50 users' };
+  // modules it runs, each at its listed price.
+  //
+  // These numbers MIRROR server-lib/pricing.js in the app repo. This page is
+  // a separate Vercel project with no access to that module, so the two have
+  // to be changed together. What a customer is actually charged is built
+  // server-side from the module keys in the checkout URL, never from any
+  // amount this page sends, so a mismatch here shows a wrong estimate but
+  // can never produce a wrong charge.
+  var BASE  = { basic: 60,  advanced: 140 };
+  var SETUP = { basic: 350, advanced: 500 };
+  var TIER  = { basic: 'Up to 10 users', advanced: '11 to 50 users' };
+  var CARD_RATE = 0.03;           // added at checkout, quoted alongside
+  var CHECKOUT = 'https://portal.forafieldsolutions.com/api/checkout';
 
-  var tier = 's';
+  var tier = 'basic';
   var mods = Array.prototype.slice.call(document.querySelectorAll('.mod input'));
   var lines = document.getElementById('cartLines');
   var totalEl = document.getElementById('cartTotal');
   var setupEl = document.getElementById('cartSetup');
+  var cardEl = document.getElementById('cartCard');
   var baseEl = document.getElementById('baseAmt');
   var flagEl = document.getElementById('cartFlag');
   var ctaEl = document.getElementById('cartCta');
+  var emailEl = document.getElementById('cartEmail');
 
-  // Every price is a whole dollar, but keep the guard in case one stops being.
   function money(n){
     var whole = Math.round(n * 100) % 100 === 0;
     return '$' + n.toLocaleString('en-US', {
       minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2
     });
   }
-  function priceOf(i){ return parseInt(i.getAttribute(tier === 's' ? 'data-s' : 'data-l'), 10); }
+  function priceOf(i){ return parseInt(i.getAttribute(tier === 'basic' ? 'data-s' : 'data-l'), 10); }
+  function keyOf(i){ return i.getAttribute('data-key'); }
   function nameOf(i){
     var d = document.createElement('textarea'); d.innerHTML = i.getAttribute('data-mod'); return d.value;
   }
+  function withCard(n){ return Math.round(n * (1 + CARD_RATE) * 100) / 100; }
+
+  // A module with data-requires cannot be bought without the module it names.
+  // Rather than letting someone tick it and get bounced by the server, the
+  // box is disabled and visibly greyed until its dependency is on, and
+  // unticked if the dependency is switched off underneath it.
+  function enforceDependencies(){
+    mods.forEach(function(i){
+      var needs = i.getAttribute('data-requires');
+      if (!needs) return;
+      var dep = mods.filter(function(m){ return keyOf(m) === needs; })[0];
+      var ok = dep && dep.checked;
+      i.disabled = !ok;
+      if (!ok && i.checked) i.checked = false;
+      i.closest('.mod').classList.toggle('mod-locked', !ok);
+    });
+  }
 
   function render(){
+    enforceDependencies();
+
     var base = BASE[tier];
     var picked = [];
     baseEl.innerHTML = money(base) + '<span>/mo</span>';
@@ -461,10 +499,11 @@
       var p = priceOf(i);
       var tag = i.closest('.mod').querySelector('[data-price]');
       if (tag) tag.innerHTML = money(p) + '<span>/mo</span>';
-      if (i.checked) picked.push({ name: nameOf(i), price: p });
+      if (i.checked) picked.push({ key: keyOf(i), name: nameOf(i), price: p });
     });
 
     var total = picked.reduce(function(a, m){ return a + m.price; }, base);
+    var setup = SETUP[tier];
 
     lines.innerHTML = '';
     function add(label, amount){
@@ -477,26 +516,35 @@
     picked.forEach(function(m){ add(m.name, money(m.price) + '/mo'); });
 
     totalEl.textContent = money(total);
-    setupEl.textContent = '+ ' + money(SETUP[tier]) + ' one-time setup';
+    setupEl.textContent = '+ ' + money(setup) + ' one-time setup';
+    cardEl.textContent = 'With the 3% card fee: ' + money(withCard(total)) +
+      '/mo and ' + money(withCard(setup)) + ' setup';
 
-    // Only worth saying something when the plan cannot actually do anything.
-    if (picked.length === 0) {
-      flagEl.hidden = false;
-      flagEl.innerHTML = '<b>Nothing picked yet.</b> The base fee gets you the account, but your crew ' +
-        'needs at least one module before they have anything to file.';
-    } else {
-      flagEl.hidden = true;
-      flagEl.innerHTML = '';
+    // The base fee alone buys an account with nothing in it, and the server
+    // refuses that selection, so say why the button is off rather than
+    // letting someone click into an error.
+    var none = picked.length === 0;
+    flagEl.hidden = !none;
+    if (none) {
+      flagEl.innerHTML = '<b>Pick at least one module.</b> The base fee gets you the account, but your crew ' +
+        'needs something to file before it is worth anything.';
     }
+    ctaEl.setAttribute('aria-disabled', none ? 'true' : 'false');
+    ctaEl.style.opacity = none ? '0.45' : '';
+    ctaEl.style.pointerEvents = none ? 'none' : '';
+
+    ctaEl.setAttribute('href', CHECKOUT + '?tier=' + encodeURIComponent(tier) +
+      '&modules=' + encodeURIComponent(picked.map(function(m){ return m.key; }).join(',')));
 
     var body = 'Hey, I built this plan on your pricing page:\n\n' +
       TIER[tier] + '\n' +
       'Platform base: ' + money(base) + '/mo\n' +
       picked.map(function(m){ return m.name + ': ' + money(m.price) + '/mo'; }).join('\n') +
       (picked.length ? '\n' : '') +
-      '\nTotal: ' + money(total) + '/mo plus ' + money(SETUP[tier]) + ' setup\n\n' +
+      '\nTotal: ' + money(total) + '/mo plus ' + money(setup) + ' setup\n' +
+      '(pre-authorized debit price, before the 3% card fee)\n\n' +
       'Here is what my company actually does:\n';
-    ctaEl.setAttribute('href', 'mailto:forafieldsolutions@gmail.com?subject=' +
+    emailEl.setAttribute('href', 'mailto:forafieldsolutions@gmail.com?subject=' +
       encodeURIComponent('My FORA plan (' + money(total) + '/mo)') +
       '&body=' + encodeURIComponent(body));
   }
@@ -510,6 +558,15 @@
       render();
     });
   });
+
+  // api/checkout.js bounces a bad selection back here with ?error=...
+  var err = new URLSearchParams(window.location.search).get('error');
+  if (err) {
+    var box = document.getElementById('cartError');
+    box.textContent = err;
+    box.hidden = false;
+  }
+
   render();
 })();
 </script>
