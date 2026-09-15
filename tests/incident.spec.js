@@ -118,6 +118,39 @@ test.describe('Incident report — offline photo queueing (Phase 3)', () => {
     await expect(page.getByText('Queued', { exact: true })).toBeVisible();
   });
 
+  test('the incident prompt forbids inventing causes and does not licence inference', async ({ page }) => {
+    // A live test found the model inventing a wind gust as a contributing
+    // factor on a report whose description was only "a hose broke off the
+    // loader causing a 20 L spill". The prompt caused it: it explicitly said
+    // "you may reasonably infer contributing factors", and then demanded 3-5
+    // sequence steps and 2-4 contributing factors, so a thin description had
+    // to be padded with something.
+    //
+    // Model behaviour can't be asserted from here — this pins the prompt, so
+    // the licence can't be reintroduced without failing.
+    let prompt = null;
+    await page.route('**/api/generate-flha', async route => {
+      prompt = route.request().postDataJSON()?.prompt || '';
+      return route.fallback();
+    });
+
+    await page.getByRole('button', { name: 'Continue →' }).click();
+    await expect(page.getByText('What happened?')).toBeVisible();
+    await page.locator('textarea').fill('A hose broke off the loader which caused a 20 L spill.');
+    await page.getByRole('button', { name: 'Generate Report' }).click();
+    await expect(page.getByText('Injury / Illness — Incident Report')).toBeVisible();
+
+    expect(prompt, 'the prompt should have been captured').toBeTruthy();
+    // The licence that caused it.
+    expect(prompt).not.toContain('reasonably infer');
+    // The rules that replace it.
+    expect(prompt).toContain('GROUNDING RULE');
+    expect(prompt).toContain('MAXIMUMS, not targets');
+    expect(prompt).toContain('Not established from the information provided');
+    // The specific fabrication that was observed, named so it stays named.
+    expect(prompt).toMatch(/no weather or wind/i);
+  });
+
   test('the generated PDF actually embeds the photo and the full severity reason', async ({ page }) => {
     // Both halves of this shipped broken and nothing caught it, because no
     // test had ever looked at the bytes the generator produces.

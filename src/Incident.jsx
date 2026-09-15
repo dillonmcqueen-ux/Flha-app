@@ -407,14 +407,17 @@ Evidence on file: ${evidence || "none listed"}
 Worker's description of what happened: "${description}"
 
 INSTRUCTIONS:
-- Write a clear, factual, professional incident report based ONLY on what was described. Do not invent specifics, but you may reasonably infer contributing factors and sensible corrective actions.
+- Write a clear, factual, professional incident report based ONLY on what was described.
+- GROUNDING RULE, which overrides every length guide below. This is a legal record that may be read by management, WCB/WSIB or a regulator, and may be relied on in an investigation. Every statement of fact must trace back to the worker's description or the fields above. NEVER introduce a circumstance that was not stated — no weather or wind, no equipment age or condition, no maintenance history, no training or experience level, no fatigue, no time pressure, no staffing or supervision level, no lighting, no ground conditions, no procedure that was or wasn't followed. If the description says a hose failed, the report says a hose failed; it does not say why unless the worker said why.
+- The counts below are MAXIMUMS, not targets. A thin description should produce a short report. Returning one contributing factor, or an empty list, is correct and expected when the description does not support more. Never pad a list to reach a number — that is how invented causes get into a permanent record.
+- Corrective actions are the one place forward-looking judgement is allowed, because they are recommendations rather than statements of fact. Keep them tied to what actually happened.
 - Keep a neutral, non-blaming, objective tone suitable for a formal record that may be reviewed by management, WCB/WSIB, or regulators.
 - "severity": rate the ACTUAL severity of this incident as "Low", "Medium", "High", or "Critical". Critical = fatality or life-altering injury/major loss; High = serious injury or significant damage; Medium = injury needing medical treatment or moderate damage; Low = minor injury/first aid or minor damage.
 - "severityReason": one short sentence explaining the rating.
 - "summary": a clear 2-4 sentence factual account of the incident.
-- "sequenceOfEvents": the step-by-step sequence leading to and during the incident (3-5 short points).
-- "contributingFactors": conditions or actions that contributed (2-4 short points).
-- "rootCause": the underlying root cause, one or two sentences.
+- "sequenceOfEvents": the sequence of events, in order, using ONLY steps the worker actually described (up to 5 short points; use as few as the description supports).
+- "contributingFactors": conditions or actions stated in the description that contributed (up to 4 short points). Return [] if the description does not identify any — do not infer them.
+- "rootCause": the underlying cause, one or two sentences, ONLY if the description establishes it. If it does not, return exactly "Not established from the information provided - requires investigation." Do not guess a cause.
 - "immediateActions": what was done right away in response (2-3 short points).
 - "correctiveActions": longer-term actions to prevent recurrence (2-4 short points).
 ${buildCompanyContextBlock(companyProfile)}
