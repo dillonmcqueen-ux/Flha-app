@@ -23,6 +23,134 @@
 // module like every other caller, so nothing in the codebase depends on an
 // anon INSERT policy any more.
 
+import crypto from 'crypto';
+
+// Every issued path gets an unguessable component spliced into its final
+// segment. Before this, paths were fully determined by the caller-supplied
+// filename — src/generatePDF.js builds `{Company}_{Worker}_{ISO-to-the-
+// second}.pdf` — which made them guessable by anyone who knew a target
+// company and worker. That mattered because pdf_url is stored on the record
+// and every list endpoint signs whatever path it finds there, so a guessed
+// path was a readable document. The random segment is spliced into the last
+// segment rather than prepended to the whole path so callers that namespace
+// by directory (api/certifications.js's `${companyId}/${rosterId}/...`, and
+// the `startsWith` prefix checks built on it) keep their structure intact.
+// Exported for tests/unit/upload-receipts.test.js — the prefix-preservation
+// property is what api/certifications.js's `startsWith` checks depend on.
+export function withUnguessableSegment(path) {
+  const segments = path.split('/');
+  const name = segments.pop();
+  segments.push(`${crypto.randomBytes(16).toString('hex')}-${name}`);
+  return segments.join('/');
+}
+
+// Hash-then-compare so mismatched-length inputs never short-circuit, same
+// helper shape as api/*.js's session verification.
+function safeEqual(a, b) {
+  const ah = crypto.createHash('sha256').update(String(a)).digest();
+  const bh = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ah, bh);
+}
+
+// ── Upload receipts ───────────────────────────────────────────────────
+// A receipt is an opaque, HMAC-signed statement by this server that it
+// issued <path> in <bucket>. createUploadUrl hands one back alongside the
+// upload token; the browser passes it through untouched in place of the
+// URL it used to build itself, and the write endpoints swap it for the
+// stored URL via storedUrlForReceipt().
+//
+// The problem this solves: pdf_url was raw client input. A worker could put
+// ANOTHER company's flha-reports path on their own record, and every list
+// endpoint would sign it for them on read (server-lib/signedUrls.js's
+// pathFromStoredUrl parses the path straight out of the stored string), so
+// they'd get a working link to a document they can't otherwise see. Because
+// a receipt can only come from this server, a path that was never issued to
+// this caller can't be stored at all — which also protects the documents
+// already sitting in the bucket under old, guessable names.
+//
+// Same construction as api/login.js's signSopPathToken, which has done this
+// for onboarding-uploads since that flow was built; this generalizes it so
+// every bucket can use it. Signed with SESSION_SECRET, which only lives in
+// Vercel's settings.
+export function signUploadReceipt(bucket, path, companyId = null) {
+  const claim = { b: bucket, p: path };
+  if (companyId !== null && companyId !== undefined) claim.c = String(companyId);
+  const data = Buffer.from(JSON.stringify(claim)).toString('base64url');
+  const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET)
+    .update(`upload-receipt:${data}`).digest('base64url');
+  return `${data}.${sig}`;
+}
+
+// Returns the issued path, or null if the receipt is missing, tampered
+// with, or was issued for a different bucket. base64url never contains a
+// ".", so the first one is unambiguously the separator.
+//
+// The company on the receipt must equal the company being asked about, in
+// both directions. "No company" is a distinct value here rather than "skip
+// the check" — an earlier version of this treated a null `expectedCompanyId`
+// as "don't verify", which silently degraded to a bucket-only check for
+// admin sessions (they carry `companyId: null`, see api/login.js) and would
+// have done the same for any future caller that happened to pass null.
+//
+// The four cases this gives:
+//   worker in company 7, receipt for 7   → resolves
+//   worker in company 7, receipt for 9   → rejected (cross-tenant replay)
+//   worker in company 7, unbound receipt → rejected (no downgrade)
+//   admin (no company), unbound receipt  → resolves
+//   admin (no company), receipt for 7    → rejected
+//
+// Receipts deliberately carry no expiry: the offline queue can drain a
+// submission days after its PDF was uploaded, so a TTL would silently drop
+// exactly the records that offline support exists to save. The company
+// binding is what bounds a leaked receipt instead.
+export function resolveUploadReceipt(receipt, expectedBucket, expectedCompanyId = null) {
+  if (!receipt || typeof receipt !== 'string') return null;
+  const idx = receipt.indexOf('.');
+  if (idx <= 0 || idx === receipt.length - 1) return null;
+  const data = receipt.slice(0, idx);
+  const sig = receipt.slice(idx + 1);
+  const expected = crypto.createHmac('sha256', process.env.SESSION_SECRET)
+    .update(`upload-receipt:${data}`).digest('base64url');
+  if (!safeEqual(sig, expected)) return null;
+  let payload;
+  try { payload = JSON.parse(Buffer.from(data, 'base64url').toString()); } catch (e) { return null; }
+  if (!payload || typeof payload !== 'object') return null;
+  if (payload.b !== expectedBucket) return null;
+  if (typeof payload.p !== 'string' || !payload.p) return null;
+  const claimCompany = Object.prototype.hasOwnProperty.call(payload, 'c') ? payload.c : null;
+  const wantCompany = (expectedCompanyId === null || expectedCompanyId === undefined)
+    ? null
+    : String(expectedCompanyId);
+  if (claimCompany !== wantCompany) return null;
+  return payload.p;
+}
+
+// The stored-column value for a verified receipt. Deliberately the same
+// "public"-shaped string the browser used to build with getPublicUrl(), so
+// every existing reader (pathFromStoredUrl in server-lib/signedUrls.js and
+// the per-file copies in api/*.js) keeps working unchanged and rows written
+// before this existed still resolve. sanitizeFilename() leaves only
+// [A-Za-z0-9_.-] and "/", so no segment needs percent-encoding and the
+// string round-trips through decodeURIComponent() intact.
+export function storedUrlForReceipt(receipt, expectedBucket, expectedCompanyId = null) {
+  const path = resolveUploadReceipt(receipt, expectedBucket, expectedCompanyId);
+  if (!path) return null;
+  return `${process.env.SUPABASE_URL}/storage/v1/object/public/${expectedBucket}/${path}`;
+}
+
+// What the api/*.js write paths actually call. Takes whatever the client
+// put in a pdf_url-shaped field and returns the URL to store, or null if it
+// isn't a receipt this server issued. Dropping to null rather than 400ing
+// is deliberate: PDF generation already returns null on failure and every
+// form tolerates a record with no PDF link, whereas rejecting the request
+// would throw away a worker's finished safety document in the field.
+export function storedUrlFromClientReceipt(value, companyId, bucket = 'flha-reports') {
+  if (!value) return null;
+  const url = storedUrlForReceipt(value, bucket, companyId);
+  if (!url) console.error(`Dropped a ${bucket} URL that was not a valid upload receipt for this company.`);
+  return url;
+}
+
 // Sanitizes each path segment independently rather than the whole string,
 // so callers that need a per-tenant subpath (e.g. `${companyId}/${rosterId}/
 // ${filename}` in api/certifications.js) keep their directory structure —
@@ -58,7 +186,11 @@ const ALLOWED_EXTENSIONS = {
   'worker-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
 };
 
-export async function createUploadUrl(supabaseAdmin, bucket, filename) {
+// `companyId` binds the issued receipt to the caller's tenant. Callers that
+// have a session should always pass it; the pre-auth onboarding upload in
+// api/login.js is the one that legitimately can't (it has its own,
+// older pathToken mechanism instead).
+export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId = null) {
   const clean = sanitizeFilename(filename);
   if (!clean) return { error: 'Invalid filename.' };
   const allowed = ALLOWED_EXTENSIONS[bucket];
@@ -66,7 +198,14 @@ export async function createUploadUrl(supabaseAdmin, bucket, filename) {
   if (allowed && !allowed.includes(ext)) {
     return { error: `Unsupported file type for this upload (.${ext || 'none'}).` };
   }
-  const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(clean);
+  const { data, error } = await supabaseAdmin.storage
+    .from(bucket).createSignedUploadUrl(withUnguessableSegment(clean));
   if (error) return { error: error.message || 'Could not prepare the upload.' };
-  return { path: data.path, uploadToken: data.token };
+  // `receipt` is returned for every bucket so any flow can adopt it; only
+  // the flha-reports write paths verify one today (see the module comment).
+  return {
+    path: data.path,
+    uploadToken: data.token,
+    receipt: signUploadReceipt(bucket, data.path, companyId),
+  };
 }

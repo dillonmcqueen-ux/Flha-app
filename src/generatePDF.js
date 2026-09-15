@@ -473,7 +473,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   // could write to that bucket without logging in. Now goes through the same
   // service-role signed-token path as every other generator.
   try {
-    const { publicUrl } = await uploadViaSignedUrl({
+    const { receipt } = await uploadViaSignedUrl({
       endpoint: "/api/flhas",
       action: "create_upload_url",
       token,
@@ -482,7 +482,11 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
       file: pdfBlob,
       contentType: "application/pdf",
     });
-    return publicUrl || null;
+    // Returns the server's signed upload receipt, not a URL the browser
+    // assembled. The endpoint that stores this swaps it for the real path
+    // via storedUrlForReceipt(), so a caller can never name a path of its
+    // own — see server-lib/uploadUrls.js.
+    return receipt || null;
   } catch (err) {
     console.error("PDF upload failed:", err.message);
     return null;

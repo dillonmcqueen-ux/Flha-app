@@ -22,8 +22,13 @@ export async function uploadViaSignedUrl({ endpoint, action, token, bucket, file
 
   const { data: pub } = supabase.storage.from(bucket).getPublicUrl(data.path);
   // Spread the endpoint's response first so any extra fields it returns
-  // (e.g. api/login.js's onboarding-uploads pathToken, used to prove a
-  // later submission actually owns this path) pass through to the caller
-  // untouched, alongside the two fields every caller already expects.
+  // pass through to the caller untouched, alongside the two fields every
+  // caller already expects. Two callers rely on this:
+  //   - `receipt` — server-lib/uploadUrls.js's signed statement that this
+  //     server issued this path. The PDF generators return it instead of
+  //     `publicUrl`, and the endpoint that stores it swaps it back for the
+  //     real path, so a caller can never name a storage path of its own.
+  //   - `pathToken` — api/login.js's older, onboarding-uploads-only version
+  //     of the same idea.
   return { ...data, path: data.path, publicUrl: pub?.publicUrl || "" };
 }

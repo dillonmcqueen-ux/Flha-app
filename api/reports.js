@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -66,7 +66,18 @@ function pathFromStoredUrl(url, bucket) {
   const marker = `/storage/v1/object/public/${bucket}/`;
   const idx = url.indexOf(marker);
   if (idx === -1) return null;
-  return decodeURIComponent(url.slice(idx + marker.length));
+  const path = decodeURIComponent(url.slice(idx + marker.length));
+  // The bucket name is not a boundary. Supabase's createSignedUrl builds
+  // `object/sign/<bucket>/<path>` as a URL string, and WHATWG URL parsing
+  // collapses dot segments before the request goes out, so a stored path of
+  // `../flha-reports/x.pdf` in the gatehouse-uploads bucket resolves to
+  // `object/sign/flha-reports/x.pdf` and signs a file in a bucket the caller
+  // was never reading. Reject traversal and absolute paths outright —
+  // server-lib/uploadUrls.js's sanitizeFilename already drops these segments
+  // on the write side, so no legitimately issued path contains one.
+  if (!path || path.startsWith('/')) return null;
+  if (path.split('/').some((segment) => segment === '.' || segment === '..')) return null;
+  return path;
 }
 
 async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
@@ -125,9 +136,9 @@ export default async function handler(req, res) {
       if (!['incident-photos', 'signatures', 'flha-reports'].includes(bucket)) {
         return res.status(400).json({ error: 'Invalid bucket.' });
       }
-      const result = await createUploadUrl(supabaseAdmin, bucket, filename);
+      const result = await createUploadUrl(supabaseAdmin, bucket, filename, session.companyId);
       if (result.error) return res.status(500).json({ error: result.error });
-      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+      return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken, receipt: result.receipt });
     }
 
     const table = TABLES[type];
@@ -162,7 +173,14 @@ export default async function handler(req, res) {
         }
       }
 
+        // pdf_url arrives as an upload receipt, not a URL the browser
+        // assembled. storedUrlFromClientReceipt turns it into the path this
+        // server actually issued, so a caller can't store another company's
+        // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
+        recordToInsert.pdf_url = storedUrlFromClientReceipt(recordToInsert.pdf_url, session.companyId);
+      }
       if (clientSubmissionId && table.jsonColumn) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }
@@ -231,7 +249,8 @@ export default async function handler(req, res) {
         ? reviewedByInput.trim()
         : (session.role === 'admin' ? 'Admin' : 'Supervisor');
       const update = { reviewed: true, reviewed_by: reviewedBy, reviewed_at: now, review_notes: notes || null };
-      if (pdfUrl) update.pdf_url = pdfUrl;
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Review failed.' });
       // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
@@ -275,7 +294,8 @@ export default async function handler(req, res) {
         if (Object.prototype.hasOwnProperty.call(fields, key)) update[key] = fields[key];
       }
       if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No editable fields provided.' });
-      if (pdfUrl) update.pdf_url = pdfUrl;
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
 
       const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
       if (error) return res.status(500).json({ error: 'Update failed.' });
