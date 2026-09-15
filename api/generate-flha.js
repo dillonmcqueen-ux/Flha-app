@@ -99,54 +99,96 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role };
 }
 
-// Shared by all eight document generators (FLHA, incident, near miss, daily
-// report, monthly inspection, toolbox talk, custom form, and AdminPanel's SOP
-// condenser) plus anything added later — every one of them posts here.
+// Model routing, by document type.
 //
-// claude-haiku-4-5 was the original choice when this was a cost-sensitive
-// side project. These are compliance documents that a regulator, a workers'
-// compensation board or an insurer may read years after the fact, and a live
-// test caught the model inventing a wind gust as the cause of a spill that
-// was only ever described as "a hose broke off the loader" (fixed in the
-// prompt; see src/Incident.jsx). Accuracy is worth more here than the price
-// difference on a few hundred documents a month.
+// This endpoint is shared by all eight document generators (FLHA, incident,
+// near miss, daily report, monthly inspection, toolbox talk, custom form, and
+// AdminPanel's SOP condenser), and until now it ran one model for all of
+// them. claude-haiku-4-5 was the original choice, from when this was a
+// cost-sensitive side project rather than something a paying customer files
+// compliance records with.
 //
-// NOTE ON THINKING: claude-opus-5 has extended thinking enabled by default —
-// it is deliberately NOT configured here. It also *rejects* the older
-// `thinking.budget_tokens` shape with a 400, so do not add one.
-export const MODEL = "claude-opus-5";
+// Moving everything to claude-opus-5 fixed the accuracy concern and created a
+// latency one: a live FLHA took 30-60 seconds. Lowering effort (see EFFORT
+// below) took the thinking time out but could not make an Opus-tier model
+// emit tokens at Haiku speed, and an FLHA is a multi-hazard JSON document
+// generated from a very long prompt. Output-token generation is what
+// dominates, so the only remaining lever is which model runs which document.
+//
+// The split follows how the documents are actually used:
+//
+//   * Incident and near-miss reports are legal records. They describe real
+//     injuries and releases, they are read by a regulator or a workers'
+//     compensation board long after the fact, and they are written rarely —
+//     a handful a month, by someone sitting down to do it properly. Accuracy
+//     is worth the wait here, so these stay on claude-opus-5.
+//
+//   * Everything else is written by a worker on a phone, often at the start
+//     of a shift, and blocks them from starting work. claude-sonnet-5 is near
+//     Opus quality and materially faster, and is still a large step up from
+//     the claude-haiku-4-5 all eight ran on before this branch.
+//
+// Both entries are current aliases with no date suffix — a date-pinned
+// snapshot eventually retires and 404s in production.
+const OPUS = "claude-opus-5";
+const SONNET = "claude-sonnet-5";
+
+export const MODEL_BY_DOCUMENT_TYPE = {
+  incident: OPUS,
+  near_miss: OPUS,
+  flha: SONNET,
+  daily_report: SONNET,
+  monthly_inspection: SONNET,
+  toolbox_talk: SONNET,
+  custom_form: SONNET,
+  sop_condense: SONNET,
+};
+
+// An unknown or missing documentType falls back to the stronger model, not
+// the faster one. The client supplies this field and a client can always be
+// wrong — a caller added later that forgets it, or an older tab running
+// yesterday's bundle. Failing toward Opus means such a bug shows up as a
+// document that takes longer than expected, which someone notices and
+// reports; failing toward Sonnet would show up as a quietly lower-tier model
+// on an incident report, which nobody would ever see. The field only selects
+// from this table, so nothing a client sends here widens what it can reach.
+export const DEFAULT_MODEL = OPUS;
+
+export function modelForDocumentType(documentType) {
+  if (typeof documentType !== 'string') return DEFAULT_MODEL;
+  return Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType)
+    ? MODEL_BY_DOCUMENT_TYPE[documentType]
+    : DEFAULT_MODEL;
+}
 
 // Thinking tokens are drawn from max_tokens alongside the visible answer, so
-// the 6000 that comfortably held a Haiku response is no longer the right
-// ceiling. The largest real output here (an FLHA hazard set) is well under
-// 2000 tokens; the rest is reasoning headroom. This is a truncation
-// backstop, not a target — unused tokens cost nothing.
+// the 6000 that comfortably held a claude-haiku-4-5 response is no longer the
+// right ceiling — both models here think by default. The largest real output
+// (an FLHA hazard set) is well under 2000 tokens; the rest is reasoning
+// headroom. This is a truncation backstop, not a target — unused tokens cost
+// nothing.
 export const MAX_TOKENS = 16000;
 
-// Reasoning effort. This is the fix for the first live FLHA on this branch
-// taking far longer than the Haiku call it replaced: claude-opus-5 defaults
-// to `high`, where it spends a large thinking budget before writing a single
-// token. That default is sized for open-ended agentic work, which is not what
-// this endpoint does — every one of the eight callers hands the model a long,
-// highly specified prompt and asks it to return one JSON object. Anthropic's
-// own migration guidance names low/medium the primary latency lever on this
-// model and notes it is unusually strong at the low end.
+// Reasoning effort, the same on both routes. Both models default to `high`,
+// where they spend a large thinking budget before writing a single token.
+// That default is sized for open-ended agentic work, which is not what this
+// endpoint does — every caller hands the model a long, highly specified
+// prompt and asks it to return one JSON object. Anthropic's own migration
+// guidance names low/medium the primary latency lever and notes these models
+// are unusually strong at the low end.
 //
-// `low` rather than `medium` because a worker opens an FLHA on a phone at the
-// start of a shift and waits on it before they can begin work; that is the
-// hot path and the one that has to feel fast. Opus at `low` is still a large
-// step up from claude-haiku-4-5, which is what this endpoint ran until now.
-//
-// If a document type later needs more deliberation than this — the incident
-// and near-miss reports are the plausible candidates, since they are legal
-// records generated rarely rather than daily — the fix is to route effort by
-// document type rather than to raise it for everything and slow the FLHA back
-// down.
+// Deliberately kept uniform: the model routing above is the one variable that
+// changed in this round, and adding a second one would make a latency or
+// quality complaint impossible to attribute. If the incident and near-miss
+// reports later turn out to want more deliberation, raising effort on the
+// Opus route alone is a one-line change — and the right one to test on its
+// own.
 //
 // Do NOT pair a lower effort with a disabled `thinking.type`. Disabling
-// thinking on this model is only valid at `high` effort or below, and it is
-// the worse lever anyway: low effort already captures most of the latency
-// saving without the failure modes that disabling brings.
+// thinking on claude-opus-5 is only valid at `high` effort or below, so a
+// later raise to xhigh or max alongside a disabled setting would 400 every
+// generation in the product at once. It is also the worse lever: low effort
+// already captures most of the latency saving.
 export const EFFORT = "low";
 
 // Server-side persona and guardrails, applied to every generation.
@@ -191,7 +233,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { prompt, token } = req.body;
+  const { prompt, token, documentType } = req.body;
   const session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
@@ -208,6 +250,8 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: "Too many AI requests. Please wait a few minutes and try again." });
   }
 
+  const model = modelForDocumentType(documentType);
+
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -217,7 +261,7 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         max_tokens: MAX_TOKENS,
         output_config: { effort: EFFORT },
         system: SAFETY_SYSTEM_PROMPT,
@@ -259,6 +303,7 @@ export default async function handler(req, res) {
     }
 
     // Log key details for debugging in Vercel logs
+    console.log("Anthropic model:", model, "documentType:", documentType || "(none)");
     console.log("Anthropic stop_reason:", data.stop_reason);
     // A truncated response is the failure mode that looks like a model
     // problem but isn't: every caller slices between the first `{` and the

@@ -32,13 +32,71 @@ process.env.SESSION_SECRET ||= 'test-session-secret';
 process.env.ANTHROPIC_API_KEY ||= 'test-anthropic-key';
 
 const handlerModule = await import('../../api/generate-flha.js');
-const { MODEL, MAX_TOKENS, EFFORT, SAFETY_SYSTEM_PROMPT, default: handler } = handlerModule;
+const {
+  MODEL_BY_DOCUMENT_TYPE, DEFAULT_MODEL, modelForDocumentType,
+  MAX_TOKENS, EFFORT, SAFETY_SYSTEM_PROMPT, default: handler,
+} = handlerModule;
 
-test('the model is a current Claude model, not a cheaper or date-pinned one', () => {
-  assert.equal(MODEL, 'claude-opus-5');
+test('legal records get Opus and the worker-facing forms get Sonnet', () => {
+  // Incident and near-miss reports describe real injuries and releases, are
+  // read by a regulator long after the fact, and are written rarely — the
+  // wait is worth it. Everything else blocks a worker on a phone from
+  // starting their shift.
+  assert.equal(MODEL_BY_DOCUMENT_TYPE.incident, 'claude-opus-5');
+  assert.equal(MODEL_BY_DOCUMENT_TYPE.near_miss, 'claude-opus-5');
+  for (const type of ['flha', 'daily_report', 'monthly_inspection', 'toolbox_talk', 'custom_form', 'sop_condense']) {
+    assert.equal(MODEL_BY_DOCUMENT_TYPE[type], 'claude-sonnet-5', type);
+  }
+});
+
+test('no routed model carries a date suffix', () => {
   // A date suffix pins a snapshot that eventually retires and 404s in
   // production; the bare alias does not.
-  assert.doesNotMatch(MODEL, /-\d{8}$/);
+  for (const model of [...Object.values(MODEL_BY_DOCUMENT_TYPE), DEFAULT_MODEL]) {
+    assert.doesNotMatch(model, /-\d{8}$/, model);
+  }
+});
+
+test('an unknown or missing documentType falls back to the stronger model', () => {
+  // The client supplies this field and a client can always be wrong. Failing
+  // toward Opus shows up as a slow document someone reports; failing toward
+  // Sonnet would show up as a quietly lower-tier model on a legal record that
+  // nobody would ever see.
+  assert.equal(DEFAULT_MODEL, 'claude-opus-5');
+  for (const bad of [undefined, null, '', 'nearMiss', 'flha ', 'FLHA', 42, {}, ['flha'], '__proto__', 'constructor', 'toString']) {
+    assert.equal(modelForDocumentType(bad), DEFAULT_MODEL, JSON.stringify(bad));
+  }
+});
+
+test('every caller sends a documentType the routing table knows', () => {
+  // The failure this catches is silent: a caller that sends nothing, or a
+  // near-miss spelling, still works — it just quietly runs the slow model.
+  // Nothing in the app would surface that, so it is pinned here instead.
+  const callers = {
+    'src/App.jsx': 'flha',
+    'src/Incident.jsx': 'incident',
+    'src/NearMiss.jsx': 'near_miss',
+    'src/DailyReport.jsx': 'daily_report',
+    'src/MonthlyInspection.jsx': 'monthly_inspection',
+    'src/ToolboxTalk.jsx': 'toolbox_talk',
+    'src/CustomForm.jsx': 'custom_form',
+    'src/AdminPanel.jsx': 'sop_condense',
+  };
+  for (const [file, expected] of Object.entries(callers)) {
+    const src = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+    const sent = [...src.matchAll(/documentType:\s*"([^"]+)"/g)].map(m => m[1]);
+    assert.deepEqual(sent, [expected], `${file} should post documentType "${expected}"`);
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, expected),
+      `${expected} is not in the routing table, so ${file} would silently fall back to ${DEFAULT_MODEL}`
+    );
+  }
+
+  // And nothing in the table is dead: every routed type has a real caller.
+  assert.deepEqual(
+    Object.keys(MODEL_BY_DOCUMENT_TYPE).sort(),
+    Object.values(callers).sort()
+  );
 });
 
 test('max_tokens leaves room for extended thinking', () => {
@@ -164,14 +222,17 @@ test('the request actually sends the model, max_tokens and system prompt', async
   };
 
   try {
-    await handler({ method: 'POST', body: { prompt: 'test prompt', token: `${data}.${sig}` } }, res);
+    await handler(
+      { method: 'POST', body: { prompt: 'test prompt', token: `${data}.${sig}`, documentType: 'flha' } },
+      res
+    );
   } finally {
     global.fetch = realFetch;
   }
 
   assert.equal(res.statusCode, 200, `handler returned ${res.statusCode}: ${JSON.stringify(res.body)}`);
   assert.ok(anthropicBody, 'the Anthropic API should have been called');
-  assert.equal(anthropicBody.model, MODEL);
+  assert.equal(anthropicBody.model, MODEL_BY_DOCUMENT_TYPE.flha);
   assert.equal(anthropicBody.max_tokens, MAX_TOKENS);
   assert.equal(anthropicBody.system, SAFETY_SYSTEM_PROMPT);
   // Top-level, not nested under `thinking` — the wrong placement is silently

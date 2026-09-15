@@ -742,7 +742,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
       const res = await fetch("/api/generate-flha", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, token })
+        body: JSON.stringify({ prompt, token, documentType: "flha" })
       });
       const data = await res.json();
 
