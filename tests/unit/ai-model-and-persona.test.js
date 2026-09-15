@@ -11,11 +11,13 @@
 // Two things these cases exist to stop coming back:
 //   * a drop back to a cheaper model, or a model string with a date suffix
 //     pinned to a snapshot that will later be retired;
-//   * a persona that cites regulations. The operator base is Canadian
-//     (provincial OH&S codes, WCB/WSIB) and nothing in this product pins a
-//     jurisdiction, so an authoritative-sounding "29 CFR 1926.501" in an
-//     Alberta record is a fabrication with legal weight. Regulatory judgment
-//     is wanted; regulatory citation is not.
+//   * a persona that cites regulations. The operator base is Canadian, which
+//     is the reason the rule is easy to talk yourself out of and must not be:
+//     occupational health and safety law here is provincial, so an
+//     authoritative-sounding clause number is wrong the moment a customer
+//     works in another province, and the compensation board is not even named
+//     the same across them. Regulatory judgment is wanted; regulatory
+//     citation is not.
 //
 // Run with `npm run test:unit`.
 
@@ -56,11 +58,27 @@ test('no deprecated thinking budget is configured', () => {
 
 test('the persona forbids regulatory citations', () => {
   assert.match(SAFETY_SYSTEM_PROMPT, /NO REGULATORY CITATIONS/);
-  // The specific shapes that would be wrong in a Canadian record.
+  // The US shape, which would be wrong in a Canadian record...
   assert.match(SAFETY_SYSTEM_PROMPT, /29 CFR/);
   assert.match(SAFETY_SYSTEM_PROMPT, /per OSHA/);
+  // ...and the Canadian shapes, which are wrong outside the one province they
+  // came from. Naming the country is not a licence to cite.
+  assert.match(SAFETY_SYSTEM_PROMPT, /OH&S Code Part 22/);
+  assert.match(SAFETY_SYSTEM_PROMPT, /CSA Z259/);
+  assert.match(SAFETY_SYSTEM_PROMPT, /provincial/);
   // The one permitted exception: the company's own SOPs, by their own name.
   assert.match(SAFETY_SYSTEM_PROMPT, /SOPs/);
+});
+
+test('the persona is pinned to Canadian units and terminology', () => {
+  // The SOPs this product ships are already metric ("deeper than 1.5
+  // metres"), and a US-defaulting model writing feet into a filed record
+  // would contradict them.
+  assert.match(SAFETY_SYSTEM_PROMPT, /Canadian worksites/);
+  assert.match(SAFETY_SYSTEM_PROMPT, /metric units/);
+  // Generic, because the board is WCB, WSIB, WorkSafeBC or CNESST depending
+  // on the province and the model is not told which.
+  assert.match(SAFETY_SYSTEM_PROMPT, /the workers' compensation board/);
 });
 
 test('the persona grounds facts without disabling forward-looking hazard work', () => {
