@@ -1,19 +1,9 @@
 // generatePDF.js — builds a full FLHA report PDF and uploads to Supabase Storage
-// Uses jsPDF loaded from CDN via dynamic import (no build step needed)
+// Uses the bundled jsPDF (see src/loadJsPDF.js), lazily imported.
 
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+import { loadJsPDF } from "./loadJsPDF.js";
 import { getForaLogoDataUrl } from "./foraLogo.js";
-
-async function loadJsPDF() {
-  if (window.jspdf) return window.jspdf.jsPDF;
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-    script.onload = () => resolve(window.jspdf.jsPDF);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
 
 function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   const lines = doc.splitTextToSize(text, maxWidth);
