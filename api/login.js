@@ -610,13 +610,32 @@ export default async function handler(req, res) {
     // Payment Link checkout completed — carries plan tier + customer id
     // through to company creation without the admin retyping either.
     if (stripeSessionId) {
+      // A Checkout Session id is effectively a bearer token: anyone holding
+      // it can present it here and inherit the purchase (tier, Stripe
+      // customer, and now the module entitlements). It is high-entropy and
+      // not enumerable, but it does travel in a redirect URL, so treat it as
+      // single-use. If another request already claimed this session, this
+      // submission gets no purchase attached and lands in the manual queue,
+      // where a human can see two people pointing at one payment.
+      //
+      // The edit path re-submits the SAME row, so a request is allowed to
+      // re-claim the session it already holds.
+      const { data: claimedRows } = await supabaseAdmin
+        .from('onboarding_requests')
+        .select('id, edit_token')
+        .eq('stripe_checkout_session_id', stripeSessionId)
+        .limit(2);
+      const claimedByOther = (claimedRows || []).some(
+        r => !(editToken && r.edit_token === editToken)
+      );
+
       const { data: checkoutRows } = await supabaseAdmin
         .from('stripe_checkouts')
         .select('customer_id, plan_tier, modules')
         .eq('session_id', stripeSessionId)
         .limit(1);
       const checkout = checkoutRows && checkoutRows[0];
-      if (checkout) {
+      if (checkout && !claimedByOther) {
         record.stripe_checkout_session_id = stripeSessionId;
         record.stripe_customer_id = checkout.customer_id;
         record.plan_tier = checkout.plan_tier;
@@ -648,11 +667,30 @@ export default async function handler(req, res) {
       requestId = existing.id;
     } else {
       record.edit_token = randomToken();
-      const { data, error } = await supabaseAdmin
+      let { data, error } = await supabaseAdmin
         .from('onboarding_requests')
         .insert(record)
         .select('id')
         .limit(1);
+
+      // onboarding_requests_stripe_session_unique: two submissions racing to
+      // claim the same Checkout Session. The application check above catches
+      // the ordinary case; this catches the race. Losing the race must not
+      // cost this person their submission, so retry without the purchase
+      // attached and let it land in the manual queue, where a human can see
+      // two people pointing at one payment.
+      if (error && error.code === '23505' && record.stripe_checkout_session_id) {
+        delete record.stripe_checkout_session_id;
+        delete record.stripe_customer_id;
+        delete record.plan_tier;
+        delete record.modules;
+        ({ data, error } = await supabaseAdmin
+          .from('onboarding_requests')
+          .insert(record)
+          .select('id')
+          .limit(1));
+      }
+
       if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
       requestId = data?.[0]?.id || null;
     }

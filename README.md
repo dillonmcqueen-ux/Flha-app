@@ -109,6 +109,33 @@ and Stripe customer id, keyed by Checkout Session id) and
 `suspended` flag and `stripe_subscription_status` in sync — a canceled/
 unpaid subscription suspends access automatically).
 
+A Checkout Session id is effectively a bearer token: it travels in a
+redirect URL, and whoever holds it can present it to
+`submit_onboarding_intake` as proof of purchase. Three things keep that from
+becoming an account takeover:
+
+1. `api/checkout.js` builds the success URL from `APP_ORIGIN` or a hardcoded
+   production origin, never from a request header. An earlier draft fell back
+   to `x-forwarded-host`, which a non-browser client can set, so curling the
+   endpoint would mint a genuine FORA-branded Checkout Session redirecting to
+   an attacker's host. Do not reintroduce a header-derived origin here.
+   (`server-lib/email.js`'s `siteOrigin()` still has that shape for
+   claim/edit/wallet links and deserves the same treatment.)
+2. A session can be claimed once. `api/login.js` refuses a session another
+   request already holds, and a unique index
+   (`onboarding_requests_stripe_session_unique`) enforces it against a race;
+   losing that race drops the purchase and lands the submission in the manual
+   queue rather than failing it.
+3. Auto-approval requires the submitted contact email to match the email
+   Stripe recorded on the checkout. A mismatch is not rejected, since a
+   company legitimately pays from accounts@ and onboards from the site
+   contact, but it never auto-provisions.
+
+`companies.stripe_customer_id` also carries a unique index, because
+`api/stripe-webhook.js` syncs subscription status by customer id alone and
+two companies sharing one would let a subscription event write onto the
+wrong tenant's row.
+
 A checkout finishes before the customer has a company in the app:
 `api/checkout.js` sets the success URL to
 `/onboarding?session_id={CHECKOUT_SESSION_ID}`, and

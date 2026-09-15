@@ -90,7 +90,8 @@ export async function checkStripeSubscriptionActive(stripe, customerId) {
 
 // Evaluates every auto-approve criterion for one onboarding_requests row.
 // `request` must include: id, custom_request, stripe_customer_id,
-// plan_tier. `skippedUserLines` is whatever the caller's own
+// plan_tier, stripe_checkout_session_id, contact_email. `skippedUserLines`
+// is whatever the caller's own
 // parseUserLines(request.users_list) call already produced (both
 // api/login.js and api/admin.js already run that parse for their own
 // reasons, so this takes it as an argument rather than re-parsing).
@@ -101,6 +102,23 @@ export async function canAutoApprove(supabaseAdmin, stripe, request, skippedUser
 
   const active = await checkStripeSubscriptionActive(stripe, request.stripe_customer_id);
   if (!active) return false;
+
+  // The submitter must be the person who paid. A Checkout Session id travels
+  // in a redirect URL and is not proof of identity on its own, so without
+  // this a leaked id would auto-provision a company under someone else's
+  // payment, with the claim link mailed to whoever submitted the form.
+  // A mismatch is not rejected outright, because a company legitimately pays
+  // from accounts@ and onboards from the site contact: it just falls through
+  // to the manual queue so a human decides.
+  const { data: checkoutRows, error: checkoutErr } = await supabaseAdmin
+    .from('stripe_checkouts')
+    .select('email')
+    .eq('session_id', request.stripe_checkout_session_id || '')
+    .limit(1);
+  if (checkoutErr) return false; // fail safe, same as the dup-check below
+  const paidBy = (checkoutRows?.[0]?.email || '').trim().toLowerCase();
+  const submittedBy = (request.contact_email || '').trim().toLowerCase();
+  if (!paidBy || !submittedBy || paidBy !== submittedBy) return false;
 
   const { data: dup, error } = await supabaseAdmin
     .from('onboarding_requests')

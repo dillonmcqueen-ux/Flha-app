@@ -78,16 +78,32 @@ async function checkIpThrottle(key, maxAttempts, windowMs) {
   return true;
 }
 
-// Where Stripe sends the visitor afterwards. The marketing site and the app
-// are different hosts, so this cannot be derived from the request: the
-// onboarding page only exists on the app. APP_ORIGIN lets the preview
-// deployments point at themselves instead of production.
-function appOrigin(req) {
-  if (process.env.APP_ORIGIN) return process.env.APP_ORIGIN.replace(/\/+$/, '');
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  if (!host) return 'https://portal.forafieldsolutions.com';
-  const proto = req.headers['x-forwarded-proto'] || 'https';
-  return `${proto}://${host}`;
+// Where Stripe sends the buyer afterwards.
+//
+// Deliberately NOT derived from the request. An earlier version fell back to
+// x-forwarded-host, which a non-browser client can set to anything: curl this
+// endpoint with X-Forwarded-Host: evil.example and Stripe mints a genuine,
+// FORA-branded Checkout Session whose success_url is on the attacker's host.
+// Send that real checkout link to a prospect, let them pay, and the redirect
+// hands the attacker the Checkout Session id, which api/login.js treats as
+// proof of purchase. The victim pays and the attacker gets the company.
+//
+// So: configuration or the hardcoded production origin, and nothing else. A
+// preview deployment that wants to test the full round trip sets APP_ORIGIN;
+// unset, it redirects to production, which is wrong for testing but never
+// unsafe.
+const DEFAULT_APP_ORIGIN = 'https://portal.forafieldsolutions.com';
+
+function appOrigin() {
+  const configured = (process.env.APP_ORIGIN || '').trim();
+  if (!configured) return DEFAULT_APP_ORIGIN;
+  try {
+    const url = new URL(configured);
+    if (url.protocol !== 'https:') return DEFAULT_APP_ORIGIN;
+    return url.origin;
+  } catch {
+    return DEFAULT_APP_ORIGIN;
+  }
 }
 
 // A visitor who lands here with a bad selection gets sent back to the
@@ -120,7 +136,7 @@ export default async function handler(req, res) {
 
   const { monthly, setup } = quote(tier, modules);
   const { recurring, invoiceItems } = buildCheckoutLineItems(tier, modules);
-  const origin = appOrigin(req);
+  const origin = appOrigin();
 
   try {
     const session = await stripe.checkout.sessions.create({
