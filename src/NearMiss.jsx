@@ -23,16 +23,16 @@ function newClientSubmissionId() {
 export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequest) {
   const { reporterLabel, anonymous, site, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig } = payload;
 
-  let signatureUrl = null;
+  let signatureReceipt = null;
   if (sig) {
     try {
       const blob = await (await fetch(sig)).blob();
       const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
-      const { publicUrl } = await uploadViaSignedUrl({
+      const { receipt } = await uploadViaSignedUrl({
         endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
         bucket: "signatures", filename, file: blob, contentType: "image/png",
       });
-      signatureUrl = publicUrl || null;
+      signatureReceipt = receipt || null;
     } catch (e) { /* signature upload failure shouldn't block submission */ }
   }
 
@@ -50,6 +50,7 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
         action: "submit",
         token: tokenForRequest,
         clientSubmissionId,
+        signatureReceipt,
         record: {
           reporter_name: reporterLabel,
           is_anonymous: anonymous,
@@ -59,7 +60,6 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
           report_json: { ...report, customFields },
           signed_by: reporterLabel,
           pdf_url: pdfUrl || null,
-          signature_url: signatureUrl,
         },
       }),
     });

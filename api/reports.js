@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 
 const supabaseAdmin = createClient(
@@ -116,9 +116,17 @@ function pickAllowed(record, allowed) {
   return out;
 }
 
+// `photo_urls` and `signature_url` are absent on purpose, alongside the
+// `status`-shaped fields every other endpoint already withholds. They used
+// to ride in on `record` as raw client strings, which made photo_urls the
+// widest read oracle in the app: it's an *array*, and the `list` action
+// batch-signs every element in one Storage call, so a single submission
+// carrying thousands of guessed incident-photos paths came back with a
+// signed URL for each one that existed and null for each that didn't.
+// Both now come from upload receipts resolved below.
 const SUBMITTABLE_FIELDS = {
-  incident: ['reporter_name', 'site', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json', 'signed_by', 'photo_urls', 'pdf_url', 'signature_url'],
-  nearmiss: ['reporter_name', 'is_anonymous', 'site', 'occurred_at', 'involved', 'report_json', 'signed_by', 'pdf_url', 'signature_url'],
+  incident: ['reporter_name', 'site', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json', 'signed_by', 'pdf_url'],
+  nearmiss: ['reporter_name', 'is_anonymous', 'site', 'occurred_at', 'involved', 'report_json', 'signed_by', 'pdf_url'],
 };
 
 export default async function handler(req, res) {
@@ -181,6 +189,13 @@ export default async function handler(req, res) {
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
         recordToInsert.pdf_url = storedUrlFromClientReceipt(recordToInsert.pdf_url, session.companyId);
       }
+      // Photos and the signature come in as receipts at the top level, never
+      // as URLs inside `record` — see the SUBMITTABLE_FIELDS comment above.
+      const { photoReceipts, signatureReceipt } = req.body;
+      if (type === 'incident') {
+        recordToInsert.photo_urls = storedUrlsFromClientReceipts(photoReceipts, session.companyId, 'incident-photos');
+      }
+      recordToInsert.signature_url = storedUrlFromClientReceipt(signatureReceipt, session.companyId, 'signatures');
       if (clientSubmissionId && table.jsonColumn) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }

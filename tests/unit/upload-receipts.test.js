@@ -17,7 +17,7 @@ process.env.SUPABASE_URL ||= 'https://example.supabase.co';
 
 const {
   signUploadReceipt, resolveUploadReceipt, storedUrlForReceipt, storedUrlFromClientReceipt,
-  withUnguessableSegment,
+  storedUrlsFromClientReceipts, withUnguessableSegment,
 } = await import('../../server-lib/uploadUrls.js');
 const { pathFromStoredUrl } = await import('../../server-lib/signedUrls.js');
 
@@ -159,4 +159,41 @@ test('pathFromStoredUrl still resolves a normal path', () => {
   assert.equal(pathFromStoredUrl(url, 'flha-reports'), PATH);
   const nested = 'https://example.supabase.co/storage/v1/object/public/worker-certifications/12/345/abc-t.pdf';
   assert.equal(pathFromStoredUrl(nested, 'worker-certifications'), '12/345/abc-t.pdf');
+});
+test('photo_urls: an array of receipts resolves to an array of stored URLs', () => {
+  const receipts = ['a.jpg', 'b.jpg'].map((n) => signUploadReceipt('incident-photos', n, COMPANY_A));
+  assert.deepEqual(
+    storedUrlsFromClientReceipts(receipts, COMPANY_A, 'incident-photos'),
+    [
+      'https://example.supabase.co/storage/v1/object/public/incident-photos/a.jpg',
+      'https://example.supabase.co/storage/v1/object/public/incident-photos/b.jpg',
+    ]
+  );
+});
+
+test('photo_urls: the batch-signing oracle is closed', () => {
+  // photo_urls is an array and the list action batch-signs every element in
+  // one Storage call, so a submission carrying thousands of guessed paths
+  // used to come back with a signed URL for each one that existed. None of
+  // those guesses is a receipt, so none of them survives to be stored.
+  const guesses = Array.from({ length: 5000 }, (_, i) =>
+    `https://example.supabase.co/storage/v1/object/public/incident-photos/incident_9_${1757000000000 + i}.png`);
+  assert.deepEqual(storedUrlsFromClientReceipts(guesses, COMPANY_A, 'incident-photos'), []);
+});
+
+test('photo_urls: one bad element is dropped without losing the good ones', () => {
+  const good = signUploadReceipt('incident-photos', 'mine.jpg', COMPANY_A);
+  const otherCompany = signUploadReceipt('incident-photos', 'theirs.jpg', COMPANY_B);
+  const wrongBucket = signUploadReceipt('flha-reports', 'report.pdf', COMPANY_A);
+  const mixed = [good, otherCompany, wrongBucket, 'https://example.com/x.jpg', null, 42];
+  assert.deepEqual(
+    storedUrlsFromClientReceipts(mixed, COMPANY_A, 'incident-photos'),
+    ['https://example.supabase.co/storage/v1/object/public/incident-photos/mine.jpg']
+  );
+});
+
+test('photo_urls: a non-array is an empty list, not a crash', () => {
+  for (const bad of [null, undefined, 'a-string', 42, {}]) {
+    assert.deepEqual(storedUrlsFromClientReceipts(bad, COMPANY_A, 'incident-photos'), [], JSON.stringify(bad));
+  }
 });

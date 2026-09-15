@@ -151,6 +151,16 @@ export function storedUrlFromClientReceipt(value, companyId, bucket = 'flha-repo
   return url;
 }
 
+// Array form, for columns like incident_reports.photo_urls. Anything that
+// isn't a valid receipt for this company is dropped rather than failing the
+// whole submission, same reasoning as the single-value helper.
+export function storedUrlsFromClientReceipts(values, companyId, bucket = 'incident-photos') {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => storedUrlFromClientReceipt(value, companyId, bucket))
+    .filter((url) => url !== null);
+}
+
 // Sanitizes each path segment independently rather than the whole string,
 // so callers that need a per-tenant subpath (e.g. `${companyId}/${rosterId}/
 // ${filename}` in api/certifications.js) keep their directory structure —
