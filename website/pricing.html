@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Pricing | FORA</title>
-<meta name="description" content="Straightforward FORA pricing. A base fee for the platform, then only the modules your company actually runs. Take every module and 10% comes off the monthly. Cancel any time, pause for the season, and your data is never locked in." />
+<meta name="description" content="Straightforward FORA pricing. A base fee for the platform, then only the modules your company actually runs. No mandatory plan and no minimum. Cancel any time, pause for the season, and your data is never locked in." />
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -133,7 +133,7 @@
   <div class="wrap">
     <div class="tagline">No demos. No sales calls.</div>
     <h1 style="margin-top:20px;">Published prices. <span class="out">No quote required.</span></h1>
-    <p class="sub">A base fee for the platform, then only the modules your company actually runs. No mandatory plan, no minimum set of documents, and no paying for a time clock you will never turn on. The number is on this page, not behind a 45 minute call with someone whose job is to find out what you can afford.</p>
+    <p class="sub">A base fee for the platform, then only the modules your company actually runs. No mandatory plan, no minimum set of documents, and no paying for a time clock you will never turn on. Every number is on this page, not behind a 45 minute call with someone whose job is to find out what you can afford.</p>
     <div class="hero-cta">
       <a href="#plans" class="cta-btn">See the plans</a>
       <a href="#build" class="cta-ghost">Build your own</a>
@@ -208,7 +208,7 @@
     <div class="section-head" data-reveal>
       <div class="kicker">Build your own</div>
       <h2>Tick what you run. That's your price.</h2>
-      <p>Every document type FORA ships is priced on its own. Take one, take all of them, take the three that matter to you. Take the lot and 10% comes off the monthly.</p>
+      <p>Every document type FORA ships is priced on its own. Take one, take all of them, take the three that matter to you. What you tick is what you pay, with no bundling games and no discount you have to chase.</p>
     </div>
 
     <div class="cart" data-reveal>
@@ -283,7 +283,7 @@
       </div>
     </div>
 
-    <p class="table-note">Take every module and 10% comes off the monthly total, rounded down to a whole dollar in your favour. The discount applies to the recurring price only, never the one-time setup fee, and it holds only while every module is active, so dropping one ends it. If you are thinking about dropping a module, ask us first and we will tell you which way your bill actually moves. Credit card payments are subject to the same 3% processing fee as above, so the totals here are the pre-authorized-debit price.</p>
+    <p class="table-note">Every module is priced the same whether you take one or all seven, so adding one always costs exactly its listed price and dropping one always saves exactly that. Nothing here changes based on how much else you buy. Credit card payments are subject to the same 3% processing fee as above, so the totals here are the pre-authorized-debit price.</p>
   </div>
 </section>
 
@@ -326,7 +326,7 @@
           <tr><th>You'd know them as</th><th class="num">Per seat / mo</th><th class="num">10 seats</th><th>What they're for</th></tr>
         </thead>
         <tbody>
-          <tr class="fora-col"><td class="lead" style="color:var(--orange); font-weight:700;">FORA</td><td class="num">Flat, not per seat</td><td class="num">$60 &ndash; $252/mo</td><td>Up to 10 users: $60 base, $252 for every module. 11 to 50 users: $140 and $578</td></tr>
+          <tr class="fora-col"><td class="lead" style="color:var(--orange); font-weight:700;">FORA</td><td class="num">Flat, not per seat</td><td class="num">$60 &ndash; $280/mo</td><td>Up to 10 users: $60 base, $280 for every module. 11 to 50 users: $140 and $643</td></tr>
           <tr><td class="lead">The big inspection platform everyone's heard of</td><td class="num">$0 – $29</td><td class="num">$0 – $290</td><td>Inspections and org-wide workflows. Free under 10 seats, then it climbs</td></tr>
           <tr><td class="lead">The construction safety binder specialist</td><td class="num">$29 – $49</td><td class="num">$290 – $490</td><td>Safety forms and worker records. Your crew still fills them out</td></tr>
           <tr><td class="lead">The daily reporting app the supers like</td><td class="num">$12 – $46</td><td class="num">$120 – $460</td><td>Daily logs, time and photos. Safety is thin</td></tr>
@@ -336,7 +336,7 @@
         </tbody>
       </table>
     </div>
-    <p class="table-note">FORA's figures are for a 10-seat company: $60 for the platform base and $252 for every module with the 10% bundle discount applied, so most companies land somewhere between. An 11 to 50 user company pays $140 and $578 at those two ends. All FORA figures exclude the one-time setup fee ($350 on Basic, $500 on Advanced) and are the pre-authorized-debit price, since credit card payments add 3%; competitor figures are monthly list prices only. <strong style="color:var(--text);">Accuracy disclaimer:</strong> these figures were compiled in September 2026 from publicly available listings, vendor websites and review-site pricing pages. Most vendors in this market do not publish real rates and gate an actual quote behind a sales call, so treat every range above as directional rather than a quoted price. Prices change. FORA's do too, but ours are always on this page.</p>
+    <p class="table-note">FORA's figures are for a 10-seat company: $60 for the platform base and $280 for every module, so most companies land somewhere between. An 11 to 50 user company pays $140 and $643 at those two ends. All FORA figures exclude the one-time setup fee ($350 on Basic, $500 on Advanced) and are the pre-authorized-debit price, since credit card payments add 3%; competitor figures are monthly list prices only. <strong style="color:var(--text);">Accuracy disclaimer:</strong> these figures were compiled in September 2026 from publicly available listings, vendor websites and review-site pricing pages. Most vendors in this market do not publish real rates and gate an actual quote behind a sales call, so treat every range above as directional rather than a quoted price. Prices change. FORA's do too, but ours are always on this page.</p>
 
     <div style="height:56px;"></div>
 
@@ -422,16 +422,14 @@
 
 <script>
 (function(){
-  // Build-your-own plan calculator. There is no mandatory plan: a company pays
-  // the platform base fee and then adds only the modules it runs. Taking every
-  // module takes 10% off the monthly, never the one-time setup fee, floored to
-  // a whole dollar in the customer's favour. BASE and SETUP below must stay in
-  // sync with the .price-card figures above, and every module price lives in
-  // the data-s / data-l attributes on its checkbox.
+  // Build-your-own plan calculator. There is no mandatory plan and no bundle
+  // discount: a company pays the platform base fee and then adds only the
+  // modules it runs, each at its listed price. BASE and SETUP below must stay
+  // in sync with the .price-card figures above, and every module price lives
+  // in the data-s / data-l attributes on its checkbox.
   var BASE  = { s: 60,  l: 140 };   // platform base fee, by seat tier
   var SETUP = { s: 350, l: 500 };   // one-time, flat regardless of modules
   var TIER  = { s: 'Up to 10 users', l: '11 to 50 users' };
-  var BUNDLE_DISCOUNT = 0.10;       // every module, monthly only
 
   var tier = 's';
   var mods = Array.prototype.slice.call(document.querySelectorAll('.mod input'));
@@ -442,8 +440,7 @@
   var flagEl = document.getElementById('cartFlag');
   var ctaEl = document.getElementById('cartCta');
 
-  // Shows cents only if a price ever stops being a whole dollar; the floor
-  // below means the total itself never does.
+  // Every price is a whole dollar, but keep the guard in case one stops being.
   function money(n){
     var whole = Math.round(n * 100) % 100 === 0;
     return '$' + n.toLocaleString('en-US', {
@@ -467,10 +464,7 @@
       if (i.checked) picked.push({ name: nameOf(i), price: p });
     });
 
-    var subtotal = picked.reduce(function(a, m){ return a + m.price; }, base);
-    var everything = picked.length === mods.length;
-    var total = everything ? Math.floor(subtotal * (1 - BUNDLE_DISCOUNT)) : subtotal;
-    var discount = subtotal - total;
+    var total = picked.reduce(function(a, m){ return a + m.price; }, base);
 
     lines.innerHTML = '';
     function add(label, amount){
@@ -481,24 +475,18 @@
     }
     add('Platform base', money(base) + '/mo');
     picked.forEach(function(m){ add(m.name, money(m.price) + '/mo'); });
-    if (everything) add('Everything, bundle discount', '\u2212' + money(discount) + '/mo');
 
     totalEl.textContent = money(total);
     setupEl.textContent = '+ ' + money(SETUP[tier]) + ' one-time setup';
 
-    flagEl.hidden = false;
-    if (everything) {
-      flagEl.innerHTML = '<b>Every module.</b> The bundle discount is on, saving you ' +
-        money(discount) + '/mo, or ' + money(discount * 12) + ' a year.';
-    } else if (picked.length === 0) {
-      flagEl.innerHTML = '<b>Nothing picked yet.</b> The base fee on its own gets you the account, ' +
-        'but your crew needs at least one module before they have anything to file.';
+    // Only worth saying something when the plan cannot actually do anything.
+    if (picked.length === 0) {
+      flagEl.hidden = false;
+      flagEl.innerHTML = '<b>Nothing picked yet.</b> The base fee gets you the account, but your crew ' +
+        'needs at least one module before they have anything to file.';
     } else {
-      var full = BASE[tier] + mods.reduce(function(a, i){ return a + priceOf(i); }, 0);
-      var remaining = mods.length - picked.length;
-      flagEl.innerHTML = '<b>' + remaining + ' module' + (remaining === 1 ? '' : 's') +
-        ' away from the bundle discount.</b> Everything works out to ' +
-        money(Math.floor(full * (1 - BUNDLE_DISCOUNT))) + '/mo instead of ' + money(full) + '.';
+      flagEl.hidden = true;
+      flagEl.innerHTML = '';
     }
 
     var body = 'Hey, I built this plan on your pricing page:\n\n' +
@@ -506,7 +494,6 @@
       'Platform base: ' + money(base) + '/mo\n' +
       picked.map(function(m){ return m.name + ': ' + money(m.price) + '/mo'; }).join('\n') +
       (picked.length ? '\n' : '') +
-      (everything ? 'Bundle discount: -' + money(discount) + '/mo\n' : '') +
       '\nTotal: ' + money(total) + '/mo plus ' + money(SETUP[tier]) + ' setup\n\n' +
       'Here is what my company actually does:\n';
     ctaEl.setAttribute('href', 'mailto:forafieldsolutions@gmail.com?subject=' +
