@@ -19,12 +19,114 @@
   <nav class="wrap">
     <a href="index.html" class="logo"><span class="dot"></span>FORA</a>
     <div class="navlinks">
-      <a href="features.html">Features</a>
-      <a href="custom-builds.html" class="active">Custom Builds</a>
+      <div class="navitem">
+        <a class="navtop" href="features.html">Platform<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="features.html" class="d-lead">Everything that's built<span class="d-sub">The whole platform on one page</span></a>
+          <div class="d-rule"></div>
+          <a href="features.html#demo">See it work<span class="d-sub">Watch it write a live FLHA</span></a>
+          <a href="features.html#documents">The ten documents<span class="d-sub">What a worker sees on their phone</span></a>
+          <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
+          <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
+          <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
+          <a href="features.html#security">Security<span class="d-sub">How your data is walled off</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop active" href="custom-builds.html">Custom Builds<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="custom-builds.html" class="d-lead">What a custom build is<span class="d-sub">Not a form builder</span></a>
+          <div class="d-rule"></div>
+          <a href="custom-builds.html#examples">Six real examples<span class="d-sub">Locate tickets, pour records, scale tickets</span></a>
+          <a href="custom-builds.html#tailored">Tailored to you<span class="d-sub">Built with you, not guessed at</span></a>
+          <a href="custom-builds.html#process">How it works<span class="d-sub">Four steps from headache to login</span></a>
+          <a href="custom-builds.html#cost">What it costs<span class="d-sub">Quoted by scope, fixed number</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="pricing.html">Pricing<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="pricing.html" class="d-lead">Plans and prices<span class="d-sub">Published, no quote required</span></a>
+          <div class="d-rule"></div>
+          <a href="pricing.html#build">Build your own plan<span class="d-sub">Add only what you use</span></a>
+          <a href="pricing.html#no-enterprise">No enterprise tier<span class="d-sub">Why there is no secret price</span></a>
+          <a href="pricing.html#cancel">Cancel any time<span class="d-sub">Built for seasonal shutdowns</span></a>
+          <a href="pricing.html#market">Market comparison<span class="d-sub">What everyone else charges</span></a>
+          <a href="pricing.html#getting-started">Getting started<span class="d-sub">One email, live in a day</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="about.html">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
+          <div class="d-rule"></div>
+          <a href="about.html#story">The story<span class="d-sub">Fifteen years on the machine</span></a>
+          <a href="about.html#tradeoffs">What you get, what you don't<span class="d-sub">The trade-offs said out loud</span></a>
+          <div class="d-rule"></div>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Use</a>
+        </div>
+      </div>
     </div>
-    <a href="pricing.html" class="cta-btn">Pricing</a>
+    <a href="pricing.html#plans" class="cta-btn navcta">Get started</a>
+    <button class="navtoggle" id="navToggle" aria-expanded="false" aria-controls="mobileNav" aria-label="Menu">
+      <svg class="ic-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      <svg class="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
   </nav>
 </header>
+
+<div class="mobilenav" id="mobileNav">
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-platform">Platform<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-platform">
+      <a href="features.html" class="d-lead">Everything that's built<span class="d-sub">The whole platform on one page</span></a>
+      <div class="d-rule"></div>
+      <a href="features.html#demo">See it work<span class="d-sub">Watch it write a live FLHA</span></a>
+      <a href="features.html#documents">The ten documents<span class="d-sub">What a worker sees on their phone</span></a>
+      <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
+      <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
+      <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
+      <a href="features.html#security">Security<span class="d-sub">How your data is walled off</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-custom">Custom Builds<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-custom">
+      <a href="custom-builds.html" class="d-lead">What a custom build is<span class="d-sub">Not a form builder</span></a>
+      <div class="d-rule"></div>
+      <a href="custom-builds.html#examples">Six real examples<span class="d-sub">Locate tickets, pour records, scale tickets</span></a>
+      <a href="custom-builds.html#tailored">Tailored to you<span class="d-sub">Built with you, not guessed at</span></a>
+      <a href="custom-builds.html#process">How it works<span class="d-sub">Four steps from headache to login</span></a>
+      <a href="custom-builds.html#cost">What it costs<span class="d-sub">Quoted by scope, fixed number</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-pricing">Pricing<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-pricing">
+      <a href="pricing.html" class="d-lead">Plans and prices<span class="d-sub">Published, no quote required</span></a>
+      <div class="d-rule"></div>
+      <a href="pricing.html#build">Build your own plan<span class="d-sub">Add only what you use</span></a>
+      <a href="pricing.html#no-enterprise">No enterprise tier<span class="d-sub">Why there is no secret price</span></a>
+      <a href="pricing.html#cancel">Cancel any time<span class="d-sub">Built for seasonal shutdowns</span></a>
+      <a href="pricing.html#market">Market comparison<span class="d-sub">What everyone else charges</span></a>
+      <a href="pricing.html#getting-started">Getting started<span class="d-sub">One email, live in a day</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-company">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-company">
+      <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
+      <div class="d-rule"></div>
+      <a href="about.html#story">The story<span class="d-sub">Fifteen years on the machine</span></a>
+      <a href="about.html#tradeoffs">What you get, what you don't<span class="d-sub">The trade-offs said out loud</span></a>
+      <div class="d-rule"></div>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Use</a>
+    </div>
+  </div>
+  <a href="pricing.html#plans" class="cta-btn">Get started</a>
+</div>
 
 <section class="hero-sm">
   <div class="glow"></div>
@@ -39,7 +141,7 @@
   </div>
 </section>
 
-<section>
+<section id="what">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">Not a form builder</div>
@@ -61,7 +163,7 @@
   </div>
 </section>
 
-<section>
+<section id="examples">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">Six real ones</div>
@@ -125,7 +227,7 @@
   </div>
 </section>
 
-<section>
+<section id="tailored">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">How it actually gets built</div>
@@ -141,7 +243,7 @@
   </div>
 </section>
 
-<section>
+<section id="process">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">The process</div>
@@ -156,7 +258,7 @@
   </div>
 </section>
 
-<section>
+<section id="cost">
   <div class="wrap">
     <div class="split">
       <div data-reveal>
@@ -181,7 +283,7 @@
   </div>
 </section>
 
-<section>
+<section id="brain-link">
   <div class="wrap">
     <div class="split">
       <div data-reveal>
@@ -250,6 +352,32 @@
     entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('show'); });
   }, { threshold: 0.15 });
   document.querySelectorAll('[data-reveal]').forEach(el => io.observe(el));
+</script>
+
+<script>
+(function(){
+  // Mobile nav: hamburger opens an accordion panel. The desktop dropdowns are
+  // CSS-only (hover + focus-within), so nothing here runs above 860px.
+  var t = document.getElementById('navToggle'), m = document.getElementById('mobileNav');
+  if (!t || !m) return;
+  function close(){ t.setAttribute('aria-expanded','false'); m.classList.remove('open'); document.body.style.overflow=''; }
+  t.addEventListener('click', function(){
+    var open = t.getAttribute('aria-expanded') === 'true';
+    t.setAttribute('aria-expanded', String(!open));
+    m.classList.toggle('open', !open);
+    document.body.style.overflow = !open ? 'hidden' : '';
+  });
+  m.querySelectorAll('.mgroup > button').forEach(function(b){
+    b.addEventListener('click', function(){
+      var open = b.getAttribute('aria-expanded') === 'true';
+      b.setAttribute('aria-expanded', String(!open));
+      document.getElementById(b.getAttribute('aria-controls')).classList.toggle('open', !open);
+    });
+  });
+  m.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', close); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', function(){ if (window.innerWidth > 860) close(); });
+})();
 </script>
 
 <script defer src="/_vercel/insights/script.js"></script>

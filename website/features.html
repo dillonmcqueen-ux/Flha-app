@@ -19,19 +19,121 @@
   <nav class="wrap">
     <a href="index.html" class="logo"><span class="dot"></span>FORA</a>
     <div class="navlinks">
-      <a href="features.html" class="active">Features</a>
-      <a href="custom-builds.html">Custom Builds</a>
+      <div class="navitem">
+        <a class="navtop active" href="features.html">Platform<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="features.html" class="d-lead">Everything that's built<span class="d-sub">The whole platform on one page</span></a>
+          <div class="d-rule"></div>
+          <a href="features.html#demo">See it work<span class="d-sub">Watch it write a live FLHA</span></a>
+          <a href="features.html#documents">The ten documents<span class="d-sub">What a worker sees on their phone</span></a>
+          <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
+          <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
+          <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
+          <a href="features.html#security">Security<span class="d-sub">How your data is walled off</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="custom-builds.html">Custom Builds<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="custom-builds.html" class="d-lead">What a custom build is<span class="d-sub">Not a form builder</span></a>
+          <div class="d-rule"></div>
+          <a href="custom-builds.html#examples">Six real examples<span class="d-sub">Locate tickets, pour records, scale tickets</span></a>
+          <a href="custom-builds.html#tailored">Tailored to you<span class="d-sub">Built with you, not guessed at</span></a>
+          <a href="custom-builds.html#process">How it works<span class="d-sub">Four steps from headache to login</span></a>
+          <a href="custom-builds.html#cost">What it costs<span class="d-sub">Quoted by scope, fixed number</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="pricing.html">Pricing<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="pricing.html" class="d-lead">Plans and prices<span class="d-sub">Published, no quote required</span></a>
+          <div class="d-rule"></div>
+          <a href="pricing.html#build">Build your own plan<span class="d-sub">Add only what you use</span></a>
+          <a href="pricing.html#no-enterprise">No enterprise tier<span class="d-sub">Why there is no secret price</span></a>
+          <a href="pricing.html#cancel">Cancel any time<span class="d-sub">Built for seasonal shutdowns</span></a>
+          <a href="pricing.html#market">Market comparison<span class="d-sub">What everyone else charges</span></a>
+          <a href="pricing.html#getting-started">Getting started<span class="d-sub">One email, live in a day</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="about.html">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
+          <div class="d-rule"></div>
+          <a href="about.html#story">The story<span class="d-sub">Fifteen years on the machine</span></a>
+          <a href="about.html#tradeoffs">What you get, what you don't<span class="d-sub">The trade-offs said out loud</span></a>
+          <div class="d-rule"></div>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Use</a>
+        </div>
+      </div>
     </div>
-    <a href="pricing.html" class="cta-btn">Pricing</a>
+    <a href="pricing.html#plans" class="cta-btn navcta">Get started</a>
+    <button class="navtoggle" id="navToggle" aria-expanded="false" aria-controls="mobileNav" aria-label="Menu">
+      <svg class="ic-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      <svg class="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
   </nav>
 </header>
+
+<div class="mobilenav" id="mobileNav">
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-platform">Platform<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-platform">
+      <a href="features.html" class="d-lead">Everything that's built<span class="d-sub">The whole platform on one page</span></a>
+      <div class="d-rule"></div>
+      <a href="features.html#demo">See it work<span class="d-sub">Watch it write a live FLHA</span></a>
+      <a href="features.html#documents">The ten documents<span class="d-sub">What a worker sees on their phone</span></a>
+      <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
+      <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
+      <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
+      <a href="features.html#security">Security<span class="d-sub">How your data is walled off</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-custom">Custom Builds<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-custom">
+      <a href="custom-builds.html" class="d-lead">What a custom build is<span class="d-sub">Not a form builder</span></a>
+      <div class="d-rule"></div>
+      <a href="custom-builds.html#examples">Six real examples<span class="d-sub">Locate tickets, pour records, scale tickets</span></a>
+      <a href="custom-builds.html#tailored">Tailored to you<span class="d-sub">Built with you, not guessed at</span></a>
+      <a href="custom-builds.html#process">How it works<span class="d-sub">Four steps from headache to login</span></a>
+      <a href="custom-builds.html#cost">What it costs<span class="d-sub">Quoted by scope, fixed number</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-pricing">Pricing<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-pricing">
+      <a href="pricing.html" class="d-lead">Plans and prices<span class="d-sub">Published, no quote required</span></a>
+      <div class="d-rule"></div>
+      <a href="pricing.html#build">Build your own plan<span class="d-sub">Add only what you use</span></a>
+      <a href="pricing.html#no-enterprise">No enterprise tier<span class="d-sub">Why there is no secret price</span></a>
+      <a href="pricing.html#cancel">Cancel any time<span class="d-sub">Built for seasonal shutdowns</span></a>
+      <a href="pricing.html#market">Market comparison<span class="d-sub">What everyone else charges</span></a>
+      <a href="pricing.html#getting-started">Getting started<span class="d-sub">One email, live in a day</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-company">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-company">
+      <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
+      <div class="d-rule"></div>
+      <a href="about.html#story">The story<span class="d-sub">Fifteen years on the machine</span></a>
+      <a href="about.html#tradeoffs">What you get, what you don't<span class="d-sub">The trade-offs said out loud</span></a>
+      <div class="d-rule"></div>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Use</a>
+    </div>
+  </div>
+  <a href="pricing.html#plans" class="cta-btn">Get started</a>
+</div>
 
 <section class="hero-sm">
   <div class="glow"></div>
   <div class="wrap">
     <div class="tagline">Everything that's built</div>
     <h1 style="margin-top:20px;">Ten document types. <span class="out">One dashboard.</span></h1>
-    <p class="sub">This is the whole platform, not a roadmap. Every feature below is live in the product today. Your company runs what it uses and the rest stays switched off, so a crew that never touches a fuel log never sees one.</p>
+    <p class="sub">This is the whole platform, not a roadmap. Every feature below is live in the product today. The five safety documents come with every plan. The other five are add-ons, so a crew that never touches a fuel log never sees one, and you never pay for it.</p>
     <div class="hero-cta">
       <a href="pricing.html" class="cta-btn">See pricing</a>
       <a href="custom-builds.html" class="cta-ghost">Need something else?</a>
@@ -39,7 +141,7 @@
   </div>
 </section>
 
-<section>
+<section id="demo">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">See it work</div>
@@ -57,7 +159,7 @@
   </div>
 </section>
 
-<section>
+<section id="documents">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">The field side</div>
@@ -71,6 +173,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#clipboard"/></svg></span>
           <h3>Field Level Hazard Assessment</h3>
+          <span class="pill pill-plan">In every plan</span>
           <span class="badge">Under a minute</span>
         </div>
         <p>"Digging a trench near the east fence line" is a complete input. That one sentence is enough to produce a full, signed FLHA.</p>
@@ -87,6 +190,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#talk"/></svg></span>
           <h3>Toolbox Talk</h3>
+          <span class="pill pill-plan">In every plan</span>
           <span class="badge">Ready to present</span>
         </div>
         <p>Pick a topic and get a 5 to 10 minute talk a supervisor can walk straight into with the crew, no prep.</p>
@@ -102,6 +206,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#document"/></svg></span>
           <h3>Incident Report</h3>
+          <span class="pill pill-plan">In every plan</span>
           <span class="badge">Regulator ready</span>
         </div>
         <p>Give it the raw details in whatever order they come out. It comes back as a formal, structured report.</p>
@@ -116,6 +221,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#alert"/></svg></span>
           <h3>Near Miss Report</h3>
+          <span class="pill pill-plan">In every plan</span>
           <span class="badge">Catches patterns</span>
         </div>
         <p>A quick description of what almost happened becomes a clean report in well under a minute.</p>
@@ -130,6 +236,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#wrench"/></svg></span>
           <h3>Equipment Inspection</h3>
+          <span class="pill pill-plan">In every plan</span>
           <span class="badge">Per machine type</span>
         </div>
         <p>Pick the machine and get the pre-use checklist built for that exact type of equipment.</p>
@@ -145,6 +252,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#timer"/></svg></span>
           <h3>Time Clock</h3>
+          <span class="pill">Add-on</span>
           <span class="badge">GPS on every punch</span>
         </div>
         <p>Clock in and out against the company roster, with the location of the punch recorded.</p>
@@ -160,6 +268,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#graduation"/></svg></span>
           <h3>Certification Tracking</h3>
+          <span class="pill">Add-on</span>
           <span class="badge">Alerts before expiry</span>
         </div>
         <p>Every ticket and certificate your crew holds, in one directory, with a warning before one lapses.</p>
@@ -174,6 +283,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#fuel"/></svg></span>
           <h3>Fuel &amp; Consumables Log</h3>
+          <span class="pill">Add-on</span>
           <span class="badge">Adds up at month end</span>
         </div>
         <p>The clipboard in the truck, turned into a log tied to the actual machine.</p>
@@ -188,6 +298,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#stack"/></svg></span>
           <h3>Daily Report</h3>
+          <span class="pill">Add-on</span>
           <span class="badge">End of shift</span>
         </div>
         <p>An end-of-day site summary filed by the person who was actually there.</p>
@@ -202,6 +313,7 @@
         <div class="spec-top">
           <span class="icon"><svg class="icon-svg"><use href="icons.svg#calendar"/></svg></span>
           <h3>Monthly Site Inspection</h3>
+          <span class="pill">Add-on</span>
           <span class="badge">Your checklist</span>
         </div>
         <p>A recurring compliance walk-through built from your own checklist, not a generic industry template.</p>
@@ -216,7 +328,7 @@
   </div>
 </section>
 
-<section>
+<section id="dashboard">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">The supervisor side</div>
@@ -285,7 +397,7 @@
   </div>
 </section>
 
-<section>
+<section id="platform">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">Underneath all of it</div>
@@ -300,12 +412,12 @@
       <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#tools"/></svg></span><h3>Custom forms</h3><p>Tell us the form you need and it gets built into your account, tagged Safety, Operations or Workforce, so it lands in the right place for workers and supervisors.</p></div>
       <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#chart"/></svg></span><h3>Analytics with exports</h3><p>Safety and equipment analytics, both exportable as a PDF when a prime contractor or an insurer asks for numbers.</p></div>
       <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#pin"/></svg></span><h3>Punch map</h3><p>Time clock punches plotted on a map, so "I was on site" is a record instead of an argument.</p></div>
-      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#check"/></svg></span><h3>Turn features off</h3><p>Any built-in document type can be switched off for your company on request. Your crew only sees what you actually use.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#check"/></svg></span><h3>Features you don't use, switched off</h3><p>Any built-in document type can be switched off for your company on request. Your crew only sees what you actually use.</p></div>
     </div>
   </div>
 </section>
 
-<section>
+<section id="security">
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">Security</div>
@@ -372,6 +484,32 @@
 
 <script src="demo-data.js"></script>
 <script src="demo.js"></script>
+
+<script>
+(function(){
+  // Mobile nav: hamburger opens an accordion panel. The desktop dropdowns are
+  // CSS-only (hover + focus-within), so nothing here runs above 860px.
+  var t = document.getElementById('navToggle'), m = document.getElementById('mobileNav');
+  if (!t || !m) return;
+  function close(){ t.setAttribute('aria-expanded','false'); m.classList.remove('open'); document.body.style.overflow=''; }
+  t.addEventListener('click', function(){
+    var open = t.getAttribute('aria-expanded') === 'true';
+    t.setAttribute('aria-expanded', String(!open));
+    m.classList.toggle('open', !open);
+    document.body.style.overflow = !open ? 'hidden' : '';
+  });
+  m.querySelectorAll('.mgroup > button').forEach(function(b){
+    b.addEventListener('click', function(){
+      var open = b.getAttribute('aria-expanded') === 'true';
+      b.setAttribute('aria-expanded', String(!open));
+      document.getElementById(b.getAttribute('aria-controls')).classList.toggle('open', !open);
+    });
+  });
+  m.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', close); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', function(){ if (window.innerWidth > 860) close(); });
+})();
+</script>
 
 <script defer src="/_vercel/insights/script.js"></script>
 </body>

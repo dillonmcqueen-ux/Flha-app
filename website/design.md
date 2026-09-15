@@ -75,10 +75,33 @@ Symbols added for the five-page rebuild: `pin`, `lock`, `calendar`,
 N1b — canonical SaaS three-section: wordmark hard-left, link cluster
 *centred* via CSS grid (`grid-template-columns: 1fr auto 1fr`), CTA
 hard-right. Frost-on-scroll behavior (existing `.solid` class via JS)
-preserved. The cluster carries the two product pages (Features, Custom
-Builds); Pricing is the hard-right CTA and About lives in the footer —
-a deliberate split so the nav pushes toward the money page rather than
-listing everything.
+preserved.
+
+The cluster carries four categories, each with a dropdown of sub-items:
+Platform, Custom Builds, Pricing, Company. The top-level item is itself a
+link to that page, so the dropdown is additive rather than a gate. "Get
+started" is the hard-right CTA. This replaced a flat two-link cluster,
+because the sections people actually wanted (the Brain, the market
+comparison, the six custom-build examples) were reachable only by scrolling
+the right page and guessing.
+
+Mechanics:
+- Desktop dropdowns are CSS-only, on `:hover` **and** `:focus-within`, so
+  they open for keyboard users with no JS.
+- Under 860px the cluster is replaced by a hamburger (`.navtoggle`) opening
+  a full-height accordion panel (`.mobilenav`). That part is the only nav
+  JS: toggle, accordion, close on link click, close on Escape, close on
+  resize past the breakpoint. It also locks body scroll while open.
+- Sub-items anchor to real section ids. Every marketing section that the nav
+  points at carries one (`#demo`, `#documents`, `#dashboard`, `#brain`,
+  `#platform`, `#security`, `#examples`, `#tailored`, `#process`, `#cost`,
+  `#plans`, `#build`, `#no-enterprise`, `#cancel`, `#market`,
+  `#getting-started`, `#story`, `#tradeoffs`). Keep the id when moving a
+  section; the nav is the only thing pointing at it.
+
+The legal pages (privacy, terms) deliberately do **not** get this nav. They
+keep their own minimal "Back to fora" header, consistent with them staying
+out of the shared system.
 
 ## Footer archetype
 Ft5 Statement (adapted) — a one-line closing statement leads the footer,
@@ -104,6 +127,10 @@ colors, no new type families):
 - `.statement` — the large pull-quote block (anti-enterprise statement)
 - `.ideas` / `.idea` — the Custom Builds niche-example cards
 - `.bio-hero` — the About page portrait + body layout
+- `.pill` / `.pill-plan` — the "In every plan" vs "Add-on" tag on each
+  document-type card, since the ten built-in types are no longer all
+  included in the base plan
+- `.navitem` / `.dropdown` / `.navtoggle` / `.mobilenav` — the category nav
 
 ## Per-page allowances
 - Marketing pages MAY use the existing CSS-only enrichment (grain texture,
