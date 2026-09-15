@@ -9,9 +9,12 @@ modern-minimal (B2B SaaS / dev-tool school — Stripe/Linear/Vercel nav and
 component voice), applied to FORA's existing dark, industrial-adjacent brand.
 
 ## Macrostructure family
-- Marketing pages (index, what-is-fora, big-five, custom-builds, the-brain,
-  pricing, about): shared hero → section-rhythm shell, each page varies its
-  own section content but keeps the same nav/footer/type/color system.
+- Marketing pages (index, features, custom-builds, pricing, about): shared
+  hero → section-rhythm shell, each page varies its own section content but
+  keeps the same nav/footer/type/color system. The five-page structure
+  replaced the earlier seven-page one — `what-is-fora.html`, `big-five.html`
+  and `the-brain.html` were absorbed into `index.html` and `features.html`
+  rather than kept as separate pages.
 - Legal pages (privacy, terms): typography-only, out of scope for this pass
   (kept on their existing self-contained styling; do not fold them into the
   shared system without a dedicated review, since they're gated by the
@@ -63,17 +66,19 @@ Single custom line-icon set (24×24, `stroke="currentColor"`,
 `<symbol>` entries in `website/icons.svg` and referenced everywhere via
 `<svg class="icon-svg"><use href="icons.svg#<name>"/></svg>`. Replaces every
 emoji glyph previously used as a feature/document/flow icon across
-index.html, big-five.html, custom-builds.html, the-brain.html, and
-what-is-fora.html. No emoji-as-icon anywhere in the marketing site going
+every marketing page. No emoji-as-icon anywhere in the marketing site going
 forward — new sections must draw from `icons.svg` or add a new symbol to it.
+Symbols added for the five-page rebuild: `pin`, `lock`, `calendar`,
+`offline`, `pdf`, `stack`.
 
 ## Nav archetype
 N1b — canonical SaaS three-section: wordmark hard-left, link cluster
 *centred* via CSS grid (`grid-template-columns: 1fr auto 1fr`), CTA
-hard-right. Same links/CTA content as before per page — only the layout
-changed from flex `space-between` (links visually off-center) to a true
-centred cluster. Frost-on-scroll behavior (existing `.solid` class via JS)
-preserved.
+hard-right. Frost-on-scroll behavior (existing `.solid` class via JS)
+preserved. The cluster carries the two product pages (Features, Custom
+Builds); Pricing is the hard-right CTA and About lives in the footer —
+a deliberate split so the nav pushes toward the money page rather than
+listing everything.
 
 ## Footer archetype
 Ft5 Statement (adapted) — a one-line closing statement leads the footer,
@@ -82,6 +87,23 @@ Not a pure Ft5 (this site's footer still needs to carry real navigation +
 legal links, so the link row stays) — it's Ft5's opening move grafted onto
 the site's existing Ft3-ish link row, which keeps every page's footer links
 reachable.
+
+## Components added for the five-page rebuild
+
+Extensions to `style.css`, all built from the existing tokens (no new
+colors, no new type families):
+
+- `.tagline` — the brand tagline lockup ("No suits. No bs. Just results.")
+- `.ftable` / `.ftable-wrap` — dark data tables for comparison and spec
+  content, horizontally scrollable under 560px
+- `.statstrip` / `.stat` — the four-up number band
+- `.versus` — the stacked-subscriptions vs FORA cost comparison
+- `.specs` / `.spec` — feature detail cards with a badge slot
+- `.cart` / `.mod` / `.cart-total` — the build-your-own plan calculator on
+  `pricing.html` (vanilla JS, no dependency; the only stateful UI on the site)
+- `.statement` — the large pull-quote block (anti-enterprise statement)
+- `.ideas` / `.idea` — the Custom Builds niche-example cards
+- `.bio-hero` — the About page portrait + body layout
 
 ## Per-page allowances
 - Marketing pages MAY use the existing CSS-only enrichment (grain texture,

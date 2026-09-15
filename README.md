@@ -72,7 +72,7 @@ Set these on Vercel (Project Settings → Environment Variables):
 
 ## Stripe billing
 
-The pricing page (`website/index.html`) links to two live Stripe Payment
+The pricing page (`website/pricing.html`) links to two live Stripe Payment
 Links (Basic, Advanced), each bundling a recurring plan price + one-time
 setup fee. The Stripe webhook is registered at its own dedicated endpoint,
 `api/stripe-webhook.js` — it used to share `api/cron-equipment-reports.js`
