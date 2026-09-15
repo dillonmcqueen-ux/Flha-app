@@ -123,6 +123,32 @@ export const MODEL = "claude-opus-5";
 // backstop, not a target — unused tokens cost nothing.
 export const MAX_TOKENS = 16000;
 
+// Reasoning effort. This is the fix for the first live FLHA on this branch
+// taking far longer than the Haiku call it replaced: claude-opus-5 defaults
+// to `high`, where it spends a large thinking budget before writing a single
+// token. That default is sized for open-ended agentic work, which is not what
+// this endpoint does — every one of the eight callers hands the model a long,
+// highly specified prompt and asks it to return one JSON object. Anthropic's
+// own migration guidance names low/medium the primary latency lever on this
+// model and notes it is unusually strong at the low end.
+//
+// `low` rather than `medium` because a worker opens an FLHA on a phone at the
+// start of a shift and waits on it before they can begin work; that is the
+// hot path and the one that has to feel fast. Opus at `low` is still a large
+// step up from claude-haiku-4-5, which is what this endpoint ran until now.
+//
+// If a document type later needs more deliberation than this — the incident
+// and near-miss reports are the plausible candidates, since they are legal
+// records generated rarely rather than daily — the fix is to route effort by
+// document type rather than to raise it for everything and slow the FLHA back
+// down.
+//
+// Do NOT pair a lower effort with a disabled `thinking.type`. Disabling
+// thinking on this model is only valid at `high` effort or below, and it is
+// the worse lever anyway: low effort already captures most of the latency
+// saving without the failure modes that disabling brings.
+export const EFFORT = "low";
+
 // Server-side persona and guardrails, applied to every generation.
 //
 // This lives here rather than in the eight client-side prompts for two
@@ -193,6 +219,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: MAX_TOKENS,
+        output_config: { effort: EFFORT },
         system: SAFETY_SYSTEM_PROMPT,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -215,6 +242,21 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
+
+    // claude-opus-5's safety classifiers can decline a request outright, and
+    // a decline is a normal HTTP 200 with stop_reason "refusal" and no usable
+    // content — not an API error. This app feeds the model injury, incident
+    // and near-miss descriptions, which is the input most likely to trip one,
+    // so this is a real path rather than a theoretical one. Without this the
+    // response falls through to the callers, which all look for a `{` that
+    // isn't there and show the worker a generic failure. Every form stays
+    // fully editable by hand and already offers that fallback, so returning
+    // the error cleanly puts them on the right screen; the log line is what
+    // makes a refusal distinguishable from an outage afterwards.
+    if (data.stop_reason === "refusal") {
+      console.error("Anthropic declined the request:", JSON.stringify(data.stop_details || null));
+      return res.status(200).json({ error: "The AI declined to write this one. Fill it in manually — every field on the next screen is editable." });
+    }
 
     // Log key details for debugging in Vercel logs
     console.log("Anthropic stop_reason:", data.stop_reason);

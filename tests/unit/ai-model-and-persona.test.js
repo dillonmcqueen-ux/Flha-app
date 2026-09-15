@@ -32,7 +32,7 @@ process.env.SESSION_SECRET ||= 'test-session-secret';
 process.env.ANTHROPIC_API_KEY ||= 'test-anthropic-key';
 
 const handlerModule = await import('../../api/generate-flha.js');
-const { MODEL, MAX_TOKENS, SAFETY_SYSTEM_PROMPT, default: handler } = handlerModule;
+const { MODEL, MAX_TOKENS, EFFORT, SAFETY_SYSTEM_PROMPT, default: handler } = handlerModule;
 
 test('the model is a current Claude model, not a cheaper or date-pinned one', () => {
   assert.equal(MODEL, 'claude-opus-5');
@@ -45,6 +45,27 @@ test('max_tokens leaves room for extended thinking', () => {
   // Opus 5 thinks by default and those tokens come out of max_tokens, so the
   // 6000 that was right for claude-haiku-4-5 would now truncate documents.
   assert.ok(MAX_TOKENS > 6000, `MAX_TOKENS is ${MAX_TOKENS}`);
+});
+
+test('effort is set below the model default, and thinking is not disabled', () => {
+  // claude-opus-5 defaults to `high` effort, which is what made the first
+  // live FLHA on this branch unusably slow. This is the latency lever.
+  assert.ok(['low', 'medium'].includes(EFFORT), `EFFORT is ${EFFORT}`);
+
+  // Disabling thinking is only valid at `high` effort or below on this model,
+  // so a future raise to xhigh/max alongside a disabled-thinking setting
+  // would 400 every generation in the product. Neither half is present.
+  const src = readFileSync(new URL('../../api/generate-flha.js', import.meta.url), 'utf8');
+  assert.ok(!src.includes('"disabled"'), 'thinking should stay on; lower effort instead');
+});
+
+test('a refusal is handled rather than parsed', () => {
+  // claude-opus-5 can decline with a normal HTTP 200 and stop_reason
+  // "refusal". Incident and near-miss descriptions are the likeliest inputs
+  // to trip that, and without this the callers look for a `{` that is not
+  // there.
+  const src = readFileSync(new URL('../../api/generate-flha.js', import.meta.url), 'utf8');
+  assert.match(src, /stop_reason === "refusal"/);
 });
 
 test('no deprecated thinking budget is configured', () => {
@@ -153,6 +174,9 @@ test('the request actually sends the model, max_tokens and system prompt', async
   assert.equal(anthropicBody.model, MODEL);
   assert.equal(anthropicBody.max_tokens, MAX_TOKENS);
   assert.equal(anthropicBody.system, SAFETY_SYSTEM_PROMPT);
+  // Top-level, not nested under `thinking` — the wrong placement is silently
+  // ignored rather than rejected, so the latency fix would just not apply.
+  assert.deepEqual(anthropicBody.output_config, { effort: EFFORT });
   // The shape that 400s on this model.
   assert.ok(!('budget_tokens' in (anthropicBody.thinking || {})));
 });
