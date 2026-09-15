@@ -67,31 +67,92 @@ Set these on Vercel (Project Settings → Environment Variables):
 | `CRON_SECRET` | No | Secures both cron jobs in `vercel.json` (`/api/cron-equipment-reports`, `/api/cron-company-brain-summary`) |
 | `STRIPE_SECRET_KEY` | Yes (for billing) | `/api/stripe-webhook` (Stripe webhook handling) and `/api/admin.js` (subscription lookup on onboarding approval) |
 | `STRIPE_WEBHOOK_SECRET` | Yes (for billing) | `/api/stripe-webhook` — verifies the `Stripe-Signature` header on incoming Stripe events |
+| `APP_ORIGIN` | No | `/api/checkout` — where Stripe sends a buyer after a successful checkout. Falls back to the request host, then `https://portal.forafieldsolutions.com`, so leaving it unset is safe; set it only when a preview deployment should redirect to itself rather than to production |
 | `RESEND_API_KEY` | No | `server-lib/email.js` (Resend transactional email API) — onboarding/claim-link and certification-expiry email delivery. `sendEmail()` is silently a no-op and logs a warning if unset |
 | `SLACK_ONBOARDING_WEBHOOK_URL` | No | `server-lib/slack.js` — Slack Incoming Webhook for onboarding-submission and auto-approve notifications from `api/login.js`. Silently a no-op if unset |
 
 ## Stripe billing
 
-The pricing page (`website/index.html`) links to two live Stripe Payment
-Links (Basic, Advanced), each bundling a recurring plan price + one-time
-setup fee. The Stripe webhook is registered at its own dedicated endpoint,
+The pricing page (`website/pricing.html`) has no Payment Links. Its
+calculator builds a link to `api/checkout.js`, which creates a Stripe
+Checkout Session on the fly from the module keys in the query string and
+303-redirects the buyer to it. Every amount comes from
+`server-lib/pricing.js` server-side, so the URL chooses which modules, never
+what they cost, and there is no amount or total parameter to tamper with.
+Stripe needs no Product or Price objects configured: the line items are
+built inline with `price_data`, so changing a price is a one-line change in
+`server-lib/pricing.js` (mirrored in the calculator on the pricing page,
+which is a separate Vercel project and cannot import it).
+
+Line items are the platform base plus one per purchased module, all monthly
+recurring, each carrying the 3% card surcharge. The one-time setup fee goes
+through `subscription_data.add_invoice_items` so it lands on the first
+invoice only. Stripe anchors the billing cycle to the moment the
+subscription is created, which is the "monthly from signup date" behaviour,
+so no `billing_cycle_anchor` is set.
+
+Note the cross-project coupling: `website/pricing.html` hardcodes
+`https://portal.forafieldsolutions.com/api/checkout` in two places (the
+no-JS fallback `href` and the `CHECKOUT` constant in its script). Renaming
+`api/checkout.js` breaks every Checkout button on the live pricing page
+until the website project is separately redeployed, and `vercel.json`'s
+production ignore filter excludes `website/`, so a commit touching only
+those two lines will not trigger an app-project build. The Stripe webhook is registered at its own dedicated endpoint,
 `api/stripe-webhook.js` — it used to share `api/cron-equipment-reports.js`
 with the weekly cron job (the same reason time clock report logic used to
 live in `companydata.js` instead of its own file) to stay under Vercel's
 12 serverless function cap on the Hobby plan; both were split back into
 their own files once the project moved to the Pro plan. It listens for
-`checkout.session.completed` (stages the purchased plan tier + Stripe
-customer id, keyed by Checkout Session id) and
+`checkout.session.completed` (stages the purchased plan tier, module list
+and Stripe customer id, keyed by Checkout Session id) and
 `customer.subscription.updated`/`deleted` (keeps an existing company's
 `suspended` flag and `stripe_subscription_status` in sync — a canceled/
 unpaid subscription suspends access automatically).
 
-A checkout finishes before the customer has a company in the app: the
-Payment Link redirects to `/onboarding?session_id={CHECKOUT_SESSION_ID}`,
-and `submit_onboarding_intake` (`api/login.js`) claims the staged row so the
-plan tier and customer id carry through to `approve_onboarding_request`
-(`api/admin.js`) when an admin approves the request and the company is
-created. Approval still requires an admin's click — nothing auto-approves.
+A Checkout Session id is effectively a bearer token: it travels in a
+redirect URL, and whoever holds it can present it to
+`submit_onboarding_intake` as proof of purchase. Three things keep that from
+becoming an account takeover:
+
+1. `api/checkout.js` builds the success URL from `APP_ORIGIN` or a hardcoded
+   production origin, never from a request header. An earlier draft fell back
+   to `x-forwarded-host`, which a non-browser client can set, so curling the
+   endpoint would mint a genuine FORA-branded Checkout Session redirecting to
+   an attacker's host. Do not reintroduce a header-derived origin here.
+   (`server-lib/email.js`'s `siteOrigin()` still has that shape for
+   claim/edit/wallet links and deserves the same treatment.)
+2. A session can be claimed once. `api/login.js` refuses a session another
+   request already holds, and a unique index
+   (`onboarding_requests_stripe_session_unique`) enforces it against a race;
+   losing that race drops the purchase and lands the submission in the manual
+   queue rather than failing it.
+3. Auto-approval requires the submitted contact email to match the email
+   Stripe recorded on the checkout. A mismatch is not rejected, since a
+   company legitimately pays from accounts@ and onboards from the site
+   contact, but it never auto-provisions.
+
+`companies.stripe_customer_id` also carries a unique index, because
+`api/stripe-webhook.js` syncs subscription status by customer id alone and
+two companies sharing one would let a subscription event write onto the
+wrong tenant's row.
+
+A checkout finishes before the customer has a company in the app:
+`api/checkout.js` sets the success URL to
+`/onboarding?session_id={CHECKOUT_SESSION_ID}`, and
+`submit_onboarding_intake` (`api/login.js`) claims the staged row so the
+plan tier, module list and customer id carry through to
+`approve_onboarding_request` (`api/admin.js`) when an admin approves the
+request and the company is created.
+
+The module list is what makes modular pricing real rather than cosmetic.
+`api/customforms.js` treats a missing `company_document_settings` row as
+"active", so a company with no rows sees every built-in document type. On
+approval, `provisionCompanyFromRequest` (`server-lib/onboardingApproval.js`)
+therefore writes an explicit row for every document key any module can
+unlock: true for the ones the purchase covers, false for the rest. A
+request whose `modules` is NULL (an admin-created company, or a checkout
+predating modular pricing) keeps the old everything-on default rather than
+being silently stripped back.
 
 Once approved, credentials are delivered via a self-serve **claim link**
 (`/claim?token=...`, `src/ClaimAccount.jsx`) instead of the admin emailing

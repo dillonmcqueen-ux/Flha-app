@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Features | FORA</title>
+<meta name="description" content="Every feature built into FORA: FLHAs in under a minute, toolbox talks, incident and near miss reports, equipment inspections, fuel logs, daily reports, monthly inspections, GPS time clock, certification tracking, the supervisor dashboard and the Brain." />
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grain"></div>
+
+<header id="siteHeader">
+  <nav class="wrap">
+    <a href="index.html" class="logo"><span class="dot"></span>FORA</a>
+    <div class="navlinks">
+      <div class="navitem">
+        <a class="navtop active" href="features.html">Platform<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="features.html" class="d-lead">Everything that's built<span class="d-sub">The whole platform on one page</span></a>
+          <div class="d-rule"></div>
+          <a href="features.html#demo">See it work<span class="d-sub">Watch it write a live FLHA</span></a>
+          <a href="features.html#documents">The ten documents<span class="d-sub">What a worker sees on their phone</span></a>
+          <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
+          <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
+          <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
+          <a href="features.html#security">Security<span class="d-sub">How your data is walled off</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="custom-builds.html">Custom Builds<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="custom-builds.html" class="d-lead">What a custom build is<span class="d-sub">Not a form builder</span></a>
+          <div class="d-rule"></div>
+          <a href="custom-builds.html#examples">Six real examples<span class="d-sub">Locate tickets, pour records, scale tickets</span></a>
+          <a href="custom-builds.html#tailored">Tailored to you<span class="d-sub">Built with you, not guessed at</span></a>
+          <a href="custom-builds.html#process">How it works<span class="d-sub">Four steps from headache to login</span></a>
+          <a href="custom-builds.html#cost">What it costs<span class="d-sub">Quoted by scope, fixed number</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="pricing.html">Pricing<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="pricing.html" class="d-lead">Plans and prices<span class="d-sub">Published, no quote required</span></a>
+          <div class="d-rule"></div>
+          <a href="pricing.html#build">Build your own plan<span class="d-sub">Add only what you use</span></a>
+          <a href="pricing.html#no-enterprise">No enterprise tier<span class="d-sub">Why there is no secret price</span></a>
+          <a href="pricing.html#cancel">Cancel any time<span class="d-sub">Built for seasonal shutdowns</span></a>
+          <a href="pricing.html#market">Market comparison<span class="d-sub">What everyone else charges</span></a>
+          <a href="pricing.html#getting-started">Getting started<span class="d-sub">One email, live in a day</span></a>
+        </div>
+      </div>
+      <div class="navitem">
+        <a class="navtop" href="about.html">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <div class="dropdown">
+          <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
+          <div class="d-rule"></div>
+          <a href="about.html#story">The story<span class="d-sub">Fifteen years on the machine</span></a>
+          <a href="about.html#tradeoffs">What you get, what you don't<span class="d-sub">The trade-offs said out loud</span></a>
+          <div class="d-rule"></div>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Use</a>
+        </div>
+      </div>
+    </div>
+    <a href="pricing.html#plans" class="cta-btn navcta">Get started</a>
+    <button class="navtoggle" id="navToggle" aria-expanded="false" aria-controls="mobileNav" aria-label="Menu">
+      <svg class="ic-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      <svg class="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </nav>
+</header>
+
+<div class="mobilenav" id="mobileNav">
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-platform">Platform<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-platform">
+      <a href="features.html" class="d-lead">Everything that's built<span class="d-sub">The whole platform on one page</span></a>
+      <div class="d-rule"></div>
+      <a href="features.html#demo">See it work<span class="d-sub">Watch it write a live FLHA</span></a>
+      <a href="features.html#documents">The ten documents<span class="d-sub">What a worker sees on their phone</span></a>
+      <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
+      <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
+      <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
+      <a href="features.html#security">Security<span class="d-sub">How your data is walled off</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-custom">Custom Builds<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-custom">
+      <a href="custom-builds.html" class="d-lead">What a custom build is<span class="d-sub">Not a form builder</span></a>
+      <div class="d-rule"></div>
+      <a href="custom-builds.html#examples">Six real examples<span class="d-sub">Locate tickets, pour records, scale tickets</span></a>
+      <a href="custom-builds.html#tailored">Tailored to you<span class="d-sub">Built with you, not guessed at</span></a>
+      <a href="custom-builds.html#process">How it works<span class="d-sub">Four steps from headache to login</span></a>
+      <a href="custom-builds.html#cost">What it costs<span class="d-sub">Quoted by scope, fixed number</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-pricing">Pricing<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-pricing">
+      <a href="pricing.html" class="d-lead">Plans and prices<span class="d-sub">Published, no quote required</span></a>
+      <div class="d-rule"></div>
+      <a href="pricing.html#build">Build your own plan<span class="d-sub">Add only what you use</span></a>
+      <a href="pricing.html#no-enterprise">No enterprise tier<span class="d-sub">Why there is no secret price</span></a>
+      <a href="pricing.html#cancel">Cancel any time<span class="d-sub">Built for seasonal shutdowns</span></a>
+      <a href="pricing.html#market">Market comparison<span class="d-sub">What everyone else charges</span></a>
+      <a href="pricing.html#getting-started">Getting started<span class="d-sub">One email, live in a day</span></a>
+    </div>
+  </div>
+  <div class="mgroup">
+    <button type="button" aria-expanded="false" aria-controls="mpanel-company">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="mpanel" id="mpanel-company">
+      <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
+      <div class="d-rule"></div>
+      <a href="about.html#story">The story<span class="d-sub">Fifteen years on the machine</span></a>
+      <a href="about.html#tradeoffs">What you get, what you don't<span class="d-sub">The trade-offs said out loud</span></a>
+      <div class="d-rule"></div>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Use</a>
+    </div>
+  </div>
+  <a href="pricing.html#plans" class="cta-btn">Get started</a>
+</div>
+
+<section class="hero-sm">
+  <div class="glow"></div>
+  <div class="wrap">
+    <div class="tagline">Everything that's built</div>
+    <h1 style="margin-top:20px;">Ten document types. <span class="out">One dashboard.</span></h1>
+    <p class="sub">This is the whole platform, not a roadmap. Every feature below is live in the product today, and every one is priced on its own. You switch on what your company runs and skip the rest, so a crew that never touches a fuel log never sees one, and you never pay for it.</p>
+    <div class="hero-cta">
+      <a href="pricing.html" class="cta-btn">See pricing</a>
+      <a href="custom-builds.html" class="cta-ghost">Need something else?</a>
+    </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">See it work</div>
+      <h2>Pick a task. Watch it write the FLHA.</h2>
+      <p>These are pre-built examples so you can see the format and depth of a real FLHA without an account. On your own account it also cross-references your company's SOPs, which is the part that is different for every company.</p>
+    </div>
+    <div class="demo-chips" id="demoChips" data-reveal>
+      <button class="demo-chip" data-id="trenching"><svg class="icon-svg"><use href="icons.svg#barricade"/></svg>Trenching near utilities</button>
+      <button class="demo-chip" data-id="scaffolding"><svg class="icon-svg"><use href="icons.svg#ladder"/></svg>Working at height on scaffolding</button>
+      <button class="demo-chip" data-id="forklift"><svg class="icon-svg"><use href="icons.svg#factory"/></svg>Forklift at a loading dock</button>
+      <button class="demo-chip" data-id="confined-space"><svg class="icon-svg"><use href="icons.svg#barrel"/></svg>Confined space tank entry</button>
+      <button class="demo-chip" data-id="hot-work"><svg class="icon-svg"><use href="icons.svg#flame"/></svg>Welding in a shop</button>
+    </div>
+    <div class="demo-panel" id="demoPanel" hidden data-reveal></div>
+  </div>
+</section>
+
+<section id="documents">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">The field side</div>
+      <h2>What a worker sees on their phone.</h2>
+      <p>One menu, grouped into Safety, Equipment and General. No training session. Most workers file their first document without anyone showing them how.</p>
+    </div>
+
+    <div class="specs" data-reveal>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#clipboard"/></svg></span>
+          <h3>Field Level Hazard Assessment</h3>
+          <span class="badge">Under a minute</span>
+        </div>
+        <p>"Digging a trench near the east fence line" is a complete input. That one sentence is enough to produce a full, signed FLHA.</p>
+        <ul>
+          <li>Voice or text entry, no form to tab through</li>
+          <li>Cross-referenced against your own SOPs and equipment list</li>
+          <li>Returns hazards, controls, required PPE and risk ratings</li>
+          <li>Signed in the field, exported as a clean PDF</li>
+          <li>Autosaves as a draft so a dropped call does not lose it</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#talk"/></svg></span>
+          <h3>Toolbox Talk</h3>
+          <span class="badge">Ready to present</span>
+        </div>
+        <p>Pick a topic and get a 5 to 10 minute talk a supervisor can walk straight into with the crew, no prep.</p>
+        <ul>
+          <li>Written around your operations, not a stock topic off a list</li>
+          <li>Tied to the work actually happening that day</li>
+          <li>Attendance captured with the record</li>
+          <li>Filed and exportable like every other document</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#document"/></svg></span>
+          <h3>Incident Report</h3>
+          <span class="badge">Regulator ready</span>
+        </div>
+        <p>Give it the raw details in whatever order they come out. It comes back as a formal, structured report.</p>
+        <ul>
+          <li>Photo attachments stored against the report</li>
+          <li>Structured enough to hand to a regulator or insurer</li>
+          <li>Nothing gets lost because the person writing it was rattled</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#alert"/></svg></span>
+          <h3>Near Miss Report</h3>
+          <span class="badge">Catches patterns</span>
+        </div>
+        <p>A quick description of what almost happened becomes a clean report in well under a minute.</p>
+        <ul>
+          <li>Low enough friction that the small ones actually get filed</li>
+          <li>The pattern shows up before it becomes an incident</li>
+          <li>Rolls into safety analytics automatically</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#wrench"/></svg></span>
+          <h3>Equipment Inspection</h3>
+          <span class="badge">Per machine type</span>
+        </div>
+        <p>Pick the machine and get the pre-use checklist built for that exact type of equipment.</p>
+        <ul>
+          <li>Pre-trip and post-trip both supported</li>
+          <li>A skid steer and a boom lift get different checklists</li>
+          <li>Defects flag straight to the supervisor dashboard</li>
+          <li>Feeds the maintenance view, so a flagged machine does not get forgotten</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#timer"/></svg></span>
+          <h3>Time Clock</h3>
+          <span class="badge">GPS on every punch</span>
+        </div>
+        <p>Clock in and out against the company roster, with the location of the punch recorded.</p>
+        <ul>
+          <li>GPS coordinates captured at clock-in and clock-out</li>
+          <li>Punches plotted on a map in the dashboard</li>
+          <li>Hours roll into a time clock report you can export</li>
+          <li>Replaces the paper sign-in sheet and the separate app nobody checks</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#graduation"/></svg></span>
+          <h3>Certification Tracking</h3>
+          <span class="badge">Alerts before expiry</span>
+        </div>
+        <p>Every ticket and certificate your crew holds, in one directory, with a warning before one lapses.</p>
+        <ul>
+          <li>Workers add and view their own tickets</li>
+          <li>Expired and expiring-soon counts surface on the worker's menu and the dashboard</li>
+          <li>Company-wide directory with photos, so a supervisor can check in seconds</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#fuel"/></svg></span>
+          <h3>Fuel &amp; Consumables Log</h3>
+          <span class="badge">Adds up at month end</span>
+        </div>
+        <p>The clipboard in the truck, turned into a log tied to the actual machine.</p>
+        <ul>
+          <li>Logged against a specific unit, not a scrap of paper</li>
+          <li>Rolls into equipment analytics</li>
+          <li>Works offline and submits when signal comes back</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#stack"/></svg></span>
+          <h3>Daily Report</h3>
+          <span class="badge">End of shift</span>
+        </div>
+        <p>An end-of-day site summary filed by the person who was actually there.</p>
+        <ul>
+          <li>Site, crew, work completed, conditions</li>
+          <li>Groups by site and crew on the dashboard</li>
+          <li>Exports as a PDF you can send straight to a client</li>
+        </ul>
+      </div>
+
+      <div class="spec">
+        <div class="spec-top">
+          <span class="icon"><svg class="icon-svg"><use href="icons.svg#calendar"/></svg></span>
+          <h3>Monthly Site Inspection</h3>
+          <span class="badge">Your checklist</span>
+        </div>
+        <p>A recurring compliance walk-through built from your own checklist, not a generic industry template.</p>
+        <ul>
+          <li>Checklist built to your wording and changed whenever you ask, no dev work</li>
+          <li>Corrective actions tracked separately until they are closed</li>
+          <li>Month-over-month record for an audit</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="dashboard">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">The supervisor side</div>
+      <h2>Everything the crew files, on one screen.</h2>
+      <p>The dashboard is organised into three areas. Every tab is filterable, groupable and exportable, and every custom build you ever add shows up right beside the built-in ones.</p>
+    </div>
+
+    <div class="ftable-wrap" data-reveal>
+      <table class="ftable">
+        <thead>
+          <tr><th>Area</th><th>What lives there</th><th>What you do with it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lead">Safety</td>
+            <td>FLHAs, toolbox talks, near misses, incidents, monthly inspections, your SOP library, safety analytics</td>
+            <td>Review and sign off, flag anything that needs a second look, export a safety analytics PDF for a prime contractor</td>
+          </tr>
+          <tr>
+            <td class="lead">Operations</td>
+            <td>Equipment inspections, daily reports, equipment register, maintenance status, fuel logs, operations analytics</td>
+            <td>See which machine got flagged and by whom, track what is overdue, pull equipment analytics for a maintenance meeting</td>
+          </tr>
+          <tr>
+            <td class="lead">Workforce</td>
+            <td>Time clock punches and map, company roster, certification directory</td>
+            <td>Approve hours, see where a punch happened, catch a ticket before it expires, reset a forgotten PIN on the spot</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Overview sits above all three with recent activity across every document type, alerts on anything overdue or expiring, and the stats a supervisor gets asked for on a Monday morning.</p>
+  </div>
+</section>
+
+<section id="brain">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">The Brain</div>
+      <h2>Why your FLHAs get better and a competitor's don't.</h2>
+      <p>Every FORA account gets its own Brain the day it is set up. Not a chatbot. Not a general-purpose model with your logo on it. A memory built entirely out of your own documentation.</p>
+    </div>
+
+    <div class="diffs" data-reveal>
+      <div class="diff-row">
+        <div class="diff-num">01</div>
+        <div><h3>It starts from your SOPs, not the internet</h3><p>At onboarding it reads your SOPs and equipment list and builds a first-pass profile: your industry, your terminology, your gear, your sites. No web research on your company or your industry, ever. Just what you sent, however messy it was when it arrived.</p></div>
+      </div>
+      <div class="diff-row">
+        <div class="diff-num">02</div>
+        <div><h3>It learns from real corrections, not every click</h3><p>When a supervisor substantively fixes something an AI-generated document got wrong or left out, that is a signal worth learning from. Rubber-stamped, unedited output is not, and does not count.</p></div>
+      </div>
+      <div class="diff-row">
+        <div class="diff-num">03</div>
+        <div><h3>It sits underneath every feature, not inside one</h3><p>Terminology and hazard emphasis picked up from an FLHA edit is available to a toolbox talk, an incident report and every custom build in the same account. The document types are not separate tools that happen to share a login.</p></div>
+      </div>
+      <div class="diff-row">
+        <div class="diff-num">04</div>
+        <div><h3>It can only ever raise the bar</h3><p>This one is structural, not a prompt instruction. The Brain can shift emphasis and terminology, but it can never soften a risk rating or skip a required hazard category. Safety-critical output never gets less cautious because of usage history.</p></div>
+      </div>
+      <div class="diff-row">
+        <div class="diff-num">05</div>
+        <div><h3>You can read exactly what it learned</h3><p>Nothing about it is a black box. Ask any time and you get a PDF snapshot of your company's Brain profile: industry, terminology, equipment, and what it has picked up from real usage.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="platform">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">Underneath all of it</div>
+      <h2>The parts nobody puts on a feature list.</h2>
+      <p>These are the things that decide whether a crew actually uses the software or quietly goes back to paper.</p>
+    </div>
+    <div class="bento-sm" data-reveal>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#offline"/></svg></span><h3>Works without signal</h3><p>Submissions queue on the phone and go up when service comes back. A dead zone does not cost you a document.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#edit"/></svg></span><h3>Draft autosave</h3><p>A half-finished form survives a locked screen, a dropped call, or a worker getting pulled onto something else.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#pdf"/></svg></span><h3>Unlimited PDF export</h3><p>Every document type exports as a properly formatted, branded PDF. No export limits, no per-document charge.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#users"/></svg></span><h3>Roster and PIN login</h3><p>Workers sign in with a PIN, not a corporate email nobody has. Forgot one? A supervisor resets it from the dashboard in seconds.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#tools"/></svg></span><h3>Custom forms</h3><p>Tell us the form you need and it gets built into your account, tagged Safety, Operations or Workforce, so it lands in the right place for workers and supervisors.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#chart"/></svg></span><h3>Analytics with exports</h3><p>Safety and equipment analytics, both exportable as a PDF when a prime contractor or an insurer asks for numbers.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#pin"/></svg></span><h3>Punch map</h3><p>Time clock punches plotted on a map, so "I was on site" is a record instead of an argument.</p></div>
+      <div class="card"><span class="icon"><svg class="icon-svg"><use href="icons.svg#check"/></svg></span><h3>Features you don't use, switched off</h3><p>Any built-in document type can be switched off for your company on request. Your crew only sees what you actually use.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">Security</div>
+      <h2>Your data, walled off from every other company on FORA.</h2>
+      <p>This is not a setting somebody has to remember to switch on. It is how the system is built.</p>
+    </div>
+    <div class="ftable-wrap" data-reveal>
+      <table class="ftable">
+        <thead><tr><th>Layer</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td class="lead">Signed sessions</td><td>Every request is checked against a signed, server-verified session before it reaches your data. Nothing gets through unverified.</td></tr>
+          <tr><td class="lead">Deny by default</td><td>Row Level Security is enabled on every table with no bypass policies, so direct database access is refused outright. The access-controlled dashboard is the only door in.</td></tr>
+          <tr><td class="lead">Company scoping</td><td>Every read and write is scoped to your company. Your dashboard can only ever return your data.</td></tr>
+          <tr><td class="lead">Private file storage</td><td>Documents and photos live in private storage and are served through time-limited signed links, never a public URL.</td></tr>
+          <tr><td class="lead">Your data stays yours</td><td>Export your records as PDFs whenever you want. Nothing is sold, and nothing is used to train anything outside your own account.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="glow"></div>
+  <div class="wrap">
+    <h2>That's the whole platform. Not a roadmap.</h2>
+    <p>Send your SOPs however messy they are and your crew is generating real documents inside one business day.</p>
+    <div class="btnrow">
+      <a href="pricing.html" class="cta-btn">See pricing</a>
+      <a href="custom-builds.html" class="cta-ghost">Need something that isn't here?</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="foot-stmt">No suits. No bs.<br>Just results.</p>
+    <div class="foot-row">
+    <div class="logo"><span class="dot"></span>FORA</div>
+    <div class="foot-links">
+      <a href="index.html">Home</a>
+      <a href="features.html">Features</a>
+      <a href="custom-builds.html">Custom Builds</a>
+      <a href="pricing.html">Pricing</a>
+      <a href="about.html">About</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Use</a>
+    </div>
+    <div class="foot-copy">© <span id="year"></span> FORA. Field Operations Record Automation.</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+  const header = document.getElementById('siteHeader');
+  window.addEventListener('scroll', () => {
+    header.classList.toggle('solid', window.scrollY > 20);
+  }, { passive: true });
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('show'); });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('[data-reveal]').forEach(el => io.observe(el));
+</script>
+
+<script src="demo-data.js"></script>
+<script src="demo.js"></script>
+
+<script>
+(function(){
+  // Mobile nav: hamburger opens an accordion panel. The desktop dropdowns are
+  // CSS-only (hover + focus-within), so nothing here runs above 860px.
+  var t = document.getElementById('navToggle'), m = document.getElementById('mobileNav');
+  if (!t || !m) return;
+  function close(){ t.setAttribute('aria-expanded','false'); m.classList.remove('open'); document.body.style.overflow=''; }
+  t.addEventListener('click', function(){
+    var open = t.getAttribute('aria-expanded') === 'true';
+    t.setAttribute('aria-expanded', String(!open));
+    m.classList.toggle('open', !open);
+    document.body.style.overflow = !open ? 'hidden' : '';
+  });
+  m.querySelectorAll('.mgroup > button').forEach(function(b){
+    b.addEventListener('click', function(){
+      var open = b.getAttribute('aria-expanded') === 'true';
+      b.setAttribute('aria-expanded', String(!open));
+      document.getElementById(b.getAttribute('aria-controls')).classList.toggle('open', !open);
+    });
+  });
+  m.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', close); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', function(){ if (window.innerWidth > 860) close(); });
+})();
+</script>
+
+<script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>
