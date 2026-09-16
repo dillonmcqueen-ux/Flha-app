@@ -24,6 +24,7 @@ import {
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
   Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu, Fuel,
+  RefreshCw,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -1771,6 +1772,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [showWorkerForms, setShowWorkerForms] = useState(false);
+
+  // ── Live refresh ──────────────────────────────────────────────────────
+  // Every list on this screen used to load exactly once, on mount, and
+  // never again. Signing out and back in was the only way to see anything
+  // submitted since — because that's what unmounts and remounts this
+  // component. `refreshKey` is the single signal every loader below keys
+  // off; bumping it re-pulls the dashboard's data in place. It's bumped on
+  // coming back from the worker forms view, on the tab/window regaining
+  // focus, on a slow poll while the tab is visible, and by the Refresh
+  // button in the header.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState(null);
+  // Mirrors lastRefreshAt for the focus/poll throttle, which reads it from
+  // inside a listener registered once — state there would be stale.
+  const lastRefreshAtRef = useRef(0);
+  const refreshNow = () => {
+    lastRefreshAtRef.current = Date.now();
+    setRefreshKey(k => k + 1);
+  };
+  const showWorkerFormsRef = useRef(false);
   const [selectedFlha, setSelectedFlha] = useState(null);
   const [showThisWeekModal, setShowThisWeekModal] = useState(false);
   // "overview" is the landing page every supervisor sees on login — the
@@ -1974,6 +1996,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setSelectedIds(new Set());
   };
 
+  useEffect(() => { showWorkerFormsRef.current = showWorkerForms; }, [showWorkerForms]);
+
   useEffect(() => {
     // Each fetch below used to run one after another — total load time was
     // the SUM of every request's latency. None of these 10 lists actually
@@ -2043,28 +2067,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       setMonthlyActions(ma);
       setCustomDocRecords(cd);
       setSops(ss || []);
-      if (visibleCompaniesRaw.length) setSelectedCompany(visibleCompaniesRaw[0].id);
+      // Keep whatever company is already selected as long as it's still in
+      // the list — a refresh shouldn't yank an admin viewing company #3
+      // back to company #1 just because the data was re-pulled underneath
+      // them. Only fall back to the first company when there's no valid
+      // selection yet (first load).
+      setSelectedCompany(prev =>
+        prev && visibleCompaniesRaw.some(c => c.id === prev)
+          ? prev
+          : (visibleCompaniesRaw.length ? visibleCompaniesRaw[0].id : prev)
+      );
       setLoading(false);
+      setRefreshing(false);
+      setLastRefreshAt(Date.now());
+      lastRefreshAtRef.current = Date.now();
     }
+    setRefreshing(true);
     loadAll();
-  }, [forcedCompanyId, token]);
+  }, [forcedCompanyId, token, refreshKey]);
 
   // Load which document types the admin has active for the selected company,
   // so the whole Dashboard — not just the Equipment tab — only shows tabs
   // for forms this company actually has turned on.
+  const loadDocSettings = async () => {
+    if (!selectedCompany) { setDocSettings([]); return; }
+    try {
+      const res = await fetch("/api/customforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_document_settings", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setDocSettings(data.documents || []);
+    } catch (e) { /* default to shown if the check fails */ }
+  };
+
   useEffect(() => {
-    async function loadDocSettings() {
-      if (!selectedCompany) { setDocSettings([]); return; }
-      try {
-        const res = await fetch("/api/customforms", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "get_document_settings", token, companyId: selectedCompany }),
-        });
-        const data = await res.json();
-        if (res.ok) setDocSettings(data.documents || []);
-      } catch (e) { /* default to shown if the check fails */ }
-    }
     loadDocSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
   const loadMaintenanceStatus = async () => {
@@ -2084,18 +2123,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
-  useEffect(() => {
+  const loadCertAlerts = async () => {
     if (!selectedCompany || !token) { setCertAlerts({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] }); return; }
-    (async () => {
-      try {
-        const res = await fetch("/api/certifications", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "certification_summary", token, companyId: selectedCompany }),
-        });
-        const data = await res.json();
-        if (res.ok) setCertAlerts(data);
-      } catch (e) { /* leave alerts as-is if the request fails */ }
-    })();
+    try {
+      const res = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "certification_summary", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setCertAlerts(data);
+    } catch (e) { /* leave alerts as-is if the request fails */ }
+  };
+
+  useEffect(() => {
+    loadCertAlerts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
   // Fuel logs (docs/scope-fuel-log-tracker.md Phase 2) — loaded per company
@@ -2105,23 +2147,30 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [fuelLogs, setFuelLogs] = useState([]);
   const [loadingFuelLogs, setLoadingFuelLogs] = useState(false);
   const [fuelSiteNames, setFuelSiteNames] = useState({});
+  // `silent` on this and every loader below: a background refresh swaps the
+  // data underneath the list that's already on screen instead of replacing
+  // it with a "Loading..." placeholder. Only a first load (or a company /
+  // tab change, where what's on screen is about to be wrong anyway) shows
+  // the spinner.
+  const loadFuelLogs = async ({ silent = false } = {}) => {
+    if (!selectedCompany) return;
+    if (!silent) setLoadingFuelLogs(true);
+    try {
+      const [fuelRes, siteRes] = await Promise.all([
+        fetch("/api/fuellogs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list", token }) }),
+        fetch("/api/companydata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_sites", token, companyId: selectedCompany }) }),
+      ]);
+      const fuelData = await fuelRes.json();
+      if (fuelRes.ok) setFuelLogs((fuelData.records || []).filter(r => r.company_id === selectedCompany));
+      const siteData = await siteRes.json();
+      if (siteRes.ok) setFuelSiteNames(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
+    } catch (e) { /* leave list as-is if the request fails */ }
+    setLoadingFuelLogs(false);
+  };
+
   useEffect(() => {
-    async function loadFuelLogs() {
-      if (!selectedCompany) return;
-      setLoadingFuelLogs(true);
-      try {
-        const [fuelRes, siteRes] = await Promise.all([
-          fetch("/api/fuellogs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list", token }) }),
-          fetch("/api/companydata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_sites", token, companyId: selectedCompany }) }),
-        ]);
-        const fuelData = await fuelRes.json();
-        if (fuelRes.ok) setFuelLogs((fuelData.records || []).filter(r => r.company_id === selectedCompany));
-        const siteData = await siteRes.json();
-        if (siteRes.ok) setFuelSiteNames(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
-      } catch (e) { /* leave list as-is if the request fails */ }
-      setLoadingFuelLogs(false);
-    }
     loadFuelLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
   const submitLogService = async (eq) => {
@@ -2239,21 +2288,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   }, [docSettings, selectedCompany]);
 
   // Load equipment reports for the selected company whenever that tab is opened or the company changes.
+  const loadEquipmentReports = async ({ silent = false } = {}) => {
+    if (activeTab !== "equipment" || !selectedCompany) return;
+    if (!silent) setLoadingEquipmentReports(true);
+    try {
+      const res = await fetch("/api/equipmentreports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_reports", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setEquipmentReports(data.reports || []);
+    } catch (e) { /* leave list as-is if the request fails */ }
+    setLoadingEquipmentReports(false);
+  };
+
   useEffect(() => {
-    async function loadEquipmentReports() {
-      if (activeTab !== "equipment" || !selectedCompany) return;
-      setLoadingEquipmentReports(true);
-      try {
-        const res = await fetch("/api/equipmentreports", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_reports", token, companyId: selectedCompany }),
-        });
-        const data = await res.json();
-        if (res.ok) setEquipmentReports(data.reports || []);
-      } catch (e) { /* leave list as-is if the request fails */ }
-      setLoadingEquipmentReports(false);
-    }
     loadEquipmentReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
 
   const openEquipmentReport = async (report) => {
@@ -2331,9 +2382,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   // ── Time Clock: my own status ────────────────────────────────────────
-  const loadMyTimeStatus = async () => {
+  const loadMyTimeStatus = async ({ silent = false } = {}) => {
     if (!userId) { setMyTimeLoading(false); return; }
-    setMyTimeLoading(true);
+    if (!silent) setMyTimeLoading(true);
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2377,9 +2428,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   // ── Time Clock: everyone's entries (supervisor/admin) ────────────────
-  const loadTimeClockEntries = async () => {
+  const loadTimeClockEntries = async ({ silent = false } = {}) => {
     if (!selectedCompany) return;
-    setLoadingTimeClockEntries(true);
+    if (!silent) setLoadingTimeClockEntries(true);
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2402,9 +2453,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   }, [activeTab, selectedCompany, token]);
 
   // ── Roster: view the roster and reset an individual PIN ───────────────
-  const loadRosterList = async () => {
+  const loadRosterList = async ({ silent = false } = {}) => {
     if (!selectedCompany) return;
-    setLoadingRosterList(true);
+    if (!silent) setLoadingRosterList(true);
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2486,9 +2537,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setOnboardingEmployee(false);
   };
 
-  const loadEmployeeDirectory = async () => {
+  const loadEmployeeDirectory = async ({ silent = false } = {}) => {
     if (!selectedCompany) return;
-    setLoadingDirectory(true);
+    if (!silent) setLoadingDirectory(true);
     try {
       const res = await fetch("/api/certifications", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2584,9 +2635,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   // ── Time Clock: weekly PDF reports ───────────────────────────────────
-  const loadTimeClockReports = async () => {
+  const loadTimeClockReports = async ({ silent = false } = {}) => {
     if (!selectedCompany) return;
-    setLoadingTimeClockReports(true);
+    if (!silent) setLoadingTimeClockReports(true);
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2603,6 +2654,69 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     loadTimeClockReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
+
+  // ── What a refresh actually re-pulls ──────────────────────────────────
+  // The big Promise.all above (FLHAs, inspections, toolbox talks, near
+  // misses, incidents, daily reports, monthly records, custom docs, SOPs)
+  // already re-runs on `refreshKey` through its own dependency array. This
+  // covers everything else — the per-company and per-tab loaders — so a
+  // refresh updates whatever tab is actually open, not just the Overview
+  // numbers. All silent: the lists on screen stay put until new data lands.
+  useEffect(() => {
+    if (refreshKey === 0) return; // first mount — every loader above just ran
+    loadDocSettings();
+    loadCertAlerts();
+    loadMaintenanceStatus();
+    loadFuelLogs({ silent: true });
+    loadEmployeeDirectory({ silent: true });
+    if (activeTab === "equipment") loadEquipmentReports({ silent: true });
+    if (activeTab === "roster") loadRosterList({ silent: true });
+    if (activeTab === "timeclock") {
+      loadTimeClockEntries({ silent: true });
+      loadTimeClockReports({ silent: true });
+      if (userId) loadMyTimeStatus({ silent: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  // ── When a refresh fires ──────────────────────────────────────────────
+  // Coming back to the app is the case that actually bit: submit a form on
+  // your phone, switch back to the dashboard tab, and the lists were from
+  // whenever you last signed in. `focus` covers desktop tab/window
+  // switching, `visibilitychange` covers a phone screen waking up or the
+  // browser being brought back to the foreground, and the poll covers a
+  // dashboard left open on a screen nobody touches — a worker's submission
+  // shows up there on its own. Throttled so the two events plus the poll
+  // can't stack up into a burst of duplicate loads, and never fired while
+  // the tab is hidden (no point spending a phone's battery or a serverless
+  // invocation on a screen nobody is looking at).
+  useEffect(() => {
+    // Short on purpose: this exists to stop `focus` and
+    // `visibilitychange` (which fire within milliseconds of each other on
+    // the same switch-back) from firing two identical loads, not to make
+    // anyone wait. Coming back 10 seconds after submitting a form still
+    // re-pulls.
+    const THROTTLE_MS = 5000;
+    const POLL_MS = 60000;
+    const maybeRefresh = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      // Don't re-pull underneath a supervisor who's mid-form — this
+      // component is still mounted behind the worker forms view, and the
+      // refresh on the way back out covers it anyway.
+      if (showWorkerFormsRef.current) return;
+      if (Date.now() - lastRefreshAtRef.current < THROTTLE_MS) return;
+      refreshNow();
+    };
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", maybeRefresh);
+    const poll = setInterval(maybeRefresh, POLL_MS);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", maybeRefresh);
+      clearInterval(poll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openTimeClockReport = async (report) => {
     setTimeClockPdfError("");
@@ -3706,7 +3820,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         userId={userId}
         token={token}
         backLabel="← Back to Dashboard"
-        onLogout={() => setShowWorkerForms(false)}
+        onLogout={() => {
+          // A supervisor who just filled out a form here is the single most
+          // likely person to want fresh data the moment they land back on
+          // the dashboard — their own submission should already be in the
+          // list, not waiting on the next poll.
+          setShowWorkerForms(false);
+          refreshNow();
+        }}
       />
     );
   }
@@ -3714,6 +3835,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   return (
     <div style={styles.wrap}>
       <style>{`
+        @keyframes fora-spin-kf { to { transform: rotate(360deg); } }
+        .fora-spin { animation: fora-spin-kf 900ms linear infinite; }
+        @media (prefers-reduced-motion: reduce) { .fora-spin { animation: none; } }
+        @media (max-width: 560px) { .fora-refresh-label { display: none; } }
         @media (max-width: 880px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }
         .fora-mobile-menu-btn { display: none; }
         .fora-sidebar-backdrop { display: none; }
@@ -3766,15 +3891,36 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             color: C.text.muted, border: `1px solid ${C.line}`, borderRadius: RAD.pill, padding: "3px 10px",
           }}>{isAdmin ? "Admin" : "Supervisor"}</span>
         </div>
-        {onLogout && (
-          <button onClick={onLogout} style={{
-            display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
-            border: `1px solid ${C.line}`, background: "transparent", padding: "7px 14px",
-            borderRadius: RAD.md, cursor: "pointer", fontWeight: 600,
-          }}>
-            <LogOut size={14} /> {backLabel}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Manual refresh — the automatic ones (returning to the tab, the
+              poll, coming back from the worker forms) cover most of it, but
+              a supervisor waiting on a specific submission wants a button
+              they can press rather than a wait they can't see. */}
+          <button
+            onClick={refreshNow}
+            disabled={refreshing}
+            title={lastRefreshAt ? `Last updated ${new Date(lastRefreshAt).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}` : "Refresh"}
+            aria-label="Refresh dashboard data"
+            style={{
+              display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
+              border: `1px solid ${C.line}`, background: "transparent", padding: "7px 12px",
+              borderRadius: RAD.md, cursor: refreshing ? "default" : "pointer", fontWeight: 600,
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            <RefreshCw size={14} className={refreshing ? "fora-spin" : undefined} />
+            <span className="fora-refresh-label">{refreshing ? "Refreshing" : "Refresh"}</span>
           </button>
-        )}
+          {onLogout && (
+            <button onClick={onLogout} style={{
+              display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
+              border: `1px solid ${C.line}`, background: "transparent", padding: "7px 14px",
+              borderRadius: RAD.md, cursor: "pointer", fontWeight: 600,
+            }}>
+              <LogOut size={14} /> {backLabel}
+            </button>
+          )}
+        </div>
       </header>
 
       <div style={{ display: "flex", alignItems: "flex-start" }}>

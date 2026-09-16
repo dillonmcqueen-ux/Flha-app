@@ -118,9 +118,9 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
       });
   }, [token, companyId]);
 
-  function loadDay() {
+  function loadDay({ silent = false } = {}) {
     if (!stationId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     fetch("/api/gatehouse", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "list_transactions", token, companyId, stationId, businessDate }),
@@ -146,6 +146,33 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   }
 
   useEffect(() => { loadDay(); loadReconciliation(); setSendStatus(""); }, [stationId, businessDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The day's transactions used to load once per station/date change and
+  // never again, so a sale rung up at the booth after this screen was
+  // opened didn't appear until the page was reloaded. Re-pull when the tab
+  // comes back to the foreground, and on a slow poll while it's visible —
+  // silently, so the table on screen isn't swapped for a loading state
+  // every minute. Throttled so the events and the poll can't stack.
+  useEffect(() => {
+    const THROTTLE_MS = 5000; // just enough to de-dupe focus + visibilitychange firing together
+    const POLL_MS = 60000;
+    let lastAt = Date.now();
+    const maybeRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastAt < THROTTLE_MS) return;
+      lastAt = Date.now();
+      loadDay({ silent: true });
+      loadReconciliation();
+    };
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", maybeRefresh);
+    const poll = setInterval(maybeRefresh, POLL_MS);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", maybeRefresh);
+      clearInterval(poll);
+    };
+  }, [stationId, businessDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cashTotal = transactions.filter((t) => !t.redirected && t.payment_method === "cash").reduce((s, t) => s + Number(t.amount || 0), 0);
   const chequeTotal = transactions.filter((t) => !t.redirected && t.payment_method === "cheque").reduce((s, t) => s + Number(t.amount || 0), 0);

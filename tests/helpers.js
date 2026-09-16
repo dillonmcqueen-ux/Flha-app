@@ -273,3 +273,73 @@ export async function signCanvas(page) {
   await page.mouse.move(box.x + box.width - 20, box.y + box.height / 2, { steps: 5 });
   await page.mouse.up();
 }
+
+// ── Supervisor dashboard ──────────────────────────────────────────────────
+// src/Dashboard.jsx pulls from a dozen endpoints on load. This stubs all of
+// them so the dashboard renders offline, and hands back a mutable `state`
+// the test can change mid-session to stand in for "a worker submitted
+// something while you were looking at this screen".
+export function mockSupervisorApis(page, { companyId = 'test-company-id', companyName = 'Test Co' } = {}) {
+  const state = { flhas: [], companyId, companyName };
+
+  const json = (route, payload) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(payload),
+  });
+
+  page.route('**/api/login', async route => {
+    const body = route.request().postDataJSON();
+    await json(route, {
+      session: { role: body.role, companyId, companyName, userName: 'Sam Supervisor', userId: null },
+      token: 'test-token',
+    });
+  });
+
+  page.route('**/api/companydata', async route => {
+    const { action } = route.request().postDataJSON();
+    if (action === 'list_companies_brief') return json(route, { companies: [{ id: companyId, name: companyName, roster_enabled: false }] });
+    if (action === 'list_sops') return json(route, { sops: [] });
+    if (action === 'list_sites') return json(route, { sites: [] });
+    if (action === 'list_time_entries') return json(route, { roster: [], entries: [], weekStart: '2026-01-01', weekEnd: '2026-01-07' });
+    if (action === 'list_time_reports') return json(route, { reports: [] });
+    if (action === 'my_time_status') return json(route, { open: null, recent: [] });
+    if (action === 'list_roster') return json(route, { members: [] });
+    return json(route, {});
+  });
+
+  page.route('**/api/flhas', async route => json(route, { flhas: state.flhas }));
+  page.route('**/api/reports', async route => json(route, { records: [] }));
+  page.route('**/api/logs', async route => json(route, { records: [] }));
+  page.route('**/api/monthly', async route => json(route, { records: [], actions: [] }));
+  page.route('**/api/customforms', async route => {
+    const { action } = route.request().postDataJSON();
+    if (action === 'get_worker_documents') return json(route, { builtinActive: {}, customForms: [] });
+    if (action === 'get_document_settings') return json(route, { documents: [] });
+    return json(route, { records: [] });
+  });
+  page.route('**/api/certifications', async route => {
+    const { action } = route.request().postDataJSON();
+    if (action === 'list_employee_directory') return json(route, { employees: [] });
+    return json(route, { expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
+  });
+  page.route('**/api/maintenance', async route => json(route, { equipment: [] }));
+  page.route('**/api/fuellogs', async route => json(route, { records: [] }));
+  page.route('**/api/equipmentreports', async route => json(route, { reports: [] }));
+
+  return state;
+}
+
+export function flhaFixture({ id = 'flha-new', workerName = 'Jamie Worker', site = 'Test Site', companyId = 'test-company-id' } = {}) {
+  return {
+    id, company_id: companyId, worker_name: workerName, job_site: site,
+    created_at: new Date().toISOString(), status: 'complete', pdf_url: null,
+    hazards_json: { taskSummary: 'Trenching near a roadway.', hazards: [] },
+  };
+}
+
+export async function loginAsSupervisor(page) {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Supervisor \/ Safety/ }).click();
+  await page.getByPlaceholder('Company code').fill('TESTCODE');
+  await page.getByRole('button', { name: /^Continue/ }).click();
+  await expect(page.getByText(/Welcome back/)).toBeVisible();
+}
