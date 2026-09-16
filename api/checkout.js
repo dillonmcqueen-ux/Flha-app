@@ -167,7 +167,19 @@ export default async function handler(req, res) {
     res.setHeader('Location', session.url);
     return res.status(303).end();
   } catch (err) {
-    console.error('Checkout session creation failed:', err.message);
+    // err.type and err.param are what make a rejected payload diagnosable
+    // from the Vercel logs alone. A StripeInvalidRequestError names the
+    // offending parameter; without it, a payload Stripe will not accept is
+    // indistinguishable from a network blip, since the buyer sees the same
+    // generic bounce either way. The setup fee shipped in a parameter
+    // Checkout does not have, and this is the line that would have said so.
+    console.error(
+      'Checkout session creation failed:',
+      JSON.stringify({
+        type: err.type, code: err.code, param: err.param,
+        message: err.message, tier, modules,
+      })
+    );
     return bounce(res, 'Could not start checkout. Please email us and we will sort it out.');
   }
 }
