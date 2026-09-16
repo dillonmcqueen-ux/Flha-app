@@ -50,10 +50,14 @@ async function syncSubscriptionToCompany(subscription) {
   if (SUSPEND_STATUSES.has(status)) updates.suspended = true;
   else if (RESTORE_STATUSES.has(status)) updates.suspended = false;
 
-  await supabaseAdmin
+  // As with the staging write below: supabase-js reports a database failure
+  // as { error } rather than throwing, so this has to be checked explicitly
+  // or a failed sync silently reports success and Stripe never retries it.
+  const { error } = await supabaseAdmin
     .from('companies')
     .update(updates)
     .eq('stripe_customer_id', subscription.customer);
+  if (error) throw new Error(`companies subscription sync failed: ${error.message}`);
 }
 
 // Whether a delivery should be processed, skipped as a genuine duplicate,
@@ -138,7 +142,13 @@ export default async function handler(req, res) {
         ? rawModules.split(',').map(m => m.trim()).filter(Boolean)
         : null;
 
-      await supabaseAdmin.from('stripe_checkouts').upsert({
+      // supabase-js RESOLVES on a database error, it does not throw: the
+      // failure arrives as { error } on the result. Ignoring it here meant a
+      // failed staging write still fell through to a 200 and a processed_at
+      // stamp, so Stripe never retried and the purchase was lost. Throwing
+      // is what routes it into the catch below, which is what leaves the
+      // claim unfinished for the retry to pick up.
+      const { error: stageErr } = await supabaseAdmin.from('stripe_checkouts').upsert({
         session_id: session.id,
         customer_id: session.customer || null,
         subscription_id: session.subscription || null,
@@ -146,6 +156,7 @@ export default async function handler(req, res) {
         modules,
         email: session.customer_details?.email || null,
       });
+      if (stageErr) throw new Error(`stripe_checkouts upsert failed: ${stageErr.message}`);
     } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
       await syncSubscriptionToCompany(event.data.object);
     }
