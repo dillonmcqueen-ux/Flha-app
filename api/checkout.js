@@ -135,16 +135,17 @@ export default async function handler(req, res) {
   }
 
   const { monthly, setup } = quote(tier, modules);
-  const { recurring, invoiceItems } = buildCheckoutLineItems(tier, modules);
+  const { lineItems } = buildCheckoutLineItems(tier, modules);
   const origin = appOrigin();
 
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      line_items: recurring,
-      // One-time setup fee on the first invoice only, never recurring.
+      // Recurring lines plus the one-time setup fee, which rides in
+      // line_items as a non-recurring price. Checkout has no
+      // add_invoice_items parameter; see server-lib/pricing.js.
+      line_items: lineItems,
       subscription_data: {
-        add_invoice_items: invoiceItems,
         metadata: { tier, modules: modules.join(',') },
       },
       // Read back by api/stripe-webhook.js on checkout.session.completed and

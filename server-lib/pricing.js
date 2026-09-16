@@ -162,12 +162,20 @@ function withSurcharge(dollars) {
   return Math.round(dollars * 100 * (1 + CARD_SURCHARGE_RATE));
 }
 
-// Builds the Checkout Session payload. Recurring lines (base + each module)
-// go in line_items; the one-time setup fee goes in add_invoice_items so it
-// lands on the first invoice only and never recurs. Stripe anchors the
-// billing cycle to the moment the subscription is created, which is the
-// "monthly from sign up date" behaviour we want, so no billing_cycle_anchor
-// is set.
+// Builds the Checkout Session line_items: the recurring lines (base + each
+// module) followed by the one-time setup fee.
+//
+// The setup fee is a line item with no `recurring` key, NOT
+// subscription_data.add_invoice_items. Checkout Sessions have no
+// add_invoice_items parameter at all, and Stripe rejects unknown parameters
+// with a 400, so sending it there fails the whole call. Mixing a
+// non-recurring line item into a mode:subscription session is Stripe's
+// documented way to charge a setup fee: the one-time line lands on the first
+// invoice and never recurs, which is the behaviour we want.
+//
+// Stripe anchors the billing cycle to the moment the subscription is created,
+// which is the "monthly from sign up date" behaviour we want, so no
+// billing_cycle_anchor is set.
 export function buildCheckoutLineItems(tier, modules) {
   const recurring = [
     {
@@ -196,20 +204,21 @@ export function buildCheckoutLineItems(tier, modules) {
     })),
   ];
 
-  const invoiceItems = [
-    {
-      price_data: {
-        currency: CURRENCY,
-        unit_amount: withSurcharge(SETUP[tier]),
-        product_data: {
-          name: 'One-time setup fee',
-          description: 'Building your account from your SOPs, equipment list and roster. Charged once. Includes the 3% card processing fee.',
-        },
+  // No `recurring` key: that is what makes this a one-time charge on the
+  // first invoice rather than a monthly line.
+  const setupFee = {
+    quantity: 1,
+    price_data: {
+      currency: CURRENCY,
+      unit_amount: withSurcharge(SETUP[tier]),
+      product_data: {
+        name: 'One-time setup fee',
+        description: 'Building your account from your SOPs, equipment list and roster. Charged once. Includes the 3% card processing fee.',
       },
     },
-  ];
+  };
 
-  return { recurring, invoiceItems };
+  return { lineItems: [...recurring, setupFee] };
 }
 
 // The company_document_settings rows to write when a purchased request is
