@@ -56,6 +56,22 @@ async function syncSubscriptionToCompany(subscription) {
     .eq('stripe_customer_id', subscription.customer);
 }
 
+// Whether a delivery should be processed, skipped as a genuine duplicate,
+// or failed. Split out from the handler so the decision is testable without
+// a database: the bug this replaced lived entirely here, and was invisible
+// to every test because it only shows up on the second delivery of an event
+// whose first delivery failed.
+//
+//   claimErr null              -> first delivery, process
+//   claimErr 23505, processed  -> finished already, genuine duplicate
+//   claimErr 23505, unfinished -> earlier attempt died, process again
+//   claimErr anything else     -> could not claim, fail so Stripe retries
+export function claimOutcome(claimErr, prior) {
+  if (!claimErr) return 'process';
+  if (claimErr.code !== '23505') return 'error';
+  return prior?.processed_at ? 'duplicate' : 'process';
+}
+
 export default async function handler(req, res) {
   let event;
   try {
@@ -68,13 +84,45 @@ export default async function handler(req, res) {
 
   // Idempotency: Stripe retries on timeout/non-2xx, and can occasionally
   // deliver the same event twice even on success.
-  const { error: dupeCheckErr } = await supabaseAdmin
+  //
+  // The row is a CLAIM, not a record of completion. Those have to be
+  // separate: this used to insert the id and then treat any later delivery
+  // of it as a duplicate, so an attempt that claimed the event and then
+  // failed could never be retried. Stripe's retry was told the event was
+  // already handled, and the customer's purchase was never staged. A
+  // timeout was the worst case, since there is no code still running to
+  // undo the claim.
+  //
+  // So: claim first, stamp processed_at only on success, and let a retry
+  // through when it finds an unfinished claim. Two concurrent deliveries
+  // can both get through this way, which is fine because both handlers are
+  // idempotent (the stripe_checkouts upsert is keyed on session_id, and the
+  // company sync is a plain update).
+  const { error: claimErr } = await supabaseAdmin
     .from('stripe_webhook_events')
     .insert({ id: event.id, type: event.type });
-  if (dupeCheckErr) {
-    if (dupeCheckErr.code === '23505') return res.status(200).json({ ok: true, duplicate: true });
+
+  let prior = null;
+  if (claimErr?.code === '23505') {
+    // Already claimed. Finished, or abandoned by a failed earlier attempt?
+    const { data, error: priorErr } = await supabaseAdmin
+      .from('stripe_webhook_events')
+      .select('processed_at')
+      .eq('id', event.id)
+      .maybeSingle();
+    if (priorErr) {
+      console.error('Could not read prior webhook event:', event.id, priorErr.message);
+      return res.status(500).json({ error: 'Could not record event.' });
+    }
+    prior = data;
+  }
+
+  const outcome = claimOutcome(claimErr, prior);
+  if (outcome === 'error') {
+    console.error('Could not claim webhook event:', event.id, claimErr.message);
     return res.status(500).json({ error: 'Could not record event.' });
   }
+  if (outcome === 'duplicate') return res.status(200).json({ ok: true, duplicate: true });
 
   try {
     if (event.type === 'checkout.session.completed') {
@@ -102,7 +150,24 @@ export default async function handler(req, res) {
       await syncSubscriptionToCompany(event.data.object);
     }
   } catch (e) {
+    // Deliberately no processed_at stamp: the claim stays unfinished so
+    // Stripe's retry reprocesses rather than being told it is a duplicate.
+    // The error was previously swallowed unlogged, which made a permanently
+    // lost purchase invisible as well as permanent.
+    console.error('Webhook handling failed:', event.id, event.type, e.message);
     return res.status(500).json({ error: 'Webhook handling failed.' });
+  }
+
+  // Only now is the event genuinely handled.
+  const { error: stampErr } = await supabaseAdmin
+    .from('stripe_webhook_events')
+    .update({ processed_at: new Date().toISOString() })
+    .eq('id', event.id);
+  if (stampErr) {
+    // The work is done and committed; failing here only risks Stripe
+    // redelivering and us redoing idempotent work. Not worth a 500, which
+    // would guarantee that redelivery rather than merely risk it.
+    console.error('Could not stamp webhook event processed:', event.id, stampErr.message);
   }
 
   return res.status(200).json({ ok: true });
