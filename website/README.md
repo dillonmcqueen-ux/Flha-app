@@ -5,15 +5,55 @@ app in this repo (`src/`, `api/`). No build step, no dependencies.
 
 ## Pages
 
-- `index.html`: Home. Introduces FORA and presents the Big 5 and Custom
-  Builds as equally weighted offerings, plus onboarding, "why FORA," and an
-  About section.
-- `big-five.html`: The Big 5 in full: all five standard documents, how each
-  one works, and the Get Started / pricing section.
-- `custom-builds.html`: Custom Builds in full: example builds, how the
-  process works, affordability messaging, and a quote CTA.
-- `privacy.html` / `terms.html`: Legal pages.
+Five marketing pages, each answering the next question a visitor has.
+
+- `index.html`: Home. The all-in-one pitch, the cost of the usual
+  multi-vendor stack versus one FORA plan, every built-in feature at a
+  glance, the Brain, and the founder.
+- `features.html`: Everything that is built, in detail. The interactive
+  FLHA demo, all ten built-in document types, the supervisor dashboard,
+  the Brain in full (`#brain` anchor), the platform underneath, and the
+  security model.
+- `custom-builds.html`: What a custom build is versus a form builder, six
+  niche worked examples, how scoping actually happens, and pricing-by-scope.
+- `pricing.html`: The platform base fee, the module menu, the interactive
+  calculator, the anti-enterprise statement, the cancel-any-time /
+  seasonal-pause terms, and the market comparison tables. There is no plan
+  and no discount: a company pays the base fee and adds only the modules it
+  runs, each at its listed price.
+
+  **The prices here MIRROR `server-lib/pricing.js` in the app.** This is a
+  separate Vercel project and cannot import that module, so the two have to
+  be changed together: the `BASE` and `SETUP` constants at the top of the
+  calculator script, the `data-s` / `data-l` attributes on each module
+  checkbox, and the `.price-card` figures. A mismatch shows a wrong estimate
+  but can never produce a wrong charge, because what a customer is actually
+  billed is built server-side from the module keys in the checkout URL.
+
+  The Checkout button links to `api/checkout.js` on the app
+  (`https://portal.forafieldsolutions.com/api/checkout?tier=...&modules=...`),
+  which creates the Stripe session and redirects. That host is hardcoded in
+  two places: the no-JS fallback `href` and the `CHECKOUT` constant in the
+  script. A module with `data-requires` (currently only Preventative
+  Maintenance, which needs Equipment Inspections) is disabled and greyed
+  until its dependency is ticked, and unticked if the dependency is removed
+  underneath it, so nobody can build a selection the server will reject.
+- `about.html`: The founder page.
+- `privacy.html` / `terms.html`: Legal pages (self-contained styling; gated
+  by the `legal-revision-date-updater` agent on substantive changes).
 - `style.css`: Shared styles for every page above.
+
+The four marketing pages share a category nav with dropdowns (Platform,
+Custom Builds, Pricing, Company). It is generated markup duplicated into
+each page, since this site has no build step, so a nav change means editing
+every page. Sub-items anchor to section ids listed in `design.md`.
+- `icons.svg`: The single line-icon set. No emoji-as-icon anywhere.
+- `demo.js` / `demo-data.js`: The interactive FLHA demo on `features.html`.
+  Pre-authored scenarios, no network requests.
+
+`what-is-fora.html`, `big-five.html` and `the-brain.html` were absorbed into
+`index.html` and `features.html` in the five-page rebuild. Footer links on
+the legal pages were updated to match.
 
 ## Preview locally
 
