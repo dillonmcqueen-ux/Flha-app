@@ -2684,9 +2684,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // your phone, switch back to the dashboard tab, and the lists were from
   // whenever you last signed in. `focus` covers desktop tab/window
   // switching, `visibilitychange` covers a phone screen waking up or the
-  // browser being brought back to the foreground, and the poll covers a
-  // dashboard left open on a screen nobody touches — a worker's submission
-  // shows up there on its own. Throttled so the two events plus the poll
+  // browser being brought back to the foreground, and a slow 5-minute poll
+  // covers a dashboard left open on a screen nobody touches — a worker's
+  // submission shows up there on its own. Throttled so the two events plus the poll
   // can't stack up into a burst of duplicate loads, and never fired while
   // the tab is hidden (no point spending a phone's battery or a serverless
   // invocation on a screen nobody is looking at).
@@ -2697,7 +2697,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // anyone wait. Coming back 10 seconds after submitting a form still
     // re-pulls.
     const THROTTLE_MS = 5000;
-    const POLL_MS = 60000;
+    // Deliberately slow. The focus/visibility triggers are what make this
+    // feel live, and they cost nothing extra — someone switching back to
+    // the tab was going to load data anyway. The poll only exists for a
+    // dashboard nobody is touching, where a 5-minute-old number is fine
+    // and a per-minute round of API calls against every open dashboard is
+    // a bill for nothing.
+    const POLL_MS = 300000;
     const maybeRefresh = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       // Don't re-pull underneath a supervisor who's mid-form — this

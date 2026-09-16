@@ -150,12 +150,12 @@ export default function GatehouseDashboard({ companyId, companyName, userName, r
   // The day's transactions used to load once per station/date change and
   // never again, so a sale rung up at the booth after this screen was
   // opened didn't appear until the page was reloaded. Re-pull when the tab
-  // comes back to the foreground, and on a slow poll while it's visible —
+  // comes back to the foreground, and on a slow 5-minute poll while it's visible —
   // silently, so the table on screen isn't swapped for a loading state
   // every minute. Throttled so the events and the poll can't stack.
   useEffect(() => {
     const THROTTLE_MS = 5000; // just enough to de-dupe focus + visibilitychange firing together
-    const POLL_MS = 60000;
+    const POLL_MS = 300000; // slow on purpose — the focus/visibility triggers do the real work, this is just a backstop
     let lastAt = Date.now();
     const maybeRefresh = () => {
       if (document.visibilityState !== "visible") return;
