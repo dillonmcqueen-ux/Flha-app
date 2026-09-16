@@ -26,6 +26,7 @@ tool rather than reviewing it inline.
 | `website/pricing.html`, `terms.html`, `index.html`, or `custom-builds.html` when pricing, plans, or Stripe links are involved | `pricing-legal-consistency-reviewer` | This exact drift (displayed price ↔ actual Stripe amount ↔ fee disclosure ↔ Terms language) took 5 separate follow-up PRs to fully resolve once (PRs #2–#6) — see `.claude/agents/pricing-legal-consistency-reviewer.md`. |
 | Any wording change to `website/*.html` | `admin-access-copy-guard` | Customers only ever have a worker or supervisor login — there is no customer "admin" role, and the Admin Panel (`AdminPanel.jsx`) is founder-only, gated by a single global `ADMIN_CODE`. The site previously claimed clients could access "the Admin Panel" and self-serve the Brain profile; both were false. This checklist exists so that mistake can never silently reappear — see `.claude/agents/admin-access-copy-guard.md`. **Always run this one, even when another row above also matches the same diff.** |
 | Substantive text changes to `website/privacy.html` or `website/terms.html` | `legal-revision-date-updater` | The "Last updated" date on both pages was set once at creation (July 28, 2026) and then silently went stale through three later commits that changed real legal text without bumping it. Unlike the other rows, this agent edits — it bumps the "Last updated" date on whichever of the two files actually changed (never "Effective date", never the legal wording itself). `src/Onboarding.jsx`/`src/Login.jsx` link straight to the live pages rather than embedding a copy, so there's nothing else to update — see `.claude/agents/legal-revision-date-updater.md`. |
+| A new feature, table, document key, pricing module, or any column that joins two features (`equipment_id`, `site_id`/`site`/`job_site`, `roster_id`, `reading_unit`, `source_type`, `answer_id`, `document_key`) | `interaction-map-keeper` | FORA is sold as products that feed each other, and a missing link between them fails *silently* — no error, no failing test, the customer just never gets what they paid for. This agent owns `docs/feature-interaction-map.md` and checks that a change is actually reachable from the features it should connect to. It edits only the map, never application code — see `.claude/agents/interaction-map-keeper.md`. |
 
 ### How to delegate
 
@@ -58,6 +59,46 @@ tool rather than reviewing it inline.
    it needs — default to read-only (`Read, Grep, Glob`) unless it
    genuinely needs to edit.
 3. Add a row to the table above.
+
+## Feature interaction mapping
+
+Separate from the per-diff reviewers above, four agents keep track of **what
+FORA has and how every piece connects to every other piece** — the thing
+that makes FORA more than a template builder.
+
+| Agent | Scope | Edits? |
+|---|---|---|
+| `interaction-map-keeper` | Owns `docs/feature-interaction-map.md`. Places each change on the map, runs the mechanical checks, keeps the matrix current, coordinates the other three. | Map only |
+| `interaction-break-hunter` | Hunts breaks: a producer nothing consumes, a consumer reading half its sources, two features disagreeing on a join key, a feature gated differently from its neighbours. | No |
+| `interaction-opportunity-scout` | Proposes new connections worth building, capped at three per sweep. | No |
+| `interaction-fix-builder` | Builds one approved, numbered break. Branch → draft PR. | Yes, on approval |
+
+**`docs/feature-interaction-map.md` is the artifact.** Read it before adding
+a feature and before assuming two features already talk. Every claim in it
+carries a `file:line` so it can be re-verified rather than trusted — a map
+entry nobody can check is worse than none, because the next session trusts
+it. It lists the product surfaces, the join keys that nearly every link
+comes down to, the interaction matrix, the verified breaks, and a
+"deliberate non-connections" list that exists to stop false positives
+(Gatehouse is a separate product; Equipment Inspection genuinely makes no AI
+call; `equipment_id` is null for free-text machines on purpose).
+
+**Hard rule: no application-code change without Dillon's explicit yes on a
+specific numbered break.** These agents find and explain; he decides;
+`interaction-fix-builder` builds, and only the one break it was handed. A
+break that has been silent for months can wait a day for approval. Nothing
+gets reported or proposed on a link that wasn't read in the code —
+comments and CLAUDE.md are leads, not evidence.
+
+The seed sweep (2026-09-16, commit `0bd289c`) mapped 18 surfaces and 7 join
+keys and found 8 verified breaks. The two worst: `api/maintenance.js`
+computes preventative-maintenance status from inspection readings only and
+never looks at `fuel_logs.hour_reading`, while `api/fuellogs.js` reads both
+— so a company that fuels daily and inspects weekly has a PM clock running
+behind readings FORA already holds; and the Company Brain receives signals
+from only 4 of 9 document types, never seeing equipment-inspection defects,
+which is the most company-specific data the product collects. All 8 are
+awaiting a decision, not being worked.
 
 ## Continuous UI/UX development agents
 
