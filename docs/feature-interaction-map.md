@@ -80,7 +80,7 @@ Hours or kilometres on a machine. Written by inspections
 |---|---|---|
 | `api/fuellogs.js` `get_last_reading` | ✅ `:106` | ✅ `:99` |
 | `api/fuellogs.js` consumption calc | ✅ `:211` | ✅ `:229` |
-| `api/maintenance.js` PM status | ✅ `:129` | ❌ **never** |
+| `api/maintenance.js` PM status | ✅ `:129` | ✅ *(#1, PR #118)* |
 | `api/equipmentreports.js` weekly | ✅ | ❌ |
 
 **This is break #1 below.** Fuel already understands that a reading can come
@@ -139,7 +139,7 @@ Nothing else writes a signal. **This is break #4 below.**
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
 | Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ❌ #4 | ⚠️ label-joined | ❌ #5 | — |
-| Fuel Log | ❌ **#1** | — | ❌ #1 | ❌ #4 | ⚠️ label-joined | — | — |
+| Fuel Log | ✅ *(#1, PR #118)* | — | ❌ #1 | ❌ #4 | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
 | Incident | — | — | — | ✅ `reports:231` | ✅ | ❌ #5 | — |
@@ -162,6 +162,7 @@ Each carries the evidence that proves it and the check that re-confirms it.
 
 ### #1 — Preventative maintenance ignores fuel-log readings
 **Severity: high.** Directly contradicts how the product is sold.
+**Status: fix approved and built — PR #118. Closes when that merges.**
 
 `api/maintenance.js:128-133` builds PM status from the `inspections` table
 alone. `api/fuellogs.js:85-120` (`get_last_reading`) reads **both**
@@ -175,9 +176,16 @@ the maintenance module does not. A company that buys `inspections` +
 PM clock running behind readings FORA already has on file. A service can
 come due and never flag.
 
-*Re-check:* `grep -n "from('fuel_logs')" api/maintenance.js` → expect no
-hits today. Note `maintenance.js:154-157` already handles a
-`unit_mismatch` status, so a fix has somewhere to put a unit disagreement.
+*Re-check:* `grep -c "fuel_logs" api/maintenance.js` → was 0 before the fix.
+`maintenance.js` already had a `unit_mismatch` status, which is where a unit
+disagreement between the two sources lands rather than producing bogus
+arithmetic.
+
+*The fix:* both tables now feed one reducer
+(`latestReadingsByEquipment`), which takes normalized reading points instead
+of raw inspection rows. A company that never bought the fuel module has no
+`fuel_logs` rows, so its status is byte-for-byte unchanged — covered by a
+case in `tests/unit/maintenance-readings.test.js`.
 
 ### #2 — Site is three different columns
 **Severity: high** for analytics, medium for daily use. See the join-key
@@ -185,8 +193,12 @@ table above. Consequences:
 - Per-site breakdowns (TODO.md's "more advanced analytics") can't be built
   across all document types, only the three with `site_id`.
 - A supervisor filtering by site sees an incomplete picture with no warning.
-- Deleting a site (`companydata.js:583`) does not detach the free-text
-  references, because there's nothing to detach.
+- Deleting a site (`companydata.js:582`) just deletes the row. Compare
+  `delete_equipment` (`companydata.js:633`), which explicitly nulls
+  `inspections.equipment_id` first. So a deleted site leaves dangling
+  `site_id` values on `fuel_logs`, `custom_form_records` and monthly
+  inspections — and nothing at all to detach on the free-text side, because
+  those rows never pointed at the site to begin with.
 
 *Re-check:* `grep -rn "site_id\|'site'\|job_site" api/*.js`
 
@@ -284,3 +296,4 @@ Do **not** flag these. They are decisions, not gaps.
 | Date | Commit | Change |
 |---|---|---|
 | 2026-09-16 | `0bd289c` | Map seeded. 18 surfaces, 7 join keys, 8 breaks found and verified. |
+| 2026-09-16 | PR #118 | Break #1 approved and built: `api/maintenance.js` now reads `fuel_logs` readings alongside inspection readings. 7 breaks remain open. |

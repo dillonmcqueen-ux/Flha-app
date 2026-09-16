@@ -5157,7 +5157,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{eq.label}</div>
                           {eq.status !== "not_tracked" && (
                             <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
-                              {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}` : "No readings recorded yet"}
+                              {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}${eq.current.readingSource === "fuel_log" ? " (from a fuel-up)" : ""}` : "No readings recorded yet"}
                               {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
                             </div>
                           )}

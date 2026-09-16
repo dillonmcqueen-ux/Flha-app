@@ -65,7 +65,10 @@ or any column that joins two features — `equipment_id`, `site_id` /
    row with today's date and the commit.
 5. **Report** breaks found. Fixes need approval first (Mode 3).
 
-## Mode 2 — full sweep (recurring)
+## Mode 2 — full sweep (on request)
+
+There is deliberately **no recurring trigger** for this — Dillon invokes it
+when he wants one. Say "run a full interaction sweep" and this is the mode.
 
 1. Re-verify every `✅` in the matrix. A link that worked last month is not
    evidence it works today; open the file and confirm the join.

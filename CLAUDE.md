@@ -73,6 +73,11 @@ that makes FORA more than a template builder.
 | `interaction-opportunity-scout` | Proposes new connections worth building, capped at three per sweep. | No |
 | `interaction-fix-builder` | Builds one approved, numbered break. Branch → draft PR. | Yes, on approval |
 
+**These are diff-triggered, not scheduled.** There is deliberately no
+recurring trigger — the delegation row above fires `interaction-map-keeper`
+when a change touches a feature or a join column, and a full re-verification
+sweep happens when Dillon asks for one ("run a full interaction sweep").
+
 **`docs/feature-interaction-map.md` is the artifact.** Read it before adding
 a feature and before assuming two features already talk. Every claim in it
 carries a `file:line` so it can be re-verified rather than trusted — a map

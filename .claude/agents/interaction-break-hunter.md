@@ -1,6 +1,6 @@
 ---
 name: interaction-break-hunter
-description: Hunts for broken or missing connections between FORA features — a producer nothing consumes, a consumer reading half its sources, two features disagreeing on a join key, a feature gated differently from its neighbours. Use when interaction-map-keeper needs a sweep, or whenever a diff adds a feature or a join column. Read-only — reports findings, does not edit.
+description: Hunts for broken or missing connections between FORA features — a producer nothing consumes, a consumer reading half its sources, two features disagreeing on a join key, a feature gated differently from its neighbours. Use whenever a diff adds a feature or a join column, or when interaction-map-keeper runs a full sweep. Read-only — reports findings, does not edit.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---

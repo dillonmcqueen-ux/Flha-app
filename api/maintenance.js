@@ -67,25 +67,60 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Reduces a set of inspections down to the single most recent reading per
-// equipment_id (posttrip's end_reading if the latest row is a posttrip,
-// otherwise pretrip's start_reading), tie-broken by id when created_at ties.
-function latestReadingsByEquipment(inspections) {
-  const latest = {};
-  for (const insp of inspections) {
-    if (!insp.equipment_id) continue;
-    const current = latest[insp.equipment_id];
-    if (!current || new Date(insp.created_at) > new Date(current.created_at) ||
-        (new Date(insp.created_at).getTime() === new Date(current.created_at).getTime() && insp.id > current.id)) {
-      latest[insp.equipment_id] = insp;
-    }
+// A usage reading is a usage reading regardless of which form captured it.
+// Inspections record one on every pre/post-trip; a fuel-up records one too,
+// and api/fuellogs.js's check_equipment already treats the two as a single
+// shared "last known reading" per machine. Preventative maintenance used to
+// read inspections alone, so a company that fuels daily and inspects weekly
+// had a PM clock running behind readings already on file — a service could
+// come due and never flag. Both tables now feed the same reducer.
+//
+// Normalizes one inspection row to a comparable reading point. A posttrip's
+// end_reading is the machine's state at the end of that trip; anything else
+// uses start_reading.
+export function inspectionReadingPoint(insp) {
+  const raw = insp.trip_type === 'posttrip' ? insp.end_reading : insp.start_reading;
+  return { equipmentId: insp.equipment_id, raw, unit: insp.reading_unit, at: insp.created_at, id: insp.id, source: 'inspection' };
+}
+
+// Same, for a fuel-up. fuel_logs.hour_reading holds hours or kilometres
+// depending on the machine, exactly as inspections' readings do.
+export function fuelReadingPoint(log) {
+  return { equipmentId: log.equipment_id, raw: log.hour_reading, unit: log.reading_unit, at: log.created_at, id: log.id, source: 'fuel_log' };
+}
+
+// Reduces reading points from every source down to the single most recent
+// one per equipment_id. Ties on created_at fall to the inspection, then to
+// the higher id within one source — row ids are only comparable to
+// themselves, so they can never order an inspection against a fuel log.
+export function latestReadingsByEquipment(points) {
+  // Null-prototype: this function is exported for unit testing, so key it
+  // defensively rather than relying on every future caller passing ids that
+  // came from the database. Today they all do.
+  const latest = Object.create(null);
+  for (const point of points) {
+    if (!point.equipmentId) continue;
+    const reading = point.raw != null && point.raw !== '' ? parseFloat(point.raw) : null;
+    if (reading == null || Number.isNaN(reading)) continue;
+
+    const current = latest[point.equipmentId];
+    if (!current) { latest[point.equipmentId] = { ...point, reading }; continue; }
+
+    const a = new Date(point.at).getTime(), b = new Date(current.at).getTime();
+    const newer = a > b
+      || (a === b && point.source === 'inspection' && current.source !== 'inspection')
+      || (a === b && point.source === current.source && point.id > current.id);
+    if (newer) latest[point.equipmentId] = { ...point, reading };
   }
-  const readings = {};
-  Object.entries(latest).forEach(([equipmentId, insp]) => {
-    const rawReading = insp.trip_type === 'posttrip' ? insp.end_reading : insp.start_reading;
-    const reading = rawReading != null && rawReading !== '' ? parseFloat(rawReading) : null;
-    if (reading == null || Number.isNaN(reading)) return;
-    readings[equipmentId] = { reading, readingUnit: insp.reading_unit || null, readingDate: insp.created_at };
+
+  const readings = Object.create(null);
+  Object.entries(latest).forEach(([equipmentId, point]) => {
+    readings[equipmentId] = {
+      reading: point.reading,
+      readingUnit: point.unit || null,
+      readingDate: point.at,
+      readingSource: point.source,
+    };
   });
   return readings;
 }
@@ -138,7 +173,20 @@ export default async function handler(req, res) {
         .eq('company_id', companyId);
       if (logErr) return res.status(500).json({ error: 'Could not load maintenance history.' });
 
-      const currentReadings = latestReadingsByEquipment(inspections || []);
+      // Fuel-ups carry a meter reading too. A company that never bought the
+      // fuel module simply has no rows here, so this is a no-op for them and
+      // the status they see is unchanged.
+      const { data: fuelLogs, error: fuelErr } = await supabaseAdmin
+        .from('fuel_logs')
+        .select('id, equipment_id, hour_reading, reading_unit, created_at')
+        .eq('company_id', companyId)
+        .not('equipment_id', 'is', null);
+      if (fuelErr) return res.status(500).json({ error: 'Could not load fuel history.' });
+
+      const currentReadings = latestReadingsByEquipment([
+        ...(inspections || []).map(inspectionReadingPoint),
+        ...(fuelLogs || []).map(fuelReadingPoint),
+      ]);
       const lastServices = latestServiceByEquipment(logs || []);
 
       const equipmentStatus = fleet.map(eq => {
