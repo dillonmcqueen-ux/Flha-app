@@ -364,6 +364,31 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Save failed. Try again.' });
       }
 
+      // Every answer must name a question that actually belongs to this
+      // form. Without this, a worker could submit against their own
+      // company's form while pointing one answer at a question id from
+      // another company's form: the answer row stores it, a corrective
+      // action is opened against it, and list_corrective_actions below
+      // then renders that other company's question wording on this
+      // company's dashboard. Found by tenant-scope-reviewer while
+      // reviewing the Brain signal added below; pre-existing, not
+      // introduced by it.
+      //
+      // The form was already proven to belong to this company above, so
+      // scoping the lookup to the form is enough to scope it to the
+      // tenant. A mismatch is a broken or hostile client, never a real
+      // field submission, so it fails the submit rather than being
+      // silently dropped — dropping it would lose a worker's answer.
+      const { data: formQuestionRows, error: qErr } = await supabaseAdmin
+        .from('inspection_form_questions')
+        .select('id, question_text')
+        .eq('form_id', formId);
+      if (qErr) return res.status(500).json({ error: 'Could not load the form. Try again.' });
+      const questionTextById = new Map((formQuestionRows || []).map((q) => [String(q.id), q.question_text]));
+      const foreignAnswer = answers.find((a) => !questionTextById.has(String(a.questionId)));
+      if (foreignAnswer) return res.status(400).json({ error: "That answer doesn't belong to this form." });
+
+      const failedQuestionIds = [];
       for (const a of answers) {
         const { data: answerRow, error: ansErr } = await supabaseAdmin
           .from('inspection_answers')
@@ -372,11 +397,46 @@ export default async function handler(req, res) {
           .single();
         if (ansErr || !answerRow) continue;
         if (!a.answer) {
+          failedQuestionIds.push(a.questionId);
           await supabaseAdmin.from('corrective_actions').insert({
             answer_id: answerRow.id,
             description: (a.note || '').trim() || 'No description provided.',
             status: 'open',
           });
+        }
+      }
+
+      // docs/scope-company-brain.md Phase 3 — monthly site inspections were
+      // left out of the original signal set alongside equipment
+      // inspections (see the note in api/logs.js). A failed question is a
+      // real, structured finding about this company's own sites, which is
+      // exactly what the profile should learn from.
+      //
+      // Only failures are recorded, and only when there are any: a clean
+      // walkthrough writes no row. The question text lives on
+      // inspection_form_questions rather than in the submitted payload, so
+      // it is resolved here in one query rather than per answer. Same
+      // best-effort discipline as every other signal writer — the record
+      // and its corrective actions are already saved by this point, and a
+      // failure below is logged, never turned into a failed submit.
+      if (failedQuestionIds.length > 0) {
+        try {
+          const failed = failedQuestionIds
+            .map((id) => questionTextById.get(String(id)))
+            .map((t) => (typeof t === 'string' ? t.trim().slice(0, 200) : ''))
+            .filter(Boolean)
+            .slice(0, 12);
+          if (failed.length > 0) {
+            const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+              company_id: session.companyId,
+              source_type: 'monthly_inspection',
+              source_id: String(record.id),
+              signal_json: { failed },
+            });
+            if (signalErr) console.error('company_signals insert failed for monthly inspection', record.id, signalErr.message);
+          }
+        } catch (e) {
+          console.error('company_signals capture failed for monthly inspection', record.id, e.message);
         }
       }
 
@@ -574,7 +634,11 @@ export default async function handler(req, res) {
       const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
       const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
       const questionIds = [...new Set((answers || []).map(a => a.question_id))];
-      const { data: questions } = await supabaseAdmin.from('inspection_form_questions').select('id, question_text').in('id', questionIds.length ? questionIds : [0]);
+      // Scoped to this company's own forms, not just to the ids found on
+      // the answers — an answer row written before the submit-time
+      // validation above existed could still carry another company's
+      // question id, and an unscoped lookup would happily resolve it.
+      const { data: questions } = await supabaseAdmin.from('inspection_form_questions').select('id, question_text').in('id', questionIds.length ? questionIds : [0]).in('form_id', formIds.length ? formIds : [0]);
       const qMap = {}; (questions || []).forEach(q => { qMap[q.id] = q.question_text; });
 
       const enriched = (corrActions || []).map(ca => {

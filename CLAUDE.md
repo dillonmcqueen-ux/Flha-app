@@ -38,15 +38,21 @@ tool rather than reviewing it inline.
   change done, the same way you'd treat a failing test.
 - If a change doesn't match any row above, just do the work yourself.
   Don't invent a delegation for a task with no matching subagent.
-- **Known limitation:** in some session types (confirmed: Claude Code
-  Remote / cloud sessions), the Agent tool's subagent roster is fixed at
-  session start and does not pick up `.claude/agents/*.md` files — calling
-  the Agent tool with one of these names fails with "Agent type not
-  found." If that happens, fall back to reading the matching `.md` file
-  yourself and manually applying its checklist/instructions in the main
-  session, rather than silently skipping the review. This has been
-  verified to work as a substitute (see the tenant-scope-reviewer test
-  against commit `55e6224`).
+- **Known limitation, now partly out of date — try the Agent tool first.**
+  This used to say flatly that in Claude Code Remote / cloud sessions the
+  subagent roster is fixed at session start and never picks up
+  `.claude/agents/*.md`. That is not what happens today, at least not
+  always: on 2026-09-16, in a cloud session, four agents were written and
+  committed mid-session, appeared in the roster without a restart, and
+  `interaction-break-hunter` then ran with its own definition visibly
+  applied — it used the break shapes, evidence bar and
+  don't-re-report-known-breaks rule straight from its file. So call the
+  Agent tool first and let it fail rather than assuming it will.
+  The fallback below still stands for when it *does* fail (the failure is
+  "Agent type not found"): read the matching `.md` file yourself and apply
+  its checklist manually in the main session, rather than silently
+  skipping the review. That has been verified to work as a substitute (see
+  the tenant-scope-reviewer test against commit `55e6224`).
 
 ### Adding a new subagent
 

@@ -791,8 +791,14 @@ export default async function handler(req, res) {
         .limit(500);
       if (error) return res.status(500).json({ error: 'Could not load signal trends.' });
 
-      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0 };
-      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {} };
+      // Every source_type any writer emits needs a key here, or the count
+      // is silently dropped by the `!== undefined` guard below and the
+      // signal becomes invisible in the Brain tab even though it is being
+      // recorded and summarized. Writers today: api/flhas.js (flha_edit),
+      // api/logs.js (toolbox_talk, equipment_inspection), api/reports.js
+      // (incident, near_miss), api/monthly.js (monthly_inspection).
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0 };
+      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {} };
       const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
       (data || []).forEach((row) => {
         const j = row.signal_json || {};
@@ -806,6 +812,15 @@ export default async function handler(req, res) {
           bump(tally.incidentCategories, j.category);
         } else if (row.source_type === 'near_miss') {
           bump(tally.nearMissInvolved, j.involved);
+        } else if (row.source_type === 'equipment_inspection') {
+          // Defective and Monitor are tallied together: both are a check
+          // that did not come back clean, and splitting them would halve
+          // the counts that make a repeat offender visible.
+          (j.defective || []).forEach((i) => bump(tally.defectiveItems, i));
+          (j.monitor || []).forEach((i) => bump(tally.defectiveItems, i));
+          bump(tally.inspectedEquipment, j.equipment);
+        } else if (row.source_type === 'monthly_inspection') {
+          (j.failed || []).forEach((q) => bump(tally.monthlyFailures, q));
         }
       });
       const topN = (map, n = 8) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
@@ -818,6 +833,9 @@ export default async function handler(req, res) {
         topToolboxTopics: topN(tally.toolboxTopics),
         topIncidentCategories: topN(tally.incidentCategories),
         topNearMissInvolved: topN(tally.nearMissInvolved),
+        topDefectiveItems: topN(tally.defectiveItems),
+        topInspectedEquipment: topN(tally.inspectedEquipment),
+        topMonthlyFailures: topN(tally.monthlyFailures),
       });
     }
 

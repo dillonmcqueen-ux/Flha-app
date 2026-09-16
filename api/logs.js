@@ -130,6 +130,43 @@ const SUBMITTABLE_FIELDS = {
   daily: ['reporter_name', 'site', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json', 'pdf_url'],
 };
 
+// Extracts the exceptions from one inspection's results_json for the Brain.
+// `items` carries every checklist line as { item, category, condition },
+// where condition is one of Good / Monitor / Defective / N/A — only the
+// last two are worth learning from. Returns null when the machine came
+// back clean, so a spotless inspection writes no row at all rather than a
+// row full of empty arrays.
+//
+// Caps mirror the other signal writers: short strings, bounded arrays, so
+// one inspection of a long checklist can never dominate the batch prompt
+// in server-lib/companyBrainSummary.js.
+const MAX_SIGNAL_ITEMS = 12;
+
+export function inspectionFindingSignal(record) {
+  const results = record && typeof record.results_json === 'object' ? record.results_json : null;
+  if (!results) return null;
+  const items = Array.isArray(results.items) ? results.items : [];
+
+  const named = (condition) => items
+    .filter((i) => i && i.condition === condition && typeof i.item === 'string' && i.item.trim())
+    .map((i) => i.item.trim().slice(0, 200))
+    .slice(0, MAX_SIGNAL_ITEMS);
+
+  const defective = named('Defective');
+  const monitor = named('Monitor');
+  if (defective.length === 0 && monitor.length === 0) return null;
+
+  const signal = { defective, monitor };
+  // The machine is the whole point of the signal — "hydraulic leak" means
+  // something different on an excavator than on a pickup. equipment_label
+  // is free text, which is why break #7 in docs/feature-interaction-map.md
+  // exists, but it is what the record carries and it is still the best
+  // available description of what was inspected.
+  const label = typeof record.equipment_label === 'string' ? record.equipment_label.trim().slice(0, 200) : '';
+  if (label) signal.equipment = label;
+  return signal;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -234,8 +271,6 @@ export default async function handler(req, res) {
       // as a company_signals row, same best-effort discipline as
       // api/flhas.js's FLHA-edit signal: never allowed to affect the
       // submission itself, which is already saved by the time this runs.
-      // Inspections and daily reports aren't part of Phase 3's signal set —
-      // only FLHA edits, toolbox talks, incidents, and near-misses are.
       if (newId && type === 'toolbox') {
         const topic = (typeof record.topic === 'string' && record.topic.trim()) ? record.topic.trim().slice(0, 200) : null;
         if (topic) {
@@ -246,6 +281,33 @@ export default async function handler(req, res) {
             signal_json: { topic },
           });
           if (signalErr) console.error('company_signals insert failed for toolbox talk', newId, signalErr.message);
+        }
+      }
+
+      // Equipment inspections were left out of Phase 3's original signal
+      // set. They are the richest company-specific signal the product
+      // collects — which checks actually fail, on which machines — and the
+      // Brain was blind to all of it while learning from FLHA edits and
+      // toolbox talks submitted through this very same handler.
+      //
+      // Only the exceptions are signal. A checklist of thirty "Good" items
+      // says nothing a profile should emphasize; the two that came back
+      // Defective do. Same best-effort discipline as every other writer
+      // here: the inspection is already saved, and a failure below is
+      // logged, never turned into a failed submit.
+      //
+      // Daily reports still produce no signal: their content is weather,
+      // crew and visitor free text with no structured finding to extract.
+      if (newId && type === 'inspection') {
+        const signal = inspectionFindingSignal(record);
+        if (signal) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: 'equipment_inspection',
+            source_id: String(newId),
+            signal_json: signal,
+          });
+          if (signalErr) console.error('company_signals insert failed for inspection', newId, signalErr.message);
         }
       }
 

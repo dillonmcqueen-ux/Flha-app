@@ -121,8 +121,17 @@ nothing enforces it. **This is break #6 below.**
 | `api/flhas.js:370` | `flha_edit` |
 | `api/reports.js:231` | `incident`, `near_miss` |
 | `api/logs.js:244` | `toolbox_talk` |
+| `api/logs.js` (PR #118) | `equipment_inspection` |
+| `api/monthly.js` (PR #118) | `monthly_inspection` |
 
-Nothing else writes a signal. **This is break #4 below.**
+Daily reports, custom documents and corrective actions still write nothing.
+**This is break #4 below.**
+
+A source type is only half-wired by its writer. `bySourceType` in
+`api/companydata.js:800` drops any type missing from its map, so an
+unlisted signal is captured and summarized but invisible in the Brain tab.
+`AdminPanel.jsx` and `server-lib/companyBrainSummary.js` are the other two
+places that must learn it.
 
 ### `answer_id` → corrective actions
 `corrective_actions` rows key on a **monthly inspection answer id**
@@ -138,13 +147,13 @@ Nothing else writes a signal. **This is break #4 below.**
 
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
-| Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ❌ #4 | ⚠️ label-joined | ❌ #5 | — |
+| Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ❌ #5 | — |
 | Fuel Log | ✅ *(#1, PR #118)* | — | ❌ #1 | ❌ #4 | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
 | Incident | — | — | — | ✅ `reports:231` | ✅ | ❌ #5 | — |
 | Near Miss | — | — | — | ✅ `reports:231` | ✅ | ❌ #5 | — |
-| Monthly Inspection | — | — | — | ❌ #4 | ✅ | ✅ `monthly:375` | — |
+| Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
 | Daily Report | — | — | — | ❌ #4 | ✅ | — | — |
 | Custom Document | — | — | — | ❌ #4 | ✅ | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
@@ -162,7 +171,12 @@ Each carries the evidence that proves it and the check that re-confirms it.
 
 ### #1 — Preventative maintenance ignores fuel-log readings
 **Severity: high.** Directly contradicts how the product is sold.
-**Status: fix approved and built — PR #118. Closes when that merges.**
+**Status: half fixed.** PR #118 closes the preventative-maintenance half.
+**The weekly-equipment-report half is still open** and does not close with
+it: `api/equipmentreports.js` and `api/cron-equipment-reports.js` both still
+contain zero references to `fuel_logs` (verified by grep), so the weekly
+report's "hours used" is still inspection-only. Do not mark #1 closed when
+PR #118 merges.
 
 `api/maintenance.js:128-133` builds PM status from the `inspections` table
 alone. `api/fuellogs.js:85-120` (`get_last_reading`) reads **both**
@@ -210,7 +224,21 @@ history all become string matching. `WalletInvite.jsx:115` and
 `certifications.js` show the correct pattern.
 
 ### #4 — The Brain learns from 4 of 9 document types
-**Severity: high.** CLAUDE.md calls the Brain FORA's flagship. It receives
+**Severity: high. Status: partially fixed in PR #118** — equipment
+inspections (`equipment_inspection`) and monthly site inspections
+(`monthly_inspection`) now emit signals, taking it to 6 of 9. **Still
+unwired: daily reports, custom documents, and corrective actions.** Daily
+reports and custom documents carry free text with no structured finding to
+extract, so wiring them is a judgement call about noise, not an oversight;
+corrective actions derive from monthly inspections and would double-count.
+Do not mark #4 closed.
+
+Adding a source type means updating four places, not one: the writer,
+`bySourceType` in `api/companydata.js` (an unlisted type is silently
+dropped), the Brain tab in `AdminPanel.jsx`, and the prompt builder in
+`server-lib/companyBrainSummary.js`. `tests/unit/brain-signal-capture.test.js`
+asserts the writer list and `bySourceType` agree.
+ CLAUDE.md calls the Brain FORA's flagship. It receives
 signals only from FLHA edits, toolbox talks, incidents and near misses.
 It never sees: **equipment inspection defects**, monthly inspection
 findings, corrective actions, daily reports, or custom documents.
@@ -252,10 +280,20 @@ grep -n "BUILTIN_DOC_KEYS = " api/customforms.js
 ```
 
 ### #7 — Weekly equipment reports group by label, not fleet id
-**Severity: medium.** `api/equipmentreports.js:3` aggregates per machine,
-but the fleet FK is available and unused. Same class as the Analytics
-grouping at `analyticsUtils.js:54,203`. A machine relabelled mid-quarter
-becomes two machines in the report.
+**Severity: medium.** `api/equipmentreports.js:141` doesn't even select
+`equipment_id`; `ensure()` at `:149-158` keys on
+`r.equipment_label || 'Unknown equipment'`. Same class as the Analytics
+grouping at `analyticsUtils.js:54,203`.
+
+*Wording corrected 2026-09-16.* This entry used to say "a machine
+relabelled mid-quarter becomes two machines." There is no `update_equipment`
+action, and `Inspection.jsx` and `FuelLog.jsx` derive labels with the same
+formula, so fleet-picked rows agree. The live failure is the **merge**
+direction: `add_equipment` (`companydata.js:601-614`) needs only one of
+make/model/type and leaves `unit_number` optional with no uniqueness check,
+so two distinct `equipment.id` rows can produce a byte-identical label and
+be summed into one report line. The split direction still happens when the
+same machine is sometimes picked from the fleet and sometimes typed.
 
 ### #8 — Certification expiry doesn't gate anything
 **Severity: medium.** Certifications are tracked with expiry alerts
@@ -264,6 +302,28 @@ becomes two machines in the report.
 `api/` or `src/`. A worker whose ticket
 expired yesterday can still submit an FLHA for the task that ticket
 covers, and nothing anywhere connects the two.
+
+### #9 — Post-trip defects never reach Equipment Analytics
+**Severity: medium.** `src/analyticsUtils.js:52` drops every non-pretrip row
+(`if (i.trip_type !== "pretrip") return;`) before reading the defect
+counters, on the stated premise — `analyticsUtils.js:48-49` — that "posttrip
+rows don't have them." That premise is false as shipped:
+`src/Inspection.jsx:428-429` writes `defectiveCount`/`monitorCount` on the
+post-trip record too.
+
+So the one screen meant to answer "which machine keeps failing" is blind to
+damage caught at the *end* of a shift, which is when in-service damage
+actually surfaces. Worse, three readers disagree on one number:
+`Dashboard.jsx:4329-4330` sums both trip types, `analyticsUtils.js` counts
+pretrip only, and `api/equipmentreports.js:172-180` counts post-trip changes
+via `has_changes`. The Inspections tab and the Analytics tab are computed
+from the same array and will not reconcile.
+
+**Needs a decision before any fix:** `Analytics.jsx:351,357` labels the
+table "Pretrip inspections flagged Defective or Monitor", so the scoping is
+at least intentional in the copy. Either Analytics should count both (and
+the copy changes) or the Dashboard KPI should count pretrip only. They
+should not silently disagree.
 
 ---
 
@@ -296,4 +356,6 @@ Do **not** flag these. They are decisions, not gaps.
 | Date | Commit | Change |
 |---|---|---|
 | 2026-09-16 | `0bd289c` | Map seeded. 18 surfaces, 7 join keys, 8 breaks found and verified. |
-| 2026-09-16 | PR #118 | Break #1 approved and built: `api/maintenance.js` now reads `fuel_logs` readings alongside inspection readings. 7 breaks remain open. |
+| 2026-09-16 | PR #118 | Break #1 **half** fixed: `api/maintenance.js` now reads `fuel_logs` readings alongside inspection readings. The weekly-equipment-report half stays open. An earlier version of this row claimed the whole break was closed; that was wrong and was caught by `interaction-break-hunter`. |
+| 2026-09-16 | PR #118 | Break #4 partially fixed: equipment inspections and monthly site inspections now emit Brain signals. Daily reports, custom documents and corrective actions remain unwired. |
+| 2026-09-16 | — | Break #9 added (post-trip defects never reach Equipment Analytics). Break #7's wording corrected. |
