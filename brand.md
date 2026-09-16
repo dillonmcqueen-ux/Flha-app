@@ -113,6 +113,25 @@ Rules until it's formally named:
 - Attitude: unbothered, blunt, has seen every excuse in the book and isn't
   buying it
 
+## Domains
+
+Two addresses, and they are not interchangeable. Anything customer-facing
+that FORA publishes uses the right one.
+
+| Address | What it is | Who it is for |
+|---|---|---|
+| `forafieldsolutions.com` | The public marketing site (`website/`) | Anyone. This is the address that goes on flyers, decks, ads, merch and email signatures. |
+| `portal.forafieldsolutions.com` | The app itself | Paying customers only, for submitting and managing documents. Never printed on outbound marketing material. |
+
+The only outbound exception is the Checkout button on `pricing.html`, which
+has to hand off to `portal.forafieldsolutions.com/api/checkout` to create the
+Stripe session. That is a handoff inside a flow somebody already started, not
+an address being advertised.
+
+Contact address on outbound material: `forafieldsolutions@gmail.com`. No
+phone number and no mailing address goes on anything public unless Dillon
+says to put it there.
+
 ## Where this applies
 
 - Website copy (`website/*.html`) — voice and cringe-list rules apply on

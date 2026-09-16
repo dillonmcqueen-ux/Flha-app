@@ -3,6 +3,12 @@
 A standalone, static marketing site for FORA, completely separate from the
 app in this repo (`src/`, `api/`). No build step, no dependencies.
 
+Served at **`forafieldsolutions.com`**. That is the public address, and the
+only one that belongs on outbound material (flyers, decks, ads, merch).
+`portal.forafieldsolutions.com` is the app, for paying customers submitting
+documents, and is never advertised as the way in. See `brand.md` for the
+full rule.
+
 ## Pages
 
 Five marketing pages, each answering the next question a visitor has.
