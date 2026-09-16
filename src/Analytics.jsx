@@ -330,14 +330,14 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
   const equipStats = equipmentIssueStats(inspections);
   const maintenance = maintenanceSummary(maintenanceStatus);
   const fuel = fuelSummary(fuelLogs, siteNames);
-  const pretripCount = inspections.filter(i => i.trip_type === "pretrip").length;
+  const inspectionCount = inspections.length;
   const topEquipment = equipStats.slice(0, 5).map(e => ({ label: e.label, count: e.defective + e.monitor }));
 
   return (
     <div>
       <SectionCard title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Wrench size={16} color={C.orange} strokeWidth={2.25} />{`Equipment Analytics — ${companyName || "Company"}`}</span>} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <StatTile label="Pretrip Inspections" value={pretripCount} />
+          <StatTile label="Inspections" value={inspectionCount} />
           <StatTile label="Daily Reports" value={daily.length} />
           <StatTile label="Equipment Tracked (Maintenance)" value={maintenance.total} />
           <StatTile label="Overdue Maintenance" value={maintenance.overdue} tone={maintenance.overdue > 0 ? "bad" : "good"} />
@@ -348,20 +348,20 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
         </div>
       </SectionCard>
 
-      <SectionCard title="Top Equipment Issues" subtitle="Pretrip inspections flagged Defective or Monitor">
+      <SectionCard title="Top Equipment Issues" subtitle="Pre-trip and post-trip inspections flagged Defective or Monitor">
         <RankedBarList items={topEquipment} emptyLabel="No equipment issues flagged yet." barColor={C.status.warning.solid} />
       </SectionCard>
 
       {isAdvanced && (
         <>
-          <SectionCard title="Equipment Issue Detail" subtitle="All equipment with pretrip inspection history">
+          <SectionCard title="Equipment Issue Detail" subtitle="All equipment with inspection history">
             <SimpleTable
-              emptyLabel="No pretrip inspections yet."
+              emptyLabel="No inspections yet."
               columns={[
                 { key: "label", label: "Equipment" },
                 { key: "defective", label: "Defective", align: "right" },
                 { key: "monitor", label: "Monitor", align: "right" },
-                { key: "pretripCount", label: "Pretrips", align: "right" },
+                { key: "inspectionCount", label: "Inspections", align: "right" },
                 { key: "lastFlaggedAt", label: "Last Flagged", render: r => r.lastFlaggedAt ? new Date(r.lastFlaggedAt).toLocaleDateString("en-CA") : "—" },
               ]}
               rows={equipStats}

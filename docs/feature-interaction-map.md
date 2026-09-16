@@ -304,7 +304,15 @@ expired yesterday can still submit an FLHA for the task that ticket
 covers, and nothing anywhere connects the two.
 
 ### #9 — Post-trip defects never reach Equipment Analytics
-**Severity: medium.** `src/analyticsUtils.js:52` drops every non-pretrip row
+**Severity: medium. Status: fixed in PR #118.** Dillon's call: Analytics
+counts both trip types and the copy changed to match. `Dashboard.jsx` was
+the side that was right, so it is untouched; `analyticsUtils.js` now agrees
+with it, and a test asserts the two reconcile on the same input. The
+`pretripCount` field is now `inspectionCount`, renamed through
+`Analytics.jsx` and `generateEquipmentAnalyticsPDF.js` so the PDF and the
+screen still match. Closes when the PR merges.
+
+Original finding: `src/analyticsUtils.js:52` drops every non-pretrip row
 (`if (i.trip_type !== "pretrip") return;`) before reading the defect
 counters, on the stated premise — `analyticsUtils.js:48-49` — that "posttrip
 rows don't have them." That premise is false as shipped:
@@ -319,11 +327,10 @@ pretrip only, and `api/equipmentreports.js:172-180` counts post-trip changes
 via `has_changes`. The Inspections tab and the Analytics tab are computed
 from the same array and will not reconcile.
 
-**Needs a decision before any fix:** `Analytics.jsx:351,357` labels the
-table "Pretrip inspections flagged Defective or Monitor", so the scoping is
-at least intentional in the copy. Either Analytics should count both (and
-the copy changes) or the Dashboard KPI should count pretrip only. They
-should not silently disagree.
+**The decision:** `Analytics.jsx` labelled the table "Pretrip inspections
+flagged Defective or Monitor", so the narrow scoping was at least
+intentional in the copy — which is why this went to Dillon rather than
+being fixed outright. He chose: count both, change the copy.
 
 ---
 
@@ -359,3 +366,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-16 | PR #118 | Break #1 **half** fixed: `api/maintenance.js` now reads `fuel_logs` readings alongside inspection readings. The weekly-equipment-report half stays open. An earlier version of this row claimed the whole break was closed; that was wrong and was caught by `interaction-break-hunter`. |
 | 2026-09-16 | PR #118 | Break #4 partially fixed: equipment inspections and monthly site inspections now emit Brain signals. Daily reports, custom documents and corrective actions remain unwired. |
 | 2026-09-16 | — | Break #9 added (post-trip defects never reach Equipment Analytics). Break #7's wording corrected. |
+| 2026-09-16 | PR #118 | Break #9 fixed: Equipment Analytics counts both trip types and its copy says so. Also fixed a blank-label bucket in the same function, found by a test. |
