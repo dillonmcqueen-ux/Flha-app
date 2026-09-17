@@ -232,6 +232,7 @@ below.**
 | Custom Document | — | — | — | — *(excluded, #4)* | ✅ | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
+| Certifications | — | — | — | — | — | — | ✅ *(#8, PR #120: expiry now reaches document review)* |
 | Sites | ⚠️ #2 | ✅ | — | — | ✅ *(#2, PR #120)* | — | — |
 | Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
@@ -556,12 +557,50 @@ be summed into one report line. The split direction still happens when the
 same machine is sometimes picked from the fleet and sometimes typed.
 
 ### #8 — Certification expiry doesn't gate anything
-**Severity: medium.** Certifications are tracked with expiry alerts
-(`api/certifications.js`), but no form consults them —
-`worker_certifications` is referenced by that one file and nowhere else in
-`api/` or `src/`. A worker whose ticket
-expired yesterday can still submit an FLHA for the task that ticket
-covers, and nothing anywhere connects the two.
+**Severity: medium. Status: fixed in PR #120, deliberately NOT as a gate.**
+
+The original finding was right about the disconnection: `worker_certifications`
+was referenced by `api/certifications.js` and by **no other file** in `api/`
+or `src/`. Expiry was tracked, alerted on, and reached nothing.
+
+**The original wording pointed at the wrong fix, and this is worth
+recording.** It said "a worker whose ticket expired yesterday can still
+submit an FLHA for the task that ticket covers". Two problems:
+
+1. **The link isn't computable.** `cert_type` is free text — the input
+   placeholder is literally "Type (e.g. Fall Protection)" — and nothing
+   anywhere maps a ticket to the tasks or hazards it covers. Gating would
+   mean inventing a taxonomy, which is a feature, not a break fix.
+2. **Gating is the wrong behaviour anyway.** Refusing a submission would
+   stop a worker filing safety paperwork on a jobsite because an
+   administrative record lapsed. That is worse than the gap it closes.
+
+So the connection runs the other way (Dillon's call, 2026-09-17): a document
+carries its author (`submitted_by_roster_id`, break #3), and a supervisor
+reviewing it sees that person's ticket status **as of the day they filed
+it** — `src/certificationStatus.js`, shown on the document review card.
+
+**As-of, not "now", is the whole point.** A ticket that lapsed last week was
+valid when the worker filed an FLHA three months ago; flagging that document
+today would tell a supervisor something false about a record they are
+reviewing.
+
+**Two boundaries held on purpose:**
+- An **unattributed** document returns nothing at all, never a reassuring
+  "no expired tickets". Pre-break-#3 documents carry no roster id, and "we
+  don't know who filed this" is a different answer from "they were clean".
+- **Anonymous near misses never carry the author id into the list payload**
+  (`api/reports.js`). It is always null for them, but *selecting* it would
+  make "this one is null" readable beside rows where it is set — turning
+  anonymity into a property a supervisor can spot. A test asserts the
+  near-miss payload omits it and the incident payload includes it.
+
+**A third instance of the same pattern found on the way.**
+`submitted_by_roster_id` was written by every submit path in PR #118 and
+**selected by nothing** — this break could not be built until the column was
+readable. That is the same "producer nothing consumes" shape as `site_id`
+(break #2) and `equipment_id` (break #7), each introduced by the fix for the
+break it belonged to.
 
 ### #9 — Post-trip defects never reach Equipment Analytics
 **Severity: medium. Status: fixed in PR #118.** Dillon's call: Analytics
@@ -635,6 +674,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
 | 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #120 | Break #8 **closed**, as a reviewer signal rather than a gate — gating was both incomputable (no cert→task mapping) and the wrong behaviour (it would block safety paperwork). Found a third "producer nothing consumes": `submitted_by_roster_id` was written by every submit path and selected by none. |
 | 2026-09-17 | PR #120 | Break #6 **closed**: the doc-key ↔ module invariant is a test now, not a comment. No application code changed — the lists already agreed; nothing guaranteed they would keep agreeing. |
 | 2026-09-17 | PR #120 | Break #4 **closed**: daily reports now emit a `daily_report` signal carrying working conditions only (fixed-vocabulary weather + parsed temperature). Custom documents and corrective actions excluded on purpose. The writers-vs-counters guard was itself stale and now scans `api/` instead of hardcoding a list. |
 | 2026-09-17 | PR #120 | Break #2 **closed**: `site_id` now survives the read boundary (five list payloads were dropping it) and the analytics site tables key on it. Two tables kept on purpose. |

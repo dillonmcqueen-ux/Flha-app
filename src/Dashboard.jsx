@@ -17,6 +17,7 @@ import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { reviewBacklog, fieldSiteActivity, fuelSummary } from "./analyticsUtils";
+import { authorCertificationFlags, authorCertificationLabel } from "./certificationStatus";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
@@ -1458,7 +1459,7 @@ function CustomDocCard({ data, onClose, onSave }) {
   );
 }
 
-function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
+function ThisWeekDocsCard({ docs, meta, certifications = [], onOpen, onClose }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -1490,6 +1491,18 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
                   </div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{m.primary(doc)}</div>
                   <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{m.secondary(doc)}</div>
+                  {/* Break #8 — never a block, only what a reviewer should
+                      know. Absent entirely when the author is unknown
+                      (pre-break-#3 documents, anonymous near misses) rather
+                      than showing a reassuring zero-state. */}
+                  {(() => {
+                    const label = authorCertificationLabel(authorCertificationFlags(certifications, doc.submitted_by_roster_id, doc.created_at));
+                    return label ? (
+                      <div style={{ fontSize: 11, color: "#F59E0B", marginTop: 3, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <ShieldCheck size={11} strokeWidth={2.5} />{label}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0, textAlign: "right" }}>
                   {new Date(doc.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })} →
@@ -1742,6 +1755,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   // ── Certification expiry alerts (onboarding wallet, Phase 3) ───────────
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
+  // Break #8 — the company's raw certifications, so a document can be shown
+  // against its author's ticket status ON THE DAY THEY FILED IT.
+  // certification_summary returns counts only, which cannot answer a
+  // per-document, as-of-then question.
+  const [companyCertifications, setCompanyCertifications] = useState([]);
 
   // ── Time Clock: my own status + everyone's entries + reports ──────────
   const [myTimeStatus, setMyTimeStatus] = useState(null);
@@ -2158,6 +2176,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
       const data = await res.json();
       if (res.ok) setCertAlerts(data);
+
+      const listRes = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_certifications", token, companyId: selectedCompany }),
+      });
+      const listData = await listRes.json();
+      if (listRes.ok) setCompanyCertifications(listData.certifications || []);
     } catch (e) { /* leave alerts as-is if the request fails */ }
   };
 
@@ -3903,7 +3928,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} onSave={saveCustomDocRecordEdit} />}
       {showThisWeekModal && (
-        <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
+        <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} certifications={companyCertifications} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}
 
       <header style={{

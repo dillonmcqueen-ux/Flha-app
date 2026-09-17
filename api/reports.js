@@ -94,11 +94,17 @@ const TABLES = {
   incident: {
     name: 'incidents',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, site, site_id, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, site, site_id, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes, submitted_by_roster_id',
   },
   nearmiss: {
     name: 'near_misses',
     jsonColumn: 'report_json',
+    // submitted_by_roster_id is deliberately ABSENT here. It is always null
+    // for an anonymous near miss (api/reports.js forces it, and a CHECK
+    // enforces it), but selecting it would make "this one is null" visible
+    // beside rows where it is set — turning anonymity into a property a
+    // supervisor can read off the payload. The certification badge that
+    // reads this column elsewhere is worth less than that promise.
     listColumns: 'id, reporter_name, is_anonymous, site, site_id, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
 };

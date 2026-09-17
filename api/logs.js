@@ -103,12 +103,12 @@ const TABLES = {
   toolbox: {
     name: 'toolbox_talks',
     jsonColumn: 'talking_points_json',
-    listColumns: 'id, presenter_name, meeting_type, site, site_id, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at',
+    listColumns: 'id, presenter_name, meeting_type, site, site_id, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at, submitted_by_roster_id',
   },
   daily: {
     name: 'daily_reports',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, site, site_id, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at',
+    listColumns: 'id, reporter_name, site, site_id, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at, submitted_by_roster_id',
   },
 };
 
