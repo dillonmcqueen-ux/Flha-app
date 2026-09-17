@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderEquipmentReportPdf, equipmentReportFilename } from '../server-lib/reportPdfs.js';
 import { companyEquipmentIndex } from '../server-lib/equipmentScope.js';
+import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -206,6 +207,56 @@ export function buildEquipmentKeyResolver(records) {
   };
 }
 
+// Folds the week's readings, from BOTH inspections and fuel logs, into each
+// report line's ending reading -- break #1's second half.
+//
+// What this does NOT touch is the "Used" column. That is a sum of trip
+// deltas (post-trip end minus its own start), and a fuel-up is a
+// point-in-time odometer, not a trip. Adding one to the other would either
+// double-count or invent usage. So usage stays inspection-derived by
+// definition, and the map records that as a deliberate boundary rather than
+// a remaining gap. The consequence worth knowing: a machine fuelled far more
+// than its inspections account for still under-reports "Used", and the
+// ending reading is where that shows up.
+//
+// Only entries already carrying a fleet id can be matched, because
+// latestReadingsByEquipment keys on equipment_id. A free-text line that
+// could not be reconciled onto the fleet (break #7's ambiguous case) has
+// nothing to join a fuel log to -- correctly, since guessing which machine
+// was fuelled is the same mistake break #7 exists to prevent.
+export function applyLatestReadings(byEquipment, records, fuelLogs) {
+  const points = [
+    ...(records || []).map(inspectionReadingPoint),
+    ...(fuelLogs || []).map(fuelReadingPoint),
+  ];
+  const latest = latestReadingsByEquipment(points);
+
+  Object.values(byEquipment || {}).forEach((entry) => {
+    if (!entry || !entry.equipmentId) return;
+    const best = latest[entry.equipmentId];
+    if (!best) return;
+
+    // A reading in a different unit is not a bigger number, it is a
+    // different question. api/maintenance.js has a unit_mismatch status for
+    // exactly this; here the safe answer is to leave the line alone rather
+    // than print kilometres under an hours heading.
+    if (entry.unit && best.readingUnit && entry.unit !== best.readingUnit) return;
+
+    // Strictly newer only, so a same-moment tie keeps what the inspection
+    // pass already wrote.
+    const currentAt = entry.endingReadingDate ? new Date(entry.endingReadingDate).getTime() : null;
+    const bestAt = new Date(best.readingDate).getTime();
+    if (currentAt != null && !(bestAt > currentAt)) return;
+
+    entry.endingReading = best.reading;
+    entry.endingReadingDate = best.readingDate;
+    // Additive: reports written before this carry no source, and both
+    // consumers render the reading the same way regardless.
+    entry.endingReadingSource = best.readingSource;
+  });
+  return byEquipment;
+}
+
 // Builds the report_json for one company + week by pulling every
 // pre-trip/post-trip inspection pair whose post-trip falls in the range.
 async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
@@ -219,6 +270,22 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
     .order('created_at', { ascending: true });
   if (error) throw new Error('Could not load inspections: ' + error.message);
 
+  // Break #1's second half. api/maintenance.js has read both tables since
+  // PR #118; this report did not, so a machine fuelled on Friday after its
+  // last post-trip showed a Thursday odometer. The "Used" column is a
+  // different question and stays inspection-only -- see the note on
+  // applyLatestReadings below.
+  const { data: fuelRows, error: fuelErr } = await supabaseAdmin
+    .from('fuel_logs')
+    .select('id, equipment_id, hour_reading, reading_unit, created_at')
+    .eq('company_id', companyId)
+    .gte('created_at', weekStartISO)
+    .lt('created_at', weekEndISO);
+  // A company that never bought the fuel module has no rows here, and a
+  // failure to read them must not cost the whole report -- the inspection
+  // half is still worth generating, just with the older reading.
+  const fuelLogs = fuelErr ? [] : (fuelRows || []);
+
   // Drop any equipment id that isn't this company's before anything keys on
   // it — see vetEquipmentIds above for which ids can be attacker-chosen and
   // why they're dropped rather than rejected. Failing the build on an
@@ -227,6 +294,7 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   const fleetIndex = await companyEquipmentIndex(supabaseAdmin, companyId);
   if (!fleetIndex) throw new Error('Could not load equipment fleet');
   vetEquipmentIds(records || [], fleetIndex);
+  vetEquipmentIds(fuelLogs, fleetIndex);
 
   // Break #7 in docs/feature-interaction-map.md — this grouped machines by
   // their free-text equipment_label while inspections.equipment_id, a real
@@ -345,6 +413,8 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
       date: posttrip.created_at,
     });
   });
+
+  applyLatestReadings(byEquipment, records || [], fuelLogs);
 
   const equipment = Object.values(byEquipment).sort((a, b) => a.equipmentLabel.localeCompare(b.equipmentLabel));
   return { weekStart: weekStartISO, weekEnd: toISODate(new Date(new Date(weekEndISO).getTime() - 86400000)), equipment };

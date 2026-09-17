@@ -143,10 +143,11 @@ Hours or kilometres on a machine. Written by inspections
 | `api/fuellogs.js` `get_last_reading` | ✅ `:106` | ✅ `:99` |
 | `api/fuellogs.js` consumption calc | ✅ `:211` | ✅ `:229` |
 | `api/maintenance.js` PM status | ✅ `:129` | ✅ *(#1, PR #118)* |
-| `api/equipmentreports.js` weekly | ✅ | ❌ |
+| `api/equipmentreports.js` weekly — ending reading | ✅ | ✅ *(#1, PR #120)* |
+| `api/equipmentreports.js` weekly — "Used" | ✅ | — *(by definition; see #1)* |
 
-**This is break #1 below.** Fuel already understands that a reading can come
-from either table. Maintenance does not.
+**This was break #1 below.** Both consumers now share one reducer in
+`server-lib/readings.js`, so neither can drift from the other again.
 
 ### `site_id` → `sites.id` vs `site` vs `job_site`
 One concept, **three column shapes across ten features**:
@@ -221,18 +222,19 @@ below.**
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
 | Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ✅ *(#5, PR #118)* | — |
-| Fuel Log | ✅ *(#1, PR #118)* | — | ❌ #1 | ❌ #4 | ⚠️ label-joined | — | — |
+| Fuel Log | ✅ *(#1, PR #118)* | — | ✅ *(#1, PR #120)* | — *(no finding to extract)* | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
 | Incident | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
 | Near Miss | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
 | Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
-| Daily Report | — | — | — | ❌ #4 | ✅ | — | — |
-| Custom Document | — | — | — | ❌ #4 | ✅ | — | — |
+| Daily Report | — | — | — | ✅ *(#4, PR #120)* | ✅ | — | — |
+| Custom Document | — | — | — | — *(excluded, #4)* | ✅ | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
-| Sites | ⚠️ #2 | ✅ | — | — | ⚠️ #2 | — | — |
-| Equipment fleet | ✅ | ✅ | ⚠️ label | ❌ #4 | ⚠️ label | — | — |
+| Certifications | — | — | — | — | — | — | ✅ *(#8, PR #120: expiry now reaches document review)* |
+| Sites | ⚠️ #2 | ✅ | — | — | ✅ *(#2, PR #120)* | — | — |
+| Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 
 ---
@@ -244,12 +246,26 @@ Each carries the evidence that proves it and the check that re-confirms it.
 
 ### #1 — Preventative maintenance ignores fuel-log readings
 **Severity: high.** Directly contradicts how the product is sold.
-**Status: half fixed.** PR #118 closes the preventative-maintenance half.
-**The weekly-equipment-report half is still open** and does not close with
-it: `api/equipmentreports.js` and `api/cron-equipment-reports.js` both still
-contain zero references to `fuel_logs` (verified by grep), so the weekly
-report's "hours used" is still inspection-only. Do not mark #1 closed when
-PR #118 merges.
+**Status: fixed.** PR #118 closed the preventative-maintenance half; the
+weekly-equipment-report half closed after it, and the two now answer the
+question with the *same code* rather than the same intention:
+`inspectionReadingPoint` / `fuelReadingPoint` / `latestReadingsByEquipment`
+moved out of `api/maintenance.js` into `server-lib/readings.js`
+(`api/equipmentreports.js:227` calls them via `applyLatestReadings`). The
+move is the fix, not a tidy-up — a second copy of that logic is how this
+break happened in the first place.
+
+**A deliberate boundary, recorded so it is not mistaken for a remaining
+gap:** the report's **"Used"** column stays inspection-only. It is a sum of
+trip deltas (a post-trip's end minus its own start); a fuel-up is a
+point-in-time odometer, not a trip. Feeding fuel readings into it would
+double-count or invent usage that never happened. Only the **ending
+reading** is multi-source. The live consequence is worth knowing: a machine
+fuelled far more than its inspections account for still under-reports
+"Used", and the ending reading is where that discrepancy becomes visible —
+which is why a fuel-derived reading is now labelled as such in both
+consumers (`server-lib/reportPdfs.js:129`, `src/Dashboard.jsx:1626`) rather
+than silently replacing a trip-derived one.
 
 `api/maintenance.js:128-133` builds PM status from the `inspections` table
 alone. `api/fuellogs.js:85-120` (`get_last_reading`) reads **both**
@@ -276,7 +292,28 @@ case in `tests/unit/maintenance-readings.test.js`.
 
 ### #2 — Site is three different columns
 **Severity: high** for analytics, medium for daily use.
-**Status: fixed in PR #118.** `site_id` (nullable FK) added to `flhas`,
+**Status: fixed.** PR #118 did the write half; PR #120 did the read half,
+which had been left open in a way worth naming. `site_id` was written on
+submit and then **dropped by every list payload** (`api/logs.js:106,111`,
+`api/reports.js:97,102`, `api/flhas.js:417` all SELECTed only the text), so
+analytics never saw the key the same PR had just added. A producer nothing
+consumes — introduced by the fix for the break it belongs to, the same way
+the `delete_site` wedge was.
+
+The analytics tables now key on `site_id` when a row has one
+(`siteBucketKey`, `src/analyticsUtils.js:110-114`), so one real site spelled
+three ways is one row, a renamed site reads under its current name, and the
+field and scheduled tables agree on what a site is called. Rows with no id —
+the "other / not in the list" path — keep name bucketing, and the two key
+spaces are namespaced so free text can never land in a registered site's
+bucket.
+
+**Still two tables, deliberately** (Dillon's call, 2026-09-17): field
+paperwork and scheduled inspections answer different questions. Merging them
+into one eight-column table is a presentation change that can be reviewed on
+its own; keying them the same way is the part that was actually broken.
+
+The original write half: `site_id` (nullable FK) added to `flhas`,
 `toolbox_talks`, `daily_reports`, `incidents` and `near_misses`, and
 backfilled by case-insensitive name match scoped to company. The text
 columns stay: the "other / not in the list" path has no id, and the text is
@@ -351,14 +388,38 @@ history all become string matching. `WalletInvite.jsx:115` and
 `certifications.js` show the correct pattern.
 
 ### #4 — The Brain learns from 4 of 9 document types
-**Severity: high. Status: partially fixed in PR #118** — equipment
-inspections (`equipment_inspection`) and monthly site inspections
-(`monthly_inspection`) now emit signals, taking it to 6 of 9. **Still
-unwired: daily reports, custom documents, and corrective actions.** Daily
-reports and custom documents carry free text with no structured finding to
-extract, so wiring them is a judgement call about noise, not an oversight;
-corrective actions derive from monthly inspections and would double-count.
-Do not mark #4 closed.
+**Severity: high. Status: closed, with two documented exclusions.** PR #118
+took it from 4 to 6 (`equipment_inspection`, `monthly_inspection`); PR #120
+added `daily_report`, taking it to 7.
+
+**What a daily report contributes, and what it does not.** Crew, visitors
+and the narrative stay out — free text with no structured finding, which is
+the noise concern that kept the whole document type out of PR #118. But two
+of its fields are not prose: `weather` is a pick from a fixed seven-value
+list (`src/DailyReport.jsx:12`) and `temperature` parses to a number. Those
+are the **one thing no other document type tells the Brain** — a company
+working at -35 in an Alberta winter should get cold-stress hazards in its
+generated FLHAs, and nothing else FORA collects carries that
+(`dailyConditionsSignal`, `api/logs.js`). Out-of-vocabulary weather is
+dropped rather than tallied, so the field changing shape cannot quietly turn
+this back into a prose signal.
+
+**The two remaining exclusions are deliberate, not open work:**
+- **Custom documents** — their shape is entirely customer-defined, so there
+  is no field that means the same thing across two companies. Dillon's call,
+  2026-09-17.
+- **Corrective actions** — they derive from findings the Brain already sees
+  (monthly answers, inspection defects), so a signal would double-count the
+  same event.
+
+**The guard that keeps this closed is now self-maintaining.** The test
+asserting writers and `bySourceType` agree used to hardcode its own list of
+writers, so it went stale the moment a writer was added — the same failure
+it existed to catch, one level up. Adding `daily_report` exposed that. It
+now **scans `api/` for writer literals**, and a second test asserts every
+counted type also branches in `server-lib/companyBrainSummary.js`, since a
+type can be counted in the Admin Panel and still contribute nothing to the
+prompt the model actually sees.
 
 Adding a source type means updating four places, not one: the writer,
 `bySourceType` in `api/companydata.js` (an unlisted type is silently
@@ -425,18 +486,33 @@ assignment-and-close-out. Equipment inspections have neither.
 
 ### #6 — Nothing enforces the doc-key ↔ module invariant
 **Severity: medium**, but the failure is a billing one.
-`pricing.js:51-56` says every key in `BUILTIN_DOC_KEYS` must appear in
-exactly one module, "or a company could be charged for something it cannot
-see, or see something it was not charged for." That invariant lives in a
-comment. `customforms.js:268-283` treats a missing settings row as
-**active**, so the failure direction is: add a doc key, forget the module,
-every company gets it free.
+**Status: fixed in PR #120.** The invariant is now a test
+(`tests/unit/doc-key-module-invariant.test.js`) instead of a sentence in a
+comment, which is the entire fix — no application code changed, because
+nothing was wrong with it. The lists agreed. Nothing guaranteed they would
+keep agreeing.
 
-*Verified equal 2026-09-16: 12 keys each, no duplicates.* The check:
-```bash
-node -e "import('./server-lib/pricing.js').then(p=>{const a=[...p.ALL_DOC_KEYS].sort();console.log(JSON.stringify(a))})"
-grep -n "BUILTIN_DOC_KEYS = " api/customforms.js
-```
+`server-lib/pricing.js:50-55` says every key in `BUILTIN_DOC_KEYS`
+(`api/customforms.js:100`) must appear in exactly one module, "or a company
+could be charged for something it cannot see, or see something it was not
+charged for."
+
+**The failure has a direction, and it is the expensive one.**
+`api/customforms.js` treats a missing `company_document_settings` row as
+**active**, so a document key no module sells is not withheld — it ships to
+every company free, silently, with no error and nothing in a log. The
+reverse (a module selling a key no document uses) bills for a feature that
+cannot be switched on.
+
+Four checks, each confirmed to fail against the mistake it describes: a new
+doc key with no module, a key sold by two modules, a module billing for a
+key that does not exist, and a `requires` naming a module that does not
+exist. The last one matters because `resolveModules()` uses it to reject
+buying preventative maintenance without equipment inspections — a typo there
+either blocks a legitimate purchase or stops enforcing the dependency.
+
+The test needs no database and no session, which is why this should never
+have been a comment in the first place.
 
 ### #7 — Weekly equipment reports group by label, not fleet id
 **Severity: medium. Status: fixed in PR #119.** The report now groups by a
@@ -481,12 +557,59 @@ be summed into one report line. The split direction still happens when the
 same machine is sometimes picked from the fleet and sometimes typed.
 
 ### #8 — Certification expiry doesn't gate anything
-**Severity: medium.** Certifications are tracked with expiry alerts
-(`api/certifications.js`), but no form consults them —
-`worker_certifications` is referenced by that one file and nowhere else in
-`api/` or `src/`. A worker whose ticket
-expired yesterday can still submit an FLHA for the task that ticket
-covers, and nothing anywhere connects the two.
+**Severity: medium. Status: fixed in PR #120, deliberately NOT as a gate.**
+
+The original finding was right about the disconnection: `worker_certifications`
+was referenced by `api/certifications.js` and by **no other file** in `api/`
+or `src/`. Expiry was tracked, alerted on, and reached nothing.
+
+**The original wording pointed at the wrong fix, and this is worth
+recording.** It said "a worker whose ticket expired yesterday can still
+submit an FLHA for the task that ticket covers". Two problems:
+
+1. **The link isn't computable.** `cert_type` is free text — the input
+   placeholder is literally "Type (e.g. Fall Protection)" — and nothing
+   anywhere maps a ticket to the tasks or hazards it covers. Gating would
+   mean inventing a taxonomy, which is a feature, not a break fix.
+2. **Gating is the wrong behaviour anyway.** Refusing a submission would
+   stop a worker filing safety paperwork on a jobsite because an
+   administrative record lapsed. That is worse than the gap it closes.
+
+So the connection runs the other way (Dillon's call, 2026-09-17): a document
+carries its author (`submitted_by_roster_id`, break #3), and a supervisor
+reviewing it sees that person's ticket status **as of the day they filed
+it** — `src/certificationStatus.js`, shown on the document review card.
+
+**As-of, not "now", is the whole point.** A ticket that lapsed last week was
+valid when the worker filed an FLHA three months ago; flagging that document
+today would tell a supervisor something false about a record they are
+reviewing.
+
+**Two boundaries held on purpose:**
+- An **unattributed** document returns nothing at all, never a reassuring
+  "no expired tickets". Pre-break-#3 documents carry no roster id, and "we
+  don't know who filed this" is a different answer from "they were clean".
+- **Anonymous near misses carry no author to badge**, and the reason is
+  worth recording because the first attempt got it wrong. That attempt
+  withheld `submitted_by_roster_id` from the near-miss list payload, arguing
+  that a column always null for anonymous rows would make "this one is null"
+  readable beside rows where it is set. It protects nothing: `is_anonymous`
+  is selected on the same line and `src/Dashboard.jsx:816,957,3166` renders
+  it as the literal word "Anonymous". Anonymity is a *designed, visible*
+  property of a near miss, and denying an inference the payload already
+  states outright only cost the badge on the non-anonymous ones.
+  The promise rests on two structural guarantees instead, both now pinned by
+  tests: `authorRosterId()` nulls the column at write time, and a CHECK
+  (`roster-attribution-migration.sql:58`) makes an anonymous row carrying an
+  author impossible. There is no row where the column could betray an
+  identity.
+
+**A third instance of the same pattern found on the way.**
+`submitted_by_roster_id` was written by every submit path in PR #118 and
+**selected by nothing** — this break could not be built until the column was
+readable. That is the same "producer nothing consumes" shape as `site_id`
+(break #2) and `equipment_id` (break #7), each introduced by the fix for the
+break it belonged to.
 
 ### #9 — Post-trip defects never reach Equipment Analytics
 **Severity: medium. Status: fixed in PR #118.** Dillon's call: Analytics
@@ -518,6 +641,46 @@ intentional in the copy — which is why this went to Dillon rather than
 being fixed outright. He chose: count both, change the copy.
 
 ---
+
+## 4b. The recurring shape: a key written and never read
+
+Three of the breaks closed in PRs #119 and #120 turned out to have the same
+underlying failure, and **each one was introduced by the fix for the break it
+belonged to**. Check this before assuming a join key works.
+
+| Column | Written by | Read by, until | Surfaced while closing |
+|---|---|---|---|
+| `equipment_id` | inspections, always | nothing — the weekly report grouped on the text label | #7 (PR #119) |
+| `site_id` | PR #118, all five field forms | nothing — every list payload SELECTed only the text | #2 (PR #120) |
+| `submitted_by_roster_id` | PR #118, every submit path | **nothing at all**, anywhere | #8 (PR #120) |
+
+The pattern: a fix adds a column, validates it on write, backfills it, and
+stops. The read side — the `select(...)` list, the aggregator, the display —
+still uses whatever it used before. **Nothing fails.** No error, no failing
+test, no log line. The column fills up with correct data that no feature ever
+looks at, and the break the column was added to close stays open while the
+changelog says it is fixed.
+
+**So when a change adds a join key, the check is not "is it written and
+validated". It is:**
+
+1. Which `select`/`listColumns` must now include it? (A column absent from
+   the list payload does not exist as far as the frontend is concerned.)
+2. Which aggregator or grouping function should key on it instead of the
+   text it replaces?
+3. Is there a comment somewhere explaining why two things *cannot* be joined,
+   written back when the key did not exist? Comments do not get re-read when
+   the facts under them change — `src/analyticsUtils.js` carried exactly such
+   a comment through break #2's entire first half.
+4. Does a test pin the new key's behaviour, or only the old one's?
+
+Two related instances, same family:
+- **The guard that went stale.** `tests/unit/brain-signal-capture.test.js`
+  asserted writers and `bySourceType` agree, from a **hardcoded list of
+  writers** — so it went out of date the moment a writer was added, which is
+  the exact failure it existed to catch. It now scans `api/`.
+- **The invariant that was only a comment.** Break #6's doc-key ↔ module
+  rule was stated in prose in `server-lib/pricing.js` and checked by nothing.
 
 ## 5. Deliberate non-connections
 
@@ -560,4 +723,9 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
 | 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #120 | Break #8 **closed**, as a reviewer signal rather than a gate — gating was both incomputable (no cert→task mapping) and the wrong behaviour (it would block safety paperwork). Found a third "producer nothing consumes": `submitted_by_roster_id` was written by every submit path and selected by none. |
+| 2026-09-17 | PR #120 | Break #6 **closed**: the doc-key ↔ module invariant is a test now, not a comment. No application code changed — the lists already agreed; nothing guaranteed they would keep agreeing. |
+| 2026-09-17 | PR #120 | Break #4 **closed**: daily reports now emit a `daily_report` signal carrying working conditions only (fixed-vocabulary weather + parsed temperature). Custom documents and corrective actions excluded on purpose. The writers-vs-counters guard was itself stale and now scans `api/` instead of hardcoding a list. |
+| 2026-09-17 | PR #120 | Break #2 **closed**: `site_id` now survives the read boundary (five list payloads were dropping it) and the analytics site tables key on it. Two tables kept on purpose. |
+| 2026-09-17 | PR #120 | Break #1 **closed**: the weekly report's ending reading now reads fuel logs too, via reading helpers moved into `server-lib/readings.js` so maintenance and the report share one definition. "Used" stays trip-derived by definition, recorded as a boundary rather than a gap. |
 | 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |

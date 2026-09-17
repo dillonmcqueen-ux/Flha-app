@@ -134,6 +134,9 @@ export function SafetyAnalyticsPanel({
   flhas = [], toolbox = [], nearMisses = [], incidents = [],
   daily = [], monthlyRecords = [], monthlyActions = [], customDocs = [],
   certAlerts = null,
+  // Break #2 — { id: name } for the company's real sites, so a site renamed
+  // since a document was filed still groups and reads under one name.
+  siteNames = {},
 }) {
   const isAdvanced = tier === "advanced";
 
@@ -141,7 +144,7 @@ export function SafetyAnalyticsPanel({
   const ratio = nearMissIncidentRatio(nearMisses, incidents);
   const backlog = reviewBacklog(nearMisses, incidents);
   const riskRate = highRiskFlhaRate(flhas);
-  const fieldSites = fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents);
+  const fieldSites = fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, siteNames);
   const openActionsCount = monthlyActions.filter(a => a.status !== "resolved").length;
   const attendance = toolboxAvgAttendance(toolbox);
   const passRate = monthlyPassRate(monthlyRecords);
@@ -224,6 +227,7 @@ export function SafetyAnalyticsPanel({
       )}
 
       {isAdvanced && <SafetyAdvancedSections
+        siteNames={siteNames}
         nearMisses={nearMisses} incidents={incidents} fieldSites={fieldSites}
         monthlyRecords={monthlyRecords} monthlyActions={monthlyActions} customDocs={customDocs}
         flhas={flhas} toolbox={toolbox} passRate={passRate}
@@ -238,9 +242,9 @@ export function SafetyAnalyticsPanel({
   );
 }
 
-function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyRecords, monthlyActions, customDocs, flhas, toolbox, passRate }) {
+function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyRecords, monthlyActions, customDocs, flhas, toolbox, passRate, siteNames = {} }) {
   const trend = monthlyTrend(nearMisses, incidents);
-  const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs);
+  const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs, siteNames);
   const aging = correctiveActionAging(monthlyActions);
   const leaderboard = reporterLeaderboard(flhas, [], toolbox);
 

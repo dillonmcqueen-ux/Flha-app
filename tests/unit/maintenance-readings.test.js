@@ -28,12 +28,15 @@ process.env.SUPABASE_URL ||= 'http://127.0.0.1:1/';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 process.env.SESSION_SECRET ||= 'test-session-secret';
 
+// The three reading helpers moved to server-lib/readings.js so the weekly
+// equipment report could reach them too (break #1's second half) -- a
+// second copy is how break #1 happened in the first place.
 const {
   inspectionReadingPoint,
   fuelReadingPoint,
   latestReadingsByEquipment,
-  latestServiceByEquipment,
-} = await import('../../api/maintenance.js');
+} = await import('../../server-lib/readings.js');
+const { latestServiceByEquipment } = await import('../../api/maintenance.js');
 
 const inspection = (o) => inspectionReadingPoint({ trip_type: 'pretrip', reading_unit: 'hrs', ...o });
 const fuelLog = (o) => fuelReadingPoint({ reading_unit: 'hrs', ...o });

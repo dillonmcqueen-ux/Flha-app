@@ -17,6 +17,7 @@ import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { reviewBacklog, fieldSiteActivity, fuelSummary } from "./analyticsUtils";
+import { authorCertificationFlags, authorCertificationLabel } from "./certificationStatus";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
@@ -1458,7 +1459,7 @@ function CustomDocCard({ data, onClose, onSave }) {
   );
 }
 
-function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
+function ThisWeekDocsCard({ docs, meta, certifications = [], onOpen, onClose }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -1490,6 +1491,18 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
                   </div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{m.primary(doc)}</div>
                   <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>{m.secondary(doc)}</div>
+                  {/* Break #8 — never a block, only what a reviewer should
+                      know. Absent entirely when the author is unknown
+                      (pre-break-#3 documents, anonymous near misses) rather
+                      than showing a reassuring zero-state. */}
+                  {(() => {
+                    const label = authorCertificationLabel(authorCertificationFlags(certifications, doc.submitted_by_roster_id, doc.created_at));
+                    return label ? (
+                      <div style={{ fontSize: 11, color: "#F59E0B", marginTop: 3, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <ShieldCheck size={11} strokeWidth={2.5} />{label}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <div style={{ fontSize: 11, color: "#9CA3AF", flexShrink: 0, textAlign: "right" }}>
                   {new Date(doc.created_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })} →
@@ -1623,7 +1636,7 @@ function EquipmentReportCard({ data, onClose, error }) {
               ) : (
                 <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
                   <div style={{ fontSize: 13, color: "#D4D4D8" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
-                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
+                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong>{eq.endingReadingSource === "fuel_log" && <span style={{ fontSize: 11, color: "#A1A1AA" }}> from fuel log</span>}</div>
                 </div>
               )}
               {eq.noPostTripCount > 0 && (
@@ -1742,6 +1755,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   // ── Certification expiry alerts (onboarding wallet, Phase 3) ───────────
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
+  // Break #8 — the company's raw certifications, so a document can be shown
+  // against its author's ticket status ON THE DAY THEY FILED IT.
+  // certification_summary returns counts only, which cannot answer a
+  // per-document, as-of-then question.
+  const [companyCertifications, setCompanyCertifications] = useState([]);
 
   // ── Time Clock: my own status + everyone's entries + reports ──────────
   const [myTimeStatus, setMyTimeStatus] = useState(null);
@@ -2158,6 +2176,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
       const data = await res.json();
       if (res.ok) setCertAlerts(data);
+
+      const listRes = await fetch("/api/certifications", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        // withFiles: false — the badge needs expiry dates, not documents, and
+        // this runs on every dashboard open. See api/certifications.js.
+        body: JSON.stringify({ action: "list_certifications", token, companyId: selectedCompany, withFiles: false }),
+      });
+      const listData = await listRes.json();
+      if (listRes.ok) setCompanyCertifications(listData.certifications || []);
     } catch (e) { /* leave alerts as-is if the request fails */ }
   };
 
@@ -2172,7 +2199,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // supervisor happens to open Fuel Logs or Equipment Analytics.
   const [fuelLogs, setFuelLogs] = useState([]);
   const [loadingFuelLogs, setLoadingFuelLogs] = useState(false);
-  const [fuelSiteNames, setFuelSiteNames] = useState({});
+  const [siteNamesById, setSiteNamesById] = useState({});
   // `silent` on this and every loader below: a background refresh swaps the
   // data underneath the list that's already on screen instead of replacing
   // it with a "Loading..." placeholder. Only a first load (or a company /
@@ -2189,7 +2216,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       const fuelData = await fuelRes.json();
       if (fuelRes.ok) setFuelLogs((fuelData.records || []).filter(r => r.company_id === selectedCompany));
       const siteData = await siteRes.json();
-      if (siteRes.ok) setFuelSiteNames(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
+      // Named for what it is rather than who asked for it first: the fuel
+      // summary needed this { id: name } map, and since break #2 the safety
+      // analytics site tables use it too. The loader runs on every company
+      // change regardless of which modules are on, so it is always
+      // populated — and if it ever is not, the site tables still group
+      // correctly, they just fall back to the text the workers typed.
+      if (siteRes.ok) setSiteNamesById(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
     } catch (e) { /* leave list as-is if the request fails */ }
     setLoadingFuelLogs(false);
   };
@@ -2830,6 +2863,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         flhas: companyFlhas, toolbox: companyToolbox, nearMisses: companyNearMisses, incidents: companyIncidents,
         daily: companyDaily, monthlyActions: companyMonthlyActions,
         monthlyRecords: companyMonthlyRecords, customDocs: companySafetyCustomDocs,
+        siteNames: siteNamesById,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the safety analytics PDF.");
@@ -2845,7 +2879,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         companyName: company?.name, companyLogo: company?.logo_url,
         inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
         customDocs: companyOperationsCustomDocs,
-        fuelLogs: TAB_VISIBLE.fuel ? fuelLogs : [], siteNames: fuelSiteNames,
+        fuelLogs: TAB_VISIBLE.fuel ? fuelLogs : [], siteNames: siteNamesById,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
@@ -3084,7 +3118,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // fuelSummary() already computes (Phase 3) surfaced as a standing
   // Overview tile instead of something a supervisor has to go find inside
   // Equipment Analytics. Still just a flag, no push/notification system.
-  const fuelFlagged = fuelSummary(fuelLogs, fuelSiteNames).flagged;
+  const fuelFlagged = fuelSummary(fuelLogs, siteNamesById).flagged;
   const fuelSpark = bucketByDay(fuelLogs, 7);
 
   // Onboarding-wallet activity — certification uploads (each one carries
@@ -3111,7 +3145,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
    .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
    .slice(0, 8);
 
-  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents)
+  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents, siteNamesById)
     .map(s => ({ ...s, total: s.flhas + s.toolbox + s.daily + s.nearMisses + s.incidents, needsAttention: s.nearMisses + s.incidents > 0 }))
     .filter(s => s.total > 0)
     .sort((a, b) => b.total - a.total)
@@ -3896,7 +3930,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} onSave={saveCustomDocRecordEdit} />}
       {showThisWeekModal && (
-        <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
+        <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} certifications={companyCertifications} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}
 
       <header style={{
@@ -5018,6 +5052,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               monthlyRecords={companyMonthlyRecords}
               monthlyActions={companyMonthlyActions}
               customDocs={companySafetyCustomDocs}
+              siteNames={siteNamesById}
               certAlerts={isDocActive("certifications") ? certAlerts : null}
             />
           </>
@@ -5049,7 +5084,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
               customDocs={companyOperationsCustomDocs}
               fuelLogs={TAB_VISIBLE.fuel ? fuelLogs : []}
-              siteNames={fuelSiteNames}
+              siteNames={siteNamesById}
             />
           </>
         )}

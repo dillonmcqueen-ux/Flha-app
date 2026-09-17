@@ -94,12 +94,32 @@ const TABLES = {
   incident: {
     name: 'incidents',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, site, site_id, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes, submitted_by_roster_id',
   },
   nearmiss: {
     name: 'near_misses',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    // submitted_by_roster_id rides along here like everywhere else, and the
+    // reasoning for that is worth stating because an earlier version of this
+    // file withheld it for the wrong reason.
+    //
+    // The worry was that selecting a column which is always null for
+    // anonymous rows would make "this one is null" readable beside rows
+    // where it is set, turning anonymity into a property a supervisor can
+    // spot. That protects nothing: `is_anonymous` is selected on this very
+    // line, and src/Dashboard.jsx renders it as the literal word "Anonymous"
+    // (:816, :957, :3166). Anonymity is a designed, visible property of a
+    // near miss, not an inference to be denied.
+    //
+    // What the promise actually rests on is structural and unaffected by
+    // what this list selects: authorRosterId() nulls the column at write
+    // time when is_anonymous is true, and a CHECK constraint
+    // (docs/schema/roster-attribution-migration.sql:58) makes an anonymous
+    // row carrying an author impossible. There is no row where this column
+    // could betray an identity. Withholding it only cost the break-#8
+    // certification badge on the non-anonymous near misses, which are most
+    // of them.
+    listColumns: 'id, reporter_name, is_anonymous, site, site_id, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes, submitted_by_roster_id',
   },
 };
 

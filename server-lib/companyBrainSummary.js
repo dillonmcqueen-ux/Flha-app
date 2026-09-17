@@ -106,6 +106,15 @@ function summarizeSignalsForPrompt(signals) {
       if (findings.length) lines.push(`- Equipment inspection${j.equipment ? ` on ${j.equipment}` : ''}: ${findings.join('; ')}`);
     } else if (s.source_type === 'monthly_inspection') {
       if (j.failed?.length) lines.push(`- Monthly site inspection failed: ${j.failed.join('; ')}`);
+    } else if (s.source_type === 'daily_report') {
+      // Break #4's daily-report half. Only the conditions reach the model --
+      // crew, visitors and the narrative stay out. A company that routinely
+      // works below -20 should get cold-stress hazards in its generated
+      // documents, and nothing else FORA collects carries that.
+      const parts = [];
+      if (j.conditions?.length) parts.push(j.conditions.join(', '));
+      if (typeof j.temperature === 'number') parts.push(`${j.temperature}°`);
+      if (parts.length) lines.push(`- Working conditions: ${parts.join(' at ')}`);
     }
   });
   return lines.slice(0, MAX_SIGNALS_PER_COMPANY_IN_PROMPT).join('\n').slice(0, 6000);

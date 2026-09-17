@@ -867,9 +867,10 @@ export default async function handler(req, res) {
       // signal becomes invisible in the Brain tab even though it is being
       // recorded and summarized. Writers today: api/flhas.js (flha_edit),
       // api/logs.js (toolbox_talk, equipment_inspection), api/reports.js
-      // (incident, near_miss), api/monthly.js (monthly_inspection).
-      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0 };
-      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {} };
+      // (incident, near_miss), api/monthly.js (monthly_inspection),
+      // api/logs.js again (daily_report).
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0, daily_report: 0 };
+      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {}, workingConditions: {} };
       const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
       (data || []).forEach((row) => {
         const j = row.signal_json || {};
@@ -890,6 +891,12 @@ export default async function handler(req, res) {
           (j.defective || []).forEach((i) => bump(tally.defectiveItems, i));
           (j.monitor || []).forEach((i) => bump(tally.defectiveItems, i));
           bump(tally.inspectedEquipment, j.equipment);
+        } else if (row.source_type === 'daily_report') {
+          // Conditions and the temperature band are tallied together: both
+          // answer "what does this company work in", and the band is what a
+          // profile should emphasize rather than an average.
+          (j.conditions || []).forEach((c) => bump(tally.workingConditions, c));
+          if (j.tempBand && j.tempBand !== 'moderate') bump(tally.workingConditions, j.tempBand);
         } else if (row.source_type === 'monthly_inspection') {
           (j.failed || []).forEach((q) => bump(tally.monthlyFailures, q));
         }
@@ -903,6 +910,7 @@ export default async function handler(req, res) {
         topRemovedHazards: topN(tally.removedHazards),
         topToolboxTopics: topN(tally.toolboxTopics),
         topIncidentCategories: topN(tally.incidentCategories),
+        topWorkingConditions: topN(tally.workingConditions),
         topNearMissInvolved: topN(tally.nearMissInvolved),
         topDefectiveItems: topN(tally.defectiveItems),
         topInspectedEquipment: topN(tally.inspectedEquipment),
