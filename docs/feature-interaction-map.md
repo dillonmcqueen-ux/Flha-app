@@ -97,6 +97,43 @@ therefore vetted on the read side instead — `vetEquipmentIds` drops any id
 not in the company's fleet before anything keys on it, falling back to the
 label the way a free-text machine already does.
 
+### `linked_inspection_id` → `inspections.id` (the trip pair)
+Set on a post-trip to point back at its pre-trip (`Inspection.jsx:53`;
+always `null` on a pre-trip, `:47`). This is what makes a *trip* a unit
+rather than two loose rows: usage for the week is `posttrip.end_reading −
+pretrip.start_reading`, and "checked out, not returned" is the absence of a
+post-trip carrying this id.
+
+| Consumer | Reads it |
+|---|---|
+| Weekly Equipment Report — open-trip count | `equipmentreports.js:316` |
+| Weekly Equipment Report — towed distance | `equipmentreports.js:331` |
+| `api/logs.js` open-pretrip list | `logs.js:223` |
+| Dashboard inspection detail | `src/Dashboard.jsx:3283` |
+
+**Weak link, recorded 2026-09-17, not being worked.** This is the last
+client-supplied foreign id in `SUBMITTABLE_FIELDS.inspection`
+(`logs.js:132`) with no ownership check — the same shape as the
+`equipment_id` gap `afee546` closed, found by `tenant-scope-reviewer` while
+verifying that fix.
+
+**It is inert today, and the reason is worth writing down:** all four
+consumers above compare `linked_inspection_id` against rows from a set that
+is *already* company-scoped (`logs.js:210`, `equipmentreports.js:216`, and
+the supervisor's own filtered list), so a foreign id matches nothing and is
+dropped. Nothing fetches by that id directly. The trap is the same one
+`equipment_id` had: the first consumer that does a direct lookup without
+re-checking `company_id` hands one company's readings to another.
+
+**Do not fix this by copying `equipmentScope.js`.** The semantics differ.
+A missing `equipment_id` degrades to a label-only record, which is a shape
+the product already has; a missing `linked_inspection_id` would silently
+drop the trip pairing and with it the week's usage hours. There is also an
+offline question to answer first — a post-trip queued offline needs its
+pre-trip's server-assigned id, so what that column holds mid-drain needs
+reading before any guard is written. Needs a decision, not a mechanical
+copy.
+
 ### `reading` / `reading_unit` (the usage clock)
 Hours or kilometres on a machine. Written by inspections
 (`start_reading`/`end_reading`) and fuel logs (`hour_reading`).
@@ -522,4 +559,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #118 | Break #3 fixed: `submitted_by_roster_id` stamped server-side on all nine document tables, with anonymous near misses structurally protected. |
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
+| 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
 | 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |
