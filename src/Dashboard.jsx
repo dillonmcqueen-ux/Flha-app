@@ -5191,6 +5191,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               <div style={{ fontSize: 11, color: C.text.faint, flexShrink: 0 }}>{eq.usageSinceService} / {eq.pmInterval} {eq.lastService?.reading_unit}</div>
                             </div>
                           )}
+                          {/* Work the crew did themselves — filter changes, small
+                              repairs. Shown here because this is where you look
+                              at a machine, but deliberately NOT counted as a
+                              service: the bar above is driven by pm_service rows
+                              only. See docs/scope-equipment-service-log.md. */}
+                          {(eq.fieldService || []).length > 0 && (
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.line}` }}>
+                              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: C.text.faint, marginBottom: 4 }}>
+                                Logged by the crew
+                              </div>
+                              {eq.fieldService.map(f => (
+                                <div key={f.id} style={{ fontSize: 12, color: C.text.muted, marginBottom: 2 }}>
+                                  {f.service_date ? new Date(f.service_date).toLocaleDateString("en-CA") : ""} · {f.performed_by || "—"} — {f.notes}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <span style={{ fontSize: 11, fontWeight: 700, color: sc.text, background: sc.bg, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>{sc.label}</span>
                       </div>

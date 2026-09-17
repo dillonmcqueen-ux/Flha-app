@@ -668,7 +668,19 @@ export default async function handler(req, res) {
       }
 
       if (interval != null) {
-        const { data: existingLog } = await supabaseAdmin.from('equipment_maintenance_log').select('id').eq('equipment_id', id).limit(1);
+        // Only a pm_service row counts as "already has a baseline". Without
+        // this filter, a worker's field_service entry (a filter change, a
+        // small repair) made before tracking was switched on would suppress
+        // the starting baseline entirely: latestServiceByEquipment ignores
+        // field entries, so the machine would report not_started forever
+        // and never come due. Second of the two lines that make worker
+        // logging safe — see docs/schema/equipment-field-service-migration.sql.
+        const { data: existingLog } = await supabaseAdmin
+          .from('equipment_maintenance_log')
+          .select('id')
+          .eq('equipment_id', id)
+          .eq('entry_type', 'pm_service')
+          .limit(1);
         if (!existingLog || existingLog.length === 0) {
           const reading = startingReading != null && startingReading !== '' ? parseFloat(startingReading) : null;
           if (reading == null || Number.isNaN(reading) || !(readingUnit || '').trim()) {

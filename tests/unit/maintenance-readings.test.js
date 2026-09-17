@@ -32,6 +32,7 @@ const {
   inspectionReadingPoint,
   fuelReadingPoint,
   latestReadingsByEquipment,
+  latestServiceByEquipment,
 } = await import('../../api/maintenance.js');
 
 const inspection = (o) => inspectionReadingPoint({ trip_type: 'pretrip', reading_unit: 'hrs', ...o });
@@ -152,4 +153,81 @@ test('the unit travels with the reading, so a mismatch stays detectable', () => 
     fuelLog({ id: 5, equipment_id: 7, hour_reading: '1240', reading_unit: 'km', created_at: '2026-09-14T16:00:00Z' }),
   ]);
   assert.equal(readings[7].readingUnit, 'km');
+});
+
+
+// ── Field service must never move the PM baseline ─────────────────────
+//
+// equipment_maintenance_log now holds two kinds of row. A `pm_service` is a
+// scheduled service and IS the baseline usageSinceService is measured from.
+// A `field_service` is a worker saying "I changed the filters" or "I
+// replaced a hose" — real, worth recording, and explicitly not a reset.
+//
+// Dillon's rule, 2026-09-17: "supervisor only, workers shouldnt be able to
+// reset the interval but they should be able to log things like filter
+// changes or repairs they've done."
+//
+// If a field entry ever reaches this reducer, a machine 40 hours from its
+// 250-hour service reads as freshly serviced and silently never comes due —
+// worse than never logging the filter change at all. The query filters too;
+// these cases pin the second guard.
+
+const pmService = (o) => ({ entry_type: 'pm_service', reading_unit: 'hrs', ...o });
+const fieldService = (o) => ({ entry_type: 'field_service', reading_unit: 'hrs', ...o });
+
+test('a field-service entry never becomes the PM baseline', () => {
+  const latest = latestServiceByEquipment([
+    pmService({ id: 1, equipment_id: 7, service_reading: 1000, service_date: '2026-09-01', created_at: '2026-09-01T08:00:00Z' }),
+    fieldService({ id: 2, equipment_id: 7, service_reading: 1240, service_date: '2026-09-14', created_at: '2026-09-14T16:00:00Z' }),
+  ]);
+  assert.equal(latest[7].service_reading, 1000, 'a filter change must not reset the clock');
+  assert.equal(latest[7].entry_type, 'pm_service');
+});
+
+test('a machine with only field service has no baseline at all', () => {
+  // Correct: it reports not_started rather than inventing a baseline from
+  // work that was never the scheduled service.
+  const latest = latestServiceByEquipment([
+    fieldService({ id: 2, equipment_id: 7, service_reading: 1240, service_date: '2026-09-14', created_at: '2026-09-14T16:00:00Z' }),
+  ]);
+  assert.equal(latest[7], undefined);
+});
+
+test('a field entry with no reading cannot break the reducer', () => {
+  // service_reading is nullable for field entries, so a null must be
+  // skipped rather than compared.
+  const latest = latestServiceByEquipment([
+    pmService({ id: 1, equipment_id: 7, service_reading: 1000, service_date: '2026-09-01', created_at: '2026-09-01T08:00:00Z' }),
+    fieldService({ id: 2, equipment_id: 7, service_reading: null, reading_unit: null, service_date: '2026-09-20', created_at: '2026-09-20T16:00:00Z' }),
+  ]);
+  assert.equal(latest[7].service_reading, 1000);
+});
+
+test('the newest pm_service still wins among several', () => {
+  const latest = latestServiceByEquipment([
+    pmService({ id: 1, equipment_id: 7, service_reading: 1000, service_date: '2026-06-01', created_at: '2026-06-01T08:00:00Z' }),
+    fieldService({ id: 2, equipment_id: 7, service_reading: 1100, service_date: '2026-07-01', created_at: '2026-07-01T08:00:00Z' }),
+    pmService({ id: 3, equipment_id: 7, service_reading: 1250, service_date: '2026-08-01', created_at: '2026-08-01T08:00:00Z' }),
+  ]);
+  assert.equal(latest[7].service_reading, 1250);
+});
+
+test('rows written before entry_type existed still count as the baseline', () => {
+  // Existing rows got entry_type='pm_service' from the column default, but
+  // a caller selecting without the column would pass undefined. Treat a
+  // missing entry_type as pm_service, never as a field entry to be skipped.
+  const latest = latestServiceByEquipment([
+    { id: 1, equipment_id: 7, service_reading: 1000, reading_unit: 'hrs', service_date: '2026-09-01', created_at: '2026-09-01T08:00:00Z' },
+  ]);
+  assert.equal(latest[7].service_reading, 1000);
+});
+
+test('each machine keeps its own baseline', () => {
+  const latest = latestServiceByEquipment([
+    pmService({ id: 1, equipment_id: 7, service_reading: 1000, service_date: '2026-09-01', created_at: '2026-09-01T08:00:00Z' }),
+    fieldService({ id: 2, equipment_id: 8, service_reading: 500, service_date: '2026-09-02', created_at: '2026-09-02T08:00:00Z' }),
+    pmService({ id: 3, equipment_id: 8, service_reading: 440, service_date: '2026-08-01', created_at: '2026-08-01T08:00:00Z' }),
+  ]);
+  assert.equal(latest[7].service_reading, 1000);
+  assert.equal(latest[8].service_reading, 440, "machine 8's field entry must not outrank its real service");
 });

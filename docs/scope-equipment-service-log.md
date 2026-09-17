@@ -1,6 +1,6 @@
 # Scope: worker-logged equipment service
 
-**Status: scoping only. Nothing built.** Asked for on 2026-09-17 while
+**Status: BUILT, 2026-09-17 (PR #118).** This document is kept as the reasoning behind it. Asked for on 2026-09-17 while
 building break #5, in these words:
 
 > should there be a separate maintenance tab that log services, employee can
@@ -141,11 +141,19 @@ a field-service entry must not move a machine's PM status.
 
 ## Open questions
 
-1. **Can a field entry ever reset the clock?** Someone doing the actual
-   250-hour service themselves is a real case. Options: a "this was the
-   scheduled service" checkbox on the worker form (needs the reading, then),
-   or supervisor-only promotion of an entry afterwards. The second is
-   safer — a worker can't accidentally wipe the interval — but adds a step.
+1. ~~**Can a field entry ever reset the clock?**~~ **Answered, and built
+   that way.** Dillon, 2026-09-17: *"supervisor only, workers shouldnt be
+   able to reset the interval but they should be able to log things like
+   filter changes or repairs they've done."*
+
+   So neither option in the original question was taken. There is no
+   checkbox and no promotion flow: the worker form writes `field_service`
+   and nothing else, and `log_field_service` has no parameter that can
+   produce a `pm_service` row. A worker who did the scheduled service tells
+   a supervisor, who logs it through the existing `log_service`. The
+   asymmetry is the design, not a gap — a promotion flow can be added later
+   if the extra step turns out to hurt, and adding one is much easier than
+   un-resetting a PM interval somebody wiped by accident.
 2. **Photos?** `Incident.jsx` is the only worker form that takes them today.
    "Here's the cracked hose I replaced" is genuinely useful, but it means
    another storage path, and per `TODO.md` storage objects are still not
