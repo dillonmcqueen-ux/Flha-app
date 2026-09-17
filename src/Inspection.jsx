@@ -381,6 +381,15 @@ export default function Inspection({ companyId, companyName, userName: loginUser
         category: it.category || "",
         unit: it.unit || "truck",
         unitLabel: it.unitLabel || "",
+        // Carried forward, not rebuilt. Without it the post-trip's copy of
+        // an attachment item has a label and no id, so every consumer that
+        // routes a defect back to the right machine
+        // (server-lib/inspectionAttachments.js's attachmentForItem) drops to
+        // label matching — which is exactly the ambiguity the id exists to
+        // resolve, since two attachments can share a label and only one of
+        // them is broken. The pre-trip and the post-trip are two halves of
+        // one trip and have to describe the same machines the same way.
+        attachmentId: it.attachmentId ?? null,
         condition: "Good",
         note: "",
         carriedFrom: flagged || undefined,
