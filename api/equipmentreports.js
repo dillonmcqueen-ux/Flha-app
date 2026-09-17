@@ -10,6 +10,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderEquipmentReportPdf, equipmentReportFilename } from '../server-lib/reportPdfs.js';
+import { companyEquipmentIndex } from '../server-lib/equipmentScope.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -153,6 +154,39 @@ function toISODate(d) {
 // definition, so the free-text row keeps its own label key rather than being
 // guessed onto one of them — guessing there would reintroduce the merge bug
 // from the other side, and silently.
+// Every equipment id this report can see must belong to the company the
+// report is for — and unlike the inspections themselves, that is not
+// something the query above can guarantee.
+//
+// `inspections.equipment_id` is checked on submit (server-lib/equipmentScope.js),
+// but `results_json.attachedTrailer.id` cannot be: results_json is a
+// free-form jsonb blob, and api/logs.js's pickAllowed whitelists the
+// COLUMN, never the contents. The legitimate client picks the trailer out
+// of the company's own fleet (src/Inspection.jsx:231-242), which is a UI
+// convention rather than an enforced one — a worker can POST any
+// results_json they like.
+//
+// An id from outside the fleet is dropped rather than rejected, because
+// keyFor already has a correct answer for "no id": fall back to the label,
+// exactly as a free-text machine does. So a bad id costs its row nothing
+// but the join, and a stale id from a machine retired mid-week behaves the
+// same way. Rejecting would throw away a whole week of real inspections
+// over one bad field.
+export function vetEquipmentIds(records, fleetIndex) {
+  // The fleet row's own id is what survives, not the value that arrived —
+  // so an id that round-tripped through jsonb as a string comes back as the
+  // number every other row carries, and report_json can't end up holding
+  // both spellings of the same machine.
+  const owned = (id) => (id === null || id === undefined || id === '') ? null : (fleetIndex.get(String(id)) ?? null);
+  (records || []).forEach((r) => {
+    if (!r) return;
+    r.equipment_id = owned(r.equipment_id);
+    const attached = r.results_json?.attachedTrailer;
+    if (attached && typeof attached === 'object') attached.id = owned(attached.id);
+  });
+  return records;
+}
+
 export function buildEquipmentKeyResolver(records) {
   const labelToIds = {};
   (records || []).forEach((r) => {
@@ -184,6 +218,15 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
     .lt('created_at', weekEndISO)
     .order('created_at', { ascending: true });
   if (error) throw new Error('Could not load inspections: ' + error.message);
+
+  // Drop any equipment id that isn't this company's before anything keys on
+  // it — see vetEquipmentIds above for which ids can be attacker-chosen and
+  // why they're dropped rather than rejected. Failing the build on an
+  // unreadable fleet is deliberate: a report silently keyed on unvetted ids
+  // is worse than a cron run that retries.
+  const fleetIndex = await companyEquipmentIndex(supabaseAdmin, companyId);
+  if (!fleetIndex) throw new Error('Could not load equipment fleet');
+  vetEquipmentIds(records || [], fleetIndex);
 
   // Break #7 in docs/feature-interaction-map.md — this grouped machines by
   // their free-text equipment_label while inspections.equipment_id, a real

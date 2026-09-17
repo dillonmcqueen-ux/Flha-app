@@ -5,6 +5,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
+import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
+import { resolveSiteId } from '../server-lib/siteScope.js';
 import crypto from 'crypto';
 
 const supabaseAdmin = createClient(
@@ -145,17 +147,29 @@ export default async function handler(req, res) {
       // tenant), but it would silently attach this fuel entry to another
       // company's equipment/site record, which a future burn-rate lookup
       // keyed on equipment_id could then read across tenants.
-      if (record.equipment_id) {
-        const { data: eqRows } = await supabaseAdmin.from('equipment').select('company_id').eq('id', record.equipment_id).limit(1);
-        if (!eqRows || eqRows.length === 0 || eqRows[0].company_id !== session.companyId) {
-          return res.status(403).json({ error: 'Not allowed.' });
-        }
+      //
+      // This guard used to live inline here and was the only copy in the
+      // repo; it now shares server-lib/equipmentScope.js with api/logs.js's
+      // inspection submit so the two can't drift. The one behaviour change
+      // is deliberate: an id that does not EXIST now stores a label-only
+      // fuel log instead of 403ing. Fuel logs are offline-queued
+      // (src/FuelLog.jsx:164) and drainQueue has no attempt cap or drop
+      // path, so 403ing a retired machine's id wedged the worker's whole
+      // fuel-log queue behind a submission that could never succeed. A
+      // cross-tenant id still 403s. See the long note in that file.
+      //
+      // The resolved value is assigned back onto `record` (which pickAllowed
+      // below reads) only when the client actually sent the key, so a
+      // submission that omits one doesn't gain an explicit null it never had.
+      if (record.equipment_id !== undefined) {
+        const resolvedEquipmentId = await resolveEquipmentId(supabaseAdmin, session.companyId, record.equipment_id);
+        if (resolvedEquipmentId === false) return res.status(403).json({ error: 'Not allowed.' });
+        record.equipment_id = resolvedEquipmentId;
       }
-      if (record.site_id) {
-        const { data: siteRows } = await supabaseAdmin.from('sites').select('company_id').eq('id', record.site_id).limit(1);
-        if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
-          return res.status(403).json({ error: 'Not allowed.' });
-        }
+      if (record.site_id !== undefined) {
+        const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, record.site_id);
+        if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed.' });
+        record.site_id = resolvedSiteId;
       }
 
       // Idempotency (docs/scope-offline-capability.md Phase 1 pattern) — a
