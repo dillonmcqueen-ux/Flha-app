@@ -4,6 +4,7 @@
 // document active/deactivated toggle settings.
 
 import { createClient } from '@supabase/supabase-js';
+import { authorRosterId } from '../server-lib/authorStamp.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -493,6 +494,8 @@ export default async function handler(req, res) {
         .from('custom_form_records')
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
+          // Break #3 — author from the session, never the request.
+          submitted_by_roster_id: authorRosterId(session),
           ai_summary: aiSummary || null, pdf_url: resolvedSubmitPdfUrl, status: 'complete',
           client_submission_id: clientSubmissionId || null,
           // docs/scope-offline-capability.md Phase 2 — flags a record

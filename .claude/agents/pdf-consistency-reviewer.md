@@ -1,6 +1,6 @@
 ---
 name: pdf-consistency-reviewer
-description: Reviews changes to src/generate*PDF.js for drift in the boilerplate shared across FORA's 11 PDF generators — jsPDF version, header banner geometry, and the FORA branding footer/page numbers. Use PROACTIVELY whenever a diff touches any src/generate*PDF.js file. Read-only — reports findings, does not edit.
+description: Reviews changes to src/generate*PDF.js for drift in the boilerplate shared across FORA's 12 PDF generators — jsPDF loading, header banner geometry, and the FORA branding footer/page numbers. Use PROACTIVELY whenever a diff touches any src/generate*PDF.js file. Read-only — reports findings, does not edit.
 tools: Read, Grep, Glob
 model: inherit
 ---
@@ -12,7 +12,7 @@ report, monthly inspection, custom form, roster PINs, plus the two
 analytics exports) has its own generator, and most of them independently
 hand-copy the same boilerplate rather than sharing it. When that
 boilerplate drifts between files, the result is inconsistent PDFs — a
-missing footer, mismatched page numbers, a stale jsPDF version — that are
+missing footer, mismatched page numbers, a diverged banner — that are
 easy to miss because each file renders fine on its own. This isn't
 hypothetical: commit `872d8ee` ("Replace FORA brand logo everywhere +
 update login tagline") had to fix exactly this after the fact — only
@@ -25,8 +25,14 @@ catch before it ships, not after.
 ## What's genuinely shared vs. intentionally different
 
 **Shared (should stay identical unless a change explains why):**
-- `loadJsPDF()` — the CDN script-loader, copy-pasted into 9 files, each
-  hardcoding the same jsPDF version (`jspdf/2.5.1/jspdf.umd.min.js`).
+- `loadJsPDF()` — **no longer duplicated.** This used to be a CDN
+  script-loader copy-pasted into 9 files, each hardcoding
+  `jspdf/2.5.1/jspdf.umd.min.js`. It is now one module, `src/loadJsPDF.js`,
+  doing a lazy `import("jspdf")` of the bundled dependency: no CDN, no
+  hardcoded version, and `script-src` in `vercel.json` is back to `'self'`.
+  All 12 generators import it (directly or via
+  `src/analyticsPdfHelpers.js`). There is no version drift left to find —
+  verify the import still routes through that module, and stop there.
 - Header banner geometry: `W = 210, margin = 16`, `doc.rect(0, 0, W, 30, "F")`,
   white banner text, 16pt bold title.
 - The FORA branding footer (logo mark, "AI-generated field safety
@@ -46,16 +52,18 @@ catch before it ships, not after.
   and has its own loader; don't treat it as a duplicate of
   `getForaLogoDataUrl()`.
 - `generateSafetyAnalyticsPDF.js` / `generateEquipmentAnalyticsPDF.js`,
-  which already import shared helpers (`loadJsPDF`, `drawBanner`,
-  `drawFooter`, etc.) from `src/analyticsPdfHelpers.js` — that's the
-  target pattern, not something to compare against the other 9 files'
-  inline versions.
+  which import their helpers (`drawBanner`, `drawFooter`, `drawTable`,
+  etc.) from `src/analyticsPdfHelpers.js` — that's the target pattern, not
+  something to compare against the other generators' inline versions.
 
 ## Checklist to run on every changed generator
 
-1. **loadJsPDF version match.** If the diff changes the CDN URL/version
-   in one file's `loadJsPDF()`, check every other file's copy and flag
-   any that still point at the old version.
+1. **jsPDF still comes from `src/loadJsPDF.js`.** Flag any generator that
+   reintroduces its own loader, a `<script>` tag, a CDN URL, or a
+   hardcoded version — that would put a third-party origin back inside a
+   logged-in session's trust boundary, which is exactly what consolidating
+   this removed. Nothing else about jsPDF loading needs checking; there is
+   no longer a version to drift.
 2. **Header banner structure match.** Confirm `W`, `margin`, banner
    height, and title font size/weight match the other document
    generators. Flag divergence in geometry or typography; do not flag

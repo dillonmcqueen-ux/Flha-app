@@ -97,6 +97,15 @@ function summarizeSignalsForPrompt(signals) {
     } else if (s.source_type === 'near_miss') {
       const parts = [j.involved, j.severity].filter(Boolean);
       if (parts.length) lines.push(`- Near miss: ${parts.join(', severity ')}`);
+    } else if (s.source_type === 'equipment_inspection') {
+      // Only the failed checks are in the signal at all, so everything
+      // here is an exception worth the model's attention. The machine is
+      // named because the same failed check means a different thing on a
+      // different machine.
+      const findings = [...(j.defective || []).map((i) => `${i} (defective)`), ...(j.monitor || []).map((i) => `${i} (monitor)`)];
+      if (findings.length) lines.push(`- Equipment inspection${j.equipment ? ` on ${j.equipment}` : ''}: ${findings.join('; ')}`);
+    } else if (s.source_type === 'monthly_inspection') {
+      if (j.failed?.length) lines.push(`- Monthly site inspection failed: ${j.failed.join('; ')}`);
     }
   });
   return lines.slice(0, MAX_SIGNALS_PER_COMPANY_IN_PROMPT).join('\n').slice(0, 6000);

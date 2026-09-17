@@ -45,17 +45,31 @@ export function highRiskFlhaRate(flhas) {
 
 // ── Equipment ────────────────────────────────────────────────
 
-// defectiveCount/monitorCount only exist on pretrip results_json (posttrip
-// rows don't have them), matching Dashboard.jsx's own inspIssueCount logic.
+// Counts both pre-trip and post-trip inspections.
+//
+// This used to drop every non-pretrip row, on the stated grounds that
+// "defectiveCount/monitorCount only exist on pretrip results_json." That
+// was never true as shipped: Inspection.jsx's submitPosttrip writes both
+// counters too (1 or 0, from the operator's reported change). So the one
+// screen meant to answer "which machine keeps failing" was blind to damage
+// caught at the END of a shift — which is exactly when in-service damage
+// surfaces, and the half a supervisor most wants to see.
+//
+// It also meant three readers disagreed about one number: Dashboard.jsx's
+// "Defective items" KPI summed both trip types, this counted pre-trip only,
+// and api/equipmentreports.js counted post-trip changes via has_changes.
+// Dashboard.jsx is the side that was right; this now matches it.
 export function equipmentIssueStats(inspections) {
   const buckets = {};
   inspections.forEach(i => {
-    if (i.trip_type !== "pretrip") return;
-    const label = (i.equipment_label || "Unlabeled equipment").trim();
+    // Trim first, then fall back. `("   " || "Unlabeled equipment")` keeps
+    // the spaces, so a whitespace-only label used to get its own ""
+    // bucket and render as a blank row next to the real one.
+    const label = (i.equipment_label || "").trim() || "Unlabeled equipment";
     const r = i.results_json || {};
-    if (!buckets[label]) buckets[label] = { label, defective: 0, monitor: 0, pretripCount: 0, lastFlaggedAt: null };
+    if (!buckets[label]) buckets[label] = { label, defective: 0, monitor: 0, inspectionCount: 0, lastFlaggedAt: null };
     const b = buckets[label];
-    b.pretripCount += 1;
+    b.inspectionCount += 1;
     b.defective += r.defectiveCount || 0;
     b.monitor += r.monitorCount || 0;
     if ((r.defectiveCount || 0) + (r.monitorCount || 0) > 0) {

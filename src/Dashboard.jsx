@@ -1503,6 +1503,17 @@ function ThisWeekDocsCard({ docs, meta, onOpen, onClose }) {
   );
 }
 
+// period_month carries a YYYY-MM-DD month for a monthly-inspection action
+// but a full ISO timestamp for an incident (occurred_at) or an inspection
+// (created_at), so it cannot just be printed. Renders a month as-is and a
+// timestamp as a local date.
+function correctiveWhen(value) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString("en-CA");
+}
+
 function CorrectiveActionRow({ ca, onUpdate }) {
   const [responsibleName, setResponsibleName] = useState(ca.responsible_name || "");
   const [targetDate, setTargetDate] = useState(ca.target_date || "");
@@ -1517,8 +1528,19 @@ function CorrectiveActionRow({ ca, onUpdate }) {
 
   return (
     <div style={{ border: `1.5px solid ${isResolved ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"}`, background: isResolved ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-      <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4", marginBottom: 2 }}>{ca.question_text}</div>
-      <div style={{ fontSize: 12, color: "#A1A1AA", marginBottom: 6 }}>{ca.site_name} · {ca.period_month} · reported by {ca.submitted_by}</div>
+      {/* Break #5: an action can now come from an incident, a near miss or a
+          failed equipment inspection, not just a monthly question. Without
+          the badge these all read as monthly findings and a supervisor has
+          no idea an injury report is sitting in the list. */}
+      {ca.source_label && (
+        <div style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: "#A1A1AA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 999, padding: "2px 8px", marginBottom: 6 }}>
+          {ca.source_label}
+        </div>
+      )}
+      {ca.question_text && <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4", marginBottom: 2 }}>{ca.question_text}</div>}
+      <div style={{ fontSize: 12, color: "#A1A1AA", marginBottom: 6 }}>
+        {[ca.site_name, correctiveWhen(ca.period_month), ca.submitted_by ? `reported by ${ca.submitted_by}` : null].filter(Boolean).join(" · ")}
+      </div>
       <div style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 10, fontStyle: "italic" }}>{ca.description}</div>
       {isResolved ? (
         <div style={{ fontSize: 12, color: "#4ADE80", fontWeight: 700 }}>
@@ -5157,7 +5179,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{eq.label}</div>
                           {eq.status !== "not_tracked" && (
                             <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
-                              {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}` : "No readings recorded yet"}
+                              {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}${eq.current.readingSource === "fuel_log" ? " (from a fuel-up)" : ""}` : "No readings recorded yet"}
                               {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
                             </div>
                           )}
@@ -5167,6 +5189,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                                 <div style={{ width: `${pct}%`, background: swatch, height: 6, borderRadius: 6 }} />
                               </div>
                               <div style={{ fontSize: 11, color: C.text.faint, flexShrink: 0 }}>{eq.usageSinceService} / {eq.pmInterval} {eq.lastService?.reading_unit}</div>
+                            </div>
+                          )}
+                          {/* Work the crew did themselves — filter changes, small
+                              repairs. Shown here because this is where you look
+                              at a machine, but deliberately NOT counted as a
+                              service: the bar above is driven by pm_service rows
+                              only. See docs/scope-equipment-service-log.md. */}
+                          {(eq.fieldService || []).length > 0 && (
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.line}` }}>
+                              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: C.text.faint, marginBottom: 4 }}>
+                                Logged by the crew
+                              </div>
+                              {eq.fieldService.map(f => (
+                                <div key={f.id} style={{ fontSize: 12, color: C.text.muted, marginBottom: 2 }}>
+                                  {f.service_date ? new Date(f.service_date).toLocaleDateString("en-CA") : ""} · {f.performed_by || "—"} — {f.notes}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>

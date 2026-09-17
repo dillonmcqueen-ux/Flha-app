@@ -48,14 +48,17 @@ async function verifySession(token) {
   // Individually-identified (roster) sessions: re-check `active` on every
   // request, so deactivating someone takes effect on their very next call
   // instead of waiting out the token's TTL.
+  // `name` comes from the roster row, never from the request: log_field_service
+  // below records who did the work, and a worker-supplied name would make
+  // that attribution worthless. Matches api/fuellogs.js's verifySession.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 function resolveCompanyId(session, requestedCompanyId) {
@@ -67,34 +70,81 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Reduces a set of inspections down to the single most recent reading per
-// equipment_id (posttrip's end_reading if the latest row is a posttrip,
-// otherwise pretrip's start_reading), tie-broken by id when created_at ties.
-function latestReadingsByEquipment(inspections) {
-  const latest = {};
-  for (const insp of inspections) {
-    if (!insp.equipment_id) continue;
-    const current = latest[insp.equipment_id];
-    if (!current || new Date(insp.created_at) > new Date(current.created_at) ||
-        (new Date(insp.created_at).getTime() === new Date(current.created_at).getTime() && insp.id > current.id)) {
-      latest[insp.equipment_id] = insp;
-    }
+// A usage reading is a usage reading regardless of which form captured it.
+// Inspections record one on every pre/post-trip; a fuel-up records one too,
+// and api/fuellogs.js's check_equipment already treats the two as a single
+// shared "last known reading" per machine. Preventative maintenance used to
+// read inspections alone, so a company that fuels daily and inspects weekly
+// had a PM clock running behind readings already on file — a service could
+// come due and never flag. Both tables now feed the same reducer.
+//
+// Normalizes one inspection row to a comparable reading point. A posttrip's
+// end_reading is the machine's state at the end of that trip; anything else
+// uses start_reading.
+export function inspectionReadingPoint(insp) {
+  const raw = insp.trip_type === 'posttrip' ? insp.end_reading : insp.start_reading;
+  return { equipmentId: insp.equipment_id, raw, unit: insp.reading_unit, at: insp.created_at, id: insp.id, source: 'inspection' };
+}
+
+// Same, for a fuel-up. fuel_logs.hour_reading holds hours or kilometres
+// depending on the machine, exactly as inspections' readings do.
+export function fuelReadingPoint(log) {
+  return { equipmentId: log.equipment_id, raw: log.hour_reading, unit: log.reading_unit, at: log.created_at, id: log.id, source: 'fuel_log' };
+}
+
+// Reduces reading points from every source down to the single most recent
+// one per equipment_id. Ties on created_at fall to the inspection, then to
+// the higher id within one source — row ids are only comparable to
+// themselves, so they can never order an inspection against a fuel log.
+export function latestReadingsByEquipment(points) {
+  // Null-prototype: this function is exported for unit testing, so key it
+  // defensively rather than relying on every future caller passing ids that
+  // came from the database. Today they all do.
+  const latest = Object.create(null);
+  for (const point of points) {
+    if (!point.equipmentId) continue;
+    const reading = point.raw != null && point.raw !== '' ? parseFloat(point.raw) : null;
+    if (reading == null || Number.isNaN(reading)) continue;
+
+    const current = latest[point.equipmentId];
+    if (!current) { latest[point.equipmentId] = { ...point, reading }; continue; }
+
+    const a = new Date(point.at).getTime(), b = new Date(current.at).getTime();
+    const newer = a > b
+      || (a === b && point.source === 'inspection' && current.source !== 'inspection')
+      || (a === b && point.source === current.source && point.id > current.id);
+    if (newer) latest[point.equipmentId] = { ...point, reading };
   }
-  const readings = {};
-  Object.entries(latest).forEach(([equipmentId, insp]) => {
-    const rawReading = insp.trip_type === 'posttrip' ? insp.end_reading : insp.start_reading;
-    const reading = rawReading != null && rawReading !== '' ? parseFloat(rawReading) : null;
-    if (reading == null || Number.isNaN(reading)) return;
-    readings[equipmentId] = { reading, readingUnit: insp.reading_unit || null, readingDate: insp.created_at };
+
+  const readings = Object.create(null);
+  Object.entries(latest).forEach(([equipmentId, point]) => {
+    readings[equipmentId] = {
+      reading: point.reading,
+      readingUnit: point.unit || null,
+      readingDate: point.at,
+      readingSource: point.source,
+    };
   });
   return readings;
 }
 
 // Reduces a set of maintenance log rows down to the most recent one per
 // equipment_id (service_date desc, tie-broken by created_at then id).
-function latestServiceByEquipment(logs) {
+//
+// Only `pm_service` rows count. This is THE line that makes worker-logged
+// field service safe: equipment_maintenance_log now also holds
+// `field_service` entries — a filter change, a small repair an operator did
+// themselves — and the baseline here is what usageSinceService is measured
+// from. Let a field entry through and a machine 40 hours from its 250-hour
+// service reads as freshly serviced and silently never comes due, which is
+// strictly worse than never logging the filter change at all.
+//
+// The caller already filters at the query, so this is the second of two
+// guards on purpose. See docs/schema/equipment-field-service-migration.sql.
+export function latestServiceByEquipment(logs) {
   const latest = {};
   for (const log of logs) {
+    if (log.entry_type && log.entry_type !== 'pm_service') continue;
     const current = latest[log.equipment_id];
     if (!current) { latest[log.equipment_id] = log; continue; }
     const a = `${log.service_date}T${log.created_at}`, b = `${current.service_date}T${current.created_at}`;
@@ -134,11 +184,41 @@ export default async function handler(req, res) {
 
       const { data: logs, error: logErr } = await supabaseAdmin
         .from('equipment_maintenance_log')
-        .select('id, equipment_id, service_date, service_reading, reading_unit, performed_by, notes, created_at')
-        .eq('company_id', companyId);
+        .select('id, equipment_id, service_date, service_reading, reading_unit, performed_by, notes, created_at, entry_type')
+        .eq('company_id', companyId)
+        .eq('entry_type', 'pm_service');
       if (logErr) return res.status(500).json({ error: 'Could not load maintenance history.' });
 
-      const currentReadings = latestReadingsByEquipment(inspections || []);
+      // Field entries are shown beside each machine but never feed the
+      // baseline above. Capped per company rather than per machine — this
+      // is a status screen, not a history view.
+      const { data: fieldLogs } = await supabaseAdmin
+        .from('equipment_maintenance_log')
+        .select('id, equipment_id, service_date, performed_by, notes, created_at')
+        .eq('company_id', companyId)
+        .eq('entry_type', 'field_service')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      const fieldByEquipment = {};
+      (fieldLogs || []).forEach(f => {
+        if (!fieldByEquipment[f.equipment_id]) fieldByEquipment[f.equipment_id] = [];
+        if (fieldByEquipment[f.equipment_id].length < 5) fieldByEquipment[f.equipment_id].push(f);
+      });
+
+      // Fuel-ups carry a meter reading too. A company that never bought the
+      // fuel module simply has no rows here, so this is a no-op for them and
+      // the status they see is unchanged.
+      const { data: fuelLogs, error: fuelErr } = await supabaseAdmin
+        .from('fuel_logs')
+        .select('id, equipment_id, hour_reading, reading_unit, created_at')
+        .eq('company_id', companyId)
+        .not('equipment_id', 'is', null);
+      if (fuelErr) return res.status(500).json({ error: 'Could not load fuel history.' });
+
+      const currentReadings = latestReadingsByEquipment([
+        ...(inspections || []).map(inspectionReadingPoint),
+        ...(fuelLogs || []).map(fuelReadingPoint),
+      ]);
       const lastServices = latestServiceByEquipment(logs || []);
 
       const equipmentStatus = fleet.map(eq => {
@@ -147,13 +227,13 @@ export default async function handler(req, res) {
         const baseline = lastServices[eq.id] || null;
 
         if (eq.pm_interval == null) {
-          return { id: eq.id, label, pmInterval: null, current, lastService: null, usageSinceService: null, status: 'not_tracked' };
+          return { id: eq.id, label, pmInterval: null, current, lastService: null, usageSinceService: null, status: 'not_tracked', fieldService: fieldByEquipment[eq.id] || [] };
         }
         if (!baseline) {
-          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: null, usageSinceService: null, status: 'not_started' };
+          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: null, usageSinceService: null, status: 'not_started', fieldService: fieldByEquipment[eq.id] || [] };
         }
         if (current && current.readingUnit && current.readingUnit !== baseline.reading_unit) {
-          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService: null, status: 'unit_mismatch' };
+          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService: null, status: 'unit_mismatch', fieldService: fieldByEquipment[eq.id] || [] };
         }
 
         const usageSinceService = current ? Math.max(0, current.reading - baseline.service_reading) : 0;
@@ -161,10 +241,100 @@ export default async function handler(req, res) {
         if (usageSinceService >= eq.pm_interval) status = 'overdue';
         else if (usageSinceService >= eq.pm_interval * 0.85) status = 'due_soon';
 
-        return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService, status };
+        return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService, status, fieldService: fieldByEquipment[eq.id] || [] };
       });
 
       return res.status(200).json({ equipment: equipmentStatus });
+    }
+
+    // ── Worker: log service they performed themselves ───────────────
+    //
+    // "Changed the filters", "replaced a hose", "greased the pins". This is
+    // the third kind of maintenance event and the only one that had nowhere
+    // to go: a PM service resets the clock, a corrective action is a finding
+    // still to be closed, and this is neither.
+    //
+    // Deliberately worker-callable and deliberately unable to touch the PM
+    // baseline. Dillon, 2026-09-17: "supervisor only, workers shouldnt be
+    // able to reset the interval but they should be able to log things like
+    // filter changes or repairs they've done." There is no flag on this
+    // action that can produce a pm_service row; a worker who did the
+    // scheduled service tells a supervisor, who logs it through
+    // log_service above. That asymmetry is the whole point, not a gap.
+    if (action === 'log_field_service') {
+      // Every other worker-callable write in the codebase blocks a suspended
+      // tenant (api/fuellogs.js:131 is the closest sibling). Without this, a
+      // company whose subscription lapsed would find its fuel logs 403ing
+      // while its service logs kept landing.
+      const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
+      if (coRows && coRows[0] && coRows[0].suspended) {
+        return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
+      }
+
+      const { equipmentId, notes, serviceReading, readingUnit } = req.body;
+      if (!equipmentId) return res.status(400).json({ error: 'Pick a machine.' });
+      const what = (notes || '').trim();
+      if (!what) return res.status(400).json({ error: 'Say what you did.' });
+
+      const { data: eqRows, error: eqErr } = await supabaseAdmin.from('equipment').select('id, company_id').eq('id', equipmentId).limit(1);
+      if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+      const equipment = eqRows[0];
+      // A worker could otherwise submit a guessed equipment id and file work
+      // against another company's machine. Admins are cross-company by
+      // design here, as everywhere else in this file.
+      if (session.role !== 'admin' && equipment.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed for this equipment.' });
+      }
+
+      // The reading is optional on purpose. Somebody who greased a machine
+      // at lunch and logs it that evening often does not know the meter,
+      // and demanding one is how a log stops getting filled in. When they
+      // do supply one it needs a unit, or it cannot be compared to anything.
+      const reading = serviceReading != null && serviceReading !== '' ? parseFloat(serviceReading) : null;
+      if (reading != null && Number.isNaN(reading)) return res.status(400).json({ error: 'That reading is not a number.' });
+      const unit = (readingUnit || '').trim() || null;
+      if (reading != null && !unit) return res.status(400).json({ error: 'Select the reading unit.' });
+
+      // Offline idempotency, by natural key rather than client_submission_id.
+      // equipment_maintenance_log has no such column and adding one is a
+      // migration this does not need: the same person logging the same words
+      // on the same machine on the same day is a drained queue retry, not two
+      // real events. Without this, a submission that succeeded but whose
+      // response was lost comes back as a duplicate line on the machine.
+      //
+      // Deliberately a heuristic, and deliberately narrow — it cannot merge
+      // two genuinely different notes, and a second real job on the same
+      // machine the same day just needs different words.
+      const { data: dupes } = await supabaseAdmin
+        .from('equipment_maintenance_log')
+        .select('id')
+        .eq('company_id', equipment.company_id)
+        .eq('equipment_id', equipment.id)
+        .eq('entry_type', 'field_service')
+        .eq('service_date', todayISO())
+        .eq('notes', what.slice(0, 1000))
+        .limit(1);
+      if (dupes && dupes.length > 0) return res.status(200).json({ ok: true, duplicate: true });
+
+      const { error } = await supabaseAdmin.from('equipment_maintenance_log').insert({
+        company_id: equipment.company_id,
+        equipment_id: equipment.id,
+        entry_type: 'field_service',
+        service_date: todayISO(),
+        service_reading: reading,
+        reading_unit: unit,
+        // session.name is the roster row's name and only exists for
+        // individually-identified sessions. A company still on a shared
+        // login has no roster row, so it falls back to the session payload's
+        // userName — without which every entry from such a company would
+        // record "Worker" with a null roster id, i.e. no attribution at all,
+        // which is the entire point of the row.
+        performed_by: (session.name || session.userName || '').trim() || 'Worker',
+        logged_by_roster_id: session.userId || null,
+        notes: what.slice(0, 1000),
+      });
+      if (error) return res.status(500).json({ error: "Couldn't save that. Try again." });
+      return res.status(200).json({ ok: true });
     }
 
     // ── Supervisor / Admin: log a completed service ─────────────────

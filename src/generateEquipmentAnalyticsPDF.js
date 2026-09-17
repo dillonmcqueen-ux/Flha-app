@@ -32,10 +32,10 @@ export async function generateEquipmentAnalyticsPDF({
   const equipStats = equipmentIssueStats(inspections);
   const maintenance = maintenanceSummary(maintenanceStatus);
   const fuel = fuelSummary(fuelLogs, siteNames);
-  const pretripCount = inspections.filter(i => i.trip_type === "pretrip").length;
+  const inspectionCount = inspections.length;
 
   y = drawStatTiles(doc, y, [
-    { label: "Pretrip Inspections", value: pretripCount },
+    { label: "Inspections", value: inspectionCount },
     { label: "Equipment Tracked (Maintenance)", value: maintenance.total },
     { label: "Overdue Maintenance", value: maintenance.overdue, color: maintenance.overdue > 0 ? [220, 38, 38] : [22, 163, 74] },
     { label: "Maintenance Due Soon", value: maintenance.dueSoon, color: maintenance.dueSoon > 0 ? [217, 119, 6] : [22, 163, 74] },
@@ -44,19 +44,19 @@ export async function generateEquipmentAnalyticsPDF({
     { label: "Fuel Cost", value: `$${fuel.totalCost.toFixed(0)}` },
   ], BLUE);
 
-  y = drawSectionTitle(doc, y, "Top Equipment Issues", "Pretrip inspections flagged Defective or Monitor", BLUE);
+  y = drawSectionTitle(doc, y, "Top Equipment Issues", "Pre-trip and post-trip inspections flagged Defective or Monitor", BLUE);
   y = drawBarList(doc, y, equipStats.slice(0, 5).map(e => ({ label: e.label, count: e.defective + e.monitor })),
     { emptyLabel: "No equipment issues flagged yet.", barColor: [180, 83, 9] });
 
   if (y > 220) { doc.addPage(); y = redrawHeader(); }
-  y = drawSectionTitle(doc, y, "Equipment Issue Detail", "All equipment with pretrip inspection history", BLUE);
+  y = drawSectionTitle(doc, y, "Equipment Issue Detail", "All equipment with inspection history", BLUE);
   y = drawTable(doc, y, {
-    emptyLabel: "No pretrip inspections yet.",
+    emptyLabel: "No inspections yet.",
     columns: [
       { key: "label", label: "Equipment", width: 62 },
       { key: "defective", label: "Defective", align: "right", width: 26 },
       { key: "monitor", label: "Monitor", align: "right", width: 26 },
-      { key: "pretripCount", label: "Pretrips", align: "right", width: 26 },
+      { key: "inspectionCount", label: "Inspections", align: "right", width: 26 },
       { key: "lastFlaggedAt", label: "Last Flagged", align: "right", width: 38, render: r => r.lastFlaggedAt ? new Date(r.lastFlaggedAt).toLocaleDateString("en-CA") : "—" },
     ],
     rows: equipStats,

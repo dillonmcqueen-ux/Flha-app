@@ -9,6 +9,7 @@ import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
+import FieldService, { resubmitFieldService } from "./FieldService.jsx";
 import MyDocuments from "./MyDocuments.jsx";
 import WorkerCertifications from "./WorkerCertifications.jsx";
 import { drainQueue } from "./offlineQueue.js";
@@ -32,6 +33,7 @@ const RESUBMIT_HANDLERS = {
   monthly: resubmitMonthly,
   customform: resubmitCustomForm,
   fuellog: resubmitFuelLog,
+  fieldservice: resubmitFieldService,
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
@@ -50,6 +52,12 @@ const BUILTIN_TYPES = [
   { key: "incident", icon: Siren, title: "Incident Report", desc: "Report an injury or event", ready: true, accent: "#DC2626", category: "safety" },
   { key: "inspection", icon: ClipboardCheck, title: "Equipment Inspection", desc: "Pre-use machine inspection", ready: true, accent: "#0369A1", category: "equipment" },
   { key: "fuellog", icon: Fuel, title: "Log Fuel", desc: "Record a fuel-up", ready: true, accent: "#F59E0B", category: "equipment" },
+  // Rides the existing `maintenance` doc key rather than introducing a new
+  // one, so it needs no BUILTIN_DOC_KEYS or pricing-module change (which is
+  // break #6 territory — an unlisted key defaults to active and ships free).
+  // A company that bought Preventative Maintenance gets the worker-facing
+  // half of it; one that did not sees nothing.
+  { key: "maintenance", icon: Wrench, title: "Log Service", desc: "Record work you did on a machine", ready: true, accent: "#0D9488", category: "equipment" },
   { key: "daily", icon: ClipboardList, title: "Daily Report", desc: "End-of-day site summary", ready: true, accent: "#16A34A", category: "general" },
   { key: "monthly", icon: CalendarClock, title: "Monthly Site Inspection", desc: "Monthly compliance checklist", ready: true, accent: "#4338CA", category: "general" },
   { key: "timeclock", icon: Clock, title: "Time Clock", desc: "Clock in and out", ready: true, accent: "#0891B2", category: null },
@@ -63,7 +71,7 @@ const BUILTIN_TYPES = [
 // land under "Equipment" here, with no second place to configure it.
 const CATEGORIES = [
   { key: "safety", formCategory: "safety", label: "Safety", icon: HardHat, accent: "#DC2626", blurb: "Hazard assessments, toolbox talks, near miss & incident reports" },
-  { key: "equipment", formCategory: "operations", label: "Equipment", icon: Wrench, accent: "#0369A1", blurb: "Equipment inspections and fuel logging" },
+  { key: "equipment", formCategory: "operations", label: "Equipment", icon: Wrench, accent: "#0369A1", blurb: "Equipment inspections, fuel and service logging" },
   { key: "general", formCategory: "workforce", label: "General", icon: Layers, accent: "#7C3AED", blurb: "Daily reports and site inspections" },
 ];
 
@@ -192,6 +200,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   }
   if (doc === "timeclock") {
     return <TimeClock companyId={companyId} companyName={companyName} userName={userName} userId={userId} onBack={() => setDoc(null)} token={token} />;
+  }
+  if (doc === "maintenance") {
+    return <FieldService companyId={companyId} userName={userName} onBack={() => setDoc(null)} token={token} />;
   }
   if (doc === "fuellog") {
     return <FuelLog companyId={companyId} userName={userName} onBack={() => setDoc(null)} token={token} />;

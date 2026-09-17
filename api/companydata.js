@@ -576,10 +576,69 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, site: data });
     }
 
+    // Deleting a site used to fail with an unexplained 500 whenever anything
+    // referenced it. Every foreign key into `sites` is NO ACTION (restrict),
+    // so Postgres refused the delete and the generic error handler below
+    // turned that into "Couldn't remove site." with no hint why. That was
+    // already true for fuel logs, monthly inspections and custom documents
+    // before break #2 added site_id to the five field forms; this widened it.
+    //
+    // Note the map originally recorded this as "delete_site leaves dangling
+    // site_id references, where delete_equipment detaches first". That was
+    // wrong: a restricting FK cannot leave a dangling reference. The real
+    // failure was the opposite -- the delete simply never succeeded.
+    //
+    // So: detach what can be detached, and refuse clearly when it cannot.
     if (action === 'delete_site') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      // Establish which company the site belongs to before touching
+      // anything. Admin is founder-only and cross-company by design, so this
+      // is not a live hole today — but every detach below then filters on
+      // that company too, so the loop cannot reach another tenant's rows
+      // even if a future write path forgets the site guard. Without it the
+      // detach relies on an invariant no constraint enforces.
+      const { data: siteRows } = await supabaseAdmin.from('sites').select('id, company_id').eq('id', id).limit(1);
+      const site = siteRows && siteRows[0];
+      if (!site) return res.status(404).json({ error: 'Site not found.' });
+
+      // These two columns are NOT NULL, so their records cannot be detached
+      // from the site -- the site IS part of the record's identity there.
+      // Refusing with a reason beats a 500, and beats deleting the records
+      // out from under someone to satisfy a tidy-up.
+      const blockers = [];
+      const { count: monthlyCount } = await supabaseAdmin
+        .from('inspection_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (monthlyCount) blockers.push(`${monthlyCount} monthly site inspection${monthlyCount === 1 ? '' : 's'}`);
+      const { count: customCount } = await supabaseAdmin
+        .from('custom_form_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (customCount) blockers.push(`${customCount} custom document${customCount === 1 ? '' : 's'}`);
+      if (blockers.length > 0) {
+        return res.status(400).json({
+          error: `This site can't be removed — it has ${blockers.join(' and ')} filed against it. Those records would lose the site they belong to.`,
+        });
+      }
+
+      // Everything else keeps its free-text site name, so detaching costs a
+      // supervisor nothing visible: the record still says where it happened,
+      // it just stops being joinable to a site that no longer exists. Same
+      // shape as delete_equipment's inspections detach.
+      // Non-atomic by nature: a failure partway through leaves some tables
+      // detached and the site still present. That is recoverable — re-running
+      // the delete finishes the job, and a detached row loses nothing a
+      // supervisor can see because the text name survives — so it is
+      // preferred over wrapping six statements in machinery this codebase
+      // does not otherwise use. The error says to try again for that reason.
+      for (const table of ['flhas', 'toolbox_talks', 'daily_reports', 'incidents', 'near_misses', 'fuel_logs']) {
+        const { error: detachErr } = await supabaseAdmin
+          .from(table).update({ site_id: null })
+          .eq('site_id', id)
+          .eq('company_id', site.company_id);
+        if (detachErr) return res.status(500).json({ error: "Couldn't fully remove that site — try again." });
+      }
+
       const { error } = await supabaseAdmin.from('sites').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove site." });
       return res.status(200).json({ ok: true });
@@ -668,7 +727,19 @@ export default async function handler(req, res) {
       }
 
       if (interval != null) {
-        const { data: existingLog } = await supabaseAdmin.from('equipment_maintenance_log').select('id').eq('equipment_id', id).limit(1);
+        // Only a pm_service row counts as "already has a baseline". Without
+        // this filter, a worker's field_service entry (a filter change, a
+        // small repair) made before tracking was switched on would suppress
+        // the starting baseline entirely: latestServiceByEquipment ignores
+        // field entries, so the machine would report not_started forever
+        // and never come due. Second of the two lines that make worker
+        // logging safe — see docs/schema/equipment-field-service-migration.sql.
+        const { data: existingLog } = await supabaseAdmin
+          .from('equipment_maintenance_log')
+          .select('id')
+          .eq('equipment_id', id)
+          .eq('entry_type', 'pm_service')
+          .limit(1);
         if (!existingLog || existingLog.length === 0) {
           const reading = startingReading != null && startingReading !== '' ? parseFloat(startingReading) : null;
           if (reading == null || Number.isNaN(reading) || !(readingUnit || '').trim()) {
@@ -791,8 +862,14 @@ export default async function handler(req, res) {
         .limit(500);
       if (error) return res.status(500).json({ error: 'Could not load signal trends.' });
 
-      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0 };
-      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {} };
+      // Every source_type any writer emits needs a key here, or the count
+      // is silently dropped by the `!== undefined` guard below and the
+      // signal becomes invisible in the Brain tab even though it is being
+      // recorded and summarized. Writers today: api/flhas.js (flha_edit),
+      // api/logs.js (toolbox_talk, equipment_inspection), api/reports.js
+      // (incident, near_miss), api/monthly.js (monthly_inspection).
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0 };
+      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {} };
       const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
       (data || []).forEach((row) => {
         const j = row.signal_json || {};
@@ -806,6 +883,15 @@ export default async function handler(req, res) {
           bump(tally.incidentCategories, j.category);
         } else if (row.source_type === 'near_miss') {
           bump(tally.nearMissInvolved, j.involved);
+        } else if (row.source_type === 'equipment_inspection') {
+          // Defective and Monitor are tallied together: both are a check
+          // that did not come back clean, and splitting them would halve
+          // the counts that make a repeat offender visible.
+          (j.defective || []).forEach((i) => bump(tally.defectiveItems, i));
+          (j.monitor || []).forEach((i) => bump(tally.defectiveItems, i));
+          bump(tally.inspectedEquipment, j.equipment);
+        } else if (row.source_type === 'monthly_inspection') {
+          (j.failed || []).forEach((q) => bump(tally.monthlyFailures, q));
         }
       });
       const topN = (map, n = 8) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
@@ -818,6 +904,9 @@ export default async function handler(req, res) {
         topToolboxTopics: topN(tally.toolboxTopics),
         topIncidentCategories: topN(tally.incidentCategories),
         topNearMissInvolved: topN(tally.nearMissInvolved),
+        topDefectiveItems: topN(tally.defectiveItems),
+        topInspectedEquipment: topN(tally.inspectedEquipment),
+        topMonthlyFailures: topN(tally.monthlyFailures),
       });
     }
 

@@ -21,11 +21,12 @@ tool rather than reviewing it inline.
 | When a change touches... | Delegate to | Why |
 |---|---|---|
 | `api/*.js` handlers reading or writing a company-scoped table (`roster`, `sops`, `sites`, `equipment`, `custom_fields`, `custom_forms`, `inspection_forms`, `equipment_reports`, `flhas`, `timeclock_reports`, `company_document_settings`) | `tenant-scope-reviewer` | Multi-tenant isolation bugs here mean one company's data becomes readable or writable by another. See `.claude/agents/tenant-scope-reviewer.md` for the exact checklist. |
-| `src/generate*PDF.js` (any of the 11 PDF generators) | `pdf-consistency-reviewer` | Each document type hand-copies the same jsPDF-loader/header/footer boilerplate instead of sharing it, so it drifts silently — see `.claude/agents/pdf-consistency-reviewer.md` for known drift (e.g. `generateInspectionPDF.js` missing the footer entirely). |
+| `src/generate*PDF.js` (any of the 12 PDF generators) | `pdf-consistency-reviewer` | Each document type hand-copies the same header/footer boilerplate instead of sharing it, so it drifts silently (jsPDF loading is no longer among it — all 12 route through `src/loadJsPDF.js`) — see `.claude/agents/pdf-consistency-reviewer.md` for known drift (e.g. `generateInspectionPDF.js` missing the footer entirely). |
 | A new file under `api/`, `vercel.json`, `api/cron-equipment-reports.js`, or `api/stripe-webhook.js` | `vercel-function-budget-guardian` | `api/` is on Vercel's Pro-plan serverless function cap (far higher than the old Hobby-plan 12, but not infinite — see `.claude/agents/vercel-function-budget-guardian.md`). |
 | `website/pricing.html`, `terms.html`, `index.html`, or `custom-builds.html` when pricing, plans, or Stripe links are involved | `pricing-legal-consistency-reviewer` | This exact drift (displayed price ↔ actual Stripe amount ↔ fee disclosure ↔ Terms language) took 5 separate follow-up PRs to fully resolve once (PRs #2–#6) — see `.claude/agents/pricing-legal-consistency-reviewer.md`. |
 | Any wording change to `website/*.html` | `admin-access-copy-guard` | Customers only ever have a worker or supervisor login — there is no customer "admin" role, and the Admin Panel (`AdminPanel.jsx`) is founder-only, gated by a single global `ADMIN_CODE`. The site previously claimed clients could access "the Admin Panel" and self-serve the Brain profile; both were false. This checklist exists so that mistake can never silently reappear — see `.claude/agents/admin-access-copy-guard.md`. **Always run this one, even when another row above also matches the same diff.** |
 | Substantive text changes to `website/privacy.html` or `website/terms.html` | `legal-revision-date-updater` | The "Last updated" date on both pages was set once at creation (July 28, 2026) and then silently went stale through three later commits that changed real legal text without bumping it. Unlike the other rows, this agent edits — it bumps the "Last updated" date on whichever of the two files actually changed (never "Effective date", never the legal wording itself). `src/Onboarding.jsx`/`src/Login.jsx` link straight to the live pages rather than embedding a copy, so there's nothing else to update — see `.claude/agents/legal-revision-date-updater.md`. |
+| A new feature, table, document key, pricing module, or any column that joins two features (`equipment_id`, `site_id`/`site`/`job_site`, `roster_id`, `reading_unit`, `source_type`, `answer_id`, `document_key`) | `interaction-map-keeper` | FORA is sold as products that feed each other, and a missing link between them fails *silently* — no error, no failing test, the customer just never gets what they paid for. This agent owns `docs/feature-interaction-map.md` and checks that a change is actually reachable from the features it should connect to. It edits only the map, never application code — see `.claude/agents/interaction-map-keeper.md`. |
 
 ### How to delegate
 
@@ -37,15 +38,21 @@ tool rather than reviewing it inline.
   change done, the same way you'd treat a failing test.
 - If a change doesn't match any row above, just do the work yourself.
   Don't invent a delegation for a task with no matching subagent.
-- **Known limitation:** in some session types (confirmed: Claude Code
-  Remote / cloud sessions), the Agent tool's subagent roster is fixed at
-  session start and does not pick up `.claude/agents/*.md` files — calling
-  the Agent tool with one of these names fails with "Agent type not
-  found." If that happens, fall back to reading the matching `.md` file
-  yourself and manually applying its checklist/instructions in the main
-  session, rather than silently skipping the review. This has been
-  verified to work as a substitute (see the tenant-scope-reviewer test
-  against commit `55e6224`).
+- **Known limitation, now partly out of date — try the Agent tool first.**
+  This used to say flatly that in Claude Code Remote / cloud sessions the
+  subagent roster is fixed at session start and never picks up
+  `.claude/agents/*.md`. That is not what happens today, at least not
+  always: on 2026-09-16, in a cloud session, four agents were written and
+  committed mid-session, appeared in the roster without a restart, and
+  `interaction-break-hunter` then ran with its own definition visibly
+  applied — it used the break shapes, evidence bar and
+  don't-re-report-known-breaks rule straight from its file. So call the
+  Agent tool first and let it fail rather than assuming it will.
+  The fallback below still stands for when it *does* fail (the failure is
+  "Agent type not found"): read the matching `.md` file yourself and apply
+  its checklist manually in the main session, rather than silently
+  skipping the review. That has been verified to work as a substitute (see
+  the tenant-scope-reviewer test against commit `55e6224`).
 
 ### Adding a new subagent
 
@@ -58,6 +65,51 @@ tool rather than reviewing it inline.
    it needs — default to read-only (`Read, Grep, Glob`) unless it
    genuinely needs to edit.
 3. Add a row to the table above.
+
+## Feature interaction mapping
+
+Separate from the per-diff reviewers above, four agents keep track of **what
+FORA has and how every piece connects to every other piece** — the thing
+that makes FORA more than a template builder.
+
+| Agent | Scope | Edits? |
+|---|---|---|
+| `interaction-map-keeper` | Owns `docs/feature-interaction-map.md`. Places each change on the map, runs the mechanical checks, keeps the matrix current, coordinates the other three. | Map only |
+| `interaction-break-hunter` | Hunts breaks: a producer nothing consumes, a consumer reading half its sources, two features disagreeing on a join key, a feature gated differently from its neighbours. | No |
+| `interaction-opportunity-scout` | Proposes new connections worth building, capped at three per sweep. | No |
+| `interaction-fix-builder` | Builds one approved, numbered break. Branch → draft PR. | Yes, on approval |
+
+**These are diff-triggered, not scheduled.** There is deliberately no
+recurring trigger — the delegation row above fires `interaction-map-keeper`
+when a change touches a feature or a join column, and a full re-verification
+sweep happens when Dillon asks for one ("run a full interaction sweep").
+
+**`docs/feature-interaction-map.md` is the artifact.** Read it before adding
+a feature and before assuming two features already talk. Every claim in it
+carries a `file:line` so it can be re-verified rather than trusted — a map
+entry nobody can check is worse than none, because the next session trusts
+it. It lists the product surfaces, the join keys that nearly every link
+comes down to, the interaction matrix, the verified breaks, and a
+"deliberate non-connections" list that exists to stop false positives
+(Gatehouse is a separate product; Equipment Inspection genuinely makes no AI
+call; `equipment_id` is null for free-text machines on purpose).
+
+**Hard rule: no application-code change without Dillon's explicit yes on a
+specific numbered break.** These agents find and explain; he decides;
+`interaction-fix-builder` builds, and only the one break it was handed. A
+break that has been silent for months can wait a day for approval. Nothing
+gets reported or proposed on a link that wasn't read in the code —
+comments and CLAUDE.md are leads, not evidence.
+
+The seed sweep (2026-09-16, commit `0bd289c`) mapped 18 surfaces and 7 join
+keys and found 8 verified breaks. The two worst: `api/maintenance.js`
+computes preventative-maintenance status from inspection readings only and
+never looks at `fuel_logs.hour_reading`, while `api/fuellogs.js` reads both
+— so a company that fuels daily and inspects weekly has a PM clock running
+behind readings FORA already holds; and the Company Brain receives signals
+from only 4 of 9 document types, never seeing equipment-inspection defects,
+which is the most company-specific data the product collects. All 8 are
+awaiting a decision, not being worked.
 
 ## Continuous UI/UX development agents
 

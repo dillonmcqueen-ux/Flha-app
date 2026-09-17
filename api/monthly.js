@@ -4,6 +4,8 @@
 // tracking.
 
 import { createClient } from '@supabase/supabase-js';
+import { authorRosterId } from '../server-lib/authorStamp.js';
+import { openCorrectiveActions } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -335,6 +337,8 @@ export default async function handler(req, res) {
         .from('inspection_records')
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
+          // Break #3 — author from the session, never the request.
+          submitted_by_roster_id: authorRosterId(session),
           period_month: periodStart, ai_summary: aiSummary || null,
           pdf_url: resolvedSubmitPdfUrl, status: 'complete',
           client_submission_id: clientSubmissionId || null,
@@ -364,6 +368,31 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Save failed. Try again.' });
       }
 
+      // Every answer must name a question that actually belongs to this
+      // form. Without this, a worker could submit against their own
+      // company's form while pointing one answer at a question id from
+      // another company's form: the answer row stores it, a corrective
+      // action is opened against it, and list_corrective_actions below
+      // then renders that other company's question wording on this
+      // company's dashboard. Found by tenant-scope-reviewer while
+      // reviewing the Brain signal added below; pre-existing, not
+      // introduced by it.
+      //
+      // The form was already proven to belong to this company above, so
+      // scoping the lookup to the form is enough to scope it to the
+      // tenant. A mismatch is a broken or hostile client, never a real
+      // field submission, so it fails the submit rather than being
+      // silently dropped — dropping it would lose a worker's answer.
+      const { data: formQuestionRows, error: qErr } = await supabaseAdmin
+        .from('inspection_form_questions')
+        .select('id, question_text')
+        .eq('form_id', formId);
+      if (qErr) return res.status(500).json({ error: 'Could not load the form. Try again.' });
+      const questionTextById = new Map((formQuestionRows || []).map((q) => [String(q.id), q.question_text]));
+      const foreignAnswer = answers.find((a) => !questionTextById.has(String(a.questionId)));
+      if (foreignAnswer) return res.status(400).json({ error: "That answer doesn't belong to this form." });
+
+      const failedQuestionIds = [];
       for (const a of answers) {
         const { data: answerRow, error: ansErr } = await supabaseAdmin
           .from('inspection_answers')
@@ -372,11 +401,52 @@ export default async function handler(req, res) {
           .single();
         if (ansErr || !answerRow) continue;
         if (!a.answer) {
-          await supabaseAdmin.from('corrective_actions').insert({
-            answer_id: answerRow.id,
-            description: (a.note || '').trim() || 'No description provided.',
-            status: 'open',
+          failedQuestionIds.push(a.questionId);
+          // Break #5: corrective actions now carry company_id/source_type/
+          // source_id so an incident or a failed equipment inspection can
+          // open one too. Written through the shared helper so all four
+          // sources stay in step.
+          await openCorrectiveActions(supabaseAdmin, {
+            companyId: session.companyId,
+            sourceType: 'monthly_answer',
+            sourceId: answerRow.id,
+            answerId: answerRow.id,
+            descriptions: [(a.note || '').trim() || 'No description provided.'],
           });
+        }
+      }
+
+      // docs/scope-company-brain.md Phase 3 — monthly site inspections were
+      // left out of the original signal set alongside equipment
+      // inspections (see the note in api/logs.js). A failed question is a
+      // real, structured finding about this company's own sites, which is
+      // exactly what the profile should learn from.
+      //
+      // Only failures are recorded, and only when there are any: a clean
+      // walkthrough writes no row. The question text lives on
+      // inspection_form_questions rather than in the submitted payload, so
+      // it is resolved here in one query rather than per answer. Same
+      // best-effort discipline as every other signal writer — the record
+      // and its corrective actions are already saved by this point, and a
+      // failure below is logged, never turned into a failed submit.
+      if (failedQuestionIds.length > 0) {
+        try {
+          const failed = failedQuestionIds
+            .map((id) => questionTextById.get(String(id)))
+            .map((t) => (typeof t === 'string' ? t.trim().slice(0, 200) : ''))
+            .filter(Boolean)
+            .slice(0, 12);
+          if (failed.length > 0) {
+            const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+              company_id: session.companyId,
+              source_type: 'monthly_inspection',
+              source_id: String(record.id),
+              signal_json: { failed },
+            });
+            if (signalErr) console.error('company_signals insert failed for monthly inspection', record.id, signalErr.message);
+          }
+        } catch (e) {
+          console.error('company_signals capture failed for monthly inspection', record.id, e.message);
         }
       }
 
@@ -513,14 +583,21 @@ export default async function handler(req, res) {
         // to "yes" keeps any existing corrective action row as-is (an
         // audit trail, not something a content edit should silently erase).
         if (!a.answer) {
-          const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id').eq('answer_id', a.id).limit(1);
-          if (!caRows || caRows.length === 0) {
-            await supabaseAdmin.from('corrective_actions').insert({
-              answer_id: a.id,
-              description: (a.note || '').trim() || 'No description provided.',
-              status: 'open',
-            });
-          }
+          // form.company_id, NOT session.companyId: this branch is reachable
+          // by an admin, who is deliberately cross-company here, so their
+          // own session company would file the action under the wrong
+          // tenant. The supervisor path is already pinned to their company
+          // by the 403 above.
+          //
+          // The helper dedupes on (company, source, description), so the
+          // explicit existence check this used to do is no longer needed.
+          await openCorrectiveActions(supabaseAdmin, {
+            companyId: form.company_id,
+            sourceType: 'monthly_answer',
+            sourceId: a.id,
+            answerId: a.id,
+            descriptions: [(a.note || '').trim() || 'No description provided.'],
+          });
         }
       }
 
@@ -547,47 +624,152 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
+    // Corrective actions are no longer a monthly-inspection concept — since
+    // break #5 they can come from an incident, a near miss or a failed
+    // equipment inspection too. The endpoint still lives in this file so the
+    // Dashboard's existing call keeps working; the honest home for it is its
+    // own api/correctiveactions.js, which is a follow-up rather than part of
+    // this change.
+    //
+    // company_id on the row replaces the old four-hop walk
+    // (answer -> record -> form -> company), which only ever worked because
+    // every row was a monthly answer. That walk is why the column had to be
+    // added: with a polymorphic source there is no single join that resolves
+    // an owner.
     if (action === 'list_corrective_actions') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
 
-      let formsQuery = supabaseAdmin.from('inspection_forms').select('id, company_id');
-      if (session.role === 'supervisor') formsQuery = formsQuery.eq('company_id', session.companyId);
-      const { data: forms } = await formsQuery;
-      const formIds = (forms || []).map(f => f.id);
-      if (formIds.length === 0) return res.status(200).json({ actions: [] });
-      const formCompanyMap = {}; (forms || []).forEach(f => { formCompanyMap[f.id] = f.company_id; });
-
-      const { data: records } = await supabaseAdmin.from('inspection_records').select('id, form_id, site_id, period_month, submitted_by').in('form_id', formIds);
-      const recordIds = (records || []).map(r => r.id);
-      if (recordIds.length === 0) return res.status(200).json({ actions: [] });
-
-      const { data: answers } = await supabaseAdmin.from('inspection_answers').select('id, record_id, question_id').in('record_id', recordIds);
-      const answerIds = (answers || []).map(a => a.id);
-      if (answerIds.length === 0) return res.status(200).json({ actions: [] });
-
-      const { data: corrActions, error } = await supabaseAdmin.from('corrective_actions').select('*').in('answer_id', answerIds).order('created_at', { ascending: false });
+      let caQuery = supabaseAdmin.from('corrective_actions').select('*').order('created_at', { ascending: false });
+      if (session.role === 'supervisor') caQuery = caQuery.eq('company_id', session.companyId);
+      const { data: corrActions, error } = await caQuery;
       if (error) return res.status(500).json({ error: 'Could not load corrective actions.' });
+      if (!corrActions || corrActions.length === 0) return res.status(200).json({ actions: [] });
 
-      const answerMap = {}; (answers || []).forEach(a => { answerMap[a.id] = a; });
-      const recordMap = {}; (records || []).forEach(r => { recordMap[r.id] = r; });
-      const siteIds = [...new Set((records || []).map(r => r.site_id))];
-      const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
-      const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
-      const questionIds = [...new Set((answers || []).map(a => a.question_id))];
-      const { data: questions } = await supabaseAdmin.from('inspection_form_questions').select('id, question_text').in('id', questionIds.length ? questionIds : [0]);
-      const qMap = {}; (questions || []).forEach(q => { qMap[q.id] = q.question_text; });
+      const idsFor = (type) => corrActions.filter(ca => ca.source_type === type).map(ca => ca.source_id);
 
-      const enriched = (corrActions || []).map(ca => {
-        const ans = answerMap[ca.answer_id];
-        const rec = ans ? recordMap[ans.record_id] : null;
-        return {
-          ...ca,
-          question_text: ans ? (qMap[ans.question_id] || 'Unknown question') : 'Unknown question',
-          site_name: rec ? (siteMap[rec.site_id] || 'Unknown site') : 'Unknown site',
-          period_month: rec?.period_month,
-          submitted_by: rec?.submitted_by,
-          company_id: rec ? formCompanyMap[rec.form_id] : null,
-        };
+      // Every enrichment lookup below is constrained to the companies whose
+      // actions were actually returned above, not just to the ids found on
+      // those actions.
+      //
+      // This is deliberate belt-and-braces. The old four-hop walk *proved*
+      // ownership of each parent row; filtering by source_id alone would
+      // only *assume* it, resting entirely on "source_id always points at a
+      // row inside company_id" holding for every writer, forever. That
+      // invariant is true for all four writers today, but a fifth that takes
+      // sourceId from a request body while taking companyId from the session
+      // would turn this read path into a cross-tenant disclosure of site
+      // names, incident details and equipment labels. Costs one predicate;
+      // removes the whole class. (tenant-scope-reviewer, 2026-09-17.)
+      const companyIds = [...new Set(corrActions.map(ca => ca.company_id).filter(Boolean))];
+      const scopedIds = companyIds.length ? companyIds : [0];
+
+      // Forms first: inspection_answers and inspection_records carry no
+      // company_id of their own, so the form is what anchors them.
+      const { data: scopedForms } = await supabaseAdmin
+        .from('inspection_forms').select('id').in('company_id', scopedIds);
+      const formIds = (scopedForms || []).map(f => f.id);
+      const scopedFormIds = formIds.length ? formIds : [0];
+
+      // ── Monthly answers ───────────────────────────────────────────────
+      const answerIds = idsFor('monthly_answer');
+      const answerMap = {}, recordMap = {}, siteMap = {}, qMap = {};
+      if (answerIds.length > 0) {
+        const { data: answers } = await supabaseAdmin.from('inspection_answers').select('id, record_id, question_id').in('id', answerIds);
+        (answers || []).forEach(a => { answerMap[a.id] = a; });
+
+        // Records are constrained to this company's forms, so an answer
+        // reached through a cross-tenant source_id resolves to nothing and
+        // renders as Unknown rather than leaking. Fail closed.
+        const recordIds = [...new Set((answers || []).map(a => a.record_id).filter(Boolean))];
+        const { data: records } = await supabaseAdmin
+          .from('inspection_records').select('id, form_id, site_id, period_month, submitted_by')
+          .in('id', recordIds.length ? recordIds : [0])
+          .in('form_id', scopedFormIds);
+        (records || []).forEach(r => { recordMap[r.id] = r; });
+
+        const siteIds = [...new Set((records || []).map(r => r.site_id).filter(Boolean))];
+        const { data: sites } = await supabaseAdmin
+          .from('sites').select('id, name')
+          .in('id', siteIds.length ? siteIds : [0])
+          .in('company_id', scopedIds);
+        (sites || []).forEach(s2 => { siteMap[s2.id] = s2.name; });
+
+        const questionIds = [...new Set((answers || []).map(a => a.question_id).filter(Boolean))];
+        const { data: questions } = await supabaseAdmin
+          .from('inspection_form_questions').select('id, question_text')
+          .in('id', questionIds.length ? questionIds : [0])
+          .in('form_id', scopedFormIds);
+        (questions || []).forEach(q => { qMap[q.id] = q.question_text; });
+      }
+
+      // ── Incidents and near misses ─────────────────────────────────────
+      const incidentMap = {}, nearMissMap = {};
+      const incidentIds = idsFor('incident');
+      if (incidentIds.length > 0) {
+        const { data: rows } = await supabaseAdmin
+          .from('incidents').select('id, site, occurred_at, reporter_name, incident_type')
+          .in('id', incidentIds).in('company_id', scopedIds);
+        (rows || []).forEach(r => { incidentMap[r.id] = r; });
+      }
+      const nearMissIds = idsFor('near_miss');
+      if (nearMissIds.length > 0) {
+        const { data: rows } = await supabaseAdmin
+          .from('near_misses').select('id, site, occurred_at, reporter_name')
+          .in('id', nearMissIds).in('company_id', scopedIds);
+        (rows || []).forEach(r => { nearMissMap[r.id] = r; });
+      }
+
+      // ── Equipment inspections ─────────────────────────────────────────
+      const inspectionMap = {};
+      const inspectionIds = idsFor('equipment_inspection');
+      if (inspectionIds.length > 0) {
+        const { data: rows } = await supabaseAdmin
+          .from('inspections').select('id, equipment_label, worker_name, trip_type, created_at')
+          .in('id', inspectionIds).in('company_id', scopedIds);
+        (rows || []).forEach(r => { inspectionMap[r.id] = r; });
+      }
+
+      // Every action reports the same four display fields regardless of
+      // where it came from, so the dashboard renders one list rather than
+      // four. source_label is what a supervisor reads to know what this is
+      // about; source_type is what the UI filters and badges on.
+      const enriched = corrActions.map(ca => {
+        const base = { ...ca, source_type: ca.source_type };
+        if (ca.source_type === 'monthly_answer') {
+          const ans = answerMap[ca.source_id];
+          const rec = ans ? recordMap[ans.record_id] : null;
+          return {
+            ...base,
+            source_label: 'Monthly site inspection',
+            question_text: ans ? (qMap[ans.question_id] || 'Unknown question') : 'Unknown question',
+            site_name: rec ? (siteMap[rec.site_id] || 'Unknown site') : 'Unknown site',
+            period_month: rec?.period_month || null,
+            submitted_by: rec?.submitted_by || null,
+          };
+        }
+        if (ca.source_type === 'incident' || ca.source_type === 'near_miss') {
+          const r = ca.source_type === 'incident' ? incidentMap[ca.source_id] : nearMissMap[ca.source_id];
+          return {
+            ...base,
+            source_label: ca.source_type === 'incident' ? 'Incident report' : 'Near miss report',
+            question_text: r?.incident_type || null,
+            site_name: r?.site || 'Unknown site',
+            period_month: r?.occurred_at || null,
+            submitted_by: r?.reporter_name || null,
+          };
+        }
+        if (ca.source_type === 'equipment_inspection') {
+          const r = inspectionMap[ca.source_id];
+          return {
+            ...base,
+            source_label: r?.trip_type === 'posttrip' ? 'Post-trip inspection' : 'Pre-use inspection',
+            question_text: r?.equipment_label || null,
+            site_name: r?.equipment_label || 'Unknown equipment',
+            period_month: r?.created_at || null,
+            submitted_by: r?.worker_name || null,
+          };
+        }
+        return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', period_month: null, submitted_by: null };
       });
 
       return res.status(200).json({ actions: enriched });
@@ -598,19 +780,16 @@ export default async function handler(req, res) {
       const { actionId, responsibleName, targetDate, status } = req.body;
       if (!actionId) return res.status(400).json({ error: 'Missing action id.' });
 
+      // Ownership now comes off the row itself. The old check walked
+      // action -> answer -> record -> form -> company, which returns 404 the
+      // moment answer_id is null — so leaving it would have made every
+      // incident- and inspection-sourced action permanently unresolvable
+      // for a supervisor, while still listing it on their dashboard.
       if (session.role === 'supervisor') {
-        const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id, answer_id').eq('id', actionId).limit(1);
+        const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id, company_id').eq('id', actionId).limit(1);
         const ca = caRows && caRows[0];
         if (!ca) return res.status(404).json({ error: 'Not found.' });
-        const { data: ansRows } = await supabaseAdmin.from('inspection_answers').select('record_id').eq('id', ca.answer_id).limit(1);
-        const ans = ansRows && ansRows[0];
-        if (!ans) return res.status(404).json({ error: 'Not found.' });
-        const { data: recRows } = await supabaseAdmin.from('inspection_records').select('form_id').eq('id', ans.record_id).limit(1);
-        const rec = recRows && recRows[0];
-        if (!rec) return res.status(404).json({ error: 'Not found.' });
-        const { data: formRows } = await supabaseAdmin.from('inspection_forms').select('company_id').eq('id', rec.form_id).limit(1);
-        const form = formRows && formRows[0];
-        if (!form || form.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+        if (ca.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
       }
 
       const updates = {};

@@ -2018,6 +2018,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.toolbox_talk}</div><div style={{ fontSize: 11, color: C.muted }}>Toolbox talks</div></div>
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.incident}</div><div style={{ fontSize: 11, color: C.muted }}>Incidents</div></div>
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.near_miss}</div><div style={{ fontSize: 11, color: C.muted }}>Near misses</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.equipment_inspection ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Equipment defects</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.monthly_inspection ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Site findings</div></div>
                   </div>
                   {[
                     ["Hazards most often added by workers", brainTrends.topAddedHazards],
@@ -2025,7 +2027,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     ["Common toolbox talk topics", brainTrends.topToolboxTopics],
                     ["Common incident categories", brainTrends.topIncidentCategories],
                     ["Recent near-miss involvement (free text — often unique per report)", brainTrends.topNearMissInvolved],
-                  ].filter(([, list]) => list.length > 0).map(([label, list]) => (
+                    ["Checks most often failing on equipment", brainTrends.topDefectiveItems],
+                    ["Machines with the most inspection findings", brainTrends.topInspectedEquipment],
+                    ["Site inspection questions most often failed", brainTrends.topMonthlyFailures],
+                  ].filter(([, list]) => (list || []).length > 0).map(([label, list]) => (
                     <div key={label}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>{label}</div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
