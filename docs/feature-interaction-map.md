@@ -63,14 +63,76 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 |---|---|---|
 | Equipment Inspection | ✅ `Inspection.jsx:45,51` | — |
 | Fuel Log | ✅ `FuelLog.jsx:21` | — |
-| Preventative Maintenance | ✅ `maintenance.js:214` | ✅ `maintenance.js:130-132` |
-| Weekly Equipment Report | — | ⚠️ groups by `equipment_label`, not id |
-| Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:54,203`) |
+| Preventative Maintenance | ✅ `maintenance.js:321,384` | ✅ `maintenance.js:86,92,180-215` |
+| Weekly Equipment Report | — | ✅ *(#7, PR #119)* `equipmentreports.js:190-213,247` |
+| Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) |
 
 **Consequence:** anything that groups by `equipment_label` silently splits
 one machine into several when the label is typed differently, and can't
 join to the fleet at all. `maintenance.js:5-7` documents this decision
-explicitly and is the correct reference.
+explicitly and is the correct reference. Analytics is the last consumer
+still keyed this way.
+
+**Ownership validation.** Now that this column is read rather than merely
+stored, an id arriving from a client is a tenancy question, exactly as
+`site_id` is. `server-lib/equipmentScope.js` is the companion to
+`server-lib/siteScope.js` and carries the same three-way contract: the
+fleet row's own id when it belongs to the caller, `false` (→ 403) when it
+belongs to another company, and `null` when it simply doesn't exist —
+**never `false` for a missing id**, because both callers are offline-queued
+and `drainQueue` (`src/offlineQueue.js:185-208`) has no attempt cap and no
+drop path, so a permanent 403 wedges a worker's whole queue. Same failure
+mode recorded for `site_id` under break #2's follow-up.
+
+| Caller | Validates `equipment_id` | Since |
+|---|---|---|
+| `api/logs.js` inspection submit | ✅ `logs.js:280-283` | PR #119 (`afee546`) — had **no** check before, though `equipment_id` was in `SUBMITTABLE_FIELDS.inspection` all along |
+| `api/fuellogs.js` submit | ✅ `fuellogs.js:165-168` | had an inline guard; migrated onto the shared helper in `afee546` |
+| `api/equipmentreports.js` report build | ✅ `equipmentreports.js:175-188` (`vetEquipmentIds`), called at `:227-229` | PR #119 (`afee546`) |
+
+`results_json.attachedTrailer.id` is the one that can't be guarded on
+submit: `results_json` is a free-form jsonb blob and `pickAllowed`
+(`logs.js:122`) whitelists the **column**, never its contents. It is
+therefore vetted on the read side instead — `vetEquipmentIds` drops any id
+not in the company's fleet before anything keys on it, falling back to the
+label the way a free-text machine already does.
+
+### `linked_inspection_id` → `inspections.id` (the trip pair)
+Set on a post-trip to point back at its pre-trip (`Inspection.jsx:53`;
+always `null` on a pre-trip, `:47`). This is what makes a *trip* a unit
+rather than two loose rows: usage for the week is `posttrip.end_reading −
+pretrip.start_reading`, and "checked out, not returned" is the absence of a
+post-trip carrying this id.
+
+| Consumer | Reads it |
+|---|---|
+| Weekly Equipment Report — open-trip count | `equipmentreports.js:316` |
+| Weekly Equipment Report — towed distance | `equipmentreports.js:331` |
+| `api/logs.js` open-pretrip list | `logs.js:223` |
+| Dashboard inspection detail | `src/Dashboard.jsx:3283` |
+
+**Weak link, recorded 2026-09-17, not being worked.** This is the last
+client-supplied foreign id in `SUBMITTABLE_FIELDS.inspection`
+(`logs.js:132`) with no ownership check — the same shape as the
+`equipment_id` gap `afee546` closed, found by `tenant-scope-reviewer` while
+verifying that fix.
+
+**It is inert today, and the reason is worth writing down:** all four
+consumers above compare `linked_inspection_id` against rows from a set that
+is *already* company-scoped (`logs.js:210`, `equipmentreports.js:216`, and
+the supervisor's own filtered list), so a foreign id matches nothing and is
+dropped. Nothing fetches by that id directly. The trap is the same one
+`equipment_id` had: the first consumer that does a direct lookup without
+re-checking `company_id` hands one company's readings to another.
+
+**Do not fix this by copying `equipmentScope.js`.** The semantics differ.
+A missing `equipment_id` degrades to a label-only record, which is a shape
+the product already has; a missing `linked_inspection_id` would silently
+drop the trip pairing and with it the week's usage hours. There is also an
+offline question to answer first — a post-trip queued offline needs its
+pre-trip's server-assigned id, so what that column holds mid-drain needs
+reading before any guard is written. Needs a decision, not a mechanical
+copy.
 
 ### `reading` / `reading_unit` (the usage clock)
 Hours or kilometres on a machine. Written by inspections
@@ -377,7 +439,33 @@ grep -n "BUILTIN_DOC_KEYS = " api/customforms.js
 ```
 
 ### #7 — Weekly equipment reports group by label, not fleet id
-**Severity: medium.** `api/equipmentreports.js:141` doesn't even select
+**Severity: medium. Status: fixed in PR #119.** The report now groups by a
+resolved key: the fleet id when the row carries one, otherwise a normalized
+label. Trailers route by `attachedTrailer.id` (which
+`src/Inspection.jsx` was already storing alongside the label and discarding),
+and tow-unit attachment lines group by `towUnitId`.
+
+**The trap worth recording.** Keying purely on `equipment_id` fixes the merge
+direction and *breaks* the other one: a machine picked from the fleet on
+Monday and typed by hand on Tuesday has an id on one row and null on the
+other, and would split into two report lines where it previously merged
+correctly. So a free-text row adopts a fleet id when its label maps to
+exactly one machine, and keeps its own key when the label is ambiguous —
+guessing there would reintroduce the merge bug from the other side, silently.
+`tests/unit/equipment-report-grouping.test.js` pins both directions; label-only
+keying fails 3 of them and id-only keying fails 2.
+
+**No migration, and stored reports are untouched.** Only `Object.values()` is
+persisted into `report_json`, so the key change is invisible to existing
+rows; `equipmentId` and `towUnitId` are additive, and both consumers fall
+back to the label when they're absent.
+
+**Root cause left in place, deliberately:** `add_equipment` still requires
+only one of make/model/type and leaves `unit_number` optional with no
+uniqueness check, which is what lets two machines share a label at all.
+Fixing that is a separate change and could block legitimate additions.
+
+Original finding: `api/equipmentreports.js:141` doesn't even select
 `equipment_id`; `ensure()` at `:149-158` keys on
 `r.equipment_label || 'Unknown equipment'`. Same class as the Analytics
 grouping at `analyticsUtils.js:54,203`.
@@ -469,3 +557,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #118 | Break #2 fixed: `site_id` on all five field forms, backfilled 89% of history. Two map errors corrected in the process — the forms already had dropdowns, and `delete_site` was failing outright rather than orphaning. |
 | 2026-09-17 | PR #118 | Break #2 follow-up: fixing `delete_site` made a dangling `site_id` reachable, which permanently wedged the offline queue (`drainQueue` breaks on any throw with no attempt cap). A missing site now stores a text-only record. **A fix for one break created a fault in another — exactly what this map exists to catch, introduced while closing a break.** |
 | 2026-09-17 | PR #118 | Break #3 fixed: `submitted_by_roster_id` stamped server-side on all nine document tables, with anonymous near misses structurally protected. |
+| 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
+| 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
+| 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |

@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
+import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
 import { openCorrectiveActions, correctiveActionsFromInspection } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -266,6 +267,19 @@ export default async function handler(req, res) {
         const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, recordToInsert.site_id);
         if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
         recordToInsert.site_id = resolvedSiteId;
+      }
+
+      // Same question for equipment_id, which has been submittable on an
+      // inspection all along but unchecked — api/fuellogs.js guarded its
+      // copy of this column, this handler never did. Break #7 made the
+      // column load-bearing (it is now the grouping key for weekly
+      // equipment reports), so an unowned id here would attach one
+      // company's inspection to another company's machine and carry that
+      // id into a stored report. See server-lib/equipmentScope.js.
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'equipment_id')) {
+        const resolvedEquipmentId = await resolveEquipmentId(supabaseAdmin, session.companyId, recordToInsert.equipment_id);
+        if (resolvedEquipmentId === false) return res.status(403).json({ error: 'Not allowed for this equipment.' });
+        recordToInsert.equipment_id = resolvedEquipmentId;
       }
       let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {

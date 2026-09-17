@@ -91,10 +91,14 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
       if (eq.attachments && eq.attachments.length > 0) {
         const byTow = {};
         eq.attachments.forEach(a => {
-          if (!byTow[a.towUnit]) byTow[a.towUnit] = { distance: 0, unit: a.unit };
-          byTow[a.towUnit].distance += a.distance;
+          // Group by the tow unit's fleet id when the report carries one, so
+          // two identically-named trucks stay apart. Reports written before
+          // break #7 have only towUnit, and fall back to it unchanged.
+          const towKey = a.towUnitId != null ? `eq:${a.towUnitId}` : `label:${a.towUnit}`;
+          if (!byTow[towKey]) byTow[towKey] = { label: a.towUnit, distance: 0, unit: a.unit };
+          byTow[towKey].distance += a.distance;
         });
-        const rawLines = Object.entries(byTow).map(([towUnit, v]) => `Attached to ${towUnit} for ${v.distance.toFixed(1)} ${v.unit}`);
+        const rawLines = Object.values(byTow).map(v => `Attached to ${v.label} for ${v.distance.toFixed(1)} ${v.unit}`);
         usageLines = rawLines.flatMap(line => doc.splitTextToSize(line, cUsageW - 4));
       } else {
         usageLines = [eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ''}` : '—'];
