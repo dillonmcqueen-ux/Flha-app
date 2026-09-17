@@ -121,7 +121,14 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
 
       doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 65, 81);
       usageLines.forEach((line, li) => doc.text(line, cUsageX + 2, textY + li * 4.2));
-      doc.text(eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ''}` : '—', cEndX + 2, textY);
+      // A reading taken from a fuel-up is marked, so a supervisor reading
+      // an odometer that no post-trip accounts for knows where it came from
+      // (break #1). Reports written before this carry no source and render
+      // exactly as they always did.
+      const endText = eq.endingReading != null
+        ? `${eq.endingReading} ${eq.unit || ''}${eq.endingReadingSource === 'fuel_log' ? ' (fuel)' : ''}`
+        : '—';
+      doc.text(endText, cEndX + 2, textY);
 
       const hasIssues = eq.issues.length > 0;
       doc.setTextColor(hasIssues ? 220 : 100, hasIssues ? 38 : 116, hasIssues ? 38 : 139);

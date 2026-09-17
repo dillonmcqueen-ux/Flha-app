@@ -143,10 +143,11 @@ Hours or kilometres on a machine. Written by inspections
 | `api/fuellogs.js` `get_last_reading` | ✅ `:106` | ✅ `:99` |
 | `api/fuellogs.js` consumption calc | ✅ `:211` | ✅ `:229` |
 | `api/maintenance.js` PM status | ✅ `:129` | ✅ *(#1, PR #118)* |
-| `api/equipmentreports.js` weekly | ✅ | ❌ |
+| `api/equipmentreports.js` weekly — ending reading | ✅ | ✅ *(#1, PR #120)* |
+| `api/equipmentreports.js` weekly — "Used" | ✅ | — *(by definition; see #1)* |
 
-**This is break #1 below.** Fuel already understands that a reading can come
-from either table. Maintenance does not.
+**This was break #1 below.** Both consumers now share one reducer in
+`server-lib/readings.js`, so neither can drift from the other again.
 
 ### `site_id` → `sites.id` vs `site` vs `job_site`
 One concept, **three column shapes across ten features**:
@@ -244,12 +245,26 @@ Each carries the evidence that proves it and the check that re-confirms it.
 
 ### #1 — Preventative maintenance ignores fuel-log readings
 **Severity: high.** Directly contradicts how the product is sold.
-**Status: half fixed.** PR #118 closes the preventative-maintenance half.
-**The weekly-equipment-report half is still open** and does not close with
-it: `api/equipmentreports.js` and `api/cron-equipment-reports.js` both still
-contain zero references to `fuel_logs` (verified by grep), so the weekly
-report's "hours used" is still inspection-only. Do not mark #1 closed when
-PR #118 merges.
+**Status: fixed.** PR #118 closed the preventative-maintenance half; the
+weekly-equipment-report half closed after it, and the two now answer the
+question with the *same code* rather than the same intention:
+`inspectionReadingPoint` / `fuelReadingPoint` / `latestReadingsByEquipment`
+moved out of `api/maintenance.js` into `server-lib/readings.js`
+(`api/equipmentreports.js:227` calls them via `applyLatestReadings`). The
+move is the fix, not a tidy-up — a second copy of that logic is how this
+break happened in the first place.
+
+**A deliberate boundary, recorded so it is not mistaken for a remaining
+gap:** the report's **"Used"** column stays inspection-only. It is a sum of
+trip deltas (a post-trip's end minus its own start); a fuel-up is a
+point-in-time odometer, not a trip. Feeding fuel readings into it would
+double-count or invent usage that never happened. Only the **ending
+reading** is multi-source. The live consequence is worth knowing: a machine
+fuelled far more than its inspections account for still under-reports
+"Used", and the ending reading is where that discrepancy becomes visible —
+which is why a fuel-derived reading is now labelled as such in both
+consumers (`server-lib/reportPdfs.js:129`, `src/Dashboard.jsx:1626`) rather
+than silently replacing a trip-derived one.
 
 `api/maintenance.js:128-133` builds PM status from the `inspections` table
 alone. `api/fuellogs.js:85-120` (`get_last_reading`) reads **both**
@@ -560,4 +575,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
 | 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #120 | Break #1 **closed**: the weekly report's ending reading now reads fuel logs too, via reading helpers moved into `server-lib/readings.js` so maintenance and the report share one definition. "Used" stays trip-derived by definition, recorded as a boundary rather than a gap. |
 | 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |

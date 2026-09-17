@@ -1623,7 +1623,7 @@ function EquipmentReportCard({ data, onClose, error }) {
               ) : (
                 <div style={{ display: "flex", gap: 16, marginBottom: eq.issues.length > 0 || eq.noPostTripCount > 0 ? 8 : 0 }}>
                   <div style={{ fontSize: 13, color: "#D4D4D8" }}>Used: <strong>{eq.usage > 0 ? `${eq.usage.toFixed(1)} ${eq.unit || ""}` : "—"}</strong></div>
-                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong></div>
+                  <div style={{ fontSize: 13, color: "#D4D4D8" }}>Ending reading: <strong>{eq.endingReading != null ? `${eq.endingReading} ${eq.unit || ""}` : "—"}</strong>{eq.endingReadingSource === "fuel_log" && <span style={{ fontSize: 11, color: "#A1A1AA" }}> from fuel log</span>}</div>
                 </div>
               )}
               {eq.noPostTripCount > 0 && (
