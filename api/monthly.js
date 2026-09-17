@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { openCorrectiveActions } from '../server-lib/correctiveActions.js';
+import { annotateRecurrence, patternsByEquipment, RECURRENCE_THRESHOLD, RECURRENCE_WINDOW_DAYS } from '../server-lib/recurrence.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -767,25 +768,57 @@ export default async function handler(req, res) {
         }
         if (ca.source_type === 'equipment_inspection') {
           const r = inspectionMap[ca.source_id];
+          // The machine label now comes off the ACTION's own column, falling
+          // back to the parent inspection only for rows written before
+          // corrective-actions-equipment-recurrence-migration.sql. Reading
+          // the parent first would break the moment an inspection is deleted
+          // — the action survives, and "Unknown equipment" on a defect is
+          // useless to the person who has to go and fix it.
+          const machine = ca.equipment_label || r?.equipment_label || null;
           return {
             ...base,
             source_label: r?.trip_type === 'posttrip' ? 'Post-trip inspection' : 'Pre-use inspection',
-            question_text: r?.equipment_label || null,
-            // Deliberately no site_id: this action came from an equipment
-            // inspection, so what fills the "site" slot is a MACHINE. It
-            // must never adopt a site's id and merge into that site's row.
-            // (That a machine appears in a site column at all is a
-            // pre-existing oddity of this list, not introduced here.)
-            site_name: r?.equipment_label || 'Unknown equipment',
+            question_text: machine,
+            equipment_label: machine,
+            // site_name is deliberately null rather than the machine name.
+            // The old code put a MACHINE in the site slot, so the dashboard
+            // rendered "Cat 320 Excavator" where every other row shows a
+            // jobsite — and the search box offered to search "site" while
+            // actually matching machines. A machine is not a site; it gets
+            // its own field and its own chip in the UI.
+            site_name: null,
             site_id: null,
-            period_month: r?.created_at || null,
+            period_month: r?.created_at || ca.created_at || null,
             submitted_by: r?.worker_name || null,
           };
         }
         return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', site_id: null, period_month: null, submitted_by: null };
       });
 
-      return res.status(200).json({ actions: enriched });
+      // ── Recurrence ────────────────────────────────────────────────────
+      //
+      // "3 low tire corrective actions in a row should flag something as a
+      // pattern" (Dillon, 2026-09-17). Computed here rather than in the
+      // browser so the corrective-actions list and the maintenance screen
+      // cannot disagree about what counts as a pattern — the same reason
+      // server-lib/readings.js exists after break #1.
+      //
+      // Counted over the company's WHOLE set, not the page: a pattern is a
+      // property of the machine's history, so it must not change depending
+      // on what the caller happens to be looking at.
+      const withRecurrence = annotateRecurrence(enriched);
+
+      // The maintenance screen reads its per-machine repeat-offender list
+      // from here rather than from api/maintenance.js. Deliberate: this is
+      // the only handler that already resolves corrective actions
+      // tenant-safely, and duplicating that resolution in a second endpoint
+      // is precisely how the cross-tenant hazard documented above gets
+      // reintroduced. It also costs no new Vercel function.
+      return res.status(200).json({
+        actions: withRecurrence,
+        equipmentPatterns: patternsByEquipment(enriched),
+        recurrenceRule: { threshold: RECURRENCE_THRESHOLD, windowDays: RECURRENCE_WINDOW_DAYS },
+      });
     }
 
     if (action === 'update_corrective_action') {
@@ -805,16 +838,68 @@ export default async function handler(req, res) {
         if (ca.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
       }
 
+      // Two values that used to go straight from the request body into the
+      // row, both found by tenant-scope-reviewer.
+      //
+      // `status` had no allow-list at all — it leaned entirely on a database
+      // CHECK to reject nonsense, and the error path below RETRIES rather
+      // than surfacing it, so a rejected value would have looked like a
+      // successful save.
+      if (status !== undefined && status !== 'open' && status !== 'resolved') {
+        return res.status(400).json({ error: 'Unknown status.' });
+      }
+
       const updates = {};
       if (responsibleName !== undefined) updates.responsible_name = responsibleName;
       if (targetDate !== undefined) updates.target_date = targetDate || null;
       if (status !== undefined) {
         updates.status = status;
         updates.resolved_at = status === 'resolved' ? new Date().toISOString() : null;
+        // Who closed it and how. A post-trip resolution already records both
+        // (resolution_source = 'posttrip'); without this a supervisor
+        // closing one by hand left resolution_source null, so "resolved"
+        // meant two different things and an audit could not tell a repair
+        // that was actually performed from a row somebody ticked off.
+        //
+        // Reopening clears all three rather than leaving a stale repair note
+        // attached to an action that is open again.
+        updates.resolution_source = status === 'resolved' ? 'supervisor' : null;
+        // And `resolved_by` fell through to the body's `responsibleName`
+        // when the session carried no name — which is every company still on
+        // a shared login. That is exactly what break #3 settled against: an
+        // author a caller can choose is a suggestion, not attribution. It
+        // degrades to the literal 'Supervisor' instead, the way
+        // api/logs.js's repair log degrades to 'Worker'. Capped, because a
+        // session value is not automatically a short one.
+        updates.resolved_by = status === 'resolved'
+          ? ((session.userName || '').trim().slice(0, 120) || 'Supervisor')
+          : null;
+        if (status !== 'resolved') updates.resolved_note = null;
       }
 
-      const { error } = await supabaseAdmin.from('corrective_actions').update(updates).eq('id', actionId);
-      if (error) return res.status(500).json({ error: "Couldn't update." });
+      // The ownership check above is correct, so this predicate changes
+      // nothing today. It makes the WRITE self-defending rather than resting
+      // on a check several lines above it staying there — one predicate for
+      // a whole class of future mistake. Admins are cross-company by design,
+      // here as everywhere else in this file.
+      let updateQuery = supabaseAdmin.from('corrective_actions').update(updates).eq('id', actionId);
+      if (session.role === 'supervisor') updateQuery = updateQuery.eq('company_id', session.companyId);
+      const { error } = await updateQuery;
+      if (error) {
+        // Same deploy-window tolerance as the insert path in
+        // server-lib/correctiveActions.js: if this code reaches production
+        // before corrective-actions-equipment-recurrence-migration.sql runs,
+        // a supervisor must still be able to close an action. Retry with
+        // only the columns that have always existed.
+        const legacy = { ...updates };
+        delete legacy.resolution_source;
+        delete legacy.resolved_by;
+        delete legacy.resolved_note;
+        let retryQuery = supabaseAdmin.from('corrective_actions').update(legacy).eq('id', actionId);
+        if (session.role === 'supervisor') retryQuery = retryQuery.eq('company_id', session.companyId);
+        const { error: retryErr } = await retryQuery;
+        if (retryErr) return res.status(500).json({ error: "Couldn't update." });
+      }
       return res.status(200).json({ ok: true });
     }
 

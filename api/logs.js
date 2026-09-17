@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
-import { openCorrectiveActions, correctiveActionsFromInspection } from '../server-lib/correctiveActions.js';
+import { openCorrectiveActions, correctiveActionsFromInspection, resolvedItemsFromPosttrip, resolveCorrectiveActionsForItems } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -154,8 +154,23 @@ export function inspectionFindingSignal(record) {
   if (!results) return null;
   const items = Array.isArray(results.items) ? results.items : [];
 
+  // A post-trip now carries a full checklist, so this reads both halves of a
+  // trip where it used to see only the pre-trip (a post-trip's results_json
+  // had no `items` at all). That is a real gain — the Brain finally sees
+  // what breaks DURING a shift, not just what was already broken before it
+  // started — but it brings a double-count with it: a defect the pre-trip
+  // reported and the post-trip confirms is still there is ONE fault on ONE
+  // machine, and tallying it twice would make whatever a machine breaks most
+  // often look twice as common as it is.
+  //
+  // So a carried-forward item is only signal when its condition CHANGED
+  // during the shift. Unchanged means the pre-trip already told the Brain.
+  // Same rule server-lib/correctiveActions.js applies to opening a second
+  // action for the same unfixed fault, for the same reason.
+  const contributes = (i) => !i.carriedFrom || i.condition !== i.carriedCondition;
+
   const named = (condition) => items
-    .filter((i) => i && i.condition === condition && typeof i.item === 'string' && i.item.trim())
+    .filter((i) => i && i.condition === condition && typeof i.item === 'string' && i.item.trim() && contributes(i))
     .map((i) => i.item.trim().slice(0, 200))
     .slice(0, MAX_SIGNAL_ITEMS);
 
@@ -440,7 +455,80 @@ export default async function handler(req, res) {
           sourceType: 'equipment_inspection',
           sourceId: newId,
           descriptions: correctiveActionsFromInspection(record.results_json, record.equipment_label),
+          // recordToInsert.equipment_id is the VETTED id — resolveEquipmentId
+          // above already rejected another company's machine and nulled a
+          // non-existent one. Reading record.equipment_id here instead would
+          // put a client-supplied id straight into the column that decides
+          // which machine a pattern belongs to.
+          equipmentId: recordToInsert.equipment_id ?? null,
+          equipmentLabel: recordToInsert.equipment_label ?? null,
         });
+
+        // ── The other half of the loop: a post-trip that clears a defect ──
+        //
+        // Dillon, 2026-09-17: "if the person marks the post trip as the issue
+        // no longer exists, it can be marked in corrective actions as
+        // resolved and logged as a repair."
+        //
+        // Two writes, in this order and not the other way round. The
+        // corrective action is the supervisor-facing record and the one that
+        // must be right; the repair line is the machine's history. If the
+        // repair log fails we would rather have a closed action with no
+        // service line than an open action the worker was told they had
+        // closed.
+        if (recordToInsert.trip_type === 'posttrip') {
+          const fixed = resolvedItemsFromPosttrip(record.results_json);
+          if (fixed.length > 0) {
+            // session.name / session.userName, never a name from the body.
+            // Who repaired a machine is attribution, and attribution a
+            // caller can choose is a suggestion — the same rule break #3
+            // settled for document authorship.
+            const who = (session.name || session.userName || '').trim() || 'Worker';
+            const noteText = fixed
+              .map((f) => (f.note ? `${f.item} — ${f.note}` : f.item))
+              .join('; ');
+
+            const closed = await resolveCorrectiveActionsForItems(supabaseAdmin, {
+              companyId: session.companyId,
+              equipmentId: recordToInsert.equipment_id ?? null,
+              equipmentLabel: recordToInsert.equipment_label ?? null,
+              itemKeys: fixed.map((f) => f.itemKey),
+              resolvedBy: who,
+              note: noteText,
+              resolutionSource: 'posttrip',
+            });
+
+            // The repair line only exists for a fleet-registered machine:
+            // equipment_maintenance_log.equipment_id is a real FK and a
+            // free-text machine has no row to point at. That machine's
+            // history still lives on its corrective actions, which is the
+            // same graceful degradation equipment_id has everywhere else.
+            //
+            // entry_type is 'field_service', NEVER 'pm_service'. A worker
+            // saying "the tire's fixed" must not reset the machine's
+            // preventative-maintenance clock — see
+            // docs/scope-equipment-service-log.md for why that would be
+            // strictly worse than not logging it at all.
+            if (closed.length > 0 && recordToInsert.equipment_id != null) {
+              const { error: repairErr } = await supabaseAdmin.from('equipment_maintenance_log').insert({
+                company_id: session.companyId,
+                equipment_id: recordToInsert.equipment_id,
+                entry_type: 'field_service',
+                service_date: new Date().toISOString().slice(0, 10),
+                // Deliberately no reading. The post-trip's end_reading is a
+                // meter reading for the trip, not for the repair, and
+                // service_reading is what a PM baseline would be measured
+                // from if one ever read these rows by mistake.
+                service_reading: null,
+                reading_unit: null,
+                performed_by: who,
+                logged_by_roster_id: session.userId || null,
+                notes: `Repaired on post-trip: ${noteText}`.slice(0, 1000),
+              });
+              if (repairErr) console.error('post-trip repair log insert failed for inspection', newId, repairErr.message);
+            }
+          }
+        }
       }
 
       return res.status(200).json({ id: newId, pdfLinked });

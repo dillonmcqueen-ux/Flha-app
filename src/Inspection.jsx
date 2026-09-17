@@ -24,11 +24,16 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     resultsJson, startReading,
     endReading, hasChanges, changeCondition, changeNotes,
     linkedPretripId, linkedPretripStartReading, linkedPretripReadingUnit,
+    linkedPretripResultsJson, linkedPretripWorker, linkedPretripCreatedAt,
   } = payload;
 
   const pdfUrl = await generateAndUploadInspection({
     equipmentLabel: label, workerName, companyName, companyLogo,
-    results: tripType === "pretrip" ? resultsJson : undefined,
+    // Both trip types now carry a checklist, so both send their results.
+    // The post-trip PDF used to receive nothing here and printed a single
+    // "change reported" box; it now prints its own end-of-shift checklist
+    // and what got fixed during the shift.
+    results: resultsJson,
     signatureDataUrl: sig,
     tripType,
     startReading: isTrailer ? null : (tripType === "pretrip" ? startReading : linkedPretripStartReading),
@@ -37,7 +42,24 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     hasChanges: tripType === "posttrip" ? !!hasChanges : undefined,
     changeCondition: tripType === "posttrip" ? changeCondition : undefined,
     changeNotes: tripType === "posttrip" ? changeNotes : undefined,
-    linkedPretrip: tripType === "posttrip" ? { id: linkedPretripId, start_reading: linkedPretripStartReading, reading_unit: linkedPretripReadingUnit } : undefined,
+    // Pre-existing break, found by pdf-consistency-reviewer while reviewing
+    // the post-trip rework and confirmed against `main`: the post-trip PDF
+    // reproduces the pre-trip in full so "this one PDF is the whole story"
+    // (generateInspectionPDF.js), and it was only ever handed
+    // {id, start_reading, reading_unit}. So every post-trip PDF FORA has
+    // ever produced printed the italic line "Pre-trip checklist not
+    // available.", an em dash for PRE-TRIP INSPECTOR, and — on a truck with
+    // a trailer — the single-column MACHINE box instead of TOW VEHICLE /
+    // TRAILER. Silent: no error, nothing missing on screen, only on the
+    // document that goes in the audit binder.
+    linkedPretrip: tripType === "posttrip" ? {
+      id: linkedPretripId,
+      start_reading: linkedPretripStartReading,
+      reading_unit: linkedPretripReadingUnit,
+      results_json: linkedPretripResultsJson || null,
+      worker_name: linkedPretripWorker || null,
+      created_at: linkedPretripCreatedAt || null,
+    } : undefined,
     token: tokenForRequest,
   });
 
@@ -285,11 +307,77 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     setChecking(false);
   };
 
+  // The post-trip checklist IS the pre-trip's checklist.
+  //
+  // Dillon, 2026-09-17: "the post trip needs to be the same checklist as the
+  // pre trip". Literally the same list rather than a freshly generated one
+  // from equipmentInspectionTemplates.js — regenerating would silently drop
+  // the attached trailer's items (the trailer is only known from the
+  // pre-trip's stored results on this screen) and would disagree with the
+  // morning's list for any machine whose template changed in between. The
+  // two halves of one trip must be comparable line for line or "is this the
+  // same fault?" cannot be answered.
+  //
+  // Every item resets to Good. Items the pre-trip flagged are tagged
+  // `carriedFrom` and get a Fixed / Still an issue / Worse prompt instead,
+  // which is the only thing the operator is actually required to answer.
+  const buildPosttripItems = (pretrip) => {
+    const prior = pretrip?.results_json?.items;
+    if (!Array.isArray(prior) || prior.length === 0) return [];
+    return prior.map(it => {
+      const flagged = it.condition === "Defective" || it.condition === "Monitor";
+      return {
+        item: it.item,
+        category: it.category || "",
+        unit: it.unit || "truck",
+        unitLabel: it.unitLabel || "",
+        condition: "Good",
+        note: "",
+        carriedFrom: flagged || undefined,
+        carriedCondition: flagged ? it.condition : undefined,
+        carriedNote: flagged ? (it.note || "") : undefined,
+        resolution: flagged ? null : undefined,
+        resolutionNote: flagged ? "" : undefined,
+      };
+    });
+  };
+
   const choosePostTrip = () => {
     setMode("posttrip");
     setReadingUnit(openPretrip.reading_unit || "Hours");
+    const built = buildPosttripItems(openPretrip);
+    setItems(built);
+    // A pre-trip submitted before this change stored no item list. Rather
+    // than showing an empty checklist, that one falls back to the old
+    // single-question flow — see the `legacyPosttrip` branch in the render.
+    // It is a shrinking set (today's open pre-trips only) and it is better
+    // than a post-trip that cannot be completed at all.
+    setInspectionMeta({ machineSummary: built.length > 0 ? "Post-trip — same checklist as the pre-trip" : "" });
     setStep("posttrip");
   };
+
+  const setResolution = (i, resolution) => setItems(prev => prev.map((it, idx) => {
+    if (idx !== i) return it;
+    // The resolution drives the condition, so the two can never disagree.
+    // The server reads `condition` to decide what opens a corrective action
+    // and `resolution` to decide what closes one; a Good item claiming to be
+    // "still an issue" would do both.
+    const condition = resolution === "fixed" ? "Good"
+      : resolution === "worse" ? "Defective"
+      : it.carriedCondition;
+    return {
+      ...it,
+      resolution,
+      condition,
+      // Keep the pre-trip's own wording on anything still outstanding, so a
+      // supervisor reading the post-trip sees what was originally reported
+      // rather than a blank note.
+      note: resolution === "fixed" ? "" : (it.note || it.carriedNote || ""),
+      resolutionNote: resolution === "fixed" ? (it.resolutionNote || "") : "",
+    };
+  }));
+
+  const setResolutionNote = (i, resolutionNote) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, resolutionNote } : it));
   const chooseNewPretrip = () => {
     setMode("pretrip");
     setStep("worker");
@@ -335,6 +423,20 @@ export default function Inspection({ companyId, companyName, userName: loginUser
 
   const defectiveCount = items.filter(i => i.condition === "Defective").length;
   const monitorCount = items.filter(i => i.condition === "Monitor").length;
+
+  // ── Post-trip derived state ───────────────────────────────────────────
+  // A pre-trip submitted before the post-trip became a full checklist has no
+  // stored item list to carry forward. That one, and only that one, keeps
+  // the old single-question flow.
+  const legacyPosttrip = mode === "posttrip" && items.length === 0;
+  const carriedIndexes = items.map((it, i) => (it.carriedFrom ? i : -1)).filter(i => i >= 0);
+  const carriedAnswered = carriedIndexes.every(i => !!items[i].resolution);
+  // "Fixed" without saying what was done leaves the repair log empty, which
+  // is most of the value of logging it at all — see docs/scope-equipment-
+  // service-log.md. Still an issue / Worse need no note: the pre-trip's own
+  // note is carried over.
+  const fixedNotesComplete = carriedIndexes.every(i => items[i].resolution !== "fixed" || (items[i].resolutionNote || "").trim());
+  const resolvedCount = carriedIndexes.filter(i => items[i].resolution === "fixed").length;
 
   // ── Submit: Pre-Trip (full checklist) ───────────────────────
   const submitPretrip = async () => {
@@ -414,27 +516,74 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     setTimeout(() => setStep("done"), 500);
   };
 
-  // ── Submit: Post-Trip (short flow) ──────────────────────────
+  // ── Submit: Post-Trip (full checklist) ──────────────────────
   const submitPosttrip = async () => {
     setSigned(true);
     setSaveError(false);
     setSavingInspection(true);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
-    const resultsJson = {
+
+    // A pre-trip with no stored checklist can't produce a carried-forward
+    // post-trip; that one keeps the old single-question shape.
+    const resultsJson = legacyPosttrip ? {
+      items: [],
       hasChanges: !!hasChanges,
       changeCondition: hasChanges ? changeCondition : null,
       changeNotes: hasChanges ? changeNotes.trim() : null,
       defectiveCount: hasChanges && changeCondition === "Defective" ? 1 : 0,
       monitorCount: hasChanges && changeCondition === "Monitor" ? 1 : 0,
-    };
+    } : (() => {
+      const resolved = items.filter(it => it.carriedFrom && it.resolution === "fixed");
+      const stillOpen = items.filter(it => it.carriedFrom && it.resolution !== "fixed");
+      const newIssues = items.filter(it => !it.carriedFrom && it.condition !== "Good" && it.condition !== "N/A");
+
+      // hasChanges / changeCondition / changeNotes are kept, derived rather
+      // than asked. They are what src/generateInspectionPDF.js and the
+      // has_changes column have always read, and three existing consumers
+      // (the dashboard row, the weekly equipment report, the PDF) would go
+      // blank if the post-trip simply stopped writing them. The checklist is
+      // the source of truth now; these are a projection of it.
+      const changed = [...resolved, ...stillOpen, ...newIssues];
+      const worstCondition = [...stillOpen, ...newIssues].some(it => it.condition === "Defective") ? "Defective"
+        : [...stillOpen, ...newIssues].length > 0 ? "Monitor"
+        : null;
+      const summary = [
+        ...resolved.map(it => `Fixed: ${it.item}${it.resolutionNote?.trim() ? ` — ${it.resolutionNote.trim()}` : ""}`),
+        ...stillOpen.map(it => `${it.resolution === "worse" ? "Worse" : "Still outstanding"}: ${it.item}${it.note?.trim() ? ` — ${it.note.trim()}` : ""}`),
+        ...newIssues.map(it => `New ${it.condition.toLowerCase()}: ${it.item}${it.note?.trim() ? ` — ${it.note.trim()}` : ""}`),
+      ].join("\n");
+
+      return {
+        items,
+        resolvedCount: resolved.length,
+        hasChanges: changed.length > 0,
+        changeCondition: worstCondition,
+        changeNotes: summary || null,
+        defectiveCount: items.filter(i => i.condition === "Defective").length,
+        monitorCount: items.filter(i => i.condition === "Monitor").length,
+      };
+    })();
 
     const clientSubmissionId = newClientSubmissionId();
     const payload = {
       tripType: "posttrip", label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit,
       equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
-      resultsJson, endReading, hasChanges: !!hasChanges, changeCondition, changeNotes,
+      // Read back off resultsJson rather than off component state, so the
+      // record, the PDF and the offline-queue replay all describe the same
+      // post-trip. The old code sent raw state here while resultsJson held a
+      // separately-computed copy — two sources for one fact.
+      resultsJson, endReading,
+      hasChanges: resultsJson.hasChanges,
+      changeCondition: resultsJson.changeCondition,
+      changeNotes: resultsJson.changeNotes,
       linkedPretripId: openPretrip.id, linkedPretripStartReading: openPretrip.start_reading, linkedPretripReadingUnit: openPretrip.reading_unit,
+      // Carried in the payload rather than re-fetched, so a submission
+      // drained from the offline queue days later still renders the same
+      // document it would have rendered at the time it was signed.
+      linkedPretripResultsJson: openPretrip.results_json || null,
+      linkedPretripWorker: openPretrip.worker_name || null,
+      linkedPretripCreatedAt: openPretrip.created_at || null,
     };
 
     // docs/scope-offline-capability.md Phase 1: a network-level failure gets
@@ -734,29 +883,157 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             {!isTrailer && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 4 }}>Starting reading: {openPretrip.start_reading} {openPretrip.reading_unit}</div>}
           </div>
 
-          <div style={s.card}>
-            <label style={s.label}>Any changes since the Pre-Trip?</label>
-            <div style={{ display: "flex", gap: 8, marginBottom: hasChanges ? 14 : 0 }}>
-              <button onClick={() => setHasChanges(false)} style={{ flex: 1, padding: "13px", borderRadius: RAD.md, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === false ? C.status.success.solid : C.line}`, background: hasChanges === false ? C.status.success.bg : C.panelInset, color: hasChanges === false ? C.status.success.text : C.text.faint }}>No changes</button>
-              <button onClick={() => setHasChanges(true)} style={{ flex: 1, padding: "13px", borderRadius: RAD.md, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === true ? C.status.warning.solid : C.line}`, background: hasChanges === true ? C.status.warning.bg : C.panelInset, color: hasChanges === true ? C.status.warning.text : C.text.faint }}>Yes, something changed</button>
-            </div>
+          {/* Legacy path: a pre-trip submitted before the post-trip became a
+              full checklist stored no items to carry forward. Only today's
+              already-open pre-trips can land here. */}
+          {legacyPosttrip && (
+            <div style={s.card}>
+              <div style={{ ...bannerStyle(C, RAD, "warning"), marginBottom: 12 }}>
+                <AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>This pre-trip was started before the full post-trip checklist existed, so there's no checklist to carry over. Answer the short version below.</span>
+              </div>
+              <label style={s.label}>Any changes since the Pre-Trip?</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: hasChanges ? 14 : 0 }}>
+                <button onClick={() => setHasChanges(false)} style={{ flex: 1, padding: "13px", borderRadius: RAD.md, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === false ? C.status.success.solid : C.line}`, background: hasChanges === false ? C.status.success.bg : C.panelInset, color: hasChanges === false ? C.status.success.text : C.text.faint }}>No changes</button>
+                <button onClick={() => setHasChanges(true)} style={{ flex: 1, padding: "13px", borderRadius: RAD.md, fontSize: 14, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${hasChanges === true ? C.status.warning.solid : C.line}`, background: hasChanges === true ? C.status.warning.bg : C.panelInset, color: hasChanges === true ? C.status.warning.text : C.text.faint }}>Yes, something changed</button>
+              </div>
 
-            {hasChanges === true && (
-              <>
-                <label style={s.label}>How serious?</label>
-                <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
-                  {["Monitor", "Defective"].map(c => {
-                    const tone = c === "Defective" ? C.status.danger : C.status.warning;
-                    return (
-                      <button key={c} onClick={() => setChangeCondition(c)} style={{ flex: 1, padding: "11px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${changeCondition === c ? tone.solid : C.line}`, background: changeCondition === c ? tone.bg : C.panelInset, color: changeCondition === c ? tone.text : C.text.faint }}>{c}</button>
-                    );
-                  })}
+              {hasChanges === true && (
+                <>
+                  <label style={s.label}>How serious?</label>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>
+                    {["Monitor", "Defective"].map(c => {
+                      const tone = c === "Defective" ? C.status.danger : C.status.warning;
+                      return (
+                        <button key={c} onClick={() => setChangeCondition(c)} style={{ flex: 1, padding: "11px", borderRadius: RAD.sm, fontSize: 13, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${changeCondition === c ? tone.solid : C.line}`, background: changeCondition === c ? tone.bg : C.panelInset, color: changeCondition === c ? tone.text : C.text.faint }}>{c}</button>
+                      );
+                    })}
+                  </div>
+                  <label style={s.label}>What changed?</label>
+                  <textarea style={{ ...s.input, minHeight: 80, resize: "vertical" }} placeholder="Describe what changed during the shift" value={changeNotes} onChange={e => setChangeNotes(e.target.value)} />
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Carried forward from the pre-trip ───────────────────────────
+              Pinned above the checklist because these are the only items the
+              operator MUST answer, and because a defect that gets scrolled
+              past is a defect nobody closes. */}
+          {!legacyPosttrip && carriedIndexes.length > 0 && (
+            <div style={{ ...s.card, borderLeft: `4px solid ${C.status.warning.solid}` }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.text.primary, display: "flex", alignItems: "center", gap: 8 }}>
+                <AlertTriangle size={17} strokeWidth={2.25} color={C.status.warning.solid} />
+                Flagged this morning ({carriedIndexes.length})
+              </div>
+              <div style={{ fontSize: 12, color: C.text.muted, marginTop: 4, marginBottom: 12, lineHeight: 1.45 }}>
+                Say what happened to each one. Marking an item fixed closes its corrective action and logs the repair against this machine.
+              </div>
+
+              {carriedIndexes.map(i => {
+                const it = items[i];
+                const tone = it.carriedCondition === "Defective" ? C.status.danger : C.status.warning;
+                const RESOLUTIONS = [
+                  { key: "fixed", label: "Fixed", tone: C.status.success },
+                  { key: "still_open", label: "Still an issue", tone: C.status.warning },
+                  { key: "worse", label: "Worse", tone: C.status.danger },
+                ];
+                return (
+                  <div key={`carried-${i}`} style={{ background: C.panelInset, borderRadius: RAD.md, padding: 12, marginBottom: 10, border: `1px solid ${it.resolution ? C.line : tone.border}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: tone.text, background: tone.bg, border: `1px solid ${tone.border}`, padding: "2px 7px", borderRadius: RAD.pill }}>{it.carriedCondition}</span>
+                      {it.unitLabel && <span style={{ fontSize: 11, color: C.text.faint }}>{it.unitLabel}</span>}
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{it.item}</div>
+                    {it.carriedNote && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 3, fontStyle: "italic" }}>“{it.carriedNote}”</div>}
+
+                    <div style={{ display: "flex", gap: 5, marginTop: 10 }}>
+                      {RESOLUTIONS.map(r => (
+                        <button key={r.key} onClick={() => setResolution(i, r.key)} style={{
+                          flex: 1, padding: "9px 4px", borderRadius: RAD.sm, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                          border: `1.5px solid ${it.resolution === r.key ? r.tone.solid : C.line}`,
+                          background: it.resolution === r.key ? r.tone.bg : C.panel,
+                          color: it.resolution === r.key ? r.tone.text : C.text.faint,
+                        }}>{r.label}</button>
+                      ))}
+                    </div>
+
+                    {it.resolution === "fixed" && (
+                      <input
+                        style={{ ...s.input, padding: "9px 11px", marginTop: 8, marginBottom: 0 }}
+                        placeholder="What did you do? (e.g. aired up and patched the tire)"
+                        value={it.resolutionNote || ""}
+                        onChange={e => setResolutionNote(i, e.target.value)}
+                      />
+                    )}
+                    {(it.resolution === "still_open" || it.resolution === "worse") && (
+                      <input
+                        style={{ ...s.input, padding: "9px 11px", marginTop: 8, marginBottom: 0 }}
+                        placeholder="Anything to add? (optional)"
+                        value={it.note || ""}
+                        onChange={e => setNote(i, e.target.value)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── The rest of the checklist ───────────────────────────────── */}
+          {!legacyPosttrip && (
+            <>
+              <div style={{ ...s.card, paddingTop: 12, paddingBottom: 12 }}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: C.text.primary }}>End-of-shift checklist</div>
+                <div style={{ fontSize: 12, color: C.text.muted, marginTop: 4, lineHeight: 1.45 }}>
+                  Same checklist as the pre-trip. Everything starts at Good — only change what isn't.
                 </div>
-                <label style={s.label}>What changed?</label>
-                <textarea style={{ ...s.input, minHeight: 80, resize: "vertical" }} placeholder="Describe what changed during the shift" value={changeNotes} onChange={e => setChangeNotes(e.target.value)} />
-              </>
-            )}
-          </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  {resolvedCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.success.text, background: C.status.success.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{resolvedCount} fixed</span>}
+                  {defectiveCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{defectiveCount} defective</span>}
+                  {monitorCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{monitorCount} monitor</span>}
+                </div>
+              </div>
+
+              {items.map((it, i) => {
+                // Carried items are answered above, not twice.
+                if (it.carriedFrom) return null;
+                const cond = COND.find(c => c.key === it.condition);
+                const prev = items.slice(0, i).filter(x => !x.carriedFrom).slice(-1)[0];
+                const isNewUnit = it.unit && it.unit !== prev?.unit;
+                return (
+                  <div key={i}>
+                    {isNewUnit && (
+                      <div style={{
+                        background: it.unit === "trailer" ? C.orangeSoft : C.status.info.bg, borderRadius: RAD.md,
+                        padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
+                        color: it.unit === "trailer" ? accent : C.status.info.text,
+                      }}>
+                        {it.unit === "trailer" ? "TRAILER" : "TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
+                      </div>
+                    )}
+                    <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
+                      {it.category && <div style={{ fontSize: 11, fontWeight: 700, color: C.text.faint, textTransform: "uppercase", marginBottom: 3 }}>{it.category}</div>}
+                      <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary, marginBottom: 8 }}>{it.item}</div>
+                      <div style={{ display: "flex", gap: 5, marginBottom: it.condition === "Defective" || it.condition === "Monitor" ? 8 : 0 }}>
+                        {COND.map(c => (
+                          <button key={c.key} onClick={() => setCondition(i, c.key)} style={{
+                            flex: 1, padding: "8px 4px", borderRadius: RAD.sm, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                            border: `1.5px solid ${it.condition === c.key ? c.color : C.line}`,
+                            background: it.condition === c.key ? c.bg : C.panelInset,
+                            color: it.condition === c.key ? c.color : C.text.faint,
+                          }}>{c.key}</button>
+                        ))}
+                      </div>
+                      {(it.condition === "Defective" || it.condition === "Monitor") && (
+                        <input style={{ ...s.input, padding: "9px 11px", marginBottom: 0 }} placeholder="Add a note (what's wrong?)" value={it.note} onChange={e => setNote(i, e.target.value)} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
 
           <div style={s.card}>
             <label style={s.label}>Your name</label>
@@ -794,7 +1071,11 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               </div>
             )}
             {(() => {
-              const ready = hasSignature && workerName && (isTrailer || endReading) && hasChanges !== null && (!hasChanges || changeNotes.trim());
+              const ready = hasSignature && workerName && (isTrailer || endReading) && (
+                legacyPosttrip
+                  ? (hasChanges !== null && (!hasChanges || changeNotes.trim()))
+                  : (carriedAnswered && fixedNotesComplete)
+              );
               return (
                 <button style={s.btn(signed && !saveError ? C.status.success.solid : ready ? accent : disabledBg(C))} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
                   {savingInspection ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : signed && !saveError ? <><CheckCircle2 size={16} strokeWidth={2.25} /> Submitted</> : "Sign & Submit Post-Trip"}
@@ -822,7 +1103,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       {step === "done" && (
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            {(mode === "pretrip" ? defectiveCount > 0 : hasChanges && changeCondition === "Defective")
+            {(mode === "pretrip" ? defectiveCount > 0 : (legacyPosttrip ? (hasChanges && changeCondition === "Defective") : defectiveCount > 0))
               ? <AlertTriangle size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
               : <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />}
             <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>
@@ -835,7 +1116,21 @@ export default function Inspection({ companyId, companyName, userName: loginUser
                 <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>This machine may not be safe to operate. Report to your supervisor.</div>
               </div>
             )}
-            {mode === "posttrip" && hasChanges && (
+            {mode === "posttrip" && !legacyPosttrip && resolvedCount > 0 && (
+              <div style={{ background: C.status.success.bg, border: `1px solid ${C.status.success.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 12, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.success.text }}>{resolvedCount} issue{resolvedCount > 1 ? "s" : ""} marked fixed</div>
+                <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>Closed off in corrective actions and logged as a repair on this machine.</div>
+              </div>
+            )}
+            {mode === "posttrip" && !legacyPosttrip && (defectiveCount > 0 || monitorCount > 0) && (
+              <div style={{ background: defectiveCount > 0 ? C.status.danger.bg : C.status.warning.bg, border: `1px solid ${defectiveCount > 0 ? C.status.danger.border : C.status.warning.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 18, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: defectiveCount > 0 ? C.status.danger.text : C.status.warning.text }}>
+                  {[defectiveCount > 0 ? `${defectiveCount} defective` : null, monitorCount > 0 ? `${monitorCount} to monitor` : null].filter(Boolean).join(" · ")}
+                </div>
+                <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>Reported to your supervisor for review.</div>
+              </div>
+            )}
+            {mode === "posttrip" && legacyPosttrip && hasChanges && (
               <div style={{ background: changeCondition === "Defective" ? C.status.danger.bg : C.status.warning.bg, border: `1px solid ${changeCondition === "Defective" ? C.status.danger.border : C.status.warning.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 18, textAlign: "left" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: changeCondition === "Defective" ? C.status.danger.text : C.status.warning.text }}>Change reported: {changeCondition}</div>
                 <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>Reported to your supervisor for review.</div>
