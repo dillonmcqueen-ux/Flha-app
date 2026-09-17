@@ -104,16 +104,28 @@ export async function companyEquipmentIndex(supabaseAdmin, companyId) {
  * spelling of "no machines", not two.
  *
  * Capped at 50 ids: a daily report naming more machines than that is a
- * malformed or hostile payload, not a jobsite.
+ * malformed or hostile payload, not a jobsite. Over the cap the whole list
+ * is REJECTED rather than truncated — truncating would drop ids before the
+ * ownership loop below ever sees them, which means padding the array past
+ * 50 would silence the cross-tenant 403 this function exists to raise.
+ *
+ * Anything that is not a plain integer id is dropped BEFORE the query, per
+ * id, rather than being sent and allowed to fail the batch. `.in()` on a
+ * bigint column 400s on a value it cannot coerce, and a single `"none"`
+ * from a client bug would otherwise take every legitimately-picked machine
+ * on that report down with it — silently, since the fallback is a
+ * label-only record with no error anywhere.
  */
 export async function resolveEquipmentIds(supabaseAdmin, companyId, rawIds) {
   if (!Array.isArray(rawIds) || rawIds.length === 0) return null;
+  if (rawIds.length > 50) return false;
 
   const wanted = [];
   const seen = new Set();
-  for (const raw of rawIds.slice(0, 50)) {
+  for (const raw of rawIds) {
     if (raw === undefined || raw === null || raw === '') continue;
-    const key = String(raw);
+    const key = String(raw).trim();
+    if (!/^\d+$/.test(key)) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     wanted.push(key);

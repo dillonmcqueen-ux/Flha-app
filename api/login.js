@@ -189,9 +189,21 @@ function signSession(payload) {
 // A short-lived, roleless ticket that proves "this browser already knows a
 // valid code for this company" without handing back a raw companyId (which
 // would let the name-picker step be probed by guessing IDs) and without
-// granting any of the access a real session would — every other protected
-// endpoint in this app gates on session.role, which a ticket never has, so
-// it can never be replayed as a session even within its 5-minute window.
+// granting any of the access a real session would.
+//
+// This used to claim a ticket "can never be replayed as a session" because
+// every protected endpoint gates on session.role. That was wrong, and the
+// wrongness is the reason `purpose` is now checked rather than merely set:
+// a ticket carries no `userId`, so every verifySession in api/ took the
+// "admin or legacy session" short-circuit and returned it as a session for
+// that file's 7-day TTL, and the handlers scoped by company rather than by
+// role (list_equipment, list_sops, list_sites, list_custom_fields,
+// get_company_logo) answered it. Anyone holding a company code could read
+// that company's reference data before entering a PIN.
+//
+// Every verifySession in api/ now rejects any payload carrying `purpose`,
+// which is the only thing that makes the sentence above true. Nothing that
+// is genuinely a session sets it.
 function signTicket(companyId, companyName, appType) {
   return signSession({ purpose: 'roster', companyId, companyName, appType, issuedAt: Date.now() });
 }

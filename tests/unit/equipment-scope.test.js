@@ -174,10 +174,21 @@ test('a database error is not read as "wrong company"', async () => {
   assert.equal(await resolveEquipmentIds(client, 'acme', [7]), null);
 });
 
-test('a list longer than the cap is truncated rather than sent whole', async () => {
-  let seen = null;
+test('a list past the cap is rejected, not truncated — truncating would let padding silence the 403', async () => {
+  // Dropping ids before the ownership loop means a cross-tenant id parked
+  // at index 50 is silently discarded instead of tripping the alarm.
+  let queried = false;
   const many = Array.from({ length: 80 }, (_, i) => i + 1);
-  const client = fakeInClient({ rows: [], onQuery: q => { seen = q.in.values; } });
-  await resolveEquipmentIds(client, 'acme', many);
-  assert.equal(seen.length, 50);
+  const client = fakeInClient({ rows: [], onQuery: () => { queried = true; } });
+  assert.strictEqual(await resolveEquipmentIds(client, 'acme', many), false);
+  assert.equal(queried, false);
+});
+
+test('one junk id is dropped on its own, and does not take the whole list with it', async () => {
+  // `.in()` on a bigint column 400s on a value it can't coerce, which would
+  // return null and strip every machine off the report with no error.
+  let seen = null;
+  const client = fakeInClient({ rows: [{ id: 7, company_id: 'acme' }, { id: 8, company_id: 'acme' }], onQuery: q => { seen = q.in.values; } });
+  assert.deepEqual(await resolveEquipmentIds(client, 'acme', [7, 'none', 8, {}, true]), [7, 8]);
+  assert.deepEqual(seen, ['7', '8']);
 });

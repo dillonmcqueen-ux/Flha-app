@@ -15,8 +15,11 @@ paying for, and nobody finds out.
 two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
-**Status:** seeded 2026-09-16 against commit `0bd289c`. Every ❌ and ⚠️ in
-"Known breaks" was read in the code, not inferred.
+**Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
+2026-09-17 against the working tree on `claude/equipment-tab-fleet-mgmt-9g0xra`
+(fleet management + attachments + compliance, migration **written, not yet
+applied**). Every ❌ and ⚠️ in "Known breaks" was read in the code, not
+inferred.
 
 ---
 
@@ -32,8 +35,8 @@ line that proves it, so it can be re-verified rather than trusted.
 | 6 | Daily Report | `src/DailyReport.jsx` | `api/logs.js` | `daily` |
 | 7 | Monthly Site Inspection | `src/MonthlyInspection.jsx` | `api/monthly.js` | `monthly` |
 | 8 | Custom Documents | `src/CustomForm.jsx` | `api/customforms.js` | `custom_<id>` |
-| 9 | Preventative Maintenance | `src/Dashboard.jsx` | `api/maintenance.js` | `maintenance` |
-| 10 | Fuel & Consumables | `src/FuelLog.jsx` | `api/fuellogs.js` | `fuellog` |
+| 9 | Preventative Maintenance | `src/Dashboard.jsx` — Equipment ▸ Maintenance | `api/maintenance.js` | `maintenance` |
+| 10 | Fuel & Consumables | `src/FuelLog.jsx`; Equipment ▸ Fuel Logs | `api/fuellogs.js` | `fuellog` |
 | 11 | Time Clock + GPS | `src/TimeClock.jsx` | `api/companydata.js` | `timeclock` |
 | 12 | Weekly Equipment Reports | `src/Dashboard.jsx` | `api/equipmentreports.js` | `equipment_reports` |
 | 13 | Weekly Time Clock Reports | `src/Dashboard.jsx` | `api/timeclockreports.js` | `timeclock` |
@@ -42,6 +45,19 @@ line that proves it, so it can be re-verified rather than trusted.
 | 16 | Company Brain | `AdminPanel.jsx` Brain tab | `api/cron-company-brain-summary.js` | *(none — always on)* |
 | 17 | Analytics | `src/Analytics.jsx` | `api/companydata.js` | *(none — tier-gated)* |
 | 18 | Gatehouse | `src/GatehouseBooth.jsx` | `api/gatehouse.js` | *(none — `app_type`)* |
+| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5690`) | `api/companydata.js` update/retire/restore | *(none — always on, see #19)* |
+| 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:5896`) | `api/companydata.js:883-950` | *(none — always on, see #19)* |
+| 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:5835`) | `api/equipmentreports.js:598` | `inspection` |
+| 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:5777`) | `api/maintenance.js:338` | `maintenance` |
+
+**The Equipment hub, 2026-09-17.** Maintenance and Fuel Logs stopped being
+top-level tabs and became sub-tabs of Equipment, and the hub itself went from
+module-gated to always-visible: `TAB_VISIBLE.equipment` was
+`equipmentReportsEnabled` (`git show HEAD:src/Dashboard.jsx`, line 2505) and is
+now `true` (`src/Dashboard.jsx:2767`). Per-sub-tab gating moved to
+`EQUIPMENT_SUBTABS` (`src/Dashboard.jsx:2800-2810`), where each entry carries
+its own `on:`. Two of the eight — Fleet Overview and Compliance — are `on: true`
+with no doc key and no pricing module behind them. **That is break #19.**
 
 Supporting surfaces: Onboarding → Claim (`Onboarding.jsx` → `ClaimAccount.jsx`),
 Admin Panel, SOPs, Sites, Equipment fleet, Roster, Custom Fields, Billing

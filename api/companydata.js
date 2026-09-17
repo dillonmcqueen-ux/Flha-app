@@ -45,6 +45,25 @@ async function verifySession(token) {
   }
   if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
 
+  // A login TICKET is not a session. api/login.js mints two roleless,
+  // short-lived tokens with this same signature and secret — the roster
+  // ticket (`purpose: 'roster'`, handed out after the company code alone,
+  // BEFORE any PIN) and the master ticket (`purpose: 'master'`) — and the
+  // comment there claims they can never be replayed as a session because
+  // "every other protected endpoint in this app gates on session.role".
+  // That was not true: a ticket carries no `userId`, so the roster
+  // short-circuit below returned it as a valid session, and the handlers
+  // that gate only on company scope rather than on role (list_equipment,
+  // list_sops, list_sites, list_custom_fields, get_company_logo) answered
+  // it — for this file's 7-day TTL, not the ticket's 5 minutes. Anyone
+  // holding a company's worker code could read that company's reference
+  // data without ever knowing a PIN.
+  //
+  // Nothing that is genuinely a session carries `purpose`, so rejecting it
+  // outright is the whole fix, and it belongs here rather than in each
+  // handler: the next endpoint added without a role check inherits it.
+  if (payload.purpose) return null;
+
   // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
   // no userId — nothing to live-check beyond the signature+TTL above.
   if (payload.role === 'admin' || !payload.userId) return payload;
