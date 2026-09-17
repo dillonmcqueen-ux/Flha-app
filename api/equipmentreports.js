@@ -132,30 +132,99 @@ function toISODate(d) {
   return d.toISOString().slice(0, 10);
 }
 
+// Resolves which report line a given inspection row belongs to.
+//
+// Exported so the rule can be tested directly — it is the whole of break #7
+// and it has to be right in both directions at once.
+//
+// A row that carries a fleet id groups by that id, which is what fixes the
+// merge bug: add_equipment requires only one of make/model/type and leaves
+// unit_number optional with no uniqueness check, so two genuinely different
+// machines can produce a byte-identical label and have their hours summed
+// into one line.
+//
+// A row with no id (a machine typed by hand rather than picked from the
+// fleet) adopts a fleet id when its label points at exactly ONE machine in
+// the same week. That preserves the behaviour keying purely on id would have
+// broken: a machine picked on Monday and typed on Tuesday must stay one line,
+// not split into two.
+//
+// When a label points at SEVERAL fleet machines it is ambiguous by
+// definition, so the free-text row keeps its own label key rather than being
+// guessed onto one of them — guessing there would reintroduce the merge bug
+// from the other side, and silently.
+export function buildEquipmentKeyResolver(records) {
+  const labelToIds = {};
+  (records || []).forEach((r) => {
+    if (!r || !r.equipment_id) return;
+    const label = (r.equipment_label || '').trim().toLowerCase();
+    if (!label) return;
+    if (!labelToIds[label]) labelToIds[label] = new Set();
+    labelToIds[label].add(r.equipment_id);
+  });
+
+  return function keyFor(equipmentId, rawLabel) {
+    if (equipmentId) return `eq:${equipmentId}`;
+    const label = (rawLabel || '').trim().toLowerCase();
+    const ids = label ? labelToIds[label] : null;
+    if (ids && ids.size === 1) return `eq:${[...ids][0]}`;
+    return `label:${label || 'unknown equipment'}`;
+  };
+}
+
 // Builds the report_json for one company + week by pulling every
 // pre-trip/post-trip inspection pair whose post-trip falls in the range.
 async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   // weekEndISO is exclusive upper bound (Monday after the week)
   const { data: records, error } = await supabaseAdmin
     .from('inspections')
-    .select('id, equipment_label, worker_name, created_at, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes, results_json')
+    .select('id, equipment_id, equipment_label, worker_name, created_at, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes, results_json')
     .eq('company_id', companyId)
     .gte('created_at', weekStartISO)
     .lt('created_at', weekEndISO)
     .order('created_at', { ascending: true });
   if (error) throw new Error('Could not load inspections: ' + error.message);
 
+  // Break #7 in docs/feature-interaction-map.md — this grouped machines by
+  // their free-text equipment_label while inspections.equipment_id, a real
+  // foreign key to the fleet, sat unread on the same rows.
+  //
+  // The live failure is the MERGE direction: add_equipment requires only one
+  // of make/model/type and leaves unit_number optional with no uniqueness
+  // check, so two genuinely different machines can produce a byte-identical
+  // label and have their hours summed into one line. A supervisor then bills
+  // or schedules service from a reading for a machine that does not exist.
+  //
+  // Keying purely on equipment_id would fix that and break the other
+  // direction: a machine picked from the fleet on Monday and typed by hand on
+  // Tuesday has an id on one row and null on the other, and would split into
+  // two lines where today it correctly merges. So free-text rows are
+  // reconciled onto a fleet entry by label first, and only fall back to a
+  // label key when that is genuinely ambiguous.
+  const keyFor = buildEquipmentKeyResolver(records || []);
+
   const byEquipment = {};
-  const ensure = (label) => {
-    if (!byEquipment[label]) {
-      byEquipment[label] = { equipmentLabel: label, unit: null, usage: 0, endingReading: null, endingReadingDate: null, issues: [], noPostTripCount: 0, attachments: [] };
+  const ensure = (equipmentId, rawLabel) => {
+    const key = keyFor(equipmentId, rawLabel);
+    const label = rawLabel || 'Unknown equipment';
+    if (!byEquipment[key]) {
+      // equipmentId is stored on the entry so a later reader can join to the
+      // fleet. It is additive: only Object.values() is persisted into
+      // report_json, so the key change is invisible to stored reports and
+      // both consumers (server-lib/reportPdfs.js, Dashboard's
+      // EquipmentReportCard) read equipmentLabel for display as before.
+      byEquipment[key] = { equipmentId: equipmentId || null, equipmentLabel: label, unit: null, usage: 0, endingReading: null, endingReadingDate: null, issues: [], noPostTripCount: 0, attachments: [] };
     }
-    return byEquipment[label];
+    const entry = byEquipment[key];
+    // A row that carries the real id upgrades an entry first created from a
+    // free-text row, so the report line can be joined to the fleet.
+    if (equipmentId && !entry.equipmentId) entry.equipmentId = equipmentId;
+    return entry;
   };
 
   (records || []).forEach(r => {
     const label = r.equipment_label || 'Unknown equipment';
-    const entry = ensure(label);
+    const entry = ensure(r.equipment_id, r.equipment_label);
     if (r.reading_unit) entry.unit = r.reading_unit;
 
     if (r.trip_type === 'posttrip') {
@@ -189,7 +258,10 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
         // on the TRAILER's own report entry, never the tow vehicle's, and
         // vice versa — otherwise a bad trailer tire reads as a defect on
         // the truck that happened to be pulling it that day.
-        const targetEntry = (it.unit === 'trailer' && attached?.label) ? ensure(attached.label) : entry;
+        // attachedTrailer is { id, label } — src/Inspection.jsx stores the
+        // fleet id right alongside the name, so the trailer's own entry is
+        // found by id and only falls back to its label.
+        const targetEntry = (it.unit === 'trailer' && attached?.label) ? ensure(attached.id, attached.label) : entry;
         targetEntry.issues.push({
           date: r.created_at,
           worker: r.worker_name,
@@ -218,9 +290,13 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
     const start = parseFloat(r.start_reading);
     const end = parseFloat(posttrip.end_reading);
     if (isNaN(start) || isNaN(end) || end < start) return;
-    const trailerEntry = ensure(attached.label);
+    const trailerEntry = ensure(attached.id, attached.label);
     trailerEntry.attachments.push({
       towUnit: r.equipment_label || 'Unknown equipment',
+      // The tow unit's fleet id, so the display below can group two
+      // identically-named trucks apart. Additive: reports written before
+      // this have only towUnit, and both consumers fall back to it.
+      towUnitId: r.equipment_id || null,
       distance: end - start,
       unit: r.reading_unit || 'km',
       date: posttrip.created_at,

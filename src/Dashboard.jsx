@@ -1602,10 +1602,14 @@ function EquipmentReportCard({ data, onClose, error }) {
             if (eq.attachments && eq.attachments.length > 0) {
               const byTow = {};
               eq.attachments.forEach(a => {
-                if (!byTow[a.towUnit]) byTow[a.towUnit] = { distance: 0, unit: a.unit };
-                byTow[a.towUnit].distance += a.distance;
+                // Group by the tow unit's fleet id when present, so two
+                // identically-named trucks stay apart. Older reports carry
+                // only towUnit and fall back to it.
+                const towKey = a.towUnitId != null ? `eq:${a.towUnitId}` : `label:${a.towUnit}`;
+                if (!byTow[towKey]) byTow[towKey] = { label: a.towUnit, distance: 0, unit: a.unit };
+                byTow[towKey].distance += a.distance;
               });
-              attachmentLines = Object.entries(byTow).map(([towUnit, v]) => `Attached to ${towUnit} for ${v.distance.toFixed(1)} ${v.unit}`);
+              attachmentLines = Object.values(byTow).map(v => `Attached to ${v.label} for ${v.distance.toFixed(1)} ${v.unit}`);
             }
             return (
             <div key={i} style={{ border: "1.5px solid #242424", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>

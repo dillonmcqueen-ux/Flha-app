@@ -377,7 +377,33 @@ grep -n "BUILTIN_DOC_KEYS = " api/customforms.js
 ```
 
 ### #7 — Weekly equipment reports group by label, not fleet id
-**Severity: medium.** `api/equipmentreports.js:141` doesn't even select
+**Severity: medium. Status: fixed in PR #119.** The report now groups by a
+resolved key: the fleet id when the row carries one, otherwise a normalized
+label. Trailers route by `attachedTrailer.id` (which
+`src/Inspection.jsx` was already storing alongside the label and discarding),
+and tow-unit attachment lines group by `towUnitId`.
+
+**The trap worth recording.** Keying purely on `equipment_id` fixes the merge
+direction and *breaks* the other one: a machine picked from the fleet on
+Monday and typed by hand on Tuesday has an id on one row and null on the
+other, and would split into two report lines where it previously merged
+correctly. So a free-text row adopts a fleet id when its label maps to
+exactly one machine, and keeps its own key when the label is ambiguous —
+guessing there would reintroduce the merge bug from the other side, silently.
+`tests/unit/equipment-report-grouping.test.js` pins both directions; label-only
+keying fails 3 of them and id-only keying fails 2.
+
+**No migration, and stored reports are untouched.** Only `Object.values()` is
+persisted into `report_json`, so the key change is invisible to existing
+rows; `equipmentId` and `towUnitId` are additive, and both consumers fall
+back to the label when they're absent.
+
+**Root cause left in place, deliberately:** `add_equipment` still requires
+only one of make/model/type and leaves `unit_number` optional with no
+uniqueness check, which is what lets two machines share a label at all.
+Fixing that is a separate change and could block legitimate additions.
+
+Original finding: `api/equipmentreports.js:141` doesn't even select
 `equipment_id`; `ensure()` at `:149-158` keys on
 `r.equipment_label || 'Unknown equipment'`. Same class as the Analytics
 grouping at `analyticsUtils.js:54,203`.
@@ -469,3 +495,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #118 | Break #2 fixed: `site_id` on all five field forms, backfilled 89% of history. Two map errors corrected in the process — the forms already had dropdowns, and `delete_site` was failing outright rather than orphaning. |
 | 2026-09-17 | PR #118 | Break #2 follow-up: fixing `delete_site` made a dangling `site_id` reachable, which permanently wedged the offline queue (`drainQueue` breaks on any throw with no attempt cap). A missing site now stores a text-only record. **A fix for one break created a fault in another — exactly what this map exists to catch, introduced while closing a break.** |
 | 2026-09-17 | PR #118 | Break #3 fixed: `submitted_by_roster_id` stamped server-side on all nine document tables, with anonymous near misses structurally protected. |
+| 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
+| 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
