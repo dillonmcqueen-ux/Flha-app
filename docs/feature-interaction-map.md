@@ -285,6 +285,13 @@ lesson rather than this break's detail:
   compatibility path in the same migration.
 - **"Monitor" items deliberately do not open actions.** Only Defective does.
   Tracking every watch-this item would bury the real defects.
+- **A read path that assumes an invariant is weaker than one that proves
+  it.** The rewritten `list_corrective_actions` first enriched parent rows
+  by `source_id` alone, which was safe only because every writer keeps
+  `source_id` inside `company_id`. A future writer taking `sourceId` from a
+  request body would have turned it into a cross-tenant disclosure of site
+  names and incident details. Every enrichment lookup is now constrained to
+  the companies whose actions were returned.
 
 Still open, deliberately: nothing here gives a worker a place to record
 routine work they did themselves (changed filters, small fixes). Forcing

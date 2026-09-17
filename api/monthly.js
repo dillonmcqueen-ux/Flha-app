@@ -644,31 +644,58 @@ export default async function handler(req, res) {
 
       const idsFor = (type) => corrActions.filter(ca => ca.source_type === type).map(ca => ca.source_id);
 
-      // ── Monthly answers: the original shape, unchanged ────────────────
+      // Every enrichment lookup below is constrained to the companies whose
+      // actions were actually returned above, not just to the ids found on
+      // those actions.
+      //
+      // This is deliberate belt-and-braces. The old four-hop walk *proved*
+      // ownership of each parent row; filtering by source_id alone would
+      // only *assume* it, resting entirely on "source_id always points at a
+      // row inside company_id" holding for every writer, forever. That
+      // invariant is true for all four writers today, but a fifth that takes
+      // sourceId from a request body while taking companyId from the session
+      // would turn this read path into a cross-tenant disclosure of site
+      // names, incident details and equipment labels. Costs one predicate;
+      // removes the whole class. (tenant-scope-reviewer, 2026-09-17.)
+      const companyIds = [...new Set(corrActions.map(ca => ca.company_id).filter(Boolean))];
+      const scopedIds = companyIds.length ? companyIds : [0];
+
+      // Forms first: inspection_answers and inspection_records carry no
+      // company_id of their own, so the form is what anchors them.
+      const { data: scopedForms } = await supabaseAdmin
+        .from('inspection_forms').select('id').in('company_id', scopedIds);
+      const formIds = (scopedForms || []).map(f => f.id);
+      const scopedFormIds = formIds.length ? formIds : [0];
+
+      // ── Monthly answers ───────────────────────────────────────────────
       const answerIds = idsFor('monthly_answer');
       const answerMap = {}, recordMap = {}, siteMap = {}, qMap = {};
       if (answerIds.length > 0) {
         const { data: answers } = await supabaseAdmin.from('inspection_answers').select('id, record_id, question_id').in('id', answerIds);
         (answers || []).forEach(a => { answerMap[a.id] = a; });
 
-        const recordIds = [...new Set((answers || []).map(a => a.record_id))];
-        const { data: records } = await supabaseAdmin.from('inspection_records').select('id, form_id, site_id, period_month, submitted_by').in('id', recordIds.length ? recordIds : [0]);
+        // Records are constrained to this company's forms, so an answer
+        // reached through a cross-tenant source_id resolves to nothing and
+        // renders as Unknown rather than leaking. Fail closed.
+        const recordIds = [...new Set((answers || []).map(a => a.record_id).filter(Boolean))];
+        const { data: records } = await supabaseAdmin
+          .from('inspection_records').select('id, form_id, site_id, period_month, submitted_by')
+          .in('id', recordIds.length ? recordIds : [0])
+          .in('form_id', scopedFormIds);
         (records || []).forEach(r => { recordMap[r.id] = r; });
 
         const siteIds = [...new Set((records || []).map(r => r.site_id).filter(Boolean))];
-        const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
+        const { data: sites } = await supabaseAdmin
+          .from('sites').select('id, name')
+          .in('id', siteIds.length ? siteIds : [0])
+          .in('company_id', scopedIds);
         (sites || []).forEach(s2 => { siteMap[s2.id] = s2.name; });
 
-        // Scoped to the forms these records actually belong to, so a stale
-        // answer row carrying another company's question id can never
-        // resolve that company's wording onto this dashboard.
-        const formIds = [...new Set((records || []).map(r => r.form_id).filter(Boolean))];
         const questionIds = [...new Set((answers || []).map(a => a.question_id).filter(Boolean))];
         const { data: questions } = await supabaseAdmin
-          .from('inspection_form_questions')
-          .select('id, question_text')
+          .from('inspection_form_questions').select('id, question_text')
           .in('id', questionIds.length ? questionIds : [0])
-          .in('form_id', formIds.length ? formIds : [0]);
+          .in('form_id', scopedFormIds);
         (questions || []).forEach(q => { qMap[q.id] = q.question_text; });
       }
 
@@ -676,12 +703,16 @@ export default async function handler(req, res) {
       const incidentMap = {}, nearMissMap = {};
       const incidentIds = idsFor('incident');
       if (incidentIds.length > 0) {
-        const { data: rows } = await supabaseAdmin.from('incidents').select('id, site, occurred_at, reporter_name, incident_type').in('id', incidentIds);
+        const { data: rows } = await supabaseAdmin
+          .from('incidents').select('id, site, occurred_at, reporter_name, incident_type')
+          .in('id', incidentIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { incidentMap[r.id] = r; });
       }
       const nearMissIds = idsFor('near_miss');
       if (nearMissIds.length > 0) {
-        const { data: rows } = await supabaseAdmin.from('near_misses').select('id, site, occurred_at, reporter_name').in('id', nearMissIds);
+        const { data: rows } = await supabaseAdmin
+          .from('near_misses').select('id, site, occurred_at, reporter_name')
+          .in('id', nearMissIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { nearMissMap[r.id] = r; });
       }
 
@@ -689,7 +720,9 @@ export default async function handler(req, res) {
       const inspectionMap = {};
       const inspectionIds = idsFor('equipment_inspection');
       if (inspectionIds.length > 0) {
-        const { data: rows } = await supabaseAdmin.from('inspections').select('id, equipment_label, worker_name, trip_type, created_at').in('id', inspectionIds);
+        const { data: rows } = await supabaseAdmin
+          .from('inspections').select('id, equipment_label, worker_name, trip_type, created_at')
+          .in('id', inspectionIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { inspectionMap[r.id] = r; });
       }
 
