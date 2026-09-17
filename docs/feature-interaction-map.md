@@ -45,10 +45,10 @@ inferred.
 | 16 | Company Brain | `AdminPanel.jsx` Brain tab | `api/cron-company-brain-summary.js` | *(none — always on)* |
 | 17 | Analytics | `src/Analytics.jsx` | `api/companydata.js` | *(none — tier-gated)* |
 | 18 | Gatehouse | `src/GatehouseBooth.jsx` | `api/gatehouse.js` | *(none — `app_type`)* |
-| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5690`) | `api/companydata.js` update/retire/restore | *(none — always on, see #19)* |
-| 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:5896`) | `api/companydata.js:883-950` | *(none — always on, see #19)* |
-| 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:5835`) | `api/equipmentreports.js:598` | `inspection` |
-| 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:5777`) | `api/maintenance.js:338` | `maintenance` |
+| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5693`) | `api/companydata.js:780,829` update/retire/restore | *(none — always on, see #19)* |
+| 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:5899`) | `api/companydata.js:902-969` | *(none — always on, see #19)* |
+| 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:5838`) | `api/equipmentreports.js:617` (`foldWeeklyUsage`, `:300`) | `inspection` |
+| 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:5780`) | `api/maintenance.js:357` | `maintenance` |
 
 **The Equipment hub, 2026-09-17.** Maintenance and Fuel Logs stopped being
 top-level tabs and became sub-tabs of Equipment, and the hub itself went from
@@ -81,10 +81,10 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Fuel Log | ✅ `FuelLog.jsx:21` | — |
 | Preventative Maintenance | ✅ `maintenance.js:321,384` | ✅ `maintenance.js:86,92,180-215` |
 | Weekly Equipment Report | — | ✅ *(#7, PR #119)* `equipmentreports.js:190-213,247` |
-| Weekly Hours | — | ✅ `equipmentreports.js:301` (`foldWeeklyUsage`) |
-| Maintenance Records | — | ✅ `maintenance.js:357-371` |
+| Weekly Hours | — | ✅ `equipmentreports.js:300` (`foldWeeklyUsage`) |
+| Maintenance Records | — | ✅ `maintenance.js:376-390` |
 | Corrective Actions | ✅ *(#11, PR #121)* `logs.js:463` | ✅ `recurrence.js:51`, `correctiveActions.js:298` |
-| Equipment Compliance | ✅ `companydata.js:915` | ✅ `companydata.js:889` (own screen only — **#14**) |
+| Equipment Compliance | ✅ `companydata.js:934` | ✅ `companydata.js:907` (own screen only — **#14**) |
 | Daily Report | ⚠️ array form `equipment_ids`, **nothing reads it** — **#13** | — |
 | Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) |
 
@@ -110,14 +110,14 @@ mode recorded for `site_id` under break #2's follow-up.
 | `api/logs.js` inspection submit | ✅ `logs.js:280-283` | PR #119 (`afee546`) — had **no** check before, though `equipment_id` was in `SUBMITTABLE_FIELDS.inspection` all along |
 | `api/fuellogs.js` submit | ✅ `fuellogs.js:165-168` | had an inline guard; migrated onto the shared helper in `afee546` |
 | `api/equipmentreports.js` report build | ✅ `equipmentreports.js:175-188` (`vetEquipmentIds`), called at `:227-229` | PR #119 (`afee546`) |
-| `api/logs.js` daily-report submit (`equipment_ids`) | ✅ `logs.js:367-370` → `resolveEquipmentIds` (`equipmentScope.js:108-140`) | 2026-09-17 fleet branch |
-| `api/companydata.js` compliance upsert | ✅ `companydata.js:909-912` (row re-read, `company_id` compared) | 2026-09-17 fleet branch |
+| `api/logs.js` daily-report submit (`equipment_ids`) | ✅ `logs.js:386-389` → `resolveEquipmentIds` (`equipmentScope.js:119-152`) | 2026-09-17 fleet branch |
+| `api/companydata.js` compliance upsert | ✅ `companydata.js:928-931` (row re-read, `company_id` compared) | 2026-09-17 fleet branch |
 
 `results_json` attachment ids are the ones that can't be guarded on
 submit: `results_json` is a free-form jsonb blob and `pickAllowed`
 (`logs.js:122`) whitelists the **column**, never its contents. They are
 therefore vetted on the read side instead — `vetEquipmentIds`
-(`equipmentreports.js:183-196`) drops any id not in the company's fleet before
+(`equipmentreports.js:196-215`) drops any id not in the company's fleet before
 anything keys on it, falling back to the label the way a free-text machine
 already does. It vets **both** shapes; see below.
 
@@ -138,15 +138,15 @@ this is not a shape that can be migrated away by rewriting rows — which is why
 
 Items carry the routing tag: `unit: 'truck'` for the machine itself,
 `unit: 'attachment'` + `attachmentId` on new records
-(`src/Inspection.jsx:465-468`), `unit: 'trailer'` with no id on legacy ones.
+(`src/Inspection.jsx:465-469`), `unit: 'trailer'` with no id on legacy ones.
 `attachmentForItem()` matches by id first, label second.
 
 | Consumer | Reads it | Routes defects to the right machine? |
 |---|---|---|
-| Weekly Equipment Report — defect routing | `equipmentreports.js:437,449` | ✅ pre-trip only |
-| Weekly Equipment Report — towed distance | `equipmentreports.js:472-487` | ✅ |
-| Weekly Hours | `equipmentreports.js:324` | ✅ |
-| Inspection PDF — header | `generateInspectionPDF.js:205` | ✅ |
+| Weekly Equipment Report — defect routing | `equipmentreports.js:456,468` | ✅ pre-trip only |
+| Weekly Equipment Report — towed distance | `equipmentreports.js:491-511` | ✅ |
+| Weekly Hours | `equipmentreports.js:343` | ✅ |
+| Inspection PDF — header | `generateInspectionPDF.js:223` | ✅ |
 | Inspection PDF — checklist + deficiency banners | `generateInspectionPDF.js:69,141` | ✅ *(was **#16**, fixed on this branch)* — groups by `unitKey()` (`:16`), which keys on `attachmentId` and falls back to `unitLabel`. Keying on `unit` alone printed an attachment's defect under a "TRUCK / TOW VEHICLE" banner and merged two attachments into one group named after whichever came first |
 | Corrective actions | `correctiveActions.js:411` (label only) | ❌ **#17** — the row is keyed to the host machine |
 | Preventative Maintenance | — | ❌ **#18** — an attachment's usage never reaches its PM clock |
@@ -158,16 +158,16 @@ silently failed for a bucket, a hammer, a mulcher or a plate tamper.
 
 | Consumer | Reads it |
 |---|---|
-| Inspection — no-readings path, attachment picker | `Inspection.jsx:275,285,291` |
+| Inspection — no-readings path, attachment picker | `Inspection.jsx:275,283,291` |
 | Daily Report picker label | `DailyReport.jsx:403` |
-| Fleet Overview / Admin Panel badges | `Dashboard.jsx:5707,5742,5746`, `AdminPanel.jsx:1953` |
+| Fleet Overview / Admin Panel badges | `Dashboard.jsx:5710,5745,5749`, `AdminPanel.jsx:1953` |
 | Preventative Maintenance | ❌ nothing — **#18** |
 | Fuel Log picker | ❌ nothing — an attachment with no tank is still offered (`FuelLog.jsx:84`). Cosmetic, not filed. |
 
 ### `equipment.retired_at` (out of the fleet, still in the history)
-Set by `retire_equipment` (`companydata.js:835`). `list_equipment` filters
+Set by `retire_equipment` (`companydata.js:854`). `list_equipment` filters
 `retired_at is null` unless `includeRetired: true` is passed
-(`companydata.js:717`), so every worker-facing picker drops the machine with
+(`companydata.js:736`), so every worker-facing picker drops the machine with
 no change on its side — `Inspection.jsx:169`, `DailyReport.jsx:130`,
 `FuelLog.jsx:84`, `FieldService.jsx:86`. Only `Dashboard.jsx:2444` and
 `AdminPanel.jsx:666,998` ask for retired rows.
@@ -177,25 +177,25 @@ which is right for some and wrong for one:
 
 | Direct reader | Includes retired? | Correct? |
 |---|---|---|
-| `maintenance.js:112-116` (`list_status`) | yes | ❌ **#15** — a sold machine keeps a live PM clock |
-| `maintenance.js:357-359` (`list_records`) | yes | ✅ deliberate; a history that drops the machines you no longer own is not a history |
-| `equipmentScope.js:124` (`companyEquipmentIndex`) | yes | ✅ historical ids must still vet |
-| `equipmentScope.js:45,82` (`resolveEquipmentId(s)`) | yes | ✅ deliberate — see §5 |
-| `companydata.js:889` (compliance list) | yes | ⚠️ **#15** — a retired unit's expired CVIP still counts |
+| `maintenance.js:133-137` (`list_status`) | yes | ❌ **#15** — a sold machine keeps a live PM clock |
+| `maintenance.js:376-379` (`list_records`) | yes | ✅ deliberate; a history that drops the machines you no longer own is not a history |
+| `equipmentScope.js:80-88` (`companyEquipmentIndex`) | yes | ✅ historical ids must still vet |
+| `equipmentScope.js:42,119` (`resolveEquipmentId(s)`) | yes | ✅ deliberate — see §5 |
+| `companydata.js:902-910` (compliance list) | yes | ⚠️ **#15** — a retired unit's expired CVIP still counts |
 
 ### `daily_reports.equipment_ids` (jsonb array → `equipment.id`)
 The joinable half of the free-text `daily_reports.equipment`, the same
 producer/consumer split `site_id` has. Written by `src/DailyReport.jsx:296`
 (live) and `:44` (offline drain), vetted by `resolveEquipmentIds`
-(`logs.js:367-370`), present in the list payload (`logs.js:111`), deliberately
-absent from `EDITABLE_FIELDS.daily` (`logs.js:601-606`).
+(`logs.js:386-389`), present in the list payload (`logs.js:130`), deliberately
+absent from `EDITABLE_FIELDS.daily` (`logs.js:620-625`).
 
 **Read by nothing. That is break #13** — the fourth instance of §4b.
 
 ### `equipment_compliance.equipment_id` → `equipment.id`
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
-`api/companydata.js:883-950`; the only consumer is Equipment ▸ Compliance
-(`Dashboard.jsx:5896-5988`). Nothing else in the product — not the weekly
+`api/companydata.js:902-969`; the only consumer is Equipment ▸ Compliance
+(`Dashboard.jsx:5899-5989`). Nothing else in the product — not the weekly
 equipment report, not the cron, not the overview banner, not the Brain — knows
 these dates exist. **That is break #14.**
 
@@ -315,8 +315,8 @@ One concept, **three column shapes across ten features**:
 Honoured everywhere. Governed by `tenant-scope-reviewer`, not this map.
 
 ### `document_key` → `company_document_settings`
-`BUILTIN_DOC_KEYS` (`customforms.js:99`) must exactly equal `ALL_DOC_KEYS`
-(`pricing.js:118`). `pricing.js:51-56` states the invariant in a comment;
+`BUILTIN_DOC_KEYS` (`customforms.js:119`) must exactly equal `ALL_DOC_KEYS`
+(`pricing.js:118`). `pricing.js:50-56` states the invariant in a comment;
 nothing enforces it. **This is break #6 below.**
 
 ### `source_type` → `company_signals` (the Brain's input)
@@ -387,8 +387,8 @@ corrective actions the fourth writer of that table, alongside
 | Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | ✅ *(#11, PR #121)* | — |
 | Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
-| Attachments (`is_attachment`) | ❌ #18 | — | ✅ `equipmentreports:324,472` | ❌ #17 | — | ❌ #17 | — |
-| Equipment Compliance | ❌ #14 | — | ❌ #14 | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue that DOES surface: `Dashboard.jsx:4647`)* |
+| Attachments (`is_attachment`) | ❌ #18 | — | ✅ `equipmentreports:343,491` | ❌ #17 | — | ❌ #17 | — |
+| Equipment Compliance | ❌ #14 | — | ❌ #14 | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue that DOES surface: `Dashboard.jsx:4650`)* |
 | Fleet retirement (`retired_at`) | ❌ #15 | ✅ picker filtered | ✅ | — | — | — | — |
 
 ---
@@ -647,7 +647,7 @@ nothing was wrong with it. The lists agreed. Nothing guaranteed they would
 keep agreeing.
 
 `server-lib/pricing.js:50-55` says every key in `BUILTIN_DOC_KEYS`
-(`api/customforms.js:100`) must appear in exactly one module, "or a company
+(`api/customforms.js:119`) must appear in exactly one module, "or a company
 could be charged for something it cannot see, or see something it was not
 charged for."
 
@@ -921,19 +921,31 @@ still in the working tree rather than after the fact.
 
 `daily_reports.equipment_ids` (jsonb array) is produced by
 `src/DailyReport.jsx:296` and `:44`, ownership-vetted by `resolveEquipmentIds`
-(`api/logs.js:367-370`, `server-lib/equipmentScope.js:108-140`), and selected
-into the list payload (`api/logs.js:111`). Then it stops.
+(`api/logs.js:386-389`, `server-lib/equipmentScope.js:119-152`), and selected
+into the list payload (`api/logs.js:130`). Then it stops.
 
 *Re-check:* `grep -rn "equipment_ids\|equipmentIds" api/ src/ server-lib/`
 → producer, allowlist, validator, list payload. No aggregator, no screen, no
-report, no analytics function. Run 2026-09-17: 10 hits, zero consumers.
+report, no analytics function. Run 2026-09-17 against `ea1c9e1`: 10 hits, zero
+consumers.
 
 **What the customer doesn't get.** "Which machines were on site last Tuesday",
 "what was this excavator doing the week before it broke", and a machine's day
 history next to its inspection and fuel history — all still unanswerable by a
 join, exactly as they were before the column existed. `src/analyticsUtils.js`
-still groups equipment by `equipment_label` (`:68,258`), and the daily report
+still groups equipment by `equipment_label` (`:68,258`) and the daily report is
+not in that grouping at all, and the daily report
 does not appear in that grouping at all.
+
+**This was a deliberate scope line on the branch that added it, not an
+oversight** — but it is the exact shape this map exists to catch, so it is
+filed rather than assumed harmless. §4b's whole point is that the column fills
+with correct data nobody looks at, and the next session reads the changelog and
+believes the join exists.
+
+**Candidate consumers, none built:** a machine's own screen showing which days
+it was on site; utilization compared against the hours the same machine logged
+on its inspections; the Brain seeing which machines actually work together.
 
 **A fix would touch:** whichever consumer is chosen first — the Fleet Overview
 row (a "last seen on site" line), `analyticsUtils.js`'s equipment grouping, or
@@ -943,9 +955,9 @@ the weekly equipment report. Not all three at once. No migration.
 
 **Severity: high. Status: open, found 2026-09-17 on the fleet branch.**
 
-`equipment_compliance` is written and read by `api/companydata.js:883-950` and
+`equipment_compliance` is written and read by `api/companydata.js:902-969` and
 consumed by exactly one screen, Equipment ▸ Compliance
-(`src/Dashboard.jsx:2483,2575,2598` → `:5896-5988`).
+(`src/Dashboard.jsx:2483,2575,2598` → `:5899-5989`).
 
 *Re-check:* `grep -rn "equipment_compliance" api/ src/ server-lib/` → 6 hits in
 `companydata.js`, 3 in `Dashboard.jsx`, nothing anywhere else. Run 2026-09-17.
@@ -960,11 +972,16 @@ and not a Brain signal. The truck goes out the gate expired and FORA knew.
 **The comparison that makes this a break rather than a wish.** FORA already
 solved this exact problem for the other expiry date it tracks: worker
 certifications get a dedicated overview banner on every dashboard open
-(`src/Dashboard.jsx:4647-4667`, fed by `certification_summary` in
+(`src/Dashboard.jsx:4650-4670`, fed by `certification_summary` in
 `api/certifications.js:266-300`, with a 30-day `expiring_soon` window at
 `:33-40`). Machine compliance uses the same three-state model
-(`expiryStatus` → expired / due_soon / ok, `src/Dashboard.jsx:5915-5917`) and
+(`expiryStatus` → expired / due_soon / ok, `src/Dashboard.jsx:5918-5920`) and
 gets none of the reach. Two expiry features, one surfaced, one silent.
+
+A machine whose CVIP expired last week inspects, fuels and reports exactly as
+it did the week before. Note the limit of the analogue: break #8 records that
+certification expiry still does not *gate* anything — so the bar being set here
+is "at least visible", not "handled".
 
 **A fix would touch:** a `compliance_summary` action beside
 `certification_summary`, the overview banner, and/or a section in
@@ -980,75 +997,74 @@ from every worker picker while keeping every row that references its id
 (`api/companydata.js:704-718`). The pickers honour it. Preventative maintenance
 does not.
 
-`api/maintenance.js:112-116` selects the fleet with **no `retired_at` filter**
-and `:166-187` computes a status for every row returned. A retired machine with
+`api/maintenance.js:133-137` selects the fleet with **no `retired_at` filter**
+and `:186-207` computes a status for every row returned. A retired machine with
 a `pm_interval` and a service baseline keeps its last known reading forever, so
 its `usageSinceService` is frozen at whatever it was — and if that was past the
-interval, it reports `overdue` permanently. That count feeds the Equipment nav
-badge (`src/Dashboard.jsx:4592`), so the badge shows work outstanding on a
+interval, it reports `overdue` permanently (`maintenance.js:201-204`). That
+count feeds the Equipment nav badge (`src/Dashboard.jsx:4592-4593`), so the badge shows work outstanding on a
 machine the company no longer owns, and there is no way to clear it short of
 hard-deleting the row, which destroys the history retirement exists to keep.
 
 Same shape, smaller: a retired machine's compliance rows still count in the
 Expired / Due-in-30 stat strip. The **add** dropdown uses `activeFleet`
-(`src/Dashboard.jsx:5904`) but the list and the counters use the unfiltered
-`compliance` array (`:5915-5917`).
+(`src/Dashboard.jsx:5907`) but the list and the counters use the unfiltered
+`compliance` array (`:5918-5920`).
 
-*Re-check:* `grep -n "retired_at" api/maintenance.js` → three hits, all inside
-`list_records` (`:348,358,366`). `list_status` has none.
+*Re-check:* `grep -n "retired" api/maintenance.js` → four hits, all inside
+`list_records` (`:367,377,385,402`). `list_status` has none. Run 2026-09-17
+against `ea1c9e1`.
 
 **A fix would touch:** the fleet query in `list_status` (exclude retired, or
 return them flagged so the screen can group them), and the compliance counters.
 Whether a retired machine should vanish from the PM screen or appear greyed out
 is a product call, not a mechanical one. No migration.
 
-### #16 — The inspection PDF labels an attachment's checklist "TRUCK / TOW VEHICLE"
+### #16 — The inspection PDF grouped checklist items by a tag the form stopped writing
 
-**Severity: medium. Status: open, found 2026-09-17 on the fleet branch.**
-§4b's mirror image again: the producer changed the value, one of two consumers
-never learned.
+**Severity: medium. Status: FIXED on this branch (PR #122), before merge.**
+§4b's mirror image: the producer changed the value, one of two consumers never
+learned. Found by this map's pass on the pre-fix working tree and independently
+by `pdf-consistency-reviewer`, which is what fixed it.
 
-`src/Inspection.jsx:467` now tags an attachment's checklist items
+`src/Inspection.jsx:467` tags an attachment's checklist items
 `unit: "attachment"` (it used to be `unit: "trailer"`). The on-screen checklist
 was updated to match — `it.unit === "truck" ? "MACHINE" : "ATTACHMENT"`
-(`src/Inspection.jsx:919,1107`). The PDF was not:
+(`src/Inspection.jsx:920,1108`) — and so was the PDF's info box
+(`generateInspectionPDF.js:223,242,255`). The PDF's **body** was not: both
+banner branches tested `it.unit === "trailer"`, so a bent set of forks would
+have printed under a blue "TRUCK / TOW VEHICLE — Forks" banner, on the same
+page as an info box saying ATTACHMENT. The document would have contradicted
+itself, and the banner exists precisely so a reader cannot mistake an
+attachment's defect for one on the machine carrying it.
 
-```
-src/generateInspectionPDF.js:53   const isTrailer = it.unit === "trailer";
-src/generateInspectionPDF.js:58   doc.text(`${isTrailer ? "TRAILER" : "TRUCK / TOW VEHICLE"}...
-src/generateInspectionPDF.js:129  const isTrailer = unit === "trailer";
-src/generateInspectionPDF.js:132  doc.text(`${isTrailer ? "TRAILER" : "TRUCK / TOW VEHICLE"}...
-```
+**The fix went further than the report asked, correctly.** Keying on `unit`
+alone would still have merged a truck's pup and its trailer into one group
+named after whichever came first. Grouping now runs through `unitKey()`
+(`src/generateInspectionPDF.js:16-20`), which keys on `attachmentId` and falls
+back to `unitLabel` — the same id-first, label-second rule
+`attachmentForItem` uses, so the PDF and the weekly report identify an
+attachment the same way.
 
-So on every new inspection PDF, the attachment's checklist section **and** its
-deficiency group both print a blue "TRUCK / TOW VEHICLE — 5x10 Dump Trailer"
-banner. The comment three lines above the first one states the purpose the
-banner has just stopped serving: *"call that out with its own banner so a
-reader can't mistake a trailer defect for a defect on the tow vehicle"*
-(`generateInspectionPDF.js:47-50`).
+*Re-check:* `grep -n 'unit === "trailer"' src/generateInspectionPDF.js` → no
+hits (run 2026-09-17 against `ea1c9e1`). Consumers now at `:69` (checklist
+banner) and `:141` (deficiency grouping).
 
-The document header was updated in the same diff
-(`generateInspectionPDF.js:205,224,237` now read MACHINE / ATTACHMENT), which
-is what makes this easy to miss: the top of the PDF is right and the body
-contradicts it. Legacy records still say `unit: 'trailer'` and still render
-correctly, so the failure only shows on records written from here on.
-
-*Re-check:* `grep -n 'unit === "trailer"' src/generateInspectionPDF.js`
-
-**A fix would touch:** `src/generateInspectionPDF.js` only, two branches. No
-migration, no schema. This is the cheapest item on the list and it is on a
-signed document that goes in the audit binder.
+**Recorded, not closed, until PR #122 merges.** And recorded even though it was
+fixed within hours, because the *shape* is the lesson: a data-shape change
+broke a consumer nobody thought of as a consumer, and nothing failed.
 
 ### #17 — An attachment's defect opens a corrective action against whatever was carrying it
 
 **Severity: high. Status: open. Pre-existing since PR #121 for trailers;
 widened 2026-09-17 to every kind of attachment.**
 
-`api/logs.js:477-478` hands `openCorrectiveActions` the **host record's**
+`api/logs.js:496-497` hands `openCorrectiveActions` the **host record's**
 `equipment_id` and `equipment_label` for every Defective item on the checklist,
 including the items belonging to an attachment. The attachment's identity
 survives only inside the description string
-(`server-lib/correctiveActions.js:407-413` prefixes `unitLabel`).
+(`server-lib/correctiveActions.js:407-413` prefixes `unitLabel`; the id never
+travels with the finding at all).
 
 Two consequences, both silent:
 
@@ -1058,22 +1074,32 @@ Two consequences, both silent:
   is filed against whichever truck towed it that day. Towed by three different
   trucks, it never reaches the threshold at all — and each truck accumulates a
   fault it never had.
-- **The per-machine repeat-offender list** (`api/monthly.js:819`
-  `patternsByEquipment` → `src/Dashboard.jsx:1905,5509`) inherits the same
+- **The per-machine repeat-offender list** (`api/monthly.js:838`
+  `patternsByEquipment` → `src/Dashboard.jsx:3429,6175`) inherits the same
   wrong attribution.
+
+**What it looks like to a customer.** A bent set of forks flagged on a
+loader's pre-trip opens an action against **the loader**. Move the forks to a
+second loader and the defect stays filed against the first, the recurrence
+counter keys on the wrong machine, and the fault appears to follow whatever
+happened to be carrying it.
 
 **The reason this is filed now rather than as a style note:** the weekly
 equipment report routes the identical defect **correctly**, to the attachment's
-own report line (`api/equipmentreports.js:449`, via `attachmentForItem`). Two
+own report line (`api/equipmentreports.js:468`, via `attachmentForItem`). Two
 features now disagree about which machine a defect belongs to, from the same
 row. That disagreement did not exist before `attachmentForItem` was written.
 
 **A second, narrower half in the same area.** `buildPosttripItems`
-(`src/Inspection.jsx:377-392`) copies `unit` and `unitLabel` forward from the
+(`src/Inspection.jsx:374-393`) copies `unit` and `unitLabel` forward from the
 pre-trip but **drops `attachmentId`**. So on a post-trip, even the report's
 correct routing falls back to label matching — which the helper's own comment
 says is the fallback precisely because "two attachments can share a label and
 only one of them is broken" (`server-lib/inspectionAttachments.js:55-59`).
+
+*Re-check:* `grep -n "attachmentId\|unitLabel" server-lib/correctiveActions.js`
+→ `unitLabel` at `:411` for the description prefix, `attachmentId` nowhere. Run
+2026-09-17 against `ea1c9e1`.
 
 **A fix would touch:** `api/logs.js`'s call site (resolve each finding's machine
 through `attachmentForItem` before choosing `equipmentId`),
@@ -1088,12 +1114,12 @@ An attachment has no meter, so an inspection of one stores no reading
 (`src/Inspection.jsx:71` writes `reading_unit: null` when `isTrailer`). FORA
 already compensates for this in two places: the weekly report credits an
 attachment the towing unit's distance for the trip
-(`api/equipmentreports.js:472-487`) and so does the new Weekly Hours screen
-(`:324`), with the reason written down — *"without that, every towed unit on
+(`api/equipmentreports.js:491-511`) and so does the new Weekly Hours screen
+(`:343`), with the reason written down — *"without that, every towed unit on
 the hours screen reads zero forever, which is worse than absent because it
-looks like an answer"* (`equipmentreports.js:274-277`).
+looks like an answer"* (`equipmentreports.js:293-296`).
 
-Preventative maintenance does not compensate. `api/maintenance.js:181` computes
+Preventative maintenance does not compensate. `api/maintenance.js:201` computes
 `usageSinceService = current ? Math.max(0, current.reading - baseline) : 0` and
 `current` is null for a machine with no readings — so a trailer with a
 5,000 km bearing interval sits at `usageSinceService: 0`, status **`ok`**,
@@ -1111,6 +1137,15 @@ credit is not one yet.
 *Re-check:* `grep -n "attach\|trailer" server-lib/readings.js api/maintenance.js`
 → no hits. Run 2026-09-17.
 
+**How narrow this actually is, in fairness to it.** Most attachments are
+inspected, not serviced on a clock — the set that matters is a trailer with
+wheel bearings, a hammer on an hour-based rebuild. Worth knowing the option
+exists rather than worth building on its own. It is also worth stating the
+status precisely, because it is easy to get wrong: an attachment with an
+interval but no service logged reports `not_started`; one with a service
+logged reports **`ok`**, not `not_started` and not `unknown`
+(`api/maintenance.js:194-204`).
+
 **A fix would touch:** `server-lib/readings.js` (a third reading-point source,
 derived from completed trips carrying attachments) and nothing in
 `api/maintenance.js` itself if it is done there, which is the point of that
@@ -1124,14 +1159,14 @@ not care about the excavator's hours.
 fix.**
 
 `TAB_VISIBLE.equipment` was `equipmentReportsEnabled`
-(`git show HEAD:src/Dashboard.jsx`, line 2505) and is now unconditionally
+(`git show c68f57d:src/Dashboard.jsx`, line 2505) and is now unconditionally
 `true` (`src/Dashboard.jsx:2767`). Inside it, `EQUIPMENT_SUBTABS`
 (`src/Dashboard.jsx:2800-2810`) marks Fleet Overview and Compliance `on: true`
 while the other six are gated on a doc key. Neither has an entry in
-`BUILTIN_DOC_KEYS` (`api/customforms.js:100`) or a module in
-`server-lib/pricing.js:60-110`.
+`BUILTIN_DOC_KEYS` (`api/customforms.js:119`) or a module in
+`server-lib/pricing.js:60-117`.
 
-That is break #6's expensive direction, stated in `pricing.js:50-55`: a feature
+That is break #6's expensive direction, stated in `pricing.js:50-56`: a feature
 no module sells is not withheld, it ships to every company free and silently.
 A company that bought only the FLHA module now gets fleet management with
 edit/retire/restore, and per-machine CVIP tracking.
@@ -1149,127 +1184,6 @@ cannot catch this, because a feature with no doc key at all is invisible to it.
 `grep -n "docKeys:" server-lib/pricing.js` — run 2026-09-17, 12 keys on both
 sides, still in exact agreement. Nothing is mis-sold; two features are simply
 outside the system.
-
-### #13 — A daily report's machines still can't be joined to
-
-**Severity: medium. Status: open, awaiting a decision.** Opened by the
-fleet-hub branch (2026-09-17), and the fourth instance of §4b below — a key
-written and read by nothing.
-
-`daily_reports.equipment` has always been a comma-joined text summary, so
-"which machines were on site last Tuesday" could only ever be answered by a
-string search. `daily_reports.equipment_ids` is now the joinable half,
-produced by `src/DailyReport.jsx:296` and vetted at `api/logs.js:367-370`
-exactly like `site_id` and `equipment_id` are.
-
-**Nothing reads it.** That was a deliberate scope line on the branch that
-added it, not an oversight — but it is the shape this map exists to catch,
-so it is filed rather than assumed harmless.
-
-Candidate consumers, none built: a machine's own screen showing which days
-it was on site; utilization compared against the hours the same machine
-logged on its inspections; the Brain seeing which machines actually work
-together.
-
-*Re-check:* `grep -rn "equipment_ids" api/ src/` — anything beyond
-`DailyReport.jsx`, `logs.js` and the migration means this is closing.
-
-### #14 — Compliance expiry dates are visible on exactly one screen
-
-**Severity: medium. Status: open, awaiting a decision.** Opened by the
-fleet-hub branch (2026-09-17).
-
-`equipment_compliance` records the dates that park a machine when they lapse
-— CVIP, registration, insurance. Written and read only by
-`api/companydata.js:883-950`, displayed only in Equipment ▸ Compliance
-(`Dashboard.jsx:5896-5988`).
-
-Nothing else knows these dates exist. Not the weekly equipment report, not
-the overview banner, not the cron, not the Brain. A machine with a CVIP that
-expired last week inspects, fuels and reports exactly as it did the week
-before.
-
-**Worker certifications are the same problem already solved once**, which is
-the strongest argument this is worth closing: an expiring ticket surfaces on
-the dashboard at `Dashboard.jsx:4647`. A machine's paperwork gets none of
-that treatment. Note that #8 records certification expiry still not *gating*
-anything — so the analogue is "it is at least visible", not "it is handled".
-
-*Re-check:* `grep -rn "equipment_compliance" api/ src/`.
-
-### #15 — A retired machine keeps a live PM clock and live expiry dates
-
-**Severity: medium. Status: open, awaiting a decision.** Opened by the
-fleet-hub branch (2026-09-17) — retirement is new, so this break could not
-exist before it.
-
-`list_equipment` filters `retired_at is null` unless asked otherwise
-(`companydata.js:717`), so every worker-facing picker drops a retired machine
-with no change on its side. Everything that reads the `equipment` table
-**directly** bypasses that filter, and for two readers that is wrong:
-
-- `api/maintenance.js:112-116` (`list_status`) — a machine sold three months
-  ago still appears on the Preventative Maintenance screen, and still counts
-  toward the Overdue tile and the Equipment nav badge. Its usage stopped when
-  it left, so it sits permanently overdue and can never be cleared.
-- `api/companydata.js:889` (compliance list) — a retired unit's expired CVIP
-  still counts toward the Expired tile.
-
-Both are the same one-line question: should these filter retired machines, or
-should the screens show them greyed out the way Fleet Overview does? That is
-a product call, not a bug fix, which is why it is filed rather than patched.
-
-The other three direct readers are correct as they stand and should NOT be
-"fixed" to match: `list_records` (`maintenance.js:357-359`) deliberately keeps
-retired machines, because a service history that drops the machines you no
-longer own is not a history, and `companyEquipmentIndex` /
-`resolveEquipmentId(s)` must still vet historical ids or every record naming a
-retired machine loses its join.
-
-*Re-check:* `grep -n "from('equipment')" api/*.js server-lib/*.js` and ask of
-each hit whether retired rows belong in that answer.
-
-### #17 — An attachment's defect opens a corrective action against the host
-
-**Severity: medium. Status: open, awaiting a decision.** Pre-existing in the
-trailer-only form; generalised, and made more visible, by the fleet-hub
-branch.
-
-`server-lib/correctiveActions.js:411` builds an equipment-sourced action from
-the inspection's own `equipment_id` / `equipment_label`. A checklist item
-carries `unit`, `unitLabel` and now `attachmentId`
-(`src/Inspection.jsx:465-468`), and none of that reaches the action.
-
-So a bent set of forks flagged on a loader's pre-trip opens an action against
-**the loader**. Move the forks to a second loader and the defect stays filed
-against the first, the recurrence counter keys on the wrong machine, and the
-fault appears to follow whatever happened to be carrying it.
-
-The weekly report already routes this correctly
-(`equipmentreports.js:437,449` via `attachmentForItem`), so the data and the
-resolver both exist — this is a consumer that hasn't been pointed at them.
-
-*Re-check:* `grep -n "attachmentId\|unitLabel" server-lib/correctiveActions.js`
-— currently no hits.
-
-### #18 — An attachment can never come due for service
-
-**Severity: low. Status: open, awaiting a decision.** Pre-existing;
-`is_attachment` makes it addressable for the first time.
-
-`api/maintenance.js`'s PM math measures usage as a meter reading delta. An
-attachment has no meter, so `currentReadings` is empty for it and it reports
-`not_started` forever even with an interval set. The weekly-hours fold already
-solves the equivalent problem by crediting a towed unit whatever pulled it
-(`equipmentreports.js:324`), and PM does not read that.
-
-Low severity because the machines this matters for are a narrow set: a trailer
-with wheel bearings, a hammer on an hour-based rebuild. Most attachments are
-inspected, not serviced on a clock. Worth knowing the option exists rather
-than worth building on its own.
-
-*Re-check:* whether `latestReadingsByEquipment` ever produces an entry for a
-row with `is_attachment = true`.
 
 ## 4b. The recurring shape: a key written and never read
 
@@ -1312,8 +1226,8 @@ wrote:
 |---|---|---|---|
 | `results_json.items` | `correctiveActionsFromInspection`, `inspectionFindingSignal` | the **post-trip** half of `src/Inspection.jsx` | #10 (PR #121) |
 | `linkedPretrip.results_json` | `src/generateInspectionPDF.js:197` | `resubmitInspection`'s payload, which passed three scalars | #12 (PR #121) |
-| `item.unit === "trailer"` | `src/generateInspectionPDF.js:53,129` | `src/Inspection.jsx`, which now writes `"attachment"` | #16, caught before merge |
-| `item.attachmentId` | `attachmentForItem` (`inspectionAttachments.js:53`) | `buildPosttripItems` (`src/Inspection.jsx:377-392`) | #17, caught before merge |
+| `item.unit === "trailer"` | `src/generateInspectionPDF.js` (pre-fix `:53,129`) | `src/Inspection.jsx`, which now writes `"attachment"` | #16, caught and fixed before merge |
+| `item.attachmentId` | `attachmentForItem` (`inspectionAttachments.js:53`), `unitKey` (`generateInspectionPDF.js:16`) | `buildPosttripItems` (`src/Inspection.jsx:374-393`) | #17, open |
 
 So the check in both directions is the same one question: **for every field a
 consumer reads, is there more than one code path that produces the record —
@@ -1351,22 +1265,23 @@ Do **not** flag these. They are decisions, not gaps.
 - **Admin Panel is founder-only.** Not a customer surface — see
   `admin-access-copy-guard`.
 - **A RETIRED machine's id still resolves on submit.** `resolveEquipmentId(s)`
-  (`equipmentScope.js:45,82,124`) deliberately does not filter `retired_at`. A
+  (`equipmentScope.js:42,80,119`) deliberately does not filter `retired_at`. A
   worker's report can sit in the offline queue for days; if the machine was
   retired in the meantime, rejecting the id would 403 the submit, and
   `drainQueue` (`src/offlineQueue.js:185-208`) has no attempt cap — one 403
   wedges that worker's entire queue forever. Same reasoning as break #2's
   follow-up. Do not "fix" this by adding a retired check.
 - **`list_records` and `companyEquipmentIndex` include retired machines on
-  purpose** (`maintenance.js:348-350`). A service history or a vetting index
+  purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
+  history or a vetting index
   that drops the machines you no longer own is not a history or an index.
   Break #15 is about `list_status` only.
 - **`equipment_ids` is not editable on a submitted daily report**
-  (`api/logs.js:601-606`). The supervisor edit corrects the free-text summary;
+  (`api/logs.js:620-625`). The supervisor edit corrects the free-text summary;
   the ids record what the worker actually picked in the field. Deliberate.
 - **A post-trip has no attachment picker.** What was hooked up is recorded on
   the pre-trip, and the post-trip reads it from there
-  (`generateInspectionPDF.js:205`, `equipmentreports.js:324`). Not a gap.
+  (`generateInspectionPDF.js:223`, `equipmentreports.js:343`). Not a gap.
 - **"Used" stays trip-derived and attachments are credited, not metered.** See
   breaks #1 and #18 — the credit is deliberate, its absence from PM is not.
 
@@ -1399,9 +1314,9 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #121 | New join key: `(machine, item_key)` on `corrective_actions`, reusing break #7's two-key machine space. One reducer (`server-lib/recurrence.js`), two callers, per break #1's lesson. Migration **written, not applied** — deliberately all-nullable so it is safe in either deploy order, which is break #5's NOT-NULL-ahead-of-its-code lesson encoded in the schema rather than a comment. |
 | 2026-09-17 | PR #121 | Surface #15 re-homed. Corrective Actions was a sub-tab of Monthly Inspections **gated on `isDocActive("monthly")`** — so a company on inspections + maintenance without monthly site inspections had corrective actions being created and unreachable. A gating bug hiding inside what looked like a navigation complaint. |
 | 2026-09-17 | PR #121 | Section 4b extended: the same silence has a mirror image — a consumer reading a field one of its two producers never wrote. Both PR #121 variants are that shape, and both hid in a feature with two entry points. |
-| 2026-09-17 | working tree, `claude/equipment-tab-fleet-mgmt-9g0xra` | **Fleet management, attachments and compliance placed on the map.** Four new surfaces (19–22), four new join keys (`equipment_ids`, `is_attachment`, `retired_at`, `equipment_compliance.equipment_id`) and one new jsonb shape (`results_json.attachments`, replacing `attachedTrailer` for new records and read through `server-lib/inspectionAttachments.js`). **Seven breaks opened: #13–#19.** Three are the shapes §4b already names, caught for the first time *before* a merge rather than while closing the next break: `equipment_ids` written and read by nothing (#13), the inspection PDF still testing a `unit` value the form stopped writing (#16), and `attachmentId` dropped by `buildPosttripItems` (#17). Migration **written, not applied**. Nothing fixed — all seven await a decision. |
-| 2026-09-17 | same branch | Break #7's root cause **half closed**: `activeUnitNumberClash` (`companydata.js:100-119`) now enforces unit-number uniqueness among active machines on add, edit and un-retire. Blank unit numbers still collide. Two statements in break #7 corrected — `update_equipment` exists now, and a rename makes Weekly Hours and Maintenance Records display different names for the same machine. |
 | 2026-09-17 | PR #122 | Fleet management. Four new keys mapped: `equipment.is_attachment` (a flag replacing `isTrailerTemplate`'s guess from the make/model text), `equipment.retired_at`, `daily_reports.equipment_ids`, and the `equipment_compliance` table. New jsonb shape `results_json.attachments` replaces the single `attachedTrailer`; both are live at once and read through one normaliser (`server-lib/inspectionAttachments.js`), because legacy records are signed documents that cannot be migrated by rewriting rows. |
 | 2026-09-17 | PR #122 | **#16 found and fixed on the branch**, by `pdf-consistency-reviewer`. `generateInspectionPDF.js` grouped checklist items by `unit` alone, so a new-shape attachment item (`unit: 'attachment'`, not `'trailer'`) would have printed under a "TRUCK / TOW VEHICLE" banner, and a truck with a pup and a trailer would have merged both into one group named after whichever came first. The info box said MACHINE/ATTACHMENT while the body of the same page still said TRUCK / TOW VEHICLE — the document disagreed with itself. Grouping keys on `attachmentId` now. **A data-shape change breaking a consumer nobody thought of as a consumer.** |
 | 2026-09-17 | PR #122 | Breaks **#13, #14, #15, #17 and #18 opened, none worked.** #13 and #14 are §4b again (`equipment_ids` read by nothing; compliance dates visible on one screen). #15 is new and introduced by retirement itself: `list_status` and the compliance list read `equipment` directly, so a sold machine keeps a live PM clock and a live expired CVIP. #17 and #18 are pre-existing and only now addressable — an attachment's defect opens an action against the host machine, and an attachment can never come due for service. |
+| 2026-09-17 | PR #122 | Surfaces 19–22 added and the Equipment hub re-mapped: Maintenance and Fuel Logs stopped being top-level tabs, and `TAB_VISIBLE.equipment` went from `equipmentReportsEnabled` to `true`. **Break #19 opened** — Fleet Overview and Compliance are `on: true` with no `BUILTIN_DOC_KEYS` entry and no `server-lib/pricing.js` module, which is break #6's expensive direction: a feature no module sells ships to every company free. Filed as a decision for Dillon, not a defect; the code states a rationale and nothing in the repo records an approval. |
+| 2026-09-17 | PR #122 | Break #7's root cause **half closed**: `activeUnitNumberClash` (`companydata.js:127-145`) enforces unit-number uniqueness among ACTIVE machines on add, edit and un-retire. Blank unit numbers still collide, and a machine still needs only one of make/model/type. Two statements in break #7 corrected — `update_equipment` exists now, and after a rename Weekly Hours shows the old label while Maintenance Records shows the new one. |
 | 2026-09-17 | PR #122 | Not an interaction break, recorded because it was found by the same sweep: `api/login.js`'s roleless roster **ticket** — minted after the company code, before any PIN — was accepted as a full session by every `verifySession` in `api/`, since a ticket has no `userId` and every copy short-circuits on that. The endpoints scoping by company rather than by role answered it for a 7-day TTL. Every verifier now rejects a payload carrying `purpose`. Found by `tenant-scope-reviewer`; the comment in `login.js` asserting this could never happen was the thing that made it invisible. |
