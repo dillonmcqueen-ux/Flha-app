@@ -133,10 +133,21 @@ unlisted signal is captured and summarized but invisible in the Brain tab.
 `AdminPanel.jsx` and `server-lib/companyBrainSummary.js` are the other two
 places that must learn it.
 
-### `answer_id` → corrective actions
-`corrective_actions` rows key on a **monthly inspection answer id**
-(`monthly.js:375,518`), and are written/read only by `api/monthly.js`.
-**This is break #5 below.**
+### `source_type` / `source_id` → corrective actions
+Since PR #118, `corrective_actions` keys on `(source_type, source_id)` with
+a real `company_id`, the same shape `company_signals` uses. `answer_id`
+survives, nullable, so the foreign key to `inspection_answers` still holds
+for monthly rows; a CHECK keeps it set if and only if
+`source_type = 'monthly_answer'`.
+
+| Writer | source_type |
+|---|---|
+| `api/monthly.js` | `monthly_answer` |
+| `api/reports.js` | `incident`, `near_miss` |
+| `api/logs.js` | `equipment_inspection` |
+
+All four go through `server-lib/correctiveActions.js`. **This was break #5
+below.**
 
 ---
 
@@ -147,12 +158,12 @@ places that must learn it.
 
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
-| Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ❌ #5 | — |
+| Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ✅ *(#5, PR #118)* | — |
 | Fuel Log | ✅ *(#1, PR #118)* | — | ❌ #1 | ❌ #4 | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
-| Incident | — | — | — | ✅ `reports:231` | ✅ | ❌ #5 | — |
-| Near Miss | — | — | — | ✅ `reports:231` | ✅ | ❌ #5 | — |
+| Incident | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
+| Near Miss | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
 | Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
 | Daily Report | — | — | — | ❌ #4 | ✅ | — | — |
 | Custom Document | — | — | — | ❌ #4 | ✅ | — | — |
@@ -255,7 +266,32 @@ daily reports, and emits a signal from exactly one of the three
 (`flhas.js:370`, `reports.js:231` covering two, `logs.js:244`).
 
 ### #5 — Corrective actions only close the loop for monthly inspections
-**Severity: high.** An incident, a near miss, and a failed equipment
+**Severity: high. Status: fixed in PR #118.** `corrective_actions` gained
+`company_id`, `source_type` and `source_id` (migration
+`corrective_actions_any_source`, applied 2026-09-17 with approval) and
+`answer_id` is now nullable. Incidents, near misses and Defective equipment
+inspection items all open tracked actions, written through one helper
+(`server-lib/correctiveActions.js`) so the four sources can't drift.
+
+Two things the fix surfaced, both recorded here because they're the general
+lesson rather than this break's detail:
+
+- **A NOT NULL column added ahead of its code is a live outage.** The
+  migration landed before the code, and `api/monthly.js` on `main` inserts
+  without the new columns *and never checks the error* — so monthly
+  corrective actions silently stopped being created. A compatibility trigger
+  (`corrective_actions_backfill_trigger`) now derives the columns from
+  `answer_id` when a caller omits them. Ship the code first, or land the
+  compatibility path in the same migration.
+- **"Monitor" items deliberately do not open actions.** Only Defective does.
+  Tracking every watch-this item would bury the real defects.
+
+Still open, deliberately: nothing here gives a worker a place to record
+routine work they did themselves (changed filters, small fixes). Forcing
+that into either the PM service log or a corrective action breaks something
+real — see `docs/scope-equipment-service-log.md`.
+
+Original finding: An incident, a near miss, and a failed equipment
 inspection all produce a finding that someone must action. Only a monthly
 inspection answer can become a tracked corrective action
 (`monthly.js:375,518`; `corrective_actions.answer_id`).
@@ -367,3 +403,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-16 | PR #118 | Break #4 partially fixed: equipment inspections and monthly site inspections now emit Brain signals. Daily reports, custom documents and corrective actions remain unwired. |
 | 2026-09-16 | — | Break #9 added (post-trip defects never reach Equipment Analytics). Break #7's wording corrected. |
 | 2026-09-16 | PR #118 | Break #9 fixed: Equipment Analytics counts both trip types and its copy says so. Also fixed a blank-label bucket in the same function, found by a test. |
+| 2026-09-17 | PR #118 | Break #5 fixed: corrective actions now open from incidents, near misses and Defective inspection items. Two migrations applied. Surfaced a live regression (NOT NULL ahead of its code) and a gap with no home yet (worker-logged routine service, scoped in `docs/scope-equipment-service-log.md`). |

@@ -4,6 +4,7 @@
 // covers both report types since they work the same way.
 
 import { createClient } from '@supabase/supabase-js';
+import { openCorrectiveActions, correctiveActionsFromReport } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -234,6 +235,28 @@ export default async function handler(req, res) {
           });
           if (signalErr) console.error('company_signals insert failed for', type, newId, signalErr.message);
         }
+      }
+
+      // Break #5 — until now, an incident's corrective actions existed only
+      // as free text inside report_json: AI-drafted, edited by whoever wrote
+      // the report, printed on the PDF by src/generateIncidentPDF.js, and
+      // then nothing. No owner, no target date, no status, and never counted
+      // in the dashboard's Open Corrective Actions. The one document type
+      // that most obviously demands follow-up was the one that could not
+      // have a tracked one, because corrective_actions.answer_id was NOT
+      // NULL against a monthly inspection.
+      //
+      // The text stays exactly where it is — the PDF is a legal record and
+      // is not changing shape. These rows are a parallel, trackable copy.
+      // Best-effort: the report is already saved, and a failure here is
+      // logged inside the helper, never turned into a failed submit.
+      if (newId && (type === 'incident' || type === 'nearmiss')) {
+        await openCorrectiveActions(supabaseAdmin, {
+          companyId: session.companyId,
+          sourceType: type === 'incident' ? 'incident' : 'near_miss',
+          sourceId: newId,
+          descriptions: correctiveActionsFromReport(record.report_json),
+        });
       }
 
       return res.status(200).json({ id: newId, pdfLinked, photosLinked, signatureLinked });

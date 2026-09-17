@@ -4,6 +4,7 @@
 // session checks as the other protected endpoints.
 
 import { createClient } from '@supabase/supabase-js';
+import { openCorrectiveActions, correctiveActionsFromInspection } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -309,6 +310,29 @@ export default async function handler(req, res) {
           });
           if (signalErr) console.error('company_signals insert failed for inspection', newId, signalErr.message);
         }
+      }
+
+      // Break #5 — a Defective item on an inspection is a finding somebody
+      // has to act on, and until now there was nowhere for it to go: it sat
+      // in results_json and showed on the inspection record, but never
+      // became an assignable, ageable item the way a failed monthly
+      // question does.
+      //
+      // Only Defective opens an action. "Monitor" is an operator saying
+      // "keep an eye on this", and turning every one of those into a tracked
+      // row would bury the real defects — see the note in
+      // server-lib/correctiveActions.js. Monitor items still reach the Brain
+      // and still show on the inspection itself.
+      //
+      // Best-effort, same as the signal writer above: the inspection is
+      // already saved, and failures are logged inside the helper.
+      if (newId && type === 'inspection') {
+        await openCorrectiveActions(supabaseAdmin, {
+          companyId: session.companyId,
+          sourceType: 'equipment_inspection',
+          sourceId: newId,
+          descriptions: correctiveActionsFromInspection(record.results_json, record.equipment_label),
+        });
       }
 
       return res.status(200).json({ id: newId, pdfLinked });
