@@ -4,6 +4,7 @@
 // session checks as the other protected endpoints.
 
 import { createClient } from '@supabase/supabase-js';
+import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { openCorrectiveActions, correctiveActionsFromInspection } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
@@ -278,7 +279,10 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabaseAdmin
         .from(table.name)
-        .insert({ ...recordToInsert, company_id: session.companyId })
+        // Break #3 — the author comes from the session, never the request.
+        // Deliberately not in SUBMITTABLE_FIELDS: an author a caller can
+        // choose is a suggestion, not attribution.
+        .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session) })
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });

@@ -14,20 +14,47 @@
 // that guard into four more handlers and let them drift, it lives here.
 
 /**
- * Returns the site id when it belongs to `companyId`, null when the caller
- * sent nothing, or `false` when it belongs to somebody else or does not
- * exist. A caller treats `false` as a 403 and null as "no site given",
- * which is legitimate — the "other / not in the list" path on every one of
- * these forms stores only the text.
+ * Returns the site's own id when it belongs to `companyId`, `null` when
+ * there is nothing to link, or `false` when the site belongs to another
+ * company. A caller treats `false` as a 403 and `null` as "no site", which
+ * is legitimate — the "other / not in the list" path stores only the text.
+ *
+ * A site id that does not exist returns `null`, NOT `false`, and that
+ * distinction is load-bearing rather than cosmetic.
+ *
+ * Returning 403 for a missing site permanently wedged the offline queue.
+ * src/offlineQueue.js's drainQueue marks an attempt and `break`s on any
+ * throw, with no attempt cap and no drop path, so a submission that can
+ * never succeed is retried forever AND blocks every later submission of
+ * that form type behind it. The scenario is not hypothetical: a worker
+ * fills an FLHA offline at a site, an admin removes that site, and the
+ * worker's queue silently stops draining. Removing a used site only became
+ * possible at all in the same change that added these ids, so this was a
+ * bug introduced alongside the feature.
+ *
+ * A guessed or stale id therefore stores a text-only record — exactly what
+ * the "other" path already does — while a genuine cross-tenant attempt
+ * still 403s, keeping that tripwire for a real client bug or a probe.
+ *
+ * The cost is a narrow enumeration signal: a caller can tell whether some
+ * site id exists by whether they get 403 or success. It reveals no name, no
+ * owner and nothing about the site, and it is a fair trade against a
+ * failure mode that silently loses a worker's queued paperwork.
  */
 export async function resolveSiteId(supabaseAdmin, companyId, rawSiteId) {
   if (rawSiteId === undefined || rawSiteId === null || rawSiteId === '') return null;
-  const { data: rows } = await supabaseAdmin
+  const { data: rows, error } = await supabaseAdmin
     .from('sites')
-    .select('company_id')
+    .select('id, company_id')
     .eq('id', rawSiteId)
     .limit(1);
-  if (!rows || rows.length === 0) return false;
+  // A database error must not be read as "wrong company". Fail toward the
+  // text-only record rather than 403ing a worker over an outage — and, per
+  // the note above, rather than wedging their queue over one.
+  if (error) return null;
+  if (!rows || rows.length === 0) return null;
   if (rows[0].company_id !== companyId) return false;
-  return rawSiteId;
+  // The row's own id, not the caller's value, so no coercion surprise can
+  // survive the round trip.
+  return rows[0].id;
 }

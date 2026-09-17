@@ -594,6 +594,16 @@ export default async function handler(req, res) {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
+      // Establish which company the site belongs to before touching
+      // anything. Admin is founder-only and cross-company by design, so this
+      // is not a live hole today — but every detach below then filters on
+      // that company too, so the loop cannot reach another tenant's rows
+      // even if a future write path forgets the site guard. Without it the
+      // detach relies on an invariant no constraint enforces.
+      const { data: siteRows } = await supabaseAdmin.from('sites').select('id, company_id').eq('id', id).limit(1);
+      const site = siteRows && siteRows[0];
+      if (!site) return res.status(404).json({ error: 'Site not found.' });
+
       // These two columns are NOT NULL, so their records cannot be detached
       // from the site -- the site IS part of the record's identity there.
       // Refusing with a reason beats a 500, and beats deleting the records
@@ -615,9 +625,18 @@ export default async function handler(req, res) {
       // supervisor nothing visible: the record still says where it happened,
       // it just stops being joinable to a site that no longer exists. Same
       // shape as delete_equipment's inspections detach.
+      // Non-atomic by nature: a failure partway through leaves some tables
+      // detached and the site still present. That is recoverable — re-running
+      // the delete finishes the job, and a detached row loses nothing a
+      // supervisor can see because the text name survives — so it is
+      // preferred over wrapping six statements in machinery this codebase
+      // does not otherwise use. The error says to try again for that reason.
       for (const table of ['flhas', 'toolbox_talks', 'daily_reports', 'incidents', 'near_misses', 'fuel_logs']) {
-        const { error: detachErr } = await supabaseAdmin.from(table).update({ site_id: null }).eq('site_id', id);
-        if (detachErr) return res.status(500).json({ error: "Couldn't remove site." });
+        const { error: detachErr } = await supabaseAdmin
+          .from(table).update({ site_id: null })
+          .eq('site_id', id)
+          .eq('company_id', site.company_id);
+        if (detachErr) return res.status(500).json({ error: "Couldn't fully remove that site — try again." });
       }
 
       const { error } = await supabaseAdmin.from('sites').delete().eq('id', id);

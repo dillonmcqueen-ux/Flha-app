@@ -879,6 +879,13 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             workerName,
             record: {
               job_site: jobSite,
+              // Sent on the amend path too. An amendment can change the site,
+              // and leaving the original id behind is the exact failure
+              // src/siteLookup.js warns about — a link that is wrong is worse
+              // than one that is missing, because nobody can see it happened.
+              // Resolves to null when the amended site is not in the list,
+              // which correctly clears a stale link rather than keeping it.
+              site_id: siteIdForName(sites, jobSite, siteMode),
               task_description: (flha.hazards || []).map(h => h.task).filter((v, i, a) => v && a.indexOf(v) === i).join(" | "),
               hazards_json: flhaWithCustom,
               pdf_url: pdfUrl || null,
