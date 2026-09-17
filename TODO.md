@@ -30,7 +30,7 @@ Backlog of ideas not being actively worked — captured so they don't get lost, 
 
 - [ ] **Drop the last anon storage INSERT policy (`company-logos`)** — `storage.objects` carried PUBLIC/anon INSERT policies on five buckets, letting anyone with the anon key from the client bundle write files with no session. Four were dropped on 2026-09-14; `company-logos` was deliberately left out of that scope. Nothing depends on it — onboarding (`api/login.js`'s `create_onboarding_upload_url`) and `AdminPanel.jsx` both upload through signed tokens, which don't consult RLS — so this is a one-line drop plus an anon-write probe to confirm. Note the bucket being public for *read* is by design and unrelated. See `docs/schema/drop-anon-storage-insert-policies.sql`.
 - [ ] **Namespace Supabase Storage objects by company** — `flha-reports` is one flat bucket shared by every tenant, and object names are deterministic (`FLHA_<CompanyName>_<ISO timestamp to the second>.pdf`). The 2026-09-14 security audit's findings 3 and 9 both root here: `create_upload_url` accepts a caller-chosen path, so any authenticated user can mint a write token for any path in the shared bucket, and there is no way to check ownership of a path on read because nothing in the path identifies the owner. The signed-URL oracle half is fixed (the server now signs the path stored on the row rather than one supplied in the request), but the real fix is deriving the path server-side as `<company_id>/<random>-<name>` and validating that prefix. Touches `server-lib/uploadUrls.js`, the four `create_upload_url` actions, all 10 PDF generators, and needs a read-path fallback so existing flat-path records keep resolving. `api/certifications.js:129-138` already does it right and is the reference.
-- [ ] **Apply `corrective-actions-equipment-recurrence-migration.sql`** — the one manual step
+- [x] **Apply `corrective-actions-equipment-recurrence-migration.sql`** — done 2026-09-17, before PR #121 merged, which is the order that matters (see below). Was the one manual step
   behind the supervisor-dashboard corrective-actions work. Adds five nullable columns to
   `corrective_actions` (`equipment_id`, `equipment_label`, `item_key`, `resolved_note`,
   `resolved_by`, `resolution_source`), backfills machine and checklist-item identity for the
@@ -41,9 +41,11 @@ Backlog of ideas not being actively worked — captured so they don't get lost, 
   code and silently stopped monthly corrective actions from being created. The reverse order
   is survivable too: `server-lib/correctiveActions.js` detects a missing column and retries
   the insert without the new fields, so a code deploy landing first degrades to today's
-  behaviour rather than dropping a corrective action. Until it runs, recurrence/pattern
-  detection and post-trip resolution are simply unavailable. Verification queries are at the
-  bottom of the migration file.
+  behaviour rather than dropping a corrective action. **Applied before the code merged**
+  anyway: had the code shipped first, a worker marking a post-trip item Fixed would have been
+  told on screen that the corrective action was closed and the repair logged while neither
+  happened — the fallback protects the data, not that message. Verification results are
+  recorded in the migration file's header.
 - [ ] **Two close-out mechanisms on one incident** — an incident or near miss carries a flat
   `reviewed` / `reviewed_by` / `review_notes` trio (`api/reports.js:94`) *and*, since break
   #5, real tracked corrective actions. Those answer different questions — "a supervisor has

@@ -1,8 +1,20 @@
 -- docs/schema/corrective-actions-equipment-recurrence-migration.sql
 --
--- STATUS: written 2026-09-17, NOT YET APPLIED. Needs Dillon's explicit
--- approval before it runs against production, like every migration in this
--- folder.
+-- STATUS: APPLIED to production 2026-09-17 with Dillon's explicit approval,
+-- as migration `corrective_actions_equipment_recurrence`.
+--
+-- Verified after applying, against 5 live rows (1 equipment_inspection,
+-- 4 monthly_answer):
+--   * both backfills resolved — 0 equipment-sourced rows left without a
+--     machine, 0 without an item_key;
+--   * 0 non-equipment rows picked up any of the three new columns;
+--   * the one real row carries equipment_id 4 ("2026 Chevrolet 2500 Pick
+--     up") and item_key "tires — tread, pressure, damage, wheel nuts",
+--     which is the tire report this whole change came from — so the
+--     containment backfill matched a real description, not just an
+--     invented test case;
+--   * RLS still enabled with zero policies, the resolution_source CHECK is
+--     present, and both partial indexes exist.
 --
 -- ── What this is for ─────────────────────────────────────────────────────
 --
