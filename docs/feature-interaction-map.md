@@ -633,6 +633,46 @@ being fixed outright. He chose: count both, change the copy.
 
 ---
 
+## 4b. The recurring shape: a key written and never read
+
+Three of the breaks closed in PRs #119 and #120 turned out to have the same
+underlying failure, and **each one was introduced by the fix for the break it
+belonged to**. Check this before assuming a join key works.
+
+| Column | Written by | Read by, until | Surfaced while closing |
+|---|---|---|---|
+| `equipment_id` | inspections, always | nothing — the weekly report grouped on the text label | #7 (PR #119) |
+| `site_id` | PR #118, all five field forms | nothing — every list payload SELECTed only the text | #2 (PR #120) |
+| `submitted_by_roster_id` | PR #118, every submit path | **nothing at all**, anywhere | #8 (PR #120) |
+
+The pattern: a fix adds a column, validates it on write, backfills it, and
+stops. The read side — the `select(...)` list, the aggregator, the display —
+still uses whatever it used before. **Nothing fails.** No error, no failing
+test, no log line. The column fills up with correct data that no feature ever
+looks at, and the break the column was added to close stays open while the
+changelog says it is fixed.
+
+**So when a change adds a join key, the check is not "is it written and
+validated". It is:**
+
+1. Which `select`/`listColumns` must now include it? (A column absent from
+   the list payload does not exist as far as the frontend is concerned.)
+2. Which aggregator or grouping function should key on it instead of the
+   text it replaces?
+3. Is there a comment somewhere explaining why two things *cannot* be joined,
+   written back when the key did not exist? Comments do not get re-read when
+   the facts under them change — `src/analyticsUtils.js` carried exactly such
+   a comment through break #2's entire first half.
+4. Does a test pin the new key's behaviour, or only the old one's?
+
+Two related instances, same family:
+- **The guard that went stale.** `tests/unit/brain-signal-capture.test.js`
+  asserted writers and `bySourceType` agree, from a **hardcoded list of
+  writers** — so it went out of date the moment a writer was added, which is
+  the exact failure it existed to catch. It now scans `api/`.
+- **The invariant that was only a comment.** Break #6's doc-key ↔ module
+  rule was stated in prose in `server-lib/pricing.js` and checked by nothing.
+
 ## 5. Deliberate non-connections
 
 Do **not** flag these. They are decisions, not gaps.
