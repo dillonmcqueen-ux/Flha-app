@@ -63,14 +63,39 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 |---|---|---|
 | Equipment Inspection | ✅ `Inspection.jsx:45,51` | — |
 | Fuel Log | ✅ `FuelLog.jsx:21` | — |
-| Preventative Maintenance | ✅ `maintenance.js:214` | ✅ `maintenance.js:130-132` |
-| Weekly Equipment Report | — | ⚠️ groups by `equipment_label`, not id |
-| Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:54,203`) |
+| Preventative Maintenance | ✅ `maintenance.js:321,384` | ✅ `maintenance.js:86,92,180-215` |
+| Weekly Equipment Report | — | ✅ *(#7, PR #119)* `equipmentreports.js:190-213,247` |
+| Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) |
 
 **Consequence:** anything that groups by `equipment_label` silently splits
 one machine into several when the label is typed differently, and can't
 join to the fleet at all. `maintenance.js:5-7` documents this decision
-explicitly and is the correct reference.
+explicitly and is the correct reference. Analytics is the last consumer
+still keyed this way.
+
+**Ownership validation.** Now that this column is read rather than merely
+stored, an id arriving from a client is a tenancy question, exactly as
+`site_id` is. `server-lib/equipmentScope.js` is the companion to
+`server-lib/siteScope.js` and carries the same three-way contract: the
+fleet row's own id when it belongs to the caller, `false` (→ 403) when it
+belongs to another company, and `null` when it simply doesn't exist —
+**never `false` for a missing id**, because both callers are offline-queued
+and `drainQueue` (`src/offlineQueue.js:185-208`) has no attempt cap and no
+drop path, so a permanent 403 wedges a worker's whole queue. Same failure
+mode recorded for `site_id` under break #2's follow-up.
+
+| Caller | Validates `equipment_id` | Since |
+|---|---|---|
+| `api/logs.js` inspection submit | ✅ `logs.js:280-283` | PR #119 (`afee546`) — had **no** check before, though `equipment_id` was in `SUBMITTABLE_FIELDS.inspection` all along |
+| `api/fuellogs.js` submit | ✅ `fuellogs.js:165-168` | had an inline guard; migrated onto the shared helper in `afee546` |
+| `api/equipmentreports.js` report build | ✅ `equipmentreports.js:175-188` (`vetEquipmentIds`), called at `:227-229` | PR #119 (`afee546`) |
+
+`results_json.attachedTrailer.id` is the one that can't be guarded on
+submit: `results_json` is a free-form jsonb blob and `pickAllowed`
+(`logs.js:122`) whitelists the **column**, never its contents. It is
+therefore vetted on the read side instead — `vetEquipmentIds` drops any id
+not in the company's fleet before anything keys on it, falling back to the
+label the way a free-text machine already does.
 
 ### `reading` / `reading_unit` (the usage clock)
 Hours or kilometres on a machine. Written by inspections
@@ -497,3 +522,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #118 | Break #3 fixed: `submitted_by_roster_id` stamped server-side on all nine document tables, with anonymous near misses structurally protected. |
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
+| 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |
