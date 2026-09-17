@@ -216,7 +216,11 @@ export function dailyConditionsSignal(record) {
   if (conditions.length === 0 && !inRange) return null;
 
   const signal = {};
-  if (conditions.length > 0) signal.conditions = conditions.slice(0, MAX_SIGNAL_ITEMS);
+  // Deduped: the vocabulary is closed, so "Snow, Snow, Snow" carries no more
+  // information than "Snow" — but api/companydata.js bumps the tally once per
+  // element, so without this one daily report could add 12 to a single
+  // condition's count and skew its own company's Brain profile.
+  if (conditions.length > 0) signal.conditions = [...new Set(conditions)].slice(0, MAX_SIGNAL_ITEMS);
   if (inRange) {
     signal.temperature = temperature;
     // Banded as well as raw, because what a profile should emphasize is

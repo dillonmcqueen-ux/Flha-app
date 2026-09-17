@@ -2179,7 +2179,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
       const listRes = await fetch("/api/certifications", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_certifications", token, companyId: selectedCompany }),
+        // withFiles: false — the badge needs expiry dates, not documents, and
+        // this runs on every dashboard open. See api/certifications.js.
+        body: JSON.stringify({ action: "list_certifications", token, companyId: selectedCompany, withFiles: false }),
       });
       const listData = await listRes.json();
       if (listRes.ok) setCompanyCertifications(listData.certifications || []);

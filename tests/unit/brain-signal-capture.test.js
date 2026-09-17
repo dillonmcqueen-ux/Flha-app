@@ -242,3 +242,14 @@ test('crew, visitors and the narrative never reach the signal', () => {
   });
   assert.deepEqual(Object.keys(signal).sort(), ['conditions', 'tempBand', 'temperature']);
 });
+
+test('repeated weather picks are deduped before they reach the tally', () => {
+  // The vocabulary is closed, so "Snow, Snow, Snow" carries no more
+  // information than "Snow". api/companydata.js bumps the working-conditions
+  // tally once per element, so without the dedupe a single daily report
+  // could add 12 to one condition's count and skew its own company's Brain
+  // profile. Found by tenant-scope-reviewer; within-tenant only, but free to
+  // fix and unambiguously correct given the fixed vocabulary.
+  const signal = dailyConditionsSignal({ weather: 'Snow, Snow, Snow, Windy, Snow', temperature: '' });
+  assert.deepEqual(signal.conditions, ['Snow', 'Windy']);
+});

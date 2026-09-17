@@ -170,7 +170,7 @@ export default async function handler(req, res) {
     // ── List certs: a worker sees their own; a supervisor/admin sees the
     // whole company, or one roster member's if rosterId is passed ───────
     if (action === 'list_certifications') {
-      const { companyId: requestedCompanyId, rosterId } = req.body;
+      const { companyId: requestedCompanyId, rosterId, withFiles } = req.body;
       const companyId = resolveCompanyId(session, requestedCompanyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company.' });
 
@@ -194,10 +194,20 @@ export default async function handler(req, res) {
       // workflow or a submission gate — a cert the worker uploaded
       // themselves (as opposed to one a supervisor/admin added on their
       // behalf) hasn't been looked at by anyone yet.
+      // Signing is opt-out because not every caller wants the documents.
+      // Break #8's certification badge needs roster_id, cert_type and
+      // expiry_date, and it loads on every dashboard open — minting a
+      // one-hour signed URL for every ticket file in the company on every
+      // such load puts document links in payloads nobody asked for them in.
+      // Callers that render the files (the Certifications tab) omit the flag
+      // and behave exactly as before.
+      const wantFiles = withFiles !== false;
       const certs = await Promise.all(
         (data || []).map(async (row) => {
+          const base = { ...row, status: classifyExpiry(row.expiry_date), unverified: row.uploaded_by_role === 'worker' };
+          if (!wantFiles) return { ...base, fileUrl: null };
           const { data: signed } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(row.file_path, 3600);
-          return { ...row, status: classifyExpiry(row.expiry_date), unverified: row.uploaded_by_role === 'worker', fileUrl: signed?.signedUrl || null };
+          return { ...base, fileUrl: signed?.signedUrl || null };
         })
       );
       return res.status(200).json({ certifications: certs });

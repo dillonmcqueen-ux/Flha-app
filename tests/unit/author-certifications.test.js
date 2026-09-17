@@ -104,15 +104,39 @@ test('no flags means no label at all', () => {
   assert.equal(authorCertificationLabel(null), null);
 });
 
-test('the anonymous near-miss payload carries no author id to read', () => {
-  // Structural, not cosmetic: api/reports.js deliberately leaves
-  // submitted_by_roster_id out of the near-miss list columns, because
-  // selecting it would make "this one is null" visible beside rows where it
-  // is set — turning anonymity into a readable property.
-  const src = readFileSync(new URL('../../api/reports.js', import.meta.url), 'utf8');
-  const nearmiss = src.match(/nearmiss: \{[\s\S]*?listColumns: '([^']*)'/)[1];
-  assert.ok(!nearmiss.includes('submitted_by_roster_id'),
-    'the near-miss list must not select submitted_by_roster_id — it would make anonymity readable');
-  const incident = src.match(/incident: \{[\s\S]*?listColumns: '([^']*)'/)[1];
-  assert.ok(incident.includes('submitted_by_roster_id'), 'incidents are attributed and should carry the author id');
+test('anonymity is protected structurally, not by withholding the author column', () => {
+  // This test previously asserted the opposite — that the near-miss list
+  // must NOT select submitted_by_roster_id, on the reasoning that a column
+  // which is always null for anonymous rows would make "this one is null"
+  // readable beside rows where it is set.
+  //
+  // That reasoning was wrong, and tenant-scope-reviewer said so plainly.
+  // `is_anonymous` is selected on the same line and src/Dashboard.jsx
+  // renders it as the literal word "Anonymous". Anonymity is a designed,
+  // visible property of a near miss; denying an inference that the payload
+  // already states outright protects nothing, and it cost the break-#8
+  // badge on the non-anonymous near misses, which are most of them.
+  //
+  // What the promise actually rests on is asserted below. Both halves have
+  // to hold: nulling at write time alone would let a future code path set
+  // it, and the constraint alone would turn a bug into a failed submit.
+  const reports = readFileSync(new URL('../../api/reports.js', import.meta.url), 'utf8');
+  assert.match(reports, /authorRosterId\(session, \{ isAnonymous: recordToInsert\.is_anonymous === true \}\)/,
+    'the author must be nulled at write time when the report is anonymous');
+
+  const migration = readFileSync(new URL('../../docs/schema/roster-attribution-migration.sql', import.meta.url), 'utf8');
+  assert.match(migration, /check \(not \(is_anonymous is true and submitted_by_roster_id is not null\)\)/,
+    'the database must refuse an anonymous row that carries an author');
+});
+
+test('a document from an anonymous report gets no badge, because it has no author', () => {
+  // The end-to-end consequence of the two guarantees above: an anonymous
+  // near miss carries a null roster id, so the badge helper returns nothing
+  // for it — the same answer it gives any unattributed document.
+  const certs = [{ roster_id: 7, cert_type: 'Fall Protection', expiry_date: '2026-09-01' }];
+  const anonymousNearMiss = { submitted_by_roster_id: null, created_at: '2026-09-17' };
+  assert.equal(
+    authorCertificationFlags(certs, anonymousNearMiss.submitted_by_roster_id, anonymousNearMiss.created_at),
+    null,
+  );
 });

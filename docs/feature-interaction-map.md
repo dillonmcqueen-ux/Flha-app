@@ -589,11 +589,20 @@ reviewing.
 - An **unattributed** document returns nothing at all, never a reassuring
   "no expired tickets". Pre-break-#3 documents carry no roster id, and "we
   don't know who filed this" is a different answer from "they were clean".
-- **Anonymous near misses never carry the author id into the list payload**
-  (`api/reports.js`). It is always null for them, but *selecting* it would
-  make "this one is null" readable beside rows where it is set — turning
-  anonymity into a property a supervisor can spot. A test asserts the
-  near-miss payload omits it and the incident payload includes it.
+- **Anonymous near misses carry no author to badge**, and the reason is
+  worth recording because the first attempt got it wrong. That attempt
+  withheld `submitted_by_roster_id` from the near-miss list payload, arguing
+  that a column always null for anonymous rows would make "this one is null"
+  readable beside rows where it is set. It protects nothing: `is_anonymous`
+  is selected on the same line and `src/Dashboard.jsx:816,957,3166` renders
+  it as the literal word "Anonymous". Anonymity is a *designed, visible*
+  property of a near miss, and denying an inference the payload already
+  states outright only cost the badge on the non-anonymous ones.
+  The promise rests on two structural guarantees instead, both now pinned by
+  tests: `authorRosterId()` nulls the column at write time, and a CHECK
+  (`roster-attribution-migration.sql:58`) makes an anonymous row carrying an
+  author impossible. There is no row where the column could betray an
+  identity.
 
 **A third instance of the same pattern found on the way.**
 `submitted_by_roster_id` was written by every submit path in PR #118 and
