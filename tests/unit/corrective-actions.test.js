@@ -58,19 +58,24 @@ test('only Defective inspection items open actions, never Monitor', () => {
       item('Air filter', 'N/A'),
     ],
   }, 'CAT 336 (Unit 12)');
-  assert.deepEqual(out, ['CAT 336 (Unit 12): Hydraulic fluid level']);
+  // Now {description, itemKey} rather than a bare string: the description is
+  // what a supervisor reads, the item key is what recurrence counting and
+  // post-trip resolution match on. They cannot be the same value — the
+  // description carries the machine label and the operator's note, both of
+  // which differ on every report of the same fault.
+  assert.deepEqual(out, [{ description: 'CAT 336 (Unit 12): Hydraulic fluid level', itemKey: 'hydraulic fluid level' }]);
 });
 
 test('an inspection defect carries the operator note when there is one', () => {
   const out = correctiveActionsFromInspection({
     items: [item('Rear tire', 'Defective', 'sidewall cut, losing air')],
   }, 'Kenworth T800');
-  assert.deepEqual(out, ['Kenworth T800: Rear tire — sidewall cut, losing air']);
+  assert.deepEqual(out, [{ description: 'Kenworth T800: Rear tire — sidewall cut, losing air', itemKey: 'rear tire' }]);
 });
 
 test('an unlabeled machine still produces a usable description', () => {
   const out = correctiveActionsFromInspection({ items: [item('Rear tire', 'Defective')] }, '   ');
-  assert.deepEqual(out, ['Rear tire']);
+  assert.deepEqual(out, [{ description: 'Rear tire', itemKey: 'rear tire' }]);
 });
 
 test('a clean inspection opens nothing', () => {

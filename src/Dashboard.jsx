@@ -25,7 +25,7 @@ import {
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
   Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu, Fuel,
-  RefreshCw,
+  RefreshCw, Repeat,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -37,6 +37,7 @@ const TAB_ICON = {
   nearmiss: AlertTriangle,
   incident: Siren,
   monthly: CalendarClock,
+  corrective: ClipboardCheck,
   sops: FileText,
   safetycustomdocs: FolderKanban,
   safetyanalytics: BarChart3,
@@ -59,7 +60,7 @@ const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
 // visible tab at once instead of one category's worth on click.
 const TAB_LABEL = {
   flhas: "FLHAs", toolbox: "Toolbox Talks", nearmiss: "Near Misses", incident: "Incidents",
-  monthly: "Monthly", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
+  monthly: "Monthly", corrective: "Corrective Actions", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
   inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance", fuel: "Fuel Logs",
   customdocs: "Custom Docs", analytics: "Equipment Analytics",
   timeclock: "Time Clock", roster: "Roster", certifications: "Certifications", workforcecustomdocs: "Custom Docs",
@@ -543,6 +544,10 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
   const r = insp.results_json || {};
   const items = r.items || [];
   const isPost = insp.trip_type === "posttrip";
+  // Post-trips from before the full-checklist change carry no items.
+  const isLegacyPost = isPost && items.length === 0;
+  const resolvedItems = items.filter(it => it.carriedFrom && it.resolution === "fixed");
+  const carriedOpenItems = items.filter(it => it.carriedFrom && it.resolution && it.resolution !== "fixed");
   const condColor = { Good: "#16A34A", Monitor: "#D97706", Defective: "#DC2626" };
   const condBg = { Good: "rgba(34,197,94,0.14)", Monitor: "rgba(245,158,11,0.14)", Defective: "rgba(239,68,68,0.14)" };
   const [editing, setEditing] = useState(false);
@@ -566,14 +571,24 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
   const updateItem = (i, key, val) => setEditItems(prev => prev.map((it, idx) => idx === i ? { ...it, [key]: val } : it));
   const saveEdit = async () => {
     setSaving(true);
-    const newResultsJson = isPost
+    const newResultsJson = (isPost && isLegacyPost)
       ? { ...r, changeCondition: editHasChanges ? editChangeCondition : null, changeNotes: editHasChanges ? editChangeNotes : null }
-      : { ...r, items: editItems };
+      : {
+          ...r,
+          items: editItems,
+          // Keep the derived counters in step with an edited checklist.
+          // Three consumers read them (the list row's badge, the weekly
+          // equipment report, the PDF) and a supervisor correcting a
+          // condition here would otherwise leave all three showing the
+          // original count.
+          defectiveCount: editItems.filter(it => it.condition === "Defective").length,
+          monitorCount: editItems.filter(it => it.condition === "Monitor").length,
+        };
     await onSave(insp.id, {
       results_json: newResultsJson,
       start_reading: editStart === "" ? null : editStart,
       end_reading: editEnd === "" ? null : editEnd,
-      has_changes: isPost ? editHasChanges : insp.has_changes,
+      has_changes: isPost ? (isLegacyPost ? editHasChanges : editItems.some(it => it.condition === "Defective" || it.condition === "Monitor" || (it.carriedFrom && it.resolution === "fixed"))) : insp.has_changes,
     });
     setSaving(false);
     setEditing(false);
@@ -609,12 +624,12 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
                 <input style={EDIT_INPUT_STYLE} value={editStart} onChange={e => setEditStart(e.target.value)} placeholder={insp.reading_unit || ""} />
               </EditField>
             )}
-            {isPost && (
+            {isPost && isLegacyPost && (
               <EditField label="Odometer / Hour-Meter End Reading">
                 <input style={EDIT_INPUT_STYLE} value={editEnd} onChange={e => setEditEnd(e.target.value)} placeholder={insp.reading_unit || ""} />
               </EditField>
             )}
-            {!isPost && editItems.map((it, i) => (
+            {(!isPost || !isLegacyPost) && editItems.map((it, i) => (
               <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 10, marginBottom: 8 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, color: "#F5F5F4", marginBottom: 6 }}>{it.item}</div>
                 <select style={{ ...EDIT_INPUT_STYLE, marginBottom: 6 }} value={it.condition || "Good"} onChange={e => updateItem(i, "condition", e.target.value)}>
@@ -660,7 +675,43 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
           )}
         </div>
 
-        {isPost ? (
+        {/* A post-trip with no items is one submitted before the post-trip
+            became a full checklist. It keeps the old change-summary view;
+            everything since shows its checklist, same as a pre-trip, plus
+            what the shift actually fixed. */}
+        {isPost && !isLegacyPost ? (
+          <>
+            {resolvedItems.length > 0 && (
+              <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#4ADE80", marginBottom: 6 }}>✓ Fixed during this shift ({resolvedItems.length})</div>
+                {resolvedItems.map((it, i) => (
+                  <div key={i} style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 3 }}>
+                    {it.item}{it.resolutionNote ? ` — ${it.resolutionNote}` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+            {carriedOpenItems.length > 0 && (
+              <div style={{ background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#FBBF24", marginBottom: 6 }}>⚠ Still outstanding from the pre-trip ({carriedOpenItems.length})</div>
+                {carriedOpenItems.map((it, i) => (
+                  <div key={i} style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 3 }}>
+                    {it.item}{it.resolution === "worse" ? " — got worse during the shift" : ""}{it.note ? ` — ${it.note}` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+            {items.map((it, i) => (
+              <div key={i} style={{ border: `1.5px solid ${condColor[it.condition] || "#242424"}40`, background: condBg[it.condition] || "#1D1D1D", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{it.item}</div>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: condColor[it.condition] }}>{it.condition}</span>
+                </div>
+                {it.note && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4, fontStyle: "italic" }}>Note: {it.note}</div>}
+              </div>
+            ))}
+          </>
+        ) : isPost ? (
           <>
             {insp.has_changes === false && (
               <div style={{ background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 14px" }}>
@@ -1527,6 +1578,33 @@ function correctiveWhen(value) {
   return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString("en-CA");
 }
 
+// "3 low tire corrective actions in a row should flag something as a
+// pattern to say 'hey maybe this tire needs to be repaired or replaced'"
+// (Dillon, 2026-09-17). The count comes from the server
+// (server-lib/recurrence.js) so this badge and the machine's own
+// repeat-offender list can never disagree.
+//
+// Shown below the threshold too, quietly — "2nd time in 90 days" is useful
+// context on a single action, and a supervisor who sees the count climbing
+// can act before it becomes a pattern.
+function RecurrenceBadge({ recurrence, compact = false }) {
+  if (!recurrence || recurrence.count < 2) return null;
+  const tone = recurrence.isPattern ? C.status.danger : C.status.warning;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: compact ? 10 : 11, fontWeight: 800,
+      color: tone.text, background: tone.bg, border: `1px solid ${tone.border}`,
+      padding: compact ? "2px 7px" : "3px 9px", borderRadius: RAD.pill,
+    }}>
+      <Repeat size={compact ? 10 : 11} strokeWidth={2.5} />
+      {recurrence.isPattern
+        ? `Recurring — ${recurrence.count}× in ${recurrence.windowDays} days`
+        : `${recurrence.count}× in ${recurrence.windowDays} days`}
+    </span>
+  );
+}
+
 function CorrectiveActionRow({ ca, onUpdate }) {
   const [responsibleName, setResponsibleName] = useState(ca.responsible_name || "");
   const [targetDate, setTargetDate] = useState(ca.target_date || "");
@@ -1550,14 +1628,28 @@ function CorrectiveActionRow({ ca, onUpdate }) {
           {ca.source_label}
         </div>
       )}
+      {ca.recurrence && ca.recurrence.count >= 2 && (
+        <div style={{ marginBottom: 6, marginLeft: 6, display: "inline-block" }}><RecurrenceBadge recurrence={ca.recurrence} /></div>
+      )}
       {ca.question_text && <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4", marginBottom: 2 }}>{ca.question_text}</div>}
       <div style={{ fontSize: 12, color: "#A1A1AA", marginBottom: 6 }}>
-        {[ca.site_name, correctiveWhen(ca.period_month), ca.submitted_by ? `reported by ${ca.submitted_by}` : null].filter(Boolean).join(" · ")}
+        {/* equipment_label, not site_name: an equipment-sourced action used
+            to render its MACHINE in the site slot, so the dashboard showed a
+            machine where every neighbouring row shows a jobsite. */}
+        {[ca.equipment_label || ca.site_name, correctiveWhen(ca.period_month), ca.submitted_by ? `reported by ${ca.submitted_by}` : null].filter(Boolean).join(" · ")}
       </div>
       <div style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 10, fontStyle: "italic" }}>{ca.description}</div>
       {isResolved ? (
-        <div style={{ fontSize: 12, color: "#4ADE80", fontWeight: 700 }}>
-          ✓ Resolved by {ca.responsible_name || "—"} · {ca.resolved_at ? new Date(ca.resolved_at).toLocaleDateString("en-CA") : ""}
+        <div>
+          <div style={{ fontSize: 12, color: "#4ADE80", fontWeight: 700 }}>
+            ✓ Resolved by {ca.resolved_by || ca.responsible_name || "—"} · {ca.resolved_at ? new Date(ca.resolved_at).toLocaleDateString("en-CA") : ""}
+            {ca.resolution_source === "posttrip" ? " · on a post-trip" : ""}
+          </div>
+          {/* What was actually done. A status flip with no record of the
+              repair is how a machine's history ends up saying nothing. */}
+          {ca.resolved_note && (
+            <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 4, fontStyle: "italic" }}>“{ca.resolved_note}”</div>
+          )}
         </div>
       ) : (
         <>
@@ -1569,6 +1661,86 @@ function CorrectiveActionRow({ ca, onUpdate }) {
             <button onClick={() => save("open")} disabled={saving} style={{ flex: 1, background: "#242424", color: "#D4D4D8", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Save Assignment</button>
             <button onClick={() => save("resolved")} disabled={saving} style={{ flex: 1, background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✓ Mark Resolved</button>
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// One corrective-actions list, rendered in two places.
+//
+// It used to live only as a sub-tab of Monthly Inspections. It is now the
+// Safety "Corrective Actions" tab (monthly findings, incidents, near
+// misses) AND a sub-tab of Maintenance (equipment defects, beside the
+// machine they belong to). Same component both times, so the two can't
+// drift into behaving differently — which is the whole reason the old
+// single list was confusing rather than merely misplaced.
+function CorrectiveActionsPanel({ title, subtitle, actions, onUpdate, searchPlaceholder, emptyText }) {
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const matches = (a) => !q
+    || (a.question_text || "").toLowerCase().includes(q)
+    || (a.equipment_label || "").toLowerCase().includes(q)
+    || (a.site_name || "").toLowerCase().includes(q)
+    || (a.description || "").toLowerCase().includes(q)
+    || (a.submitted_by || "").toLowerCase().includes(q);
+
+  const shown = actions.filter(matches);
+  const open = shown.filter(a => a.status !== "resolved");
+  const resolved = shown.filter(a => a.status === "resolved");
+  const patterns = open.filter(a => a.recurrence && a.recurrence.isPattern).length;
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: 16, marginBottom: 12, boxShadow: SHAD.md }}>
+      <PanelHeader icon={AlertTriangle} title={title} subtitle={subtitle} />
+
+      <StatStrip items={[
+        { icon: AlertTriangle, value: actions.filter(a => a.status !== "resolved").length, label: "Open", tone: actions.filter(a => a.status !== "resolved").length > 0 ? "danger" : "neutral" },
+        { icon: Repeat, value: patterns, label: "Recurring", tone: patterns > 0 ? "danger" : "neutral" },
+        { icon: CircleCheckBig, value: actions.filter(a => a.status === "resolved").length, label: "Resolved", tone: "success" },
+      ]} />
+
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+        <input
+          style={{ width: "100%", padding: "9px 12px 9px 34px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 14, boxSizing: "border-box", outline: "none", background: C.panelInset, color: C.text.primary }}
+          placeholder={searchPlaceholder}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      {shown.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+          <div style={{ marginBottom: 8 }}><CircleCheckBig size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+          {actions.length === 0 ? emptyText : "Nothing matches your search."}
+        </div>
+      ) : (
+        <>
+          {open.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.status.danger.text, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                Open ({open.length})
+              </div>
+              {/* Recurring faults sort to the top of the open list. A
+                  supervisor working down the list top-first should hit the
+                  tire that has gone flat three times before the one that has
+                  gone flat once. */}
+              {[...open].sort((a, b) => (b.recurrence?.count || 0) - (a.recurrence?.count || 0)).map(ca => (
+                <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={onUpdate} />
+              ))}
+            </div>
+          )}
+          {resolved.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                Resolved ({resolved.length})
+              </div>
+              {resolved.map(ca => (
+                <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={onUpdate} />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -1727,8 +1899,17 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [selectedInspection, setSelectedInspection] = useState(null);
   const [monthlyRecords, setMonthlyRecords] = useState([]);
   const [monthlyActions, setMonthlyActions] = useState([]);
+  // Recurrence groups past the threshold, keyed by equipment id (a global
+  // PK, so no company key is needed — and maintenanceStatus, the only thing
+  // that reads this, is already company-scoped).
+  const [equipmentPatterns, setEquipmentPatterns] = useState({});
+  const [recurrenceRule, setRecurrenceRule] = useState({ threshold: 3, windowDays: 90 });
   const [selectedMonthlyRecord, setSelectedMonthlyRecord] = useState(null);
-  const [monthlySubTab, setMonthlySubTab] = useState("records"); // records | actions
+  // Maintenance splits into the machines themselves and the open defects
+  // against them. Monthly no longer has sub-tabs at all — its corrective
+  // actions moved out to their own Safety tab.
+  const [maintenanceSubTab, setMaintenanceSubTab] = useState("machines"); // machines | actions
+  const [inspectionsSubTab, setInspectionsSubTab] = useState("records");  // records | actions
   const [equipmentReports, setEquipmentReports] = useState([]);
   const [loadingEquipmentReports, setLoadingEquipmentReports] = useState(false);
   const [selectedEquipmentReport, setSelectedEquipmentReport] = useState(null);
@@ -1881,9 +2062,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [moSearch, setMoSearch] = useState("");
   const [moSortBy, setMoSortBy] = useState("newest");
   const [moGroupBy, setMoGroupBy] = useState("site");
-
-  // ── Monthly Corrective Actions tab: search state ────────────
-  const [moaSearch, setMoaSearch] = useState("");
 
   // ── Custom Documents tab: search/sort/group state ───────────
   const [cdSearch, setCdSearch] = useState("");
@@ -2074,7 +2252,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         safeFetch("/api/logs", { type: "toolbox", action: "list", token }, d => d.records || [], []),
         safeFetch("/api/logs", { type: "daily", action: "list", token }, d => d.records || [], []),
         safeFetch("/api/monthly", { action: "list_records", token }, d => d.records || [], []),
-        safeFetch("/api/monthly", { action: "list_corrective_actions", token }, d => d.actions || [], []),
+        safeFetch("/api/monthly", { action: "list_corrective_actions", token }, d => d, { actions: [], equipmentPatterns: {} }),
         safeFetch("/api/customforms", { action: "list_records", token }, d => d.records || [], []),
       ]);
 
@@ -2108,7 +2286,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       setIncidents(inc);
       setDailyReports(dr);
       setMonthlyRecords(mr);
-      setMonthlyActions(ma);
+      setMonthlyActions(ma.actions || []);
+      setEquipmentPatterns(ma.equipmentPatterns || {});
+      if (ma.recurrenceRule) setRecurrenceRule(ma.recurrenceRule);
       setCustomDocRecords(cd);
       setSops(ss || []);
       // Keep whatever company is already selected as long as it's still in
@@ -2308,6 +2488,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     incident: isDocActive("incident"),
     daily: isDocActive("daily"),
     monthly: isDocActive("monthly"),
+    // Corrective Actions used to be a SUB-TAB of Monthly Inspections, which
+    // was wrong twice over. Cosmetically: a defect a worker flagged on a
+    // pre-trip this morning showed up filed under "Monthly", so a
+    // supervisor looking for it had no reason to look there — Dillon hit
+    // exactly this on 2026-09-17. Functionally, and worse: the whole panel
+    // was gated on isDocActive("monthly"), so a company that bought
+    // equipment inspections and preventative maintenance but NOT monthly
+    // site inspections could not see its corrective actions AT ALL. They
+    // were being created and were unreachable.
+    //
+    // It is now gated on having any source that can produce one. Equipment
+    // defects deliberately do NOT appear here — they live with the machine,
+    // in Maintenance. See equipmentCorrectiveActions below.
+    corrective: isDocActive("monthly") || isDocActive("incident") || isDocActive("nearmiss"),
     equipment: equipmentReportsEnabled,
     customdocs: hasActiveCustomFormIn("operations"),
     safetycustomdocs: hasActiveCustomFormIn("safety"),
@@ -2331,7 +2525,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // dashboards, not one page mixing both audiences' numbers together.
   // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
-    { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "sops", "safetycustomdocs", "safetyanalytics"] },
+    { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "corrective", "sops", "safetycustomdocs", "safetyanalytics"] },
     { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "fuel", "customdocs", "analytics"] },
     { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "certifications", "workforcecustomdocs"] },
   ];
@@ -2896,6 +3090,34 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const companyDaily = dailyReports.filter(d => d.company_id === selectedCompany);
   const companyMonthlyRecords = monthlyRecords.filter(r => r.company_id === selectedCompany);
   const companyMonthlyActions = monthlyActions.filter(a => a.company_id === selectedCompany);
+
+  // ── The split that moves a pre-trip defect out of "Monthly" ───────────
+  //
+  // One endpoint still returns every corrective action, because they are one
+  // table and one tenancy check. What changed is where each kind is READ:
+  //
+  //   equipment_inspection -> Maintenance, beside the machine it belongs to
+  //   everything else      -> the Safety "Corrective Actions" tab
+  //
+  // Dillon's call, 2026-09-17: "When someone does a pretrip and flags an
+  // issue, it must display in maintenance as a corrective action." A
+  // mechanic looking at a machine and a safety supervisor reviewing an
+  // incident are not the same person doing the same job, and one merged
+  // list served neither.
+  const equipmentCorrectiveActions = companyMonthlyActions.filter(a => a.source_type === "equipment_inspection");
+  const safetyCorrectiveActions = companyMonthlyActions.filter(a => a.source_type !== "equipment_inspection");
+  const openEquipmentActions = equipmentCorrectiveActions.filter(a => a.status !== "resolved");
+  const openSafetyActions = safetyCorrectiveActions.filter(a => a.status !== "resolved");
+
+  // Recurrence groups that crossed the threshold, keyed by equipment id.
+  // Computed server-side (server-lib/recurrence.js) so this screen and the
+  // corrective-actions list can never disagree about what a pattern is.
+  // Deliberately NOT filtered by selectedCompany, unlike every other
+  // `company*` binding here — hence the plain name. It is keyed by
+  // equipment.id, a global primary key, and is only ever INDEXED by an id
+  // taken from the selected company's own fleet (see the Maintenance tab).
+  // Never iterate its keys: for an admin session it spans companies.
+  const equipmentPatternsById = equipmentPatterns;
   const companyCustomDocs = customDocRecords.filter(r => r.company_id === selectedCompany);
   const companySafetyCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "safety");
   const companyOperationsCustomDocs = companyCustomDocs.filter(r => (r.form_category || "operations") === "operations");
@@ -3050,7 +3272,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       const data = await res.json();
       if (res.ok) {
         setMonthlyActions(prev => prev.map(a => a.id === actionId
-          ? { ...a, responsible_name: responsibleName, target_date: targetDate, status, resolved_at: status === "resolved" ? new Date().toISOString() : null }
+          ? {
+              ...a,
+              responsible_name: responsibleName,
+              target_date: targetDate,
+              status,
+              resolved_at: status === "resolved" ? new Date().toISOString() : null,
+              // Mirrors what api/monthly.js writes, so a row closed here
+              // reads the same as one loaded fresh — including clearing a
+              // post-trip's repair note when an action is reopened.
+              resolution_source: status === "resolved" ? "supervisor" : null,
+              resolved_note: status === "resolved" ? a.resolved_note : null,
+            }
           : a));
       }
     } catch (e) { /* ignore */ }
@@ -3817,16 +4050,6 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     );
   };
 
-  // ── Monthly Corrective Actions: search processing ──
-  const moaMatchesSearch = (a) => {
-    if (!moaSearch.trim()) return true;
-    const q = moaSearch.toLowerCase();
-    return (a.question_text || "").toLowerCase().includes(q) ||
-           (a.site_name || "").toLowerCase().includes(q) ||
-           (a.submitted_by || "").toLowerCase().includes(q);
-  };
-  const processedMonthlyActions = companyMonthlyActions.filter(moaMatchesSearch);
-
   // ── Equipment: sort processing ──
   const sortedEquipmentReports = [...equipmentReports].sort((a, b) =>
     equipmentSortBy === "oldest"
@@ -3999,8 +4222,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           tabCounts={{
             nearmiss: companyNearMisses.filter(n => !n.reviewed).length,
             incident: companyIncidents.filter(n => !n.reviewed).length,
-            monthly: openCorrectiveCount,
-            maintenance: maintenanceStatus.filter(e => e.status === "overdue").length,
+            // The Monthly badge used to carry the open-corrective-action
+            // count, which is how a pre-trip defect ended up advertising
+            // itself as a monthly-inspection problem in the nav. Each count
+            // now sits on the tab that actually holds those rows.
+            corrective: openSafetyActions.length,
+            inspections: TAB_VISIBLE.maintenance ? 0 : openEquipmentActions.length,
+            maintenance: maintenanceStatus.filter(e => e.status === "overdue").length + openEquipmentActions.length,
           }}
           activeTab={activeTab}
           onSelectTab={setActiveTab}
@@ -4137,8 +4365,17 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   color={reportReviewStats.total > 0 && reportReviewStats.caughtUp ? C.status.success.solid : C.orange}
                 />
               </div>
+              {/* Routes to whichever tab actually holds the majority of
+                  what is open, instead of always dropping the supervisor
+                  into Monthly Inspections. */}
               {sparkTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions", correctiveSpark,
-                () => { if (TAB_VISIBLE.monthly) { setActiveTab("monthly"); setMonthlySubTab("actions"); } },
+                () => {
+                  const equipmentHeavy = openEquipmentActions.length > openSafetyActions.length;
+                  if (equipmentHeavy && TAB_VISIBLE.maintenance) { setActiveTab("maintenance"); setMaintenanceSubTab("actions"); return; }
+                  if (equipmentHeavy && TAB_VISIBLE.inspections) { setActiveTab("inspections"); setInspectionsSubTab("actions"); return; }
+                  if (TAB_VISIBLE.corrective) { setActiveTab("corrective"); return; }
+                  if (TAB_VISIBLE.maintenance) { setActiveTab("maintenance"); setMaintenanceSubTab("actions"); }
+                },
                 openCorrectiveCount > 0 ? "accent" : "neutral")}
               {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "neutral")}
               {sparkTile(Fuel, fuelFlagged.length, "Fuel Alerts", fuelSpark,
@@ -4376,7 +4613,35 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {activeTab === "inspections" && TAB_VISIBLE.inspections && (
+        {/* Equipment defects live in Maintenance. A company can buy
+            equipment inspections WITHOUT preventative maintenance, though
+            (maintenance requires inspections, not the other way round —
+            server-lib/pricing.js:78), and that company has no Maintenance
+            tab to put them in. Rather than leaving its corrective actions
+            unreachable — which is the exact bug this whole change is
+            fixing, one module over — the Inspections tab grows the same
+            sub-tab, rendering the same component. */}
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && !TAB_VISIBLE.maintenance && (
+          <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
+            <button style={styles.tab(inspectionsSubTab === "records")} onClick={() => setInspectionsSubTab("records")}>Submissions</button>
+            <button style={styles.tab(inspectionsSubTab === "actions")} onClick={() => setInspectionsSubTab("actions")}>
+              Corrective Actions{openEquipmentActions.length > 0 ? ` (${openEquipmentActions.length})` : ""}
+            </button>
+          </div>
+        )}
+
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && !TAB_VISIBLE.maintenance && inspectionsSubTab === "actions" && (
+          <CorrectiveActionsPanel
+            title={`${company?.name || ""} — Equipment Corrective Actions`}
+            subtitle={`Defects flagged on pre-trip and post-trip inspections. The same fault ${recurrenceRule.threshold}× on one machine within ${recurrenceRule.windowDays} days is flagged as recurring.`}
+            actions={equipmentCorrectiveActions}
+            onUpdate={updateCorrectiveAction}
+            searchPlaceholder="Search machine, fault, or who reported it…"
+            emptyText="No equipment defects outstanding."
+          />
+        )}
+
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && (TAB_VISIBLE.maintenance || inspectionsSubTab === "records") && (
           <div style={styles.card}>
             <PanelHeader
               icon={TAB_ICON.inspections}
@@ -4864,14 +5129,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "monthly" && TAB_VISIBLE.monthly && (
           <>
-            <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
-              <button style={styles.tab(monthlySubTab === "records")} onClick={() => setMonthlySubTab("records")}>Submissions</button>
-              <button style={styles.tab(monthlySubTab === "actions")} onClick={() => setMonthlySubTab("actions")}>
-                Corrective Actions{companyMonthlyActions.filter(a => a.status !== "resolved").length > 0 ? ` (${companyMonthlyActions.filter(a => a.status !== "resolved").length})` : ""}
-              </button>
-            </div>
-
-            {monthlySubTab === "records" && (
+            {/* The Corrective Actions sub-tab that used to sit here moved out
+                to its own top-level Safety tab. Monthly Inspections is a
+                record of submissions; it was never the right filing cabinet
+                for a defect somebody found on a pre-trip. */}
+            {true && (
               <div style={styles.card}>
                 <PanelHeader
                   icon={TAB_ICON.monthly}
@@ -4961,62 +5223,24 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 )}
               </div>
             )}
-
-            {monthlySubTab === "actions" && (
-              <div style={styles.card}>
-                <PanelHeader
-                  icon={AlertTriangle}
-                  title={`${company?.name || ""} — Corrective Actions`}
-                  subtitle="Assign a responsible person and target date, then mark resolved once complete"
-                />
-
-                <StatStrip items={[
-                  { icon: AlertTriangle, value: companyMonthlyActions.filter(a => a.status !== "resolved").length, label: "Open", tone: companyMonthlyActions.filter(a => a.status !== "resolved").length > 0 ? "danger" : "neutral" },
-                  { icon: CircleCheckBig, value: companyMonthlyActions.filter(a => a.status === "resolved").length, label: "Resolved", tone: "success" },
-                ]} />
-
-                <div style={{ position: "relative", marginBottom: 14 }}>
-                  <Search size={15} color={C.text.faint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-                  <input
-                    style={{ ...styles.searchInput, marginBottom: 0, paddingLeft: 34 }}
-                    placeholder="Search question, site, or submitted by…"
-                    value={moaSearch}
-                    onChange={e => setMoaSearch(e.target.value)}
-                  />
-                </div>
-
-                {processedMonthlyActions.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
-                    <div style={{ marginBottom: 8 }}><CircleCheckBig size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
-                    {companyMonthlyActions.length === 0 ? "No corrective actions logged yet." : "No corrective actions match your search."}
-                  </div>
-                ) : (
-                  <>
-                    {processedMonthlyActions.filter(a => a.status !== "resolved").length > 0 && (
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: C.status.danger.text, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
-                          Open ({processedMonthlyActions.filter(a => a.status !== "resolved").length})
-                        </div>
-                        {processedMonthlyActions.filter(a => a.status !== "resolved").map(ca => (
-                          <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={updateCorrectiveAction} />
-                        ))}
-                      </div>
-                    )}
-                    {processedMonthlyActions.filter(a => a.status === "resolved").length > 0 && (
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: C.text.faint, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
-                          Resolved ({processedMonthlyActions.filter(a => a.status === "resolved").length})
-                        </div>
-                        {processedMonthlyActions.filter(a => a.status === "resolved").map(ca => (
-                          <CorrectiveActionRow key={ca.id} ca={ca} onUpdate={updateCorrectiveAction} />
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+            {/* Corrective actions moved out of this tab entirely — see the
+                `corrective` tab (Safety) and the Maintenance tab's
+                Corrective Actions sub-tab (equipment defects). */}
           </>
+        )}
+
+        {/* ── Safety: corrective actions from monthly findings, incidents
+            and near misses. Equipment defects deliberately are NOT here —
+            they belong with the machine, in Maintenance. ───────────────── */}
+        {activeTab === "corrective" && TAB_VISIBLE.corrective && (
+          <CorrectiveActionsPanel
+            title={`${company?.name || ""} — Corrective Actions`}
+            subtitle="From monthly inspections, incidents and near misses — assign a responsible person and target date, then mark resolved once complete"
+            actions={safetyCorrectiveActions}
+            onUpdate={updateCorrectiveAction}
+            searchPlaceholder="Search finding, site, or reported by…"
+            emptyText="No corrective actions logged yet."
+          />
         )}
 
         {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
@@ -5175,7 +5399,33 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
+        {/* ── Maintenance: the machines, and the defects against them ──────
+            Dillon, 2026-09-17: "When someone does a pretrip and flags an
+            issue, it must display in maintenance as a corrective action."
+            Two sub-tabs rather than one long page, because "is anything due
+            for service?" and "what is broken right now?" are two different
+            questions a supervisor asks on two different days. */}
         {activeTab === "maintenance" && TAB_VISIBLE.maintenance && (
+          <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
+            <button style={styles.tab(maintenanceSubTab === "machines")} onClick={() => setMaintenanceSubTab("machines")}>Machines</button>
+            <button style={styles.tab(maintenanceSubTab === "actions")} onClick={() => setMaintenanceSubTab("actions")}>
+              Corrective Actions{openEquipmentActions.length > 0 ? ` (${openEquipmentActions.length})` : ""}
+            </button>
+          </div>
+        )}
+
+        {activeTab === "maintenance" && TAB_VISIBLE.maintenance && maintenanceSubTab === "actions" && (
+          <CorrectiveActionsPanel
+            title={`${company?.name || ""} — Equipment Corrective Actions`}
+            subtitle={`Defects flagged on pre-trip and post-trip inspections. The same fault ${recurrenceRule.threshold}× on one machine within ${recurrenceRule.windowDays} days is flagged as recurring.`}
+            actions={equipmentCorrectiveActions}
+            onUpdate={updateCorrectiveAction}
+            searchPlaceholder="Search machine, fault, or who reported it…"
+            emptyText="No equipment defects outstanding."
+          />
+        )}
+
+        {activeTab === "maintenance" && TAB_VISIBLE.maintenance && maintenanceSubTab === "machines" && (
           <div style={styles.card}>
             <PanelHeader
               icon={TAB_ICON.maintenance}
@@ -5247,6 +5497,63 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               ))}
                             </div>
                           )}
+
+                          {/* ── This machine's own history ──────────────────
+                              The gap Dillon hit: "there was no log for it
+                              anywhere that that unit had a flat tire
+                              previously to see if it becomes a pattern."
+                              A machine's card now answers both "what is
+                              wrong with it right now" and "what keeps going
+                              wrong with it", without leaving this screen. */}
+                          {(() => {
+                            const patterns = equipmentPatternsById[eq.id] || [];
+                            const openForMachine = openEquipmentActions.filter(a => String(a.equipment_id) === String(eq.id));
+                            if (patterns.length === 0 && openForMachine.length === 0) return null;
+                            return (
+                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.line}` }}>
+                                {patterns.map(pt => (
+                                  <div key={pt.key} style={{
+                                    background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`,
+                                    borderRadius: RAD.sm, padding: "8px 10px", marginBottom: 6,
+                                  }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                                      <Repeat size={12} strokeWidth={2.5} color={C.status.danger.text} />
+                                      <span style={{ fontSize: 11, fontWeight: 800, color: C.status.danger.text, textTransform: "uppercase", letterSpacing: 0.3 }}>
+                                        Recurring — {pt.count}× in {pt.windowDays} days
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: 13, color: C.text.primary, fontWeight: 600 }}>{pt.sampleDescription || pt.itemKey}</div>
+                                    {/* The recommendation is the point. A count
+                                        alone leaves the supervisor to do the
+                                        arithmetic; this says what the count
+                                        means. */}
+                                    <div style={{ fontSize: 12, color: C.text.body, marginTop: 3 }}>
+                                      This keeps coming back — worth repairing or replacing properly rather than patching it again.
+                                    </div>
+                                  </div>
+                                ))}
+                                {openForMachine.length > 0 && (
+                                  <>
+                                    <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: C.status.danger.text, marginBottom: 4, marginTop: patterns.length > 0 ? 8 : 0 }}>
+                                      Open defects ({openForMachine.length})
+                                    </div>
+                                    {openForMachine.slice(0, 5).map(a => (
+                                      <div key={a.id} style={{ fontSize: 12, color: C.text.muted, marginBottom: 3, display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+                                        <span style={{ color: C.text.body }}>{a.description}</span>
+                                        <RecurrenceBadge recurrence={a.recurrence} compact />
+                                      </div>
+                                    ))}
+                                    <button
+                                      onClick={() => setMaintenanceSubTab("actions")}
+                                      style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0, marginTop: 4 }}
+                                    >
+                                      {openForMachine.length > 5 ? `View all ${openForMachine.length} →` : "Assign or close these →"}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <span style={{ fontSize: 11, fontWeight: 700, color: sc.text, background: sc.bg, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: RAD.pill, flexShrink: 0 }}>{sc.label}</span>
                       </div>

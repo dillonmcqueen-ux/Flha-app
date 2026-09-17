@@ -1,6 +1,7 @@
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { loadJsPDF } from "./loadJsPDF.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
+import { getForaLogoDataUrl } from "./foraLogo.js";
 
 const CHECK_COLS = [
   { key: "Good", label: "G", color: [22, 163, 74] },
@@ -20,14 +21,28 @@ function drawChecklistCompact(doc, items, { margin, contentW, y, W }) {
   const boxX = (colIdx) => boxesRightEdge - BOX - (2 - colIdx) * PITCH;
 
   // legend header
-  doc.setFontSize(6.5); doc.setFont("helvetica", "bold"); doc.setTextColor(148, 163, 184);
-  CHECK_COLS.forEach((c, i) => doc.text(c.label, boxX(i) + BOX / 2, y, { align: "center" }));
-  y += 4;
+  const drawLegend = () => {
+    doc.setFontSize(6.5); doc.setFont("helvetica", "bold"); doc.setTextColor(148, 163, 184);
+    CHECK_COLS.forEach((c, i) => doc.text(c.label, boxX(i) + BOX / 2, y, { align: "center" }));
+    y += 4;
+  };
+  drawLegend();
 
   let lastCategory = null;
   let lastUnit = null;
   items.forEach((it) => {
-    if (y > 270) { doc.addPage(); y = 20; }
+    if (y > 270) {
+      doc.addPage(); y = 20;
+      // Repeat the G/M/D legend and re-assert the category on the new page.
+      // Without this a checklist that spills over gives the reader three
+      // unlabelled boxes per row and no category heading, so they have to
+      // flip back to work out which column means Defective. Rare before a
+      // post-trip carried a checklist of its own; now this function runs
+      // TWICE in one document, so a multi-page checklist is normal.
+      drawLegend();
+      lastCategory = null;
+      lastUnit = null;
+    }
     // A trailer attached to a tow unit gets its own checklist appended,
     // tagged by unit — call that out with its own banner so a reader can't
     // mistake a trailer defect for a defect on the tow vehicle, or vice
@@ -261,12 +276,53 @@ export async function generateAndUploadInspection({
     y += 10;
 
     // ── POST-TRIP section ──────────────────────────────────────────────
+    const posttripItems = results?.items || [];
+    const resolvedItems = posttripItems.filter(it => it.carriedFrom && it.resolution === "fixed");
+
+    // Guarded like every other section heading in this file. Unguarded, the
+    // pre-trip signature line above can leave y at 281, putting this banner
+    // in the bottom margin and the checklist legend 3mm from the paper edge
+    // — or orphaning the heading alone on the previous page.
+    if (y + 18 > 280) { doc.addPage(); y = 20; }
     doc.setFillColor(237, 233, 254); doc.roundedRect(margin, y, contentW, 7, 1.5, 1.5, "F");
     doc.setTextColor(91, 33, 182); doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
-    doc.text("POST-TRIP — CHANGES SINCE PRE-TRIP", margin + 3, y + 5);
+    doc.text(posttripItems.length > 0 ? "POST-TRIP CHECKLIST" : "POST-TRIP — CHANGES SINCE PRE-TRIP", margin + 3, y + 5);
     y += 11;
 
-    if (!hasChanges) {
+    if (posttripItems.length > 0) {
+      // Repairs first. This section is the reason the post-trip stopped
+      // being a single yes/no question: a defect raised in the morning and
+      // cleared by the end of the shift is the one thing the paper record
+      // could never show, and it is what makes the corrective action that
+      // closed against it auditable.
+      if (resolvedItems.length > 0) {
+        const lines = resolvedItems.map(it => {
+          const what = (it.resolutionNote || "").trim();
+          return `${it.unitLabel ? `[${it.unitLabel}] ` : ""}${it.item}${what ? ` — ${what}` : ""}`;
+        });
+        const wrapped = lines.flatMap(l => doc.splitTextToSize(l, contentW - 10));
+        const boxH = 13 + wrapped.length * 4.5;
+        // Measure the box, THEN decide whether it fits — the same pattern
+        // drawDeficienciesSection already uses. A fixed threshold overflows
+        // at five or more wrapped lines: jsPDF clips rather than paginating,
+        // so a machine that carried six defects out of the morning and had
+        // them all signed off would print the green header with the last
+        // repairs cut off mid-sentence. That is exactly the auditable record
+        // this section exists to produce.
+        if (y + boxH > 280) { doc.addPage(); y = 20; }
+        doc.setFillColor(240, 253, 244); doc.setDrawColor(134, 239, 172);
+        doc.roundedRect(margin, y, contentW, boxH, 2, 2, "FD");
+        doc.setTextColor(22, 101, 52); doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
+        doc.text(`RESOLVED DURING THIS SHIFT (${resolvedItems.length})`, margin + 4, y + 7);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(51, 65, 85); doc.setFontSize(8.5);
+        doc.text(wrapped, margin + 5, y + 12.5);
+        y += boxH + 6;
+      }
+
+      y = drawCustomFieldsPDF(doc, results?.customFields, { margin, contentW, y, accent: [91, 33, 182] });
+      y = drawChecklistCompact(doc, posttripItems, { margin, contentW, y, W });
+      y = drawDeficienciesSection(doc, posttripItems, { margin, contentW, y, W });
+    } else if (!hasChanges) {
       doc.setFillColor(240, 253, 244); doc.setDrawColor(134, 239, 172);
       doc.roundedRect(margin, y, contentW, 12, 2, 2, "FD");
       doc.setTextColor(22, 101, 52); doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
@@ -304,6 +360,33 @@ export async function generateAndUploadInspection({
   doc.setTextColor(100, 116, 139); doc.setFontSize(8); doc.setFont("helvetica", "normal");
   doc.text(`Printed name: ${workerName}`, margin, y + 29);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
+
+  // footer — the one piece of the shared boilerplate this generator never
+  // had. Nine of the other eleven have this exact loop; src/generateDailyPDF.js
+  // is the reference. It was cosmetic while a post-trip was one page. It is
+  // not any more: a post-trip now prints the pre-trip checklist, its
+  // deficiencies, the repairs, the post-trip checklist, ITS deficiencies and
+  // a signature — three to five pages that go into an audit binder beside
+  // near-miss and toolbox PDFs that both carry page numbers. Shuffle them
+  // and there is nothing on any sheet saying which page it is, how many
+  // there are, or that it is a FORA document.
+  const foraLogo = await getForaLogoDataUrl();
+  const H = 297; const pageCount = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2); doc.line(margin, H - 12, W - margin, H - 12);
+    if (foraLogo) {
+      try { doc.addImage(foraLogo, "PNG", margin, H - 10, 16, 6.55); } catch (e) {}
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(148, 163, 184);
+      doc.text("AI-generated field safety documentation", margin + 19, H - 7);
+    } else {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(21, 128, 61);
+      doc.text("FORA", margin, H - 7);
+      doc.setFont("helvetica", "normal"); doc.setTextColor(148, 163, 184);
+      doc.text("AI-generated field safety documentation", margin + 11, H - 7);
+    }
+    doc.text(`Page ${p} of ${pageCount}`, W - margin, H - 7, { align: "right" });
+  }
 
   // upload
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);

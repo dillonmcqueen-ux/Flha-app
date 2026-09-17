@@ -38,7 +38,7 @@ line that proves it, so it can be re-verified rather than trusted.
 | 12 | Weekly Equipment Reports | `src/Dashboard.jsx` | `api/equipmentreports.js` | `equipment_reports` |
 | 13 | Weekly Time Clock Reports | `src/Dashboard.jsx` | `api/timeclockreports.js` | `timeclock` |
 | 14 | Certifications | `src/WorkerCertifications.jsx` | `api/certifications.js` | `certifications` |
-| 15 | Corrective Actions | `src/Dashboard.jsx` | `api/monthly.js` | *(none — rides `monthly`)* |
+| 15 | Corrective Actions | `src/Dashboard.jsx` — Maintenance tab (equipment) + its own Safety tab (everything else) | `api/monthly.js` | *(none — gated per source, see #10)* |
 | 16 | Company Brain | `AdminPanel.jsx` Brain tab | `api/cron-company-brain-summary.js` | *(none — always on)* |
 | 17 | Analytics | `src/Analytics.jsx` | `api/companydata.js` | *(none — tier-gated)* |
 | 18 | Gatehouse | `src/GatehouseBooth.jsx` | `api/gatehouse.js` | *(none — `app_type`)* |
@@ -65,6 +65,7 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Fuel Log | ✅ `FuelLog.jsx:21` | — |
 | Preventative Maintenance | ✅ `maintenance.js:321,384` | ✅ `maintenance.js:86,92,180-215` |
 | Weekly Equipment Report | — | ✅ *(#7, PR #119)* `equipmentreports.js:190-213,247` |
+| Corrective Actions | ✅ *(#11, PR #121)* `logs.js:463` | ✅ `recurrence.js:51`, `correctiveActions.js:298` |
 | Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) |
 
 **Consequence:** anything that groups by `equipment_label` silently splits
@@ -133,6 +134,45 @@ offline question to answer first — a post-trip queued offline needs its
 pre-trip's server-assigned id, so what that column holds mid-drain needs
 reading before any guard is written. Needs a decision, not a mechanical
 copy.
+
+### `(machine, item_key)` — the recurrence key
+Added by PR #121 (migration `corrective-actions-equipment-recurrence-migration.sql`,
+**written, not yet applied**). The pair that answers "has this unit had this
+fault before?", which nothing in the product could answer until now:
+`corrective_actions` knew *what* was wrong and *which finding* it came from,
+but its only pointer to a machine was `source_id` → one single inspection row.
+
+The machine half deliberately reuses the two-key space break #7 settled on:
+the fleet id when the row has one, otherwise the normalized label
+(`server-lib/recurrence.js:49-65`). The item half is the checklist line,
+lower-cased and whitespace-collapsed (`recurrence.js:38-42`) — **not** the
+description, which carries the machine label and the operator's note and
+therefore differs on every report of the same fault.
+
+| Consumer | Reads it |
+|---|---|
+| Recurrence count on each action | `api/monthly.js:809` (`annotateRecurrence`) |
+| Per-machine repeat-offender list | `api/monthly.js:819` (`patternsByEquipment`) → `src/Dashboard.jsx:1905,5509` |
+| Post-trip resolution | `server-lib/correctiveActions.js:327` |
+| Open-defect dedupe on submit | `server-lib/correctiveActions.js:153-199` |
+
+**Two things about this key are load-bearing and easy to get wrong.**
+
+*A label key must carry `company_id`; an id key must not.* `equipment.id` is
+a global sequence, so an id already names one company's machine. A label is a
+string two tenants can both type, and `list_corrective_actions` returns every
+company at once for an admin session (`monthly.js:644`) — so an
+unnamespaced label key merges two tenants' machines into one recurrence group
+(`recurrence.js:54-64`, pinned by `tests/unit/defect-recurrence.test.js`).
+
+*Closing and counting must use the same definition of "same machine".* The
+first version of `resolveCorrectiveActionsForItems` filtered the machine in
+the query with `.eq('equipment_label', …)` while the count used the
+normalized key. Two consequences, both found by `tenant-scope-reviewer`: a
+free-text label closed a **fleet-registered** machine's defects (and wrote no
+repair line, since that path needs an `equipment_id`), and a label differing
+only in case counted toward a group it could never close. Both sides now call
+`machineKey()`.
 
 ### `reading` / `reading_unit` (the usage clock)
 Hours or kilometres on a machine. Written by inspections
@@ -207,10 +247,19 @@ for monthly rows; a CHECK keeps it set if and only if
 |---|---|
 | `api/monthly.js` | `monthly_answer` |
 | `api/reports.js` | `incident`, `near_miss` |
-| `api/logs.js` | `equipment_inspection` |
+| `api/logs.js` | `equipment_inspection` (pre-trip **and**, since #11, post-trip) |
 
 All four go through `server-lib/correctiveActions.js`. **This was break #5
 below.**
+
+Since PR #121 the relationship also runs the other way: a post-trip can
+**close** an action and record the repair
+(`api/logs.js:493`, `server-lib/correctiveActions.js:272-352`), writing a
+`field_service` row to `equipment_maintenance_log` (`api/logs.js:513`) —
+never `pm_service`, which would reset the machine's PM clock. That made
+corrective actions the fourth writer of that table, alongside
+`api/maintenance.js:262` (`log_field_service`), `api/maintenance.js:325`
+(`log_service`) and `api/companydata.js:748`. **This was break #11 below.**
 
 ---
 
@@ -221,7 +270,7 @@ below.**
 
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
-| Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ✅ *(#5, PR #118)* | — |
+| Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118; post-trip too, #10, PR #121)* | ⚠️ label-joined | ✅ *(#5, PR #118; post-trip opens AND closes, #10/#11, PR #121)* | — |
 | Fuel Log | ✅ *(#1, PR #118)* | — | ✅ *(#1, PR #120)* | — *(no finding to extract)* | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
@@ -234,7 +283,8 @@ below.**
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
 | Certifications | — | — | — | — | — | — | ✅ *(#8, PR #120: expiry now reaches document review)* |
 | Sites | ⚠️ #2 | ✅ | — | — | ✅ *(#2, PR #120)* | — | — |
-| Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | — | — |
+| Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | ✅ *(#11, PR #121)* | — |
+| Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 
 ---
@@ -642,6 +692,102 @@ being fixed outright. He chose: count both, change the copy.
 
 ---
 
+### #10 — A post-trip defect opened no corrective action, ever
+
+**Severity: high. Status: fixed in PR #121.** Reported by Dillon on
+2026-09-17 from a live submission: he flagged a flat tire on a pre-trip, did
+the post-trip on the same machine, and the post-trip neither mentioned the
+tire nor recorded anything about it.
+
+`server-lib/correctiveActions.js`'s `correctiveActionsFromInspection` has
+always read `results.items`. A **pre-trip** stored that array. A **post-trip**
+did not: its `results_json` was a single
+`{hasChanges, changeCondition, changeNotes}` blob built at
+`src/Inspection.jsx:423-429` (pre-PR-#121 line numbers). So the same helper,
+the same table, the same `type === 'inspection'` branch in `api/logs.js`
+opened an action for a defect found at the START of a shift and silently
+nothing for the identical defect found at the END.
+
+**The shape is worth naming because it is not the one 4b describes.** That
+section covers a key written and never read. This is the mirror image: a
+consumer reading a field **one of its two producers never wrote**. Same
+silence, same absence of any error, and the same reason nobody found it — the
+feature worked in the case anybody tested.
+
+The post-trip now runs the pre-trip's own stored checklist rather than a
+regenerated one (`src/Inspection.jsx`, `buildPosttripItems`), so the trailer's
+items come with it and the two halves of a trip are comparable line for line.
+
+Two second-order effects this exposed, both handled:
+- **The Brain suddenly had a double-count.** `inspectionFindingSignal`
+  (`api/logs.js:152`) also reads `results.items`, so post-trips began feeding
+  it — a genuine gain (what breaks DURING a shift was never visible) that
+  would have tallied an unchanged carried fault twice. A carried item is
+  signal only when its condition changed (`api/logs.js:157-170`).
+- **A carried defect must not open a SECOND action.** One open action per
+  machine per fault (`server-lib/correctiveActions.js:153-199`), or a fault
+  nobody has fixed crosses the recurrence threshold inside a single day.
+
+*Re-check:* `grep -n "results.items\|results_json.items" server-lib/correctiveActions.js api/logs.js`
+— every consumer of that array must now be true for both trip types.
+
+### #11 — Nothing could close an equipment corrective action from the field
+
+**Severity: high. Status: fixed in PR #121.** The other half of #10, and the
+reason "there was no log for it anywhere that that unit had a flat tire
+previously" was true even for faults that *had* been fixed.
+
+An action could be opened by a worker and closed only by a supervisor on the
+dashboard, with no record of what was actually done — `status` flipped to
+`resolved` and that was the entire audit trail. A repair performed on the
+jobsite reached neither `corrective_actions` nor
+`equipment_maintenance_log`, so a machine's history showed the fault
+appearing and never showed it being fixed.
+
+A post-trip item marked **Fixed** now closes the matching open action
+(`server-lib/correctiveActions.js:272`) with the worker's own words in
+`resolved_note`, and writes a `field_service` row against the machine
+(`api/logs.js:513`).
+
+**Matching on (machine, item) rather than on the linked pre-trip's id is the
+part that matters.** Keyed to one pre-trip, Thursday's fix closes Thursday's
+action and leaves Tuesday's unfixed-and-still-open one forever — the
+supervisor's list slowly fills with defects repaired weeks ago, which is how
+a list stops being read.
+
+**`field_service`, never `pm_service`** — see
+`docs/scope-equipment-service-log.md`. A worker saying "the tire's fixed"
+must not reset a 250-hour service clock;
+`latestServiceByEquipment` (`api/maintenance.js:87`) filters on
+`entry_type` precisely so this fourth writer is safe.
+
+### #12 — The post-trip PDF's pre-trip half was always blank
+
+**Severity: medium. Status: fixed in PR #121.** Pre-existing on `main`,
+confirmed by stashing the branch and re-reading it. Found by
+`pdf-consistency-reviewer` while reviewing #10's diff.
+
+`src/generateInspectionPDF.js` reproduces the pre-trip in full inside the
+post-trip document, so one PDF is the whole story. It was only ever handed
+`{id, start_reading, reading_unit}` — so `linkedPretrip?.results_json?.items`
+was always `[]`, and **every post-trip PDF FORA has ever produced** printed
+the italic line "Pre-trip checklist not available.", an em dash for PRE-TRIP
+INSPECTOR, and, on a truck with a trailer, the single-column MACHINE box
+instead of TOW VEHICLE / TRAILER.
+
+A producer whose consumer received nothing — the same family as 4b, one
+level further out: the field existed, the reader read it, and the *caller*
+never populated it. Nothing on screen was wrong; only the document that goes
+in the audit binder.
+
+The pre-trip's results, author and timestamp now ride in the submission
+payload rather than being re-fetched, so a post-trip drained from the offline
+queue days later renders the document it would have rendered when it was
+signed.
+
+*Re-check:* `grep -n "linkedPretrip" src/Inspection.jsx` — the object built
+there must carry every field `generateInspectionPDF.js` reads off it.
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -674,6 +820,21 @@ validated". It is:**
    a comment through break #2's entire first half.
 4. Does a test pin the new key's behaviour, or only the old one's?
 
+**PR #121 added two more variants, and they are the mirror image.** 4b is
+about a key nobody reads. These are about a reader whose *producer* never
+wrote:
+
+| What | Consumer | The producer that never wrote it | Surfaced while closing |
+|---|---|---|---|
+| `results_json.items` | `correctiveActionsFromInspection`, `inspectionFindingSignal` | the **post-trip** half of `src/Inspection.jsx` | #10 (PR #121) |
+| `linkedPretrip.results_json` | `src/generateInspectionPDF.js:197` | `resubmitInspection`'s payload, which passed three scalars | #12 (PR #121) |
+
+So the check in both directions is the same one question: **for every field a
+consumer reads, is there more than one code path that produces the record —
+and does every one of them set it?** A feature with two entry points (a
+pre-trip and a post-trip; a live submit and an offline drain) is where this
+hides, because the case somebody tested works perfectly.
+
 Two related instances, same family:
 - **The guard that went stale.** `tests/unit/brain-signal-capture.test.js`
   asserted writers and `bySourceType` agree, from a **hardcoded list of
@@ -694,8 +855,8 @@ Do **not** flag these. They are decisions, not gaps.
 - **Equipment Inspection makes no AI call.** It is checklist-driven, so it
   correctly does not import `companyProfile.js`. "7 of 8 generators" in
   CLAUDE.md counts AI-calling generators; Inspection is the 8th form, not
-  a missing integration. (It *should* still emit a Brain signal — that's
-  break #4, a different thing.)
+  a missing integration. (It *should* still emit a Brain signal — that was
+  break #4, closed in PR #118, and extended to post-trips by #10 in PR #121.)
 - **`equipment_id` is null for free-text machines.** Intentional
   (`maintenance.js:5-7`). Never "fix" this by matching on label.
 - **RLS has no policies.** Deny-by-default backstop by design (README).
@@ -729,3 +890,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #120 | Break #2 **closed**: `site_id` now survives the read boundary (five list payloads were dropping it) and the analytics site tables key on it. Two tables kept on purpose. |
 | 2026-09-17 | PR #120 | Break #1 **closed**: the weekly report's ending reading now reads fuel logs too, via reading helpers moved into `server-lib/readings.js` so maintenance and the report share one definition. "Used" stays trip-derived by definition, recorded as a boundary rather than a gap. |
 | 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |
+| 2026-09-17 | PR #121 | Breaks **#10, #11 and #12** found and closed, all from one live report: a pre-trip flat tire that the post-trip never mentioned. #10 — a post-trip's `results_json` had no `items`, so the helper every consumer shares opened an action for a defect at the start of a shift and silently nothing for the same defect at the end. #11 — nothing could close an equipment action from the field or record the repair. #12 — pre-existing on `main`: **every post-trip PDF ever produced** printed "Pre-trip checklist not available." because the caller passed three scalars where the generator reads a whole record. |
+| 2026-09-17 | PR #121 | New join key: `(machine, item_key)` on `corrective_actions`, reusing break #7's two-key machine space. One reducer (`server-lib/recurrence.js`), two callers, per break #1's lesson. Migration **written, not applied** — deliberately all-nullable so it is safe in either deploy order, which is break #5's NOT-NULL-ahead-of-its-code lesson encoded in the schema rather than a comment. |
+| 2026-09-17 | PR #121 | Surface #15 re-homed. Corrective Actions was a sub-tab of Monthly Inspections **gated on `isDocActive("monthly")`** — so a company on inspections + maintenance without monthly site inspections had corrective actions being created and unreachable. A gating bug hiding inside what looked like a navigation complaint. |
+| 2026-09-17 | PR #121 | Section 4b extended: the same silence has a mirror image — a consumer reading a field one of its two producers never wrote. Both PR #121 variants are that shape, and both hid in a feature with two entry points. |
