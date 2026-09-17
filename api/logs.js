@@ -174,6 +174,61 @@ export function inspectionFindingSignal(record) {
   return signal;
 }
 
+// The conditions a company actually works in — break #4's daily-report half.
+//
+// PR #118 left daily reports out, and the reasoning held: their content is
+// crew, visitor and narrative free text with no structured finding to
+// extract, and feeding raw prose to the Brain dilutes the signal that makes
+// a profile company-specific.
+//
+// Two of their fields are not prose. `weather` is a pick from a fixed
+// seven-value list in src/DailyReport.jsx, joined for storage; `temperature`
+// is typed but parses to a number. Together they are the ONE thing no other
+// document type tells the Brain: a company working at -35 in an Alberta
+// winter should get cold-stress hazards in its generated FLHAs, and today
+// nothing anywhere carries that.
+//
+// Crew, visitors and the narrative stay out, deliberately. This is the
+// structured half of a mostly-unstructured document, not the whole thing.
+const WEATHER_VOCAB = ['Clear', 'Cloudy', 'Rain', 'Snow', 'Windy', 'Hot', 'Cold'];
+
+// Mirrors src/DailyReport.jsx's WEATHER list. Anything outside it is
+// dropped rather than tallied, so a future free-text weather field cannot
+// quietly turn this into a prose signal.
+export function dailyConditionsSignal(record) {
+  if (!record) return null;
+  const raw = typeof record.weather === 'string' ? record.weather : '';
+  const conditions = raw
+    .split(',')
+    .map((w) => w.trim())
+    .filter((w) => WEATHER_VOCAB.includes(w));
+
+  // Free text like "18°C", "-35", "minus 20". Take the first signed number
+  // and nothing else; a value that does not parse is simply absent rather
+  // than guessed at.
+  const tempRaw = typeof record.temperature === 'string' ? record.temperature : '';
+  const match = tempRaw.match(/-?\d+(?:\.\d+)?/);
+  const temperature = match ? parseFloat(match[0]) : null;
+  // Sanity bound: a typo like "180" is not a jobsite temperature, and a
+  // tallied nonsense band would be worse than no band at all.
+  const inRange = temperature != null && temperature >= -60 && temperature <= 60;
+
+  if (conditions.length === 0 && !inRange) return null;
+
+  const signal = {};
+  if (conditions.length > 0) signal.conditions = conditions.slice(0, MAX_SIGNAL_ITEMS);
+  if (inRange) {
+    signal.temperature = temperature;
+    // Banded as well as raw, because what a profile should emphasize is
+    // "they work in extreme cold", not "the mean was -18.4".
+    signal.tempBand = temperature <= -20 ? 'extreme_cold'
+      : temperature <= 0 ? 'freezing'
+      : temperature >= 30 ? 'extreme_heat'
+      : 'moderate';
+  }
+  return signal;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -330,9 +385,6 @@ export default async function handler(req, res) {
       // Defective do. Same best-effort discipline as every other writer
       // here: the inspection is already saved, and a failure below is
       // logged, never turned into a failed submit.
-      //
-      // Daily reports still produce no signal: their content is weather,
-      // crew and visitor free text with no structured finding to extract.
       if (newId && type === 'inspection') {
         const signal = inspectionFindingSignal(record);
         if (signal) {
@@ -343,6 +395,24 @@ export default async function handler(req, res) {
             signal_json: signal,
           });
           if (signalErr) console.error('company_signals insert failed for inspection', newId, signalErr.message);
+        }
+      }
+
+      // Break #4's daily-report half — see dailyConditionsSignal above for
+      // what is extracted and what is deliberately left out. Same
+      // best-effort discipline as every other writer here: the report is
+      // already saved, and a failure below is logged, never turned into a
+      // failed submit.
+      if (newId && type === 'daily') {
+        const signal = dailyConditionsSignal(recordToInsert);
+        if (signal) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: 'daily_report',
+            source_id: String(newId),
+            signal_json: signal,
+          });
+          if (signalErr) console.error('company_signals insert failed for daily report', newId, signalErr.message);
         }
       }
 

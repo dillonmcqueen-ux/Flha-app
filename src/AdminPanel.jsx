@@ -2020,12 +2020,14 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.near_miss}</div><div style={{ fontSize: 11, color: C.muted }}>Near misses</div></div>
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.equipment_inspection ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Equipment defects</div></div>
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.monthly_inspection ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Site findings</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.daily_report ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Working conditions</div></div>
                   </div>
                   {[
                     ["Hazards most often added by workers", brainTrends.topAddedHazards],
                     ["Hazards most often removed by workers", brainTrends.topRemovedHazards],
                     ["Common toolbox talk topics", brainTrends.topToolboxTopics],
                     ["Common incident categories", brainTrends.topIncidentCategories],
+                    ["Conditions this company works in", brainTrends.topWorkingConditions],
                     ["Recent near-miss involvement (free text — often unique per report)", brainTrends.topNearMissInvolved],
                     ["Checks most often failing on equipment", brainTrends.topDefectiveItems],
                     ["Machines with the most inspection findings", brainTrends.topInspectedEquipment],

@@ -222,14 +222,14 @@ below.**
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
 | Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ✅ *(#5, PR #118)* | — |
-| Fuel Log | ✅ *(#1, PR #118)* | — | ✅ *(#1, PR #120)* | ❌ #4 | ⚠️ label-joined | — | — |
+| Fuel Log | ✅ *(#1, PR #118)* | — | ✅ *(#1, PR #120)* | — *(no finding to extract)* | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
 | Incident | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
 | Near Miss | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
 | Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
-| Daily Report | — | — | — | ❌ #4 | ✅ | — | — |
-| Custom Document | — | — | — | ❌ #4 | ✅ | — | — |
+| Daily Report | — | — | — | ✅ *(#4, PR #120)* | ✅ | — | — |
+| Custom Document | — | — | — | — *(excluded, #4)* | ✅ | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
 | Sites | ⚠️ #2 | ✅ | — | — | ✅ *(#2, PR #120)* | — | — |
@@ -387,14 +387,38 @@ history all become string matching. `WalletInvite.jsx:115` and
 `certifications.js` show the correct pattern.
 
 ### #4 — The Brain learns from 4 of 9 document types
-**Severity: high. Status: partially fixed in PR #118** — equipment
-inspections (`equipment_inspection`) and monthly site inspections
-(`monthly_inspection`) now emit signals, taking it to 6 of 9. **Still
-unwired: daily reports, custom documents, and corrective actions.** Daily
-reports and custom documents carry free text with no structured finding to
-extract, so wiring them is a judgement call about noise, not an oversight;
-corrective actions derive from monthly inspections and would double-count.
-Do not mark #4 closed.
+**Severity: high. Status: closed, with two documented exclusions.** PR #118
+took it from 4 to 6 (`equipment_inspection`, `monthly_inspection`); PR #120
+added `daily_report`, taking it to 7.
+
+**What a daily report contributes, and what it does not.** Crew, visitors
+and the narrative stay out — free text with no structured finding, which is
+the noise concern that kept the whole document type out of PR #118. But two
+of its fields are not prose: `weather` is a pick from a fixed seven-value
+list (`src/DailyReport.jsx:12`) and `temperature` parses to a number. Those
+are the **one thing no other document type tells the Brain** — a company
+working at -35 in an Alberta winter should get cold-stress hazards in its
+generated FLHAs, and nothing else FORA collects carries that
+(`dailyConditionsSignal`, `api/logs.js`). Out-of-vocabulary weather is
+dropped rather than tallied, so the field changing shape cannot quietly turn
+this back into a prose signal.
+
+**The two remaining exclusions are deliberate, not open work:**
+- **Custom documents** — their shape is entirely customer-defined, so there
+  is no field that means the same thing across two companies. Dillon's call,
+  2026-09-17.
+- **Corrective actions** — they derive from findings the Brain already sees
+  (monthly answers, inspection defects), so a signal would double-count the
+  same event.
+
+**The guard that keeps this closed is now self-maintaining.** The test
+asserting writers and `bySourceType` agree used to hardcode its own list of
+writers, so it went stale the moment a writer was added — the same failure
+it existed to catch, one level up. Adding `daily_report` exposed that. It
+now **scans `api/` for writer literals**, and a second test asserts every
+counted type also branches in `server-lib/companyBrainSummary.js`, since a
+type can be counted in the Admin Panel and still contribute nothing to the
+prompt the model actually sees.
 
 Adding a source type means updating four places, not one: the writer,
 `bySourceType` in `api/companydata.js` (an unlisted type is silently
@@ -596,6 +620,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
 | 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #120 | Break #4 **closed**: daily reports now emit a `daily_report` signal carrying working conditions only (fixed-vocabulary weather + parsed temperature). Custom documents and corrective actions excluded on purpose. The writers-vs-counters guard was itself stale and now scans `api/` instead of hardcoding a list. |
 | 2026-09-17 | PR #120 | Break #2 **closed**: `site_id` now survives the read boundary (five list payloads were dropping it) and the analytics site tables key on it. Two tables kept on purpose. |
 | 2026-09-17 | PR #120 | Break #1 **closed**: the weekly report's ending reading now reads fuel logs too, via reading helpers moved into `server-lib/readings.js` so maintenance and the report share one definition. "Used" stays trip-derived by definition, recorded as a boundary rather than a gap. |
 | 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |

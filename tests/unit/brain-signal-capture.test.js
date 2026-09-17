@@ -22,13 +22,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 process.env.SUPABASE_URL ||= 'http://127.0.0.1:1/';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 process.env.SESSION_SECRET ||= 'test-session-secret';
 
-const { inspectionFindingSignal } = await import('../../api/logs.js');
+const { inspectionFindingSignal,
+  dailyConditionsSignal,
+} = await import('../../api/logs.js');
 
 const item = (name, condition) => ({ item: name, category: 'Fluids & Engine Compartment', condition });
 
@@ -125,10 +127,118 @@ test('every source_type a writer emits is counted by the trends endpoint', () =>
   // its map, so a captured signal would be recorded and summarized but
   // invisible in the Admin Panel's Brain tab. This asserts the two lists
   // agree, which is the exact drift this whole change exists to close.
-  const writers = ['flha_edit', 'toolbox_talk', 'incident', 'near_miss', 'equipment_inspection', 'monthly_inspection'];
+  //
+  // The writer list is SCANNED from api/, not hardcoded. An earlier version
+  // of this test hardcoded it, which meant the guard itself went stale the
+  // moment a writer was added -- the same failure it exists to catch, one
+  // level up. Adding daily_report is what exposed that.
+  const apiDir = new URL('../../api/', import.meta.url);
+  const literals = new Set();
+  for (const file of readdirSync(apiDir).filter((f) => f.endsWith('.js'))) {
+    const src = readFileSync(new URL(file, apiDir), 'utf8');
+    for (const m of src.matchAll(/source_type: '([a-z_]+)'/g)) literals.add(m[1]);
+    // Ternary writers, e.g. api/reports.js's
+    // `source_type: type === 'incident' ? 'incident' : 'near_miss'`.
+    for (const m of src.matchAll(/source_type: [^,\n]*\?\s*'([a-z_]+)'\s*:\s*'([a-z_]+)'/g)) {
+      literals.add(m[1]);
+      literals.add(m[2]);
+    }
+  }
+
+  // Corrective-action source types are a different vocabulary on a
+  // different table and are deliberately not Brain signals -- they derive
+  // from findings the Brain already sees, so counting them would
+  // double-count. Excluded by name so the exclusion is visible rather than
+  // implicit in a regex.
+  const notBrainSignals = new Set(['monthly_answer']);
+  const writers = [...literals].filter((t) => !notBrainSignals.has(t));
+
+  assert.ok(writers.length >= 6, `expected to find the Brain writers by scanning api/, found ${writers.length}: ${writers.join(', ')}`);
+
   const source = readFileSync(new URL('../../api/companydata.js', import.meta.url), 'utf8');
   const declared = source.match(/const bySourceType = \{([^}]*)\}/)[1];
   for (const w of writers) {
     assert.ok(declared.includes(`${w}:`), `bySourceType is missing "${w}", so its signals would be silently uncounted`);
   }
+});
+
+test('every counted source_type also reaches the prompt the model actually sees', () => {
+  // bySourceType only feeds the Admin Panel tile. A type can be counted
+  // there and still contribute nothing to the profile, which is the
+  // half-wired state break #4 describes: captured, summarized, invisible.
+  const declared = readFileSync(new URL('../../api/companydata.js', import.meta.url), 'utf8')
+    .match(/const bySourceType = \{([^}]*)\}/)[1];
+  const counted = [...declared.matchAll(/([a-z_]+):/g)].map((m) => m[1]);
+  const prompt = readFileSync(new URL('../../server-lib/companyBrainSummary.js', import.meta.url), 'utf8');
+  for (const t of counted) {
+    assert.ok(prompt.includes(`'${t}'`), `companyBrainSummary.js never branches on "${t}", so its signals never reach the model`);
+  }
+});
+
+// ── Break #4's daily-report half ────────────────────────────────────────
+//
+// Daily reports were left out of PR #118 on purpose: crew, visitors and the
+// narrative are free text with no structured finding, and feeding raw prose
+// to the Brain dilutes the signal that makes a profile company-specific.
+// Two fields are not prose, though -- weather is a pick from a fixed list
+// and temperature parses to a number -- and together they are the one thing
+// no other document type tells the Brain.
+//
+// What these cases exist to stop coming back:
+//   * free text creeping in through the weather field and turning this back
+//     into a prose signal;
+//   * a typo'd temperature being tallied as a real working condition;
+//   * an empty daily report writing a row that says nothing.
+
+test('conditions and temperature become a signal', () => {
+  const signal = dailyConditionsSignal({ weather: 'Snow, Windy', temperature: '-35°C' });
+  assert.deepEqual(signal.conditions, ['Snow', 'Windy']);
+  assert.equal(signal.temperature, -35);
+  assert.equal(signal.tempBand, 'extreme_cold');
+});
+
+test('weather outside the fixed vocabulary is dropped, not tallied', () => {
+  // The vocabulary mirrors src/DailyReport.jsx. Anything else means the
+  // field changed shape, and a prose weather value must not silently become
+  // a counted "condition".
+  const signal = dailyConditionsSignal({ weather: 'Blizzard, Snow', temperature: '' });
+  assert.deepEqual(signal.conditions, ['Snow']);
+});
+
+test('an unparseable temperature is absent rather than guessed', () => {
+  const signal = dailyConditionsSignal({ weather: 'Clear', temperature: 'chilly' });
+  assert.equal(signal.temperature, undefined);
+  assert.equal(signal.tempBand, undefined);
+});
+
+test('an out-of-range temperature is rejected', () => {
+  // "180" is a typo, not a jobsite. A tallied nonsense band is worse than
+  // no band.
+  const signal = dailyConditionsSignal({ weather: 'Clear', temperature: '180' });
+  assert.equal(signal.temperature, undefined);
+  assert.deepEqual(signal.conditions, ['Clear']);
+});
+
+test('a daily report with nothing structured writes no row at all', () => {
+  assert.equal(dailyConditionsSignal({ weather: '', temperature: '' }), null);
+  assert.equal(dailyConditionsSignal({}), null);
+  assert.equal(dailyConditionsSignal(null), null);
+});
+
+test('negative temperatures parse, including bare numbers', () => {
+  // The band boundaries are inclusive at the cold end: -20 is already
+  // extreme cold on an Alberta jobsite, not merely freezing.
+  assert.equal(dailyConditionsSignal({ weather: '', temperature: '-20' }).tempBand, 'extreme_cold');
+  assert.equal(dailyConditionsSignal({ weather: '', temperature: '-19' }).tempBand, 'freezing');
+  assert.equal(dailyConditionsSignal({ weather: '', temperature: '35' }).tempBand, 'extreme_heat');
+  assert.equal(dailyConditionsSignal({ weather: '', temperature: '18°C' }).tempBand, 'moderate');
+});
+
+test('crew, visitors and the narrative never reach the signal', () => {
+  const signal = dailyConditionsSignal({
+    weather: 'Clear', temperature: '18',
+    crew: 'Dave, Priya, and a subcontractor', visitors: 'Safety officer from head office',
+    report_json: { workDone: 'Poured the north footing' },
+  });
+  assert.deepEqual(Object.keys(signal).sort(), ['conditions', 'tempBand', 'temperature']);
 });
