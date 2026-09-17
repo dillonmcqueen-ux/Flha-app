@@ -222,7 +222,7 @@ below.**
 | From ↓ / To → | PM | Fuel | Equip Rpt | Brain | Analytics | Corrective | Certs |
 |---|---|---|---|---|---|---|---|
 | Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118)* | ⚠️ label-joined | ✅ *(#5, PR #118)* | — |
-| Fuel Log | ✅ *(#1, PR #118)* | — | ❌ #1 | ❌ #4 | ⚠️ label-joined | — | — |
+| Fuel Log | ✅ *(#1, PR #118)* | — | ✅ *(#1, PR #120)* | ❌ #4 | ⚠️ label-joined | — | — |
 | FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
 | Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
 | Incident | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
@@ -232,8 +232,8 @@ below.**
 | Custom Document | — | — | — | ❌ #4 | ✅ | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
-| Sites | ⚠️ #2 | ✅ | — | — | ⚠️ #2 | — | — |
-| Equipment fleet | ✅ | ✅ | ⚠️ label | ❌ #4 | ⚠️ label | — | — |
+| Sites | ⚠️ #2 | ✅ | — | — | ✅ *(#2, PR #120)* | — | — |
+| Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 
 ---
@@ -291,7 +291,28 @@ case in `tests/unit/maintenance-readings.test.js`.
 
 ### #2 — Site is three different columns
 **Severity: high** for analytics, medium for daily use.
-**Status: fixed in PR #118.** `site_id` (nullable FK) added to `flhas`,
+**Status: fixed.** PR #118 did the write half; PR #120 did the read half,
+which had been left open in a way worth naming. `site_id` was written on
+submit and then **dropped by every list payload** (`api/logs.js:106,111`,
+`api/reports.js:97,102`, `api/flhas.js:417` all SELECTed only the text), so
+analytics never saw the key the same PR had just added. A producer nothing
+consumes — introduced by the fix for the break it belongs to, the same way
+the `delete_site` wedge was.
+
+The analytics tables now key on `site_id` when a row has one
+(`siteBucketKey`, `src/analyticsUtils.js:110-114`), so one real site spelled
+three ways is one row, a renamed site reads under its current name, and the
+field and scheduled tables agree on what a site is called. Rows with no id —
+the "other / not in the list" path — keep name bucketing, and the two key
+spaces are namespaced so free text can never land in a registered site's
+bucket.
+
+**Still two tables, deliberately** (Dillon's call, 2026-09-17): field
+paperwork and scheduled inspections answer different questions. Merging them
+into one eight-column table is a presentation change that can be reviewed on
+its own; keying them the same way is the part that was actually broken.
+
+The original write half: `site_id` (nullable FK) added to `flhas`,
 `toolbox_talks`, `daily_reports`, `incidents` and `near_misses`, and
 backfilled by case-insensitive name match scoped to company. The text
 columns stay: the "other / not in the list" path has no id, and the text is
@@ -575,5 +596,6 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
 | 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #120 | Break #2 **closed**: `site_id` now survives the read boundary (five list payloads were dropping it) and the analytics site tables key on it. Two tables kept on purpose. |
 | 2026-09-17 | PR #120 | Break #1 **closed**: the weekly report's ending reading now reads fuel logs too, via reading helpers moved into `server-lib/readings.js` so maintenance and the report share one definition. "Used" stays trip-derived by definition, recorded as a boundary rather than a gap. |
 | 2026-09-17 | PR #119 (`afee546`) | `equipment_id` ownership validation added (`server-lib/equipmentScope.js`), found by `tenant-scope-reviewer` on the break #7 diff. Making a column load-bearing exposed that nothing validated it: `api/logs.js`'s inspection submit never checked it, and `attachedTrailer.id` can't be checked on submit at all. **A second instance of the #2 pattern — closing a break turned a dormant column into a live dependency.** Nothing leaked; the trap was closed before a reader existed to spring it. |

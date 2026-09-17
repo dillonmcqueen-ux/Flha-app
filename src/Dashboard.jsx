@@ -2172,7 +2172,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // supervisor happens to open Fuel Logs or Equipment Analytics.
   const [fuelLogs, setFuelLogs] = useState([]);
   const [loadingFuelLogs, setLoadingFuelLogs] = useState(false);
-  const [fuelSiteNames, setFuelSiteNames] = useState({});
+  const [siteNamesById, setSiteNamesById] = useState({});
   // `silent` on this and every loader below: a background refresh swaps the
   // data underneath the list that's already on screen instead of replacing
   // it with a "Loading..." placeholder. Only a first load (or a company /
@@ -2189,7 +2189,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       const fuelData = await fuelRes.json();
       if (fuelRes.ok) setFuelLogs((fuelData.records || []).filter(r => r.company_id === selectedCompany));
       const siteData = await siteRes.json();
-      if (siteRes.ok) setFuelSiteNames(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
+      // Named for what it is rather than who asked for it first: the fuel
+      // summary needed this { id: name } map, and since break #2 the safety
+      // analytics site tables use it too. The loader runs on every company
+      // change regardless of which modules are on, so it is always
+      // populated — and if it ever is not, the site tables still group
+      // correctly, they just fall back to the text the workers typed.
+      if (siteRes.ok) setSiteNamesById(Object.fromEntries((siteData.sites || []).map(s => [s.id, s.name])));
     } catch (e) { /* leave list as-is if the request fails */ }
     setLoadingFuelLogs(false);
   };
@@ -2830,6 +2836,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         flhas: companyFlhas, toolbox: companyToolbox, nearMisses: companyNearMisses, incidents: companyIncidents,
         daily: companyDaily, monthlyActions: companyMonthlyActions,
         monthlyRecords: companyMonthlyRecords, customDocs: companySafetyCustomDocs,
+        siteNames: siteNamesById,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the safety analytics PDF.");
@@ -2845,7 +2852,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         companyName: company?.name, companyLogo: company?.logo_url,
         inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
         customDocs: companyOperationsCustomDocs,
-        fuelLogs: TAB_VISIBLE.fuel ? fuelLogs : [], siteNames: fuelSiteNames,
+        fuelLogs: TAB_VISIBLE.fuel ? fuelLogs : [], siteNames: siteNamesById,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
@@ -3084,7 +3091,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // fuelSummary() already computes (Phase 3) surfaced as a standing
   // Overview tile instead of something a supervisor has to go find inside
   // Equipment Analytics. Still just a flag, no push/notification system.
-  const fuelFlagged = fuelSummary(fuelLogs, fuelSiteNames).flagged;
+  const fuelFlagged = fuelSummary(fuelLogs, siteNamesById).flagged;
   const fuelSpark = bucketByDay(fuelLogs, 7);
 
   // Onboarding-wallet activity — certification uploads (each one carries
@@ -3111,7 +3118,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
    .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
    .slice(0, 8);
 
-  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents)
+  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents, siteNamesById)
     .map(s => ({ ...s, total: s.flhas + s.toolbox + s.daily + s.nearMisses + s.incidents, needsAttention: s.nearMisses + s.incidents > 0 }))
     .filter(s => s.total > 0)
     .sort((a, b) => b.total - a.total)
@@ -5018,6 +5025,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               monthlyRecords={companyMonthlyRecords}
               monthlyActions={companyMonthlyActions}
               customDocs={companySafetyCustomDocs}
+              siteNames={siteNamesById}
               certAlerts={isDocActive("certifications") ? certAlerts : null}
             />
           </>
@@ -5049,7 +5057,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
               customDocs={companyOperationsCustomDocs}
               fuelLogs={TAB_VISIBLE.fuel ? fuelLogs : []}
-              siteNames={fuelSiteNames}
+              siteNames={siteNamesById}
             />
           </>
         )}

@@ -94,12 +94,12 @@ const TABLES = {
   incident: {
     name: 'incidents',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, site, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, site, site_id, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
   nearmiss: {
     name: 'near_misses',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, is_anonymous, site, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
+    listColumns: 'id, reporter_name, is_anonymous, site, site_id, occurred_at, involved, report_json, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes',
   },
 };
 

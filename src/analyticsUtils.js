@@ -79,50 +79,91 @@ export function equipmentIssueStats(inspections) {
   return Object.values(buckets).sort((a, b) => (b.defective + b.monitor) - (a.defective + a.monitor));
 }
 
-// ── Sites — kept as two separate tables on purpose. Free-text `site`
-// (workers typing/picking a name on FLHA/toolbox/daily/near-miss/incident)
-// and FK-resolved `site_name` (monthly/custom, backed by the real sites
-// table) are not safe to merge — casing/typo drift and fallback labels like
-// "Unknown site" would collide across the two systems.
+// ── Sites ───────────────────────────────────────────────────────────────
+// Still two tables, because they answer two questions (field paperwork vs
+// scheduled inspections). What changed is that they now agree on what a
+// SITE IS.
+//
+// Break #2 in docs/feature-interaction-map.md. This comment used to say the
+// two were "not safe to merge — casing/typo drift and fallback labels would
+// collide", and that was true while a name was the only key. PR #118 added
+// site_id to all five field forms, so both sides now carry the real FK; the
+// reason not to join them stopped being true and nothing noticed.
+//
+// The second half of that break is the one this closes: PR #118 wrote the
+// id on submit, but every list payload still SELECTed only the text
+// (api/logs.js, api/reports.js, api/flhas.js), so the key was produced and
+// thrown away before analytics ever saw it. A producer nothing consumes —
+// exactly the shape the map exists to catch, introduced by the fix for the
+// break it belongs to.
+//
+// Rows keyed by id merge regardless of how the text was spelled, and take
+// their label from the sites table so both tables name a site identically.
+// Rows with no id — the "other / not in the list" path — keep the old
+// name bucketing, which is the correct answer for a place that isn't a
+// registered site. The two never collide, because an id-keyed bucket and a
+// name-keyed bucket have different key prefixes.
 
-export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents) {
+// Buckets a row under its real site when it has one, and under its
+// normalized text when it does not. Returns null when there is nothing to
+// key on at all.
+function siteBucketKey(siteId, rawSite) {
+  if (siteId !== undefined && siteId !== null && siteId !== "") return `id:${siteId}`;
+  const name = normalizeSiteKey(rawSite);
+  return name ? `name:${name}` : null;
+}
+
+export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, siteNames = {}) {
   const buckets = {};
-  const bump = (rawSite, field) => {
-    const key = normalizeSiteKey(rawSite);
+  const bump = (rawSite, siteId, field) => {
+    const key = siteBucketKey(siteId, rawSite);
     if (!key) return;
-    if (!buckets[key]) buckets[key] = { labelCounts: {}, flhas: 0, toolbox: 0, daily: 0, nearMisses: 0, incidents: 0 };
+    if (!buckets[key]) buckets[key] = { siteId: key.startsWith("id:") ? siteId : null, labelCounts: {}, flhas: 0, toolbox: 0, daily: 0, nearMisses: 0, incidents: 0 };
     const b = buckets[key];
-    const label = rawSite.trim();
-    b.labelCounts[label] = (b.labelCounts[label] || 0) + 1;
+    const label = (rawSite || "").trim();
+    if (label) b.labelCounts[label] = (b.labelCounts[label] || 0) + 1;
     b[field] += 1;
   };
-  flhas.forEach(f => bump(f.job_site, "flhas"));
-  toolbox.forEach(t => bump(t.site, "toolbox"));
-  daily.forEach(d => bump(d.site, "daily"));
-  nearMisses.forEach(n => bump(n.site, "nearMisses"));
-  incidents.forEach(i => bump(i.site, "incidents"));
+  flhas.forEach(f => bump(f.job_site, f.site_id, "flhas"));
+  toolbox.forEach(t => bump(t.site, t.site_id, "toolbox"));
+  daily.forEach(d => bump(d.site, d.site_id, "daily"));
+  nearMisses.forEach(n => bump(n.site, n.site_id, "nearMisses"));
+  incidents.forEach(i => bump(i.site, i.site_id, "incidents"));
 
   return Object.values(buckets)
     .map(b => {
+      // The sites table wins when the row is joined to it, so a site renamed
+      // last month reads under its current name and matches what the
+      // scheduled table shows. The most-used text stays the fallback: an
+      // id-keyed bucket whose site has since been deleted still has to be
+      // called something, and the words the workers used are the best
+      // available answer.
       let label = "", bestCount = 0;
       Object.entries(b.labelCounts).forEach(([l, count]) => { if (count > bestCount) { label = l; bestCount = count; } });
-      return { site: label, flhas: b.flhas, toolbox: b.toolbox, daily: b.daily, nearMisses: b.nearMisses, incidents: b.incidents };
+      const canonical = b.siteId != null ? siteNames[b.siteId] : null;
+      return { site: canonical || label || "Unknown site", siteId: b.siteId, flhas: b.flhas, toolbox: b.toolbox, daily: b.daily, nearMisses: b.nearMisses, incidents: b.incidents };
     })
     .sort((a, b) => (b.nearMisses + b.incidents) - (a.nearMisses + a.incidents));
 }
 
-export function scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs) {
+export function scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs, siteNames = {}) {
   const buckets = {};
-  const bump = (siteName, field) => {
-    const key = normalizeSiteKey(siteName);
+  const bump = (siteName, siteId, field) => {
+    const key = siteBucketKey(siteId, siteName);
     if (!key) return;
-    if (!buckets[key]) buckets[key] = { site: (siteName || "").trim(), monthly: 0, openActions: 0, customDocs: 0 };
+    if (!buckets[key]) buckets[key] = { siteId: key.startsWith("id:") ? siteId : null, site: (siteName || "").trim(), monthly: 0, openActions: 0, customDocs: 0 };
     buckets[key][field] += 1;
   };
-  monthlyRecords.forEach(r => bump(r.site_name, "monthly"));
-  customDocs.forEach(c => bump(c.site_name, "customDocs"));
-  monthlyActions.forEach(a => { if (a.status !== "resolved") bump(a.site_name, "openActions"); });
-  return Object.values(buckets).sort((a, b) => b.openActions - a.openActions || b.monthly - a.monthly);
+  monthlyRecords.forEach(r => bump(r.site_name, r.site_id, "monthly"));
+  customDocs.forEach(c => bump(c.site_name, c.site_id, "customDocs"));
+  monthlyActions.forEach(a => { if (a.status !== "resolved") bump(a.site_name, a.site_id, "openActions"); });
+  return Object.values(buckets)
+    // These rows already arrive with a server-resolved site_name (see
+    // api/monthly.js), so the map lookup only re-confirms it — but keying on
+    // the id is what makes a bucket here line up with the same site's bucket
+    // in fieldSiteActivity, which is the whole point.
+    .map(b => ({ ...b, site: (b.siteId != null ? siteNames[b.siteId] : null) || b.site || "Unknown site" }))
+    .sort((a, b) => b.openActions - a.openActions || b.monthly - a.monthly);
 }
 
 // ── Trend / aging / leaderboard / compliance ────────────────

@@ -23,7 +23,7 @@ const SEV_COLOR = { Critical: [127, 29, 29], High: [220, 38, 38], Medium: [217, 
 export async function generateSafetyAnalyticsPDF({
   companyName, companyLogo,
   flhas = [], toolbox = [], nearMisses = [], incidents = [], daily = [], monthlyActions = [],
-  monthlyRecords = [], customDocs = [],
+  monthlyRecords = [], customDocs = [], siteNames = {},
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -40,14 +40,14 @@ export async function generateSafetyAnalyticsPDF({
   const ratio = nearMissIncidentRatio(nearMisses, incidents);
   const backlog = reviewBacklog(nearMisses, incidents);
   const riskRate = highRiskFlhaRate(flhas);
-  const fieldSites = fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents);
+  const fieldSites = fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, siteNames);
   const trend = monthlyTrend(nearMisses, incidents);
   const aging = correctiveActionAging(monthlyActions);
   const leaderboard = reporterLeaderboard(flhas, [], toolbox);
   const attendance = toolboxAvgAttendance(toolbox);
   const openActionsCount = monthlyActions.filter(a => a.status !== "resolved").length;
   const passRate = monthlyPassRate(monthlyRecords);
-  const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs);
+  const scheduledSites = scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs, siteNames);
 
   y = drawStatTiles(doc, y, [
     { label: "Total FLHAs", value: flhas.length },
