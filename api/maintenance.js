@@ -262,6 +262,15 @@ export default async function handler(req, res) {
     // scheduled service tells a supervisor, who logs it through
     // log_service above. That asymmetry is the whole point, not a gap.
     if (action === 'log_field_service') {
+      // Every other worker-callable write in the codebase blocks a suspended
+      // tenant (api/fuellogs.js:131 is the closest sibling). Without this, a
+      // company whose subscription lapsed would find its fuel logs 403ing
+      // while its service logs kept landing.
+      const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
+      if (coRows && coRows[0] && coRows[0].suspended) {
+        return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
+      }
+
       const { equipmentId, notes, serviceReading, readingUnit } = req.body;
       if (!equipmentId) return res.status(400).json({ error: 'Pick a machine.' });
       const what = (notes || '').trim();
@@ -314,7 +323,13 @@ export default async function handler(req, res) {
         service_date: todayISO(),
         service_reading: reading,
         reading_unit: unit,
-        performed_by: (session.name || '').trim() || 'Worker',
+        // session.name is the roster row's name and only exists for
+        // individually-identified sessions. A company still on a shared
+        // login has no roster row, so it falls back to the session payload's
+        // userName — without which every entry from such a company would
+        // record "Worker" with a null roster id, i.e. no attribution at all,
+        // which is the entire point of the row.
+        performed_by: (session.name || session.userName || '').trim() || 'Worker',
         logged_by_roster_id: session.userId || null,
         notes: what.slice(0, 1000),
       });
