@@ -6,7 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
-import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
+import { resolveEquipmentId, resolveEquipmentIds } from '../server-lib/equipmentScope.js';
 import { openCorrectiveActions, correctiveActionsFromInspection, resolvedItemsFromPosttrip, resolveCorrectiveActionsForItems } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -108,7 +108,7 @@ const TABLES = {
   daily: {
     name: 'daily_reports',
     jsonColumn: 'report_json',
-    listColumns: 'id, reporter_name, site, site_id, report_date, weather, temperature, crew, equipment, visitors, report_json, company_id, pdf_url, created_at, submitted_by_roster_id',
+    listColumns: 'id, reporter_name, site, site_id, report_date, weather, temperature, crew, equipment, equipment_ids, visitors, report_json, company_id, pdf_url, created_at, submitted_by_roster_id',
   },
 };
 
@@ -134,7 +134,11 @@ const SUBMITTABLE_FIELDS = {
   // `site_id` is the joinable half, validated against the caller's company
   // in the submit path before it is trusted.
   toolbox: ['presenter_name', 'meeting_type', 'site', 'site_id', 'topic', 'talking_points_json', 'attendees_json', 'pdf_url'],
-  daily: ['reporter_name', 'site', 'site_id', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json', 'pdf_url'],
+  // `equipment` (the comma-joined text the form built) stays authoritative
+  // for display and PDFs; `equipment_ids` is the joinable half, vetted
+  // against the caller's own fleet below exactly like site_id and
+  // equipment_id are. Same producer/consumer split as break #2.
+  daily: ['reporter_name', 'site', 'site_id', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'equipment_ids', 'visitors', 'report_json', 'pdf_url'],
 };
 
 // Extracts the exceptions from one inspection's results_json for the Brain.
@@ -354,6 +358,16 @@ export default async function handler(req, res) {
         const resolvedEquipmentId = await resolveEquipmentId(supabaseAdmin, session.companyId, recordToInsert.equipment_id);
         if (resolvedEquipmentId === false) return res.status(403).json({ error: 'Not allowed for this equipment.' });
         recordToInsert.equipment_id = resolvedEquipmentId;
+      }
+
+      // Same question again for the daily report's list of machines. A
+      // daily report names everything that was on site that day, so the
+      // joinable half is an array — one unowned id in it is the same
+      // tenancy problem as one unowned id on an inspection.
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'equipment_ids')) {
+        const resolvedEquipmentIds = await resolveEquipmentIds(supabaseAdmin, session.companyId, recordToInsert.equipment_ids);
+        if (resolvedEquipmentIds === false) return res.status(403).json({ error: 'Not allowed for this equipment.' });
+        recordToInsert.equipment_ids = resolvedEquipmentIds;
       }
       let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
@@ -584,6 +598,12 @@ export default async function handler(req, res) {
       const EDITABLE_FIELDS = {
         inspection: ['results_json', 'start_reading', 'end_reading', 'has_changes'],
         toolbox: ['presenter_name', 'meeting_type', 'site', 'topic', 'talking_points_json'],
+        // `equipment_ids` is deliberately NOT editable here. This edit is a
+        // supervisor correcting the free-text summary on a submitted
+        // report; the ids record which fleet machines the worker actually
+        // picked in the field, and letting a text edit silently rewrite
+        // that would make the joinable half less trustworthy than the text
+        // it exists to back up. A wrong machine is a re-submit, not a typo.
         daily: ['reporter_name', 'site', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json'],
       };
       const allowed = EDITABLE_FIELDS[type] || [];

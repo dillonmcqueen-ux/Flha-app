@@ -335,6 +335,64 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ── The full service history, not just the current status ──────────
+    //
+    // list_status answers "is anything due?" and deliberately caps field
+    // entries at 5 per machine because it is a status screen. This answers
+    // the other question a supervisor asks — "what has actually been done to
+    // this machine?" — which is the one a buyer, an auditor or a warranty
+    // claim needs, and it needs every row, not the latest five.
+    //
+    // Labels are resolved here rather than client-side so a record for a
+    // RETIRED machine still reads as that machine. The fleet query is
+    // deliberately unfiltered on retired_at for exactly that reason: a
+    // history that silently drops the machines you no longer own is not a
+    // history.
+    if (action === 'list_records') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data: fleet, error: eqErr } = await supabaseAdmin
+        .from('equipment')
+        .select('id, year, make, model, type, unit_number, retired_at')
+        .eq('company_id', companyId);
+      if (eqErr) return res.status(500).json({ error: 'Could not load equipment.' });
+
+      const labels = {};
+      (fleet || []).forEach(eq => {
+        labels[eq.id] = {
+          label: [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ') + (eq.unit_number ? ` (Unit ${eq.unit_number})` : ''),
+          retired: !!eq.retired_at,
+        };
+      });
+
+      const { data: logs, error: logErr } = await supabaseAdmin
+        .from('equipment_maintenance_log')
+        .select('id, equipment_id, entry_type, service_date, service_reading, reading_unit, performed_by, notes, created_at')
+        .eq('company_id', companyId)
+        .order('service_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      if (logErr) return res.status(500).json({ error: 'Could not load maintenance records.' });
+
+      const records = (logs || []).map(row => ({
+        id: row.id,
+        equipmentId: row.equipment_id,
+        equipmentLabel: labels[row.equipment_id]?.label || 'Unknown equipment',
+        equipmentRetired: labels[row.equipment_id]?.retired || false,
+        entryType: row.entry_type || 'pm_service',
+        serviceDate: row.service_date,
+        serviceReading: row.service_reading,
+        readingUnit: row.reading_unit,
+        performedBy: row.performed_by,
+        notes: row.notes,
+        createdAt: row.created_at,
+      }));
+
+      return res.status(200).json({ records });
+    }
+
     return res.status(400).json({ error: 'Unknown action.' });
   } catch (e) {
     return res.status(500).json({ error: 'Server error. Please try again.' });

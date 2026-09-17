@@ -22,7 +22,7 @@ function newClientSubmissionId() {
 // state itself. Exported so WorkerMenu.jsx can drain this form's queue
 // without needing the DailyReport component mounted.
 export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, siteId, reportDate, weather, temperature, crew, equipment, visitors, report, customFields, companyName, companyLogo } = payload;
+  const { reporter, site, siteId, reportDate, weather, temperature, crew, equipment, equipmentIds, visitors, report, customFields, companyName, companyLogo } = payload;
   const pdfUrl = await generateAndUploadDaily({
     reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report,
     companyName, companyLogo, token: tokenForRequest,
@@ -41,7 +41,7 @@ export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest
         record: {
           reporter_name: reporter,
           site, site_id: siteId || null, report_date: reportDate, weather, temperature,
-          crew, equipment, visitors,
+          crew, equipment, equipment_ids: (equipmentIds && equipmentIds.length > 0) ? equipmentIds : null, visitors,
           report_json: { ...report, customFields },
           pdf_url: pdfUrl || null,
         },
@@ -80,7 +80,11 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
   const [temperature, setTemperature] = useState("");
   const [crew, setCrew] = useState("");
   const [equipmentFleet, setEquipmentFleet] = useState([]);
-  const [pickedEquip, setPickedEquip] = useState([]); // array of label strings
+  // [{ id, label }] — the label is what prints on the report and the PDF,
+  // the id is what makes "which machines were on site last Tuesday"
+  // answerable by a join instead of a string search. id is null for a
+  // machine restored from an older draft, which stored labels only.
+  const [pickedEquip, setPickedEquip] = useState([]);
   const [equipDropdown, setEquipDropdown] = useState("");
   const [otherEquipment, setOtherEquipment] = useState("");
   const [visitors, setVisitors] = useState("");
@@ -158,7 +162,8 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
       if (draft.weather) setWeather(draft.weather);
       if (draft.temperature) setTemperature(draft.temperature);
       if (draft.crew) setCrew(draft.crew);
-      if (draft.pickedEquip) setPickedEquip(draft.pickedEquip);
+      // Drafts written before equipment ids existed hold plain strings.
+      if (draft.pickedEquip) setPickedEquip(draft.pickedEquip.map(e => (typeof e === "string" ? { id: null, label: e } : e)));
       if (draft.otherEquipment) setOtherEquipment(draft.otherEquipment);
       if (draft.visitors) setVisitors(draft.visitors);
       if (draft.workDone) setWorkDone(draft.workDone);
@@ -181,11 +186,14 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
   const equipLabel = (eq) => [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ") + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
 
   const addPickedEquip = () => {
-    if (!equipDropdown.trim()) return;
-    if (!pickedEquip.includes(equipDropdown)) setPickedEquip(prev => [...prev, equipDropdown]);
+    if (!equipDropdown) return;
+    const eq = equipmentFleet.find(e => String(e.id) === String(equipDropdown));
+    if (!eq) return;
+    if (pickedEquip.some(p => String(p.id) === String(eq.id))) return;
+    setPickedEquip(prev => [...prev, { id: eq.id, label: equipLabel(eq) }]);
     setEquipDropdown("");
   };
-  const removePickedEquip = (label) => setPickedEquip(prev => prev.filter(l => l !== label));
+  const removePickedEquip = (id) => setPickedEquip(prev => prev.filter(p => String(p.id) !== String(id)));
 
   const toggleWeather = (w) => {
     setWeather(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
@@ -194,8 +202,14 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
   // Combine fleet picks + free-typed "other" equipment into one string for storage/PDF
   const equipmentSummary = () => {
     const other = otherEquipment.trim();
-    return [...pickedEquip, ...(other ? [other] : [])].join(", ");
+    return [...pickedEquip.map(p => p.label), ...(other ? [other] : [])].join(", ");
   };
+
+  // Only fleet picks have ids. Free-typed "other equipment" deliberately
+  // contributes nothing here — the same rule every other form in this app
+  // follows: the text is the record, an id is only ever added when a machine
+  // was genuinely chosen off the fleet list.
+  const equipmentIds = () => pickedEquip.map(p => p.id).filter(id => id != null);
 
   const weatherSummary = () => weather.join(", ");
 
@@ -279,7 +293,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const equipment = equipmentSummary();
     const weatherStr = weatherSummary();
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporter, site, siteId: siteIdForName(sites, site, siteMode), reportDate, weather: weatherStr, temperature, crew, equipment, visitors, report, customFields: cf.entries(), companyName, companyLogo };
+    const payload = { reporter, site, siteId: siteIdForName(sites, site, siteMode), reportDate, weather: weatherStr, temperature, crew, equipment, equipmentIds: equipmentIds(), visitors, report, customFields: cf.entries(), companyName, companyLogo };
 
     if (!navigator.onLine) {
       await enqueueSubmission("daily", clientSubmissionId, payload);
@@ -384,10 +398,11 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ display: "flex", gap: 8, marginBottom: 11 }}>
                 <select style={{ ...s.input, marginBottom: 0, flex: 1 }} value={equipDropdown} onChange={e => setEquipDropdown(e.target.value)}>
                   <option value="">Select equipment…</option>
-                  {equipmentFleet.map(eq => {
-                    const lbl = equipLabel(eq);
-                    return <option key={eq.id} value={lbl} disabled={pickedEquip.includes(lbl)}>{lbl}</option>;
-                  })}
+                  {equipmentFleet.map(eq => (
+                    <option key={eq.id} value={eq.id} disabled={pickedEquip.some(p => String(p.id) === String(eq.id))}>
+                      {equipLabel(eq)}{eq.is_attachment ? " — attachment" : ""}
+                    </option>
+                  ))}
                 </select>
                 <button onClick={addPickedEquip} disabled={!equipDropdown} style={{ background: equipDropdown ? accent : disabledBg(C), color: "#fff", border: "none", borderRadius: RAD.md, padding: "0 18px", fontWeight: 700, fontSize: 14, cursor: equipDropdown ? "pointer" : "default", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}><Plus size={15} strokeWidth={2.5} /> Add</button>
               </div>
@@ -397,10 +412,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
             {pickedEquip.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 11 }}>
-                {pickedEquip.map(label => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}`, borderRadius: RAD.md }}>
-                    <span style={{ fontSize: 14, color: C.status.success.text }}>{label}</span>
-                    <button onClick={() => removePickedEquip(label)} style={{ background: "transparent", border: "none", color: C.status.danger.text, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 700 }}><X size={14} strokeWidth={2.5} /> Remove</button>
+                {pickedEquip.map(picked => (
+                  <div key={picked.id ?? picked.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}`, borderRadius: RAD.md }}>
+                    <span style={{ fontSize: 14, color: C.status.success.text }}>{picked.label}</span>
+                    <button onClick={() => removePickedEquip(picked.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 700 }}><X size={14} strokeWidth={2.5} /> Remove</button>
                   </div>
                 ))}
               </div>

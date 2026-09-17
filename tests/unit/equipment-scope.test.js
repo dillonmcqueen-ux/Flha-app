@@ -112,3 +112,72 @@ test('an unreadable fleet is null, so a caller can refuse rather than strip ever
   const index = await companyEquipmentIndex(fakeClient({ error: { message: 'down' } }), 'acme');
   assert.strictEqual(index, null);
 });
+
+// ── the array form, for a daily report's list of machines ────────────────
+//
+// Same rules as the single-id form above, and these cases exist to keep
+// them the same: a second set of semantics for the same question is a
+// second set of bugs.
+
+// The array form queries with .in(), which the builder above doesn't model,
+// so it gets its own minimal stand-in.
+function fakeInClient({ rows = [], error = null, onQuery } = {}) {
+  return {
+    from(table) {
+      const q = { table, in: null };
+      const builder = {
+        select() { return builder; },
+        in(key, values) { q.in = { key, values }; return builder; },
+        then(resolve, reject) {
+          if (onQuery) onQuery(q);
+          return Promise.resolve({ data: error ? null : rows, error }).then(resolve, reject);
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+const { resolveEquipmentIds } = await import('../../server-lib/equipmentScope.js');
+
+test('owned ids resolve to the rows\' own ids, so strings come back as numbers', async () => {
+  const client = fakeInClient({ rows: [{ id: 7, company_id: 'acme' }, { id: 8, company_id: 'acme' }] });
+  assert.deepEqual(await resolveEquipmentIds(client, 'acme', ['7', 8]), [7, 8]);
+});
+
+test('one id belonging to another company fails the whole list — the cross-tenant tripwire stays', async () => {
+  const client = fakeInClient({ rows: [{ id: 7, company_id: 'acme' }, { id: 4711, company_id: 'other-co' }] });
+  assert.strictEqual(await resolveEquipmentIds(client, 'acme', [7, 4711]), false);
+});
+
+test('an id that does not exist is dropped, not rejected — a 403 here wedges the offline queue', async () => {
+  const client = fakeInClient({ rows: [{ id: 7, company_id: 'acme' }] });
+  assert.deepEqual(await resolveEquipmentIds(client, 'acme', [7, 999]), [7]);
+});
+
+test('an empty list, a non-array, and a list of nothings are all null — one spelling of "no machines"', async () => {
+  const client = fakeInClient({ rows: [] });
+  assert.equal(await resolveEquipmentIds(client, 'acme', []), null);
+  assert.equal(await resolveEquipmentIds(client, 'acme', null), null);
+  assert.equal(await resolveEquipmentIds(client, 'acme', ['', null, undefined]), null);
+});
+
+test('duplicates are collapsed before the query, so one machine is stored once', async () => {
+  let seen = null;
+  const client = fakeInClient({ rows: [{ id: 7, company_id: 'acme' }], onQuery: q => { seen = q.in.values; } });
+  assert.deepEqual(await resolveEquipmentIds(client, 'acme', [7, '7', 7]), [7]);
+  assert.deepEqual(seen, ['7']);
+});
+
+test('a database error is not read as "wrong company"', async () => {
+  const client = fakeInClient({ error: { message: 'connection reset' } });
+  assert.equal(await resolveEquipmentIds(client, 'acme', [7]), null);
+});
+
+test('a list longer than the cap is truncated rather than sent whole', async () => {
+  let seen = null;
+  const many = Array.from({ length: 80 }, (_, i) => i + 1);
+  const client = fakeInClient({ rows: [], onQuery: q => { seen = q.in.values; } });
+  await resolveEquipmentIds(client, 'acme', many);
+  assert.equal(seen.length, 50);
+});

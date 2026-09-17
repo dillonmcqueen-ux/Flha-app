@@ -228,14 +228,17 @@ test.describe('Equipment Inspection', () => {
     await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
   });
 
-  test('a non-tow-capable machine (excavator) gets no "attach a trailer" option', async ({ page }) => {
+  test('a machine with nothing in the fleet to attach gets no attachment option', async ({ page }) => {
+    // The mocked fleet is one excavator and nothing flagged is_attachment,
+    // so there is genuinely nothing to hook onto it — and an excavator is
+    // not tow-capable, so it does not get the free-text trailer path either.
     await page.locator('select').selectOption({ label: 'UNIT 12, Excavator' });
     await page.getByRole('button', { name: 'Continue →' }).click();
     await expect(page.getByText('Inspector')).toBeVisible();
-    await expect(page.getByText('Attach a trailer?')).not.toBeVisible();
+    await expect(page.getByText('Anything attached?')).not.toBeVisible();
   });
 
-  test('a tow-capable unit offers to attach a trailer, and it\'s carried into the submitted record', async ({ page }) => {
+  test('a tow-capable unit offers to attach something, and it\'s carried into the submitted record', async ({ page }) => {
     let submittedRecord = null;
     await page.route('**/api/logs', async route => {
       const body = route.request().postDataJSON();
@@ -254,19 +257,21 @@ test.describe('Equipment Inspection', () => {
     await page.getByRole('button', { name: 'Continue →' }).click();
 
     await expect(page.getByText('Inspector')).toBeVisible();
-    await expect(page.getByText('Attach a trailer? (optional)')).toBeVisible();
+    await expect(page.getByText('Anything attached? (optional)')).toBeVisible();
     await page.getByPlaceholder('e.g. 5x10 Dump Trailer (Unit 7)').fill('5x10 Dump Trailer (Unit 7)');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.getByText('5x10 Dump Trailer (Unit 7)')).toBeVisible();
 
     await page.getByPlaceholder('e.g. John Smith').fill('Jamie Inspector');
     await page.getByPlaceholder('e.g. 1245.3').fill('42000');
     await page.getByRole('button', { name: 'Start Inspection' }).click();
 
-    await expect(page.getByText('Trailer attached: 5x10 Dump Trailer (Unit 7)')).toBeVisible();
+    await expect(page.getByText('Attached: 5x10 Dump Trailer (Unit 7)')).toBeVisible();
 
     // The checklist must EXPAND to cover the trailer too, clearly separated
     // from the truck's own items — not just recorded as metadata.
-    await expect(page.getByText('TRUCK / TOW VEHICLE')).toBeVisible();
-    await expect(page.getByText('TRAILER — 5x10 Dump Trailer (Unit 7)')).toBeVisible();
+    await expect(page.getByText('MACHINE', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('ATTACHMENT — 5x10 Dump Trailer (Unit 7)')).toBeVisible();
     await expect(page.getByText('Service brake function/pedal feel')).toBeVisible(); // pickup item
     await expect(page.getByText('Coupler/hitch — condition, locking pin/latch')).toBeVisible(); // trailer item
 
@@ -279,15 +284,16 @@ test.describe('Equipment Inspection', () => {
     await page.getByRole('button', { name: 'Sign & Submit Pre-Trip Inspection' }).click();
     await expect(page.getByText('Pre-Trip Complete')).toBeVisible({ timeout: 15000 });
 
-    expect(submittedRecord.results_json.attachedTrailer).toEqual({ id: null, label: '5x10 Dump Trailer (Unit 7)' });
+    expect(submittedRecord.results_json.attachments).toEqual([{ id: null, label: '5x10 Dump Trailer (Unit 7)' }]);
     const items = submittedRecord.results_json.items;
     const truckItems = items.filter(it => it.unit === 'truck');
-    const trailerItems = items.filter(it => it.unit === 'trailer');
+    const trailerItems = items.filter(it => it.unit === 'attachment');
     expect(truckItems.length).toBeGreaterThan(0);
     expect(trailerItems.length).toBeGreaterThan(0);
     // The flagged defect must be tagged to the trailer, not the truck.
     const flaggedItem = items.find(it => it.condition === 'Defective');
-    expect(flaggedItem.unit).toBe('trailer');
+    expect(flaggedItem.unit).toBe('attachment');
+    expect(flaggedItem.unitLabel).toBe('5x10 Dump Trailer (Unit 7)');
     expect(truckItems.every(it => it.condition !== 'Defective')).toBe(true);
   });
 

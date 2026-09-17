@@ -144,9 +144,20 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const [changeCondition, setChangeCondition] = useState("Monitor");
   const [changeNotes, setChangeNotes] = useState("");
 
-  // ── trailer attachment (tow-capable units only) ────────────
-  const [attachedTrailerId, setAttachedTrailerId] = useState("");
-  const [attachedTrailerText, setAttachedTrailerText] = useState("");
+  // ── attachments ────────────────────────────────────────────
+  //
+  // Dillon, 2026-09-17: "inspections can only pick one unless it's an
+  // attachment." One machine per inspection, and as many attachments on it
+  // as were actually hooked up — a truck and a pup, a loader with forks, a
+  // hoe with a hammer and a thumb.
+  //
+  // This replaces a trailer-only version that guessed from the make/model
+  // text (isTrailerTemplate). That guess is still the FALLBACK, so a fleet
+  // nobody has flagged yet keeps working exactly as before, but the fleet
+  // row's own `is_attachment` flag is the answer wherever it exists.
+  const [pickedAttachments, setPickedAttachments] = useState([]); // [{ id, label }]
+  const [attachmentDropdown, setAttachmentDropdown] = useState("");
+  const [attachmentText, setAttachmentText] = useState("");
 
   // Load equipment registry + logo
   useEffect(() => {
@@ -199,8 +210,14 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       if (draft.selectedEqId) setSelectedEqId(draft.selectedEqId);
       if (draft.freeEq) setFreeEq(draft.freeEq);
       if (draft.workerName) setWorkerName(draft.workerName);
-      if (draft.attachedTrailerId) setAttachedTrailerId(draft.attachedTrailerId);
-      if (draft.attachedTrailerText) setAttachedTrailerText(draft.attachedTrailerText);
+      if (Array.isArray(draft.pickedAttachments)) setPickedAttachments(draft.pickedAttachments);
+      // A draft saved before attachments went plural holds the old two
+      // fields. Restoring them as one attachment is exactly what they meant.
+      else if (draft.attachedTrailerId || draft.attachedTrailerText) {
+        const fromFleet = draft.attachedTrailerId ? equipment.find(e => String(e.id) === String(draft.attachedTrailerId)) : null;
+        if (fromFleet) setPickedAttachments([{ id: fromFleet.id, label: menuLabelFor(fromFleet) }]);
+        else if (draft.attachedTrailerText) setPickedAttachments([{ id: null, label: draft.attachedTrailerText }]);
+      }
       if (draft.step === "worker" || draft.step === "inspect") {
         if (draft.readingUnit) setReadingUnit(draft.readingUnit);
         if (draft.startReading) setStartReading(draft.startReading);
@@ -216,7 +233,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   useDraftAutosave(
     "inspection",
     companyId,
-    { step, eqMode, selectedEq, selectedEqId, freeEq, workerName, attachedTrailerId, attachedTrailerText, readingUnit, startReading, items, inspectionMeta },
+    { step, eqMode, selectedEq, selectedEqId, freeEq, workerName, pickedAttachments, readingUnit, startReading, items, inspectionMeta },
     draftRestored && !!companyId
   );
 
@@ -248,20 +265,53 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   };
 
   const { type: currentType, make: currentMake, model: currentModel } = currentEquipmentFields();
-  const isTrailer = isTrailerTemplate(currentType, currentMake, currentModel);
-  const isTowCapable = isTowCapableTemplate(currentType, currentMake, currentModel);
-  const trailerFleet = equipment.filter(eq => isTrailerTemplate(eq.type, eq.make, eq.model));
+  const selectedFleetEq = eqMode === "list" ? equipment.find(e => String(e.id) === String(selectedEqId)) : null;
 
-  // { id, label } for whatever trailer (if any) was selected to go with
-  // this trip, or null if none — fleet selection wins over free text.
-  const selectedAttachedTrailer = () => {
-    if (attachedTrailerId) {
-      const eq = trailerFleet.find(e => String(e.id) === String(attachedTrailerId));
-      return eq ? { id: eq.id, label: menuLabelFor(eq) } : null;
+  // Whether the machine being inspected is itself an attachment. Nothing
+  // towed or bolted on has a meter of its own, which is why this drives the
+  // "no readings" path and the single-column PDF header — the same question
+  // isTrailerTemplate was answering by keyword, now answerable outright for
+  // any fleet machine a supervisor has flagged.
+  const isAttachmentUnit = !!selectedFleetEq?.is_attachment;
+  const isTrailer = isAttachmentUnit || isTrailerTemplate(currentType, currentMake, currentModel);
+  const isTowCapable = isTowCapableTemplate(currentType, currentMake, currentModel);
+
+  // Everything in the fleet that can be hooked onto something else: flagged
+  // rows first, plus anything the old keyword match calls a trailer so a
+  // fleet that predates the flag keeps behaving as it did. The machine
+  // being inspected is never offered as its own attachment.
+  const attachmentFleet = equipment.filter(eq =>
+    String(eq.id) !== String(selectedEqId) &&
+    (eq.is_attachment || isTrailerTemplate(eq.type, eq.make, eq.model))
+  );
+
+  // An attachment can't carry an attachment, and there's nothing to offer
+  // if the fleet holds none — except for a tow-capable unit, which keeps
+  // its free-text path for a rental trailer that isn't in the fleet.
+  const canAttach = !isAttachmentUnit && (attachmentFleet.length > 0 || isTowCapable);
+
+  const addAttachment = () => {
+    const eq = attachmentFleet.find(e => String(e.id) === String(attachmentDropdown));
+    if (eq) {
+      if (!pickedAttachments.some(a => String(a.id) === String(eq.id))) {
+        setPickedAttachments(prev => [...prev, { id: eq.id, label: menuLabelFor(eq) }]);
+      }
+      setAttachmentDropdown("");
+      return;
     }
-    if (attachedTrailerText.trim()) return { id: null, label: attachedTrailerText.trim() };
-    return null;
+    const typed = attachmentText.trim();
+    if (!typed) return;
+    if (!pickedAttachments.some(a => a.label === typed)) {
+      setPickedAttachments(prev => [...prev, { id: null, label: typed }]);
+    }
+    setAttachmentText("");
   };
+  const removeAttachment = (attachment) => setPickedAttachments(prev => prev.filter(a => a !== attachment));
+
+  // What actually gets stored on the record. Cleared entirely when the
+  // machine can't carry an attachment, so switching from a truck to a
+  // skid steer mid-form can't leave a stale trailer on the inspection.
+  const attachmentsForRecord = () => (canAttach ? pickedAttachments : []);
 
   const lastHadIssues = (insp) => {
     if (!insp) return false;
@@ -393,26 +443,37 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     const truckLabel = equipmentLabel();
     const truckItems = template.items.map(it => ({ item: it.item, category: it.category || "", unit: "truck", unitLabel: truckLabel, condition: "Good", note: "" }));
 
-    // A trailer attached to a tow-capable unit gets its OWN checklist
-    // appended, tagged by unit — the trailer is a completely different
-    // machine with different failure points, and a defect on it must never
-    // read as a defect on the tow vehicle (or vice versa) on this record,
-    // in the PDF, or in the weekly report's issue list.
-    const trailer = isTowCapable ? selectedAttachedTrailer() : null;
-    let trailerTemplateLabel = null;
+    // Each attachment gets its OWN checklist appended, tagged by unit — an
+    // attachment is a completely different machine with different failure
+    // points, and a defect on it must never read as a defect on the machine
+    // carrying it (or vice versa) on this record, in the PDF, or in the
+    // weekly report's issue list.
+    //
+    // `attachmentId` is what routes a defect back to the right machine
+    // downstream (server-lib/inspectionAttachments.js). Label matching is
+    // only the fallback, because two attachments can share a label and only
+    // one of them is broken.
+    const attachments = attachmentsForRecord();
+    const attachmentTemplateLabels = [];
     let allItems = truckItems;
-    if (trailer) {
-      const trailerEq = attachedTrailerId ? trailerFleet.find(e => String(e.id) === String(attachedTrailerId)) : null;
-      const trailerTemplate = trailerEq
-        ? getEquipmentTemplate(trailerEq.type, trailerEq.make, trailerEq.model)
-        : getEquipmentTemplate(trailer.label, "", "");
-      trailerTemplateLabel = trailerTemplate.label;
-      const trailerItems = trailerTemplate.items.map(it => ({ item: it.item, category: it.category || "", unit: "trailer", unitLabel: trailer.label, condition: "Good", note: "" }));
-      allItems = [...truckItems, ...trailerItems];
-    }
+    attachments.forEach(attachment => {
+      const attachmentEq = attachment.id != null ? equipment.find(e => String(e.id) === String(attachment.id)) : null;
+      const attachmentTemplate = attachmentEq
+        ? getEquipmentTemplate(attachmentEq.type, attachmentEq.make, attachmentEq.model)
+        : getEquipmentTemplate(attachment.label, "", "");
+      attachmentTemplateLabels.push(attachmentTemplate.label);
+      const attachmentItems = attachmentTemplate.items.map(it => ({
+        item: it.item, category: it.category || "",
+        unit: "attachment", unitLabel: attachment.label, attachmentId: attachment.id ?? null,
+        condition: "Good", note: "",
+      }));
+      allItems = [...allItems, ...attachmentItems];
+    });
 
     setInspectionMeta({
-      machineSummary: trailer ? `${template.label} + ${trailerTemplateLabel} (trailer attached)` : `${template.label} — pre-trip inspection`,
+      machineSummary: attachmentTemplateLabels.length > 0
+        ? `${template.label} + ${attachmentTemplateLabels.join(" + ")} (attached)`
+        : `${template.label} — pre-trip inspection`,
     });
     setItems(allItems);
     setStep("inspect");
@@ -447,7 +508,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     const label = equipmentLabel();
     const resultsJson = {
       machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries(),
-      attachedTrailer: isTowCapable ? selectedAttachedTrailer() : null,
+      attachments: attachmentsForRecord(),
     };
 
     // Auto-save a free-typed rental to the fleet, via the protected
@@ -761,24 +822,59 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               </>
             )}
 
-            {isTowCapable && (
+            {canAttach && (
               <>
-                <label style={s.label}>Attach a trailer? (optional)</label>
-                {trailerFleet.length > 0 && (
-                  <select style={s.input} value={attachedTrailerId} onChange={e => { setAttachedTrailerId(e.target.value); setAttachedTrailerText(""); }}>
-                    <option value="">No trailer attached</option>
-                    {trailerFleet.map(eq => (
-                      <option key={eq.id} value={eq.id}>{menuLabelFor(eq)}</option>
-                    ))}
-                  </select>
+                <label style={s.label}>Anything attached? (optional)</label>
+                <div style={{ fontSize: 12, color: C.text.faint, marginBottom: 8, marginTop: -4 }}>
+                  Trailer, bucket, hammer, forks — each one gets its own checklist added below yours.
+                </div>
+                {attachmentFleet.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 11 }}>
+                    <select
+                      style={{ ...s.input, marginBottom: 0, flex: 1 }}
+                      value={attachmentDropdown}
+                      onChange={e => { setAttachmentDropdown(e.target.value); setAttachmentText(""); }}
+                    >
+                      <option value="">Select an attachment…</option>
+                      {attachmentFleet.map(eq => (
+                        <option key={eq.id} value={eq.id} disabled={pickedAttachments.some(a => String(a.id) === String(eq.id))}>
+                          {menuLabelFor(eq)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={addAttachment}
+                      disabled={!attachmentDropdown}
+                      style={{ background: attachmentDropdown ? accent : disabledBg(C), color: "#fff", border: "none", borderRadius: RAD.md, padding: "0 18px", fontWeight: 700, fontSize: 14, cursor: attachmentDropdown ? "pointer" : "default", flexShrink: 0 }}
+                    >Add</button>
+                  </div>
                 )}
-                {!attachedTrailerId && (
-                  <input
-                    style={{ ...s.input, marginTop: trailerFleet.length > 0 ? -3 : 0 }}
-                    placeholder={trailerFleet.length > 0 ? "Or type a trailer not in your fleet" : "e.g. 5x10 Dump Trailer (Unit 7)"}
-                    value={attachedTrailerText}
-                    onChange={e => setAttachedTrailerText(e.target.value)}
-                  />
+
+                {!attachmentDropdown && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 11 }}>
+                    <input
+                      style={{ ...s.input, marginBottom: 0, flex: 1 }}
+                      placeholder={attachmentFleet.length > 0 ? "Or type one that isn't in your fleet" : "e.g. 5x10 Dump Trailer (Unit 7)"}
+                      value={attachmentText}
+                      onChange={e => setAttachmentText(e.target.value)}
+                    />
+                    <button
+                      onClick={addAttachment}
+                      disabled={!attachmentText.trim()}
+                      style={{ background: attachmentText.trim() ? accent : disabledBg(C), color: "#fff", border: "none", borderRadius: RAD.md, padding: "0 18px", fontWeight: 700, fontSize: 14, cursor: attachmentText.trim() ? "pointer" : "default", flexShrink: 0 }}
+                    >Add</button>
+                  </div>
+                )}
+
+                {pickedAttachments.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 11 }}>
+                    {pickedAttachments.map(attachment => (
+                      <div key={attachment.id ?? attachment.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}`, borderRadius: RAD.md }}>
+                        <span style={{ fontSize: 14, color: C.status.success.text }}>{attachment.label}</span>
+                        <button onClick={() => removeAttachment(attachment)} style={{ background: "transparent", border: "none", color: C.status.danger.text, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </>
             )}
@@ -803,7 +899,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
             <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary }}>{equipmentLabel()}</div>
             {inspectionMeta.machineSummary && <div style={{ fontSize: 13, color: C.text.muted, marginTop: 2 }}>{inspectionMeta.machineSummary}</div>}
             {!isTrailer && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 6 }}>Starting reading: {startReading} {readingUnit}</div>}
-            {isTowCapable && selectedAttachedTrailer() && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 6 }}>Trailer attached: {selectedAttachedTrailer().label}</div>}
+            {attachmentsForRecord().length > 0 && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 6 }}>Attached: {attachmentsForRecord().map(a => a.label).join(", ")}</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               {defectiveCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{defectiveCount} defective</span>}
               {monitorCount > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.status.warning.text, background: C.status.warning.bg, padding: "4px 10px", borderRadius: RAD.pill }}>{monitorCount} monitor</span>}
@@ -817,11 +913,11 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               <div key={i}>
                 {isNewUnit && (
                   <div style={{
-                    background: it.unit === "trailer" ? C.orangeSoft : C.status.info.bg, borderRadius: RAD.md,
+                    background: it.unit === "truck" ? C.status.info.bg : C.orangeSoft, borderRadius: RAD.md,
                     padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
-                    color: it.unit === "trailer" ? accent : C.status.info.text,
+                    color: it.unit === "truck" ? C.status.info.text : accent,
                   }}>
-                    {it.unit === "trailer" ? "TRAILER" : "TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
+                    {it.unit === "truck" ? "MACHINE" : "ATTACHMENT"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
                   </div>
                 )}
               <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
@@ -1005,11 +1101,11 @@ export default function Inspection({ companyId, companyName, userName: loginUser
                   <div key={i}>
                     {isNewUnit && (
                       <div style={{
-                        background: it.unit === "trailer" ? C.orangeSoft : C.status.info.bg, borderRadius: RAD.md,
+                        background: it.unit === "truck" ? C.status.info.bg : C.orangeSoft, borderRadius: RAD.md,
                         padding: "8px 12px", marginBottom: 8, fontWeight: 800, fontSize: 13,
-                        color: it.unit === "trailer" ? accent : C.status.info.text,
+                        color: it.unit === "truck" ? C.status.info.text : accent,
                       }}>
-                        {it.unit === "trailer" ? "TRAILER" : "TRUCK / TOW VEHICLE"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
+                        {it.unit === "truck" ? "MACHINE" : "ATTACHMENT"}{it.unitLabel ? ` — ${it.unitLabel}` : ""}
                       </div>
                     )}
                     <div style={{ ...s.card, padding: 12, borderLeft: `4px solid ${cond.color}`, marginBottom: 8 }}>
