@@ -255,7 +255,34 @@ table above. Consequences:
 *Re-check:* `grep -rn "site_id\|'site'\|job_site" api/*.js`
 
 ### #3 — Documents identify people by free text, not roster id
-**Severity: medium.** Roster login exists precisely so a person is a real
+**Severity: medium. Status: fixed in PR #118.** `submitted_by_roster_id`
+(nullable FK) on all nine document tables, stamped **server-side from the
+session** — so unlike break #2 there is no frontend change at all, the value
+cannot be forged, and a queued offline submission is attributed at drain
+time to whoever is actually logged in. It is deliberately absent from every
+`SUBMITTABLE_FIELDS` allowlist: an author a caller can choose is a
+suggestion, not attribution.
+
+**The part that mattered most: anonymous near misses.** `is_anonymous` is a
+promise made to a worker in the UI — `src/NearMiss.jsx` says the report is
+anonymous and takes no signature, and three such reports already exist.
+Stamping an author on one would silently break that promise. A CHECK
+(`near_misses_anonymous_has_no_author`) makes it structurally impossible,
+verified against production in a rolled-back probe covering all three
+directions, including flipping an attributed report to anonymous.
+
+**The backfill is deliberately partial.** Operational forms (FLHA,
+inspections, toolbox, daily, fuel) were matched by name within company.
+Incidents and near misses were **not**: a text name matching a roster name
+is an inference, and on an injury report the cost of one wrong attribution
+outweighs linking a handful of historical rows. Going forward both are
+stamped from the session, which is authoritative rather than inferred.
+
+Two of three companies are on shared logins with no roster rows, so their
+records stay text-only — the same graceful degradation as #2's "other site"
+path, which is why the column is nullable.
+
+Original finding: Roster login exists precisely so a person is a real
 record, but every submitted document stores a name string. Per-worker
 analytics, "show me everything Rob submitted", and deactivation-aware
 history all become string matching. `WalletInvite.jsx:115` and
@@ -440,3 +467,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #118 | Break #5 fixed: corrective actions now open from incidents, near misses and Defective inspection items. Two migrations applied. Surfaced a live regression (NOT NULL ahead of its code) and a gap with no home yet (worker-logged routine service, scoped in `docs/scope-equipment-service-log.md`). |
 | 2026-09-17 | PR #118 | Worker-logged equipment service built (`docs/scope-equipment-service-log.md`). Not a break — a gap with no home. |
 | 2026-09-17 | PR #118 | Break #2 fixed: `site_id` on all five field forms, backfilled 89% of history. Two map errors corrected in the process — the forms already had dropdowns, and `delete_site` was failing outright rather than orphaning. |
+| 2026-09-17 | PR #118 | Break #2 follow-up: fixing `delete_site` made a dangling `site_id` reachable, which permanently wedged the offline queue (`drainQueue` breaks on any throw with no attempt cap). A missing site now stores a text-only record. **A fix for one break created a fault in another — exactly what this map exists to catch, introduced while closing a break.** |
+| 2026-09-17 | PR #118 | Break #3 fixed: `submitted_by_roster_id` stamped server-side on all nine document tables, with anonymous near misses structurally protected. |

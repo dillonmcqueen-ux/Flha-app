@@ -4,6 +4,7 @@
 // tracking.
 
 import { createClient } from '@supabase/supabase-js';
+import { authorRosterId } from '../server-lib/authorStamp.js';
 import { openCorrectiveActions } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -336,6 +337,8 @@ export default async function handler(req, res) {
         .from('inspection_records')
         .insert({
           form_id: formId, site_id: siteId, submitted_by: submittedBy,
+          // Break #3 — author from the session, never the request.
+          submitted_by_roster_id: authorRosterId(session),
           period_month: periodStart, ai_summary: aiSummary || null,
           pdf_url: resolvedSubmitPdfUrl, status: 'complete',
           client_submission_id: clientSubmissionId || null,

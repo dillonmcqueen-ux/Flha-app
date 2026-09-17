@@ -4,6 +4,7 @@
 // protected endpoints (api/logs.js is the closest sibling).
 
 import { createClient } from '@supabase/supabase-js';
+import { authorRosterId } from '../server-lib/authorStamp.js';
 import crypto from 'crypto';
 
 const supabaseAdmin = createClient(
@@ -178,7 +179,8 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabaseAdmin
         .from('fuel_logs')
-        .insert({ ...recordToInsert, company_id: session.companyId })
+        // Break #3 — author from the session, never the request.
+        .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session) })
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
