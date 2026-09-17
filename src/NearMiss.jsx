@@ -4,6 +4,7 @@ import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
+import { siteIdForName } from "./siteLookup.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
@@ -21,7 +22,7 @@ function newClientSubmissionId() {
 // caller can tell success from failure. Exported so WorkerMenu.jsx can
 // drain this form's queue without the component mounted.
 export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequest) {
-  const { reporterLabel, anonymous, site, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig } = payload;
+  const { reporterLabel, anonymous, site, siteId, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig } = payload;
 
   let signatureReceipt = null;
   if (sig) {
@@ -55,6 +56,7 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
           reporter_name: reporterLabel,
           is_anonymous: anonymous,
           site,
+          site_id: siteId || null,
           occurred_at: occurredAt,
           involved,
           report_json: { ...report, customFields },
@@ -281,7 +283,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSaving(true); setSaveError(false);
     const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporterLabel: reporterLabel(), anonymous, site, occurredAt, involved, report, customFields: cf.entries(), companyName, companyLogo, companyId, sig };
+    const payload = { reporterLabel: reporterLabel(), anonymous, site, siteId: siteIdForName(sites, site, siteMode), occurredAt, involved, report, customFields: cf.entries(), companyName, companyLogo, companyId, sig };
 
     if (!navigator.onLine) {
       await enqueueSubmission("nearmiss", clientSubmissionId, payload);

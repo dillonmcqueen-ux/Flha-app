@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
@@ -71,7 +72,7 @@ async function uploadPendingPhoto(pendingPhotoId, companyId, tokenForRequest) {
 // `sig` is a data: URL string, not a File/Blob, so it's plain JSON and safe
 // to persist in the queue.
 export async function resubmitIncident(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, photoImages, pendingPhotoIds } = payload;
+  const { reporter, site, siteId, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields, report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, photoImages, pendingPhotoIds } = payload;
 
   // `photoUrls` and `photoReceipts` are parallel arrays, same pattern
   // api/login.js's onboarding flow already uses for `paths`/`pathTokens`.
@@ -126,7 +127,7 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
         signatureReceipt,
         record: {
           reporter_name: reporter,
-          site, occurred_at: occurredAt, incident_type: incidentType,
+          site, site_id: siteId || null, occurred_at: occurredAt, incident_type: incidentType,
           injured_person: injuredPerson, body_part: bodyPart, treatment,
           medical_attention: medicalAttention, witnesses, evidence,
           report_json: { ...report, customFields },
@@ -486,7 +487,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const photoReceipts = uploadedPhotoReceipts();
     const pendingIds = pendingPhotoIds();
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, pendingPhotoIds: pendingIds };
+    const payload = { reporter, site, siteId: siteIdForName(sites, site, siteMode), occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields: cf.entries(), report, companyName, companyLogo, companyId, sig, photoUrls, photoReceipts, pendingPhotoIds: pendingIds };
     // Deliberately NOT part of `payload`, so it never reaches the offline
     // queue: these are full-size photos as base64, and the queue already
     // budgets 28MB for pending photo blobs. A queued submission therefore

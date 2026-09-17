@@ -5,6 +5,7 @@
 // they're asking before touching the database.
 
 import { createClient } from '@supabase/supabase-js';
+import { resolveSiteId } from '../server-lib/siteScope.js';
 import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -125,6 +126,12 @@ function pickAllowed(record, allowed) {
 const SUBMITTABLE_FIELDS = [
   'worker_name', 'job_site', 'task_description', 'hazards_json',
   'signed_by', 'pdf_url', 'worker_signature', 'crew_signatures',
+  // Break #2 — the form already showed a dropdown of real sites and kept
+  // only the name. site_id is validated against the caller's company in the
+  // submit path below before it is trusted; job_site (the text) stays,
+  // because the "other" path has no id and the PDF is a record of what was
+  // written at the time.
+  'site_id',
 ];
 
 // `hazards_json` arrives as untrusted client input. Coerce it to the plain
@@ -280,6 +287,18 @@ export default async function handler(req, res) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
         const amendUpdate = pickAllowed(record, SUBMITTABLE_FIELDS);
+
+        // Break #2 — a client-supplied site_id is a tenancy question:
+        // unchecked, a worker could file their own company's FLHA against
+        // another company's site row. Rejecting rather than silently
+        // nulling, so a real bug surfaces instead of quietly producing
+        // unjoinable records. Applied to the amend path too — an amendment
+        // can carry a changed site.
+        if (Object.prototype.hasOwnProperty.call(amendUpdate, 'site_id')) {
+          const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, amendUpdate.site_id);
+          if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
+          amendUpdate.site_id = resolvedSiteId;
+        }
         // Derive from the hazards being written; fall back to the hazards
         // already on the row when an amendment doesn't touch them.
         let amendedHazards;
@@ -332,6 +351,18 @@ export default async function handler(req, res) {
           }
         }
         const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS);
+
+        // Break #2 — a client-supplied site_id is a tenancy question:
+        // unchecked, a worker could file their own company's FLHA against
+        // another company's site row. Rejecting rather than silently
+        // nulling, so a real bug surfaces instead of quietly producing
+        // unjoinable records. Applied to the amend path too — an amendment
+        // can carry a changed site.
+        if (Object.prototype.hasOwnProperty.call(recordToInsert, 'site_id')) {
+          const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, recordToInsert.site_id);
+          if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
+          recordToInsert.site_id = resolvedSiteId;
+        }
         const normalized = normalizeHazardsJson(recordToInsert.hazards_json);
         if (!normalized.ok) return res.status(400).json({ error: 'Invalid hazard data.' });
         if (clientSubmissionId) {

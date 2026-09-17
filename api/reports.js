@@ -4,6 +4,7 @@
 // covers both report types since they work the same way.
 
 import { createClient } from '@supabase/supabase-js';
+import { resolveSiteId } from '../server-lib/siteScope.js';
 import { openCorrectiveActions, correctiveActionsFromReport } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -126,8 +127,8 @@ function pickAllowed(record, allowed) {
 // signed URL for each one that existed and null for each that didn't.
 // Both now come from upload receipts resolved below.
 const SUBMITTABLE_FIELDS = {
-  incident: ['reporter_name', 'site', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json', 'signed_by', 'pdf_url'],
-  nearmiss: ['reporter_name', 'is_anonymous', 'site', 'occurred_at', 'involved', 'report_json', 'signed_by', 'pdf_url'],
+  incident: ['reporter_name', 'site', 'site_id', 'occurred_at', 'incident_type', 'injured_person', 'body_part', 'treatment', 'medical_attention', 'witnesses', 'evidence', 'report_json', 'signed_by', 'pdf_url'],
+  nearmiss: ['reporter_name', 'is_anonymous', 'site', 'site_id', 'occurred_at', 'involved', 'report_json', 'signed_by', 'pdf_url'],
 };
 
 export default async function handler(req, res) {
@@ -187,6 +188,18 @@ export default async function handler(req, res) {
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+
+      // Break #2 — a client-supplied site_id is a tenancy question, not a
+      // validation detail: unchecked, a worker could file their own
+      // company's record against another company's site row. Rejecting
+      // rather than silently nulling, so a real bug surfaces instead of
+      // quietly producing unjoinable records. Same guard api/fuellogs.js
+      // already applied to fuel logs, now shared.
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'site_id')) {
+        const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, recordToInsert.site_id);
+        if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
+        recordToInsert.site_id = resolvedSiteId;
+      }
       let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
         const submittedPdf = recordToInsert.pdf_url;

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
+import { siteIdForName } from "./siteLookup.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
@@ -24,7 +25,7 @@ function newClientSubmissionId() {
 // state itself. Exported so WorkerMenu.jsx can drain this form's queue
 // without needing the FLHA component mounted.
 export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest) {
-  const { flha, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal } = payload;
+  const { flha, workerName, jobSite, siteId, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal } = payload;
   const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
   const newStatus = hasExtreme ? "pending_approval" : "complete";
 
@@ -47,6 +48,10 @@ export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest)
         record: {
           worker_name: workerName,
           job_site: jobSite,
+          // Break #2 — the joinable half of the site the worker picked. The
+          // text above stays: it is what the PDF shows, and the "other"
+          // path has no id at all.
+          site_id: siteId || null,
           task_description: taskDescription,
           hazards_json: flha,
           signed_by: workerName,
@@ -916,7 +921,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     // (one task AI-generated, another added manually via continueWithoutAI)
     // can't be cleanly attributed to "the AI's version" as a single baseline.
     const aiEditSignal = flha.ai_assisted ? computeFlhaEditSignal(aiBaselineRef.current, flha.hazards) : null;
-    const payload = { flha: flhaWithCustom, workerName, jobSite, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal };
+    const payload = { flha: flhaWithCustom, workerName, jobSite, siteId: siteIdForName(sites, jobSite, siteMode), taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal };
 
     if (!navigator.onLine) {
       await enqueueSubmission("flha", clientSubmissionId, payload);

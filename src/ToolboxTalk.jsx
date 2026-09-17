@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
@@ -19,7 +20,7 @@ function newClientSubmissionId() {
 // autosave restore logic above — sign-late updates an existing record
 // fetched live, it isn't a fresh queueable submission).
 export async function resubmitToolboxTalk(payload, clientSubmissionId, tokenForRequest) {
-  const { presenter, meetingType, site, topic, points, attendees, customFields, companyName, companyLogo } = payload;
+  const { presenter, meetingType, site, siteId, topic, points, attendees, customFields, companyName, companyLogo } = payload;
   const pdfUrl = await generateAndUploadToolbox({
     presenter, meetingType, site, topic, companyName, companyLogo, points, attendees, customFields, token: tokenForRequest,
   });
@@ -38,6 +39,7 @@ export async function resubmitToolboxTalk(payload, clientSubmissionId, tokenForR
           presenter_name: presenter,
           meeting_type: meetingType,
           site,
+          site_id: siteId || null,
           topic,
           talking_points_json: { ...points, customFields },
           attendees_json: attendees,
@@ -328,7 +330,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   const submit = async () => {
     setSaving(true); setSaveError(false);
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { presenter, meetingType, site, topic, points, attendees, customFields: cf.entries(), companyName, companyLogo };
+    const payload = { presenter, meetingType, site, siteId: siteIdForName(sites, site, siteMode), topic, points, attendees, customFields: cf.entries(), companyName, companyLogo };
 
     if (!navigator.onLine) {
       await enqueueSubmission("toolbox", clientSubmissionId, payload);

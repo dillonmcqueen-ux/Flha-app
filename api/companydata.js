@@ -576,10 +576,50 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, site: data });
     }
 
+    // Deleting a site used to fail with an unexplained 500 whenever anything
+    // referenced it. Every foreign key into `sites` is NO ACTION (restrict),
+    // so Postgres refused the delete and the generic error handler below
+    // turned that into "Couldn't remove site." with no hint why. That was
+    // already true for fuel logs, monthly inspections and custom documents
+    // before break #2 added site_id to the five field forms; this widened it.
+    //
+    // Note the map originally recorded this as "delete_site leaves dangling
+    // site_id references, where delete_equipment detaches first". That was
+    // wrong: a restricting FK cannot leave a dangling reference. The real
+    // failure was the opposite -- the delete simply never succeeded.
+    //
+    // So: detach what can be detached, and refuse clearly when it cannot.
     if (action === 'delete_site') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      // These two columns are NOT NULL, so their records cannot be detached
+      // from the site -- the site IS part of the record's identity there.
+      // Refusing with a reason beats a 500, and beats deleting the records
+      // out from under someone to satisfy a tidy-up.
+      const blockers = [];
+      const { count: monthlyCount } = await supabaseAdmin
+        .from('inspection_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (monthlyCount) blockers.push(`${monthlyCount} monthly site inspection${monthlyCount === 1 ? '' : 's'}`);
+      const { count: customCount } = await supabaseAdmin
+        .from('custom_form_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (customCount) blockers.push(`${customCount} custom document${customCount === 1 ? '' : 's'}`);
+      if (blockers.length > 0) {
+        return res.status(400).json({
+          error: `This site can't be removed — it has ${blockers.join(' and ')} filed against it. Those records would lose the site they belong to.`,
+        });
+      }
+
+      // Everything else keeps its free-text site name, so detaching costs a
+      // supervisor nothing visible: the record still says where it happened,
+      // it just stops being joinable to a site that no longer exists. Same
+      // shape as delete_equipment's inspections detach.
+      for (const table of ['flhas', 'toolbox_talks', 'daily_reports', 'incidents', 'near_misses', 'fuel_logs']) {
+        const { error: detachErr } = await supabaseAdmin.from(table).update({ site_id: null }).eq('site_id', id);
+        if (detachErr) return res.status(500).json({ error: "Couldn't remove site." });
+      }
+
       const { error } = await supabaseAdmin.from('sites').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove site." });
       return res.status(200).json({ ok: true });

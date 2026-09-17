@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadDaily } from "./generateDailyPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
+import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
@@ -21,7 +22,7 @@ function newClientSubmissionId() {
 // state itself. Exported so WorkerMenu.jsx can drain this form's queue
 // without needing the DailyReport component mounted.
 export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report, customFields, companyName, companyLogo } = payload;
+  const { reporter, site, siteId, reportDate, weather, temperature, crew, equipment, visitors, report, customFields, companyName, companyLogo } = payload;
   const pdfUrl = await generateAndUploadDaily({
     reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report,
     companyName, companyLogo, token: tokenForRequest,
@@ -39,7 +40,7 @@ export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest
         clientSubmissionId,
         record: {
           reporter_name: reporter,
-          site, report_date: reportDate, weather, temperature,
+          site, site_id: siteId || null, report_date: reportDate, weather, temperature,
           crew, equipment, visitors,
           report_json: { ...report, customFields },
           pdf_url: pdfUrl || null,
@@ -278,7 +279,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const equipment = equipmentSummary();
     const weatherStr = weatherSummary();
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporter, site, reportDate, weather: weatherStr, temperature, crew, equipment, visitors, report, customFields: cf.entries(), companyName, companyLogo };
+    const payload = { reporter, site, siteId: siteIdForName(sites, site, siteMode), reportDate, weather: weatherStr, temperature, crew, equipment, visitors, report, customFields: cf.entries(), companyName, companyLogo };
 
     if (!navigator.onLine) {
       await enqueueSubmission("daily", clientSubmissionId, payload);

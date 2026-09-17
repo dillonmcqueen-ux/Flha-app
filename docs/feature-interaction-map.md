@@ -213,7 +213,34 @@ of raw inspection rows. A company that never bought the fuel module has no
 case in `tests/unit/maintenance-readings.test.js`.
 
 ### #2 — Site is three different columns
-**Severity: high** for analytics, medium for daily use. See the join-key
+**Severity: high** for analytics, medium for daily use.
+**Status: fixed in PR #118.** `site_id` (nullable FK) added to `flhas`,
+`toolbox_talks`, `daily_reports`, `incidents` and `near_misses`, and
+backfilled by case-insensitive name match scoped to company. The text
+columns stay: the "other / not in the list" path has no id, and the text is
+what the PDF showed at the time, which for an incident report is a legal
+record that must not change when somebody renames a site.
+
+**What this break actually was, corrected.** The map said workers typed site
+names freely. They do not — all five forms already rendered a dropdown of
+the company's real sites with an "other" fallback. The forms resolved the
+pick to a NAME and threw the id away. Measured before the fix: **55 of 62
+existing free-text rows (89%) matched a real site by name**, which is what a
+dropdown in use looks like. So this was never a data-entry problem, it was a
+key being discarded at the boundary — shape 3, and the most recoverable kind.
+
+**The `delete_site` half was recorded wrong too.** The map said it "just
+deletes the row, leaving dangling `site_id`, where `delete_equipment`
+detaches first". A dangling reference was never possible: every FK into
+`sites` is `NO ACTION`, so Postgres *refused* the delete and the generic
+handler turned that into "Couldn't remove site." with no reason given. That
+was already happening for any site used by a fuel log, monthly inspection or
+custom document. It now detaches what can be detached and refuses with a
+real explanation when it cannot (`inspection_records.site_id` and
+`custom_form_records.site_id` are NOT NULL — the site is part of those
+records' identity).
+
+Original finding: See the join-key
 table above. Consequences:
 - Per-site breakdowns (TODO.md's "more advanced analytics") can't be built
   across all document types, only the three with `site_id`.
@@ -411,3 +438,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-16 | — | Break #9 added (post-trip defects never reach Equipment Analytics). Break #7's wording corrected. |
 | 2026-09-16 | PR #118 | Break #9 fixed: Equipment Analytics counts both trip types and its copy says so. Also fixed a blank-label bucket in the same function, found by a test. |
 | 2026-09-17 | PR #118 | Break #5 fixed: corrective actions now open from incidents, near misses and Defective inspection items. Two migrations applied. Surfaced a live regression (NOT NULL ahead of its code) and a gap with no home yet (worker-logged routine service, scoped in `docs/scope-equipment-service-log.md`). |
+| 2026-09-17 | PR #118 | Worker-logged equipment service built (`docs/scope-equipment-service-log.md`). Not a break — a gap with no home. |
+| 2026-09-17 | PR #118 | Break #2 fixed: `site_id` on all five field forms, backfilled 89% of history. Two map errors corrected in the process — the forms already had dropdowns, and `delete_site` was failing outright rather than orphaning. |

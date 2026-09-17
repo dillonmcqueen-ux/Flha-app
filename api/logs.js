@@ -4,6 +4,7 @@
 // session checks as the other protected endpoints.
 
 import { createClient } from '@supabase/supabase-js';
+import { resolveSiteId } from '../server-lib/siteScope.js';
 import { openCorrectiveActions, correctiveActionsFromInspection } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -127,8 +128,11 @@ function pickAllowed(record, allowed) {
 
 const SUBMITTABLE_FIELDS = {
   inspection: ['worker_name', 'equipment_label', 'equipment_id', 'results_json', 'signed_by', 'pdf_url', 'trip_type', 'linked_inspection_id', 'start_reading', 'end_reading', 'reading_unit', 'has_changes'],
-  toolbox: ['presenter_name', 'meeting_type', 'site', 'topic', 'talking_points_json', 'attendees_json', 'pdf_url'],
-  daily: ['reporter_name', 'site', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json', 'pdf_url'],
+  // Break #2 — `site` (the text the form resolved from its dropdown) stays;
+  // `site_id` is the joinable half, validated against the caller's company
+  // in the submit path before it is trusted.
+  toolbox: ['presenter_name', 'meeting_type', 'site', 'site_id', 'topic', 'talking_points_json', 'attendees_json', 'pdf_url'],
+  daily: ['reporter_name', 'site', 'site_id', 'report_date', 'weather', 'temperature', 'crew', 'equipment', 'visitors', 'report_json', 'pdf_url'],
 };
 
 // Extracts the exceptions from one inspection's results_json for the Brain.
@@ -250,6 +254,18 @@ export default async function handler(req, res) {
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+
+      // Break #2 — a client-supplied site_id is a tenancy question, not a
+      // validation detail: unchecked, a worker could file their own
+      // company's record against another company's site row. Rejecting
+      // rather than silently nulling, so a real bug surfaces instead of
+      // quietly producing unjoinable records. Same guard api/fuellogs.js
+      // already applied to fuel logs, now shared.
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'site_id')) {
+        const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, recordToInsert.site_id);
+        if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
+        recordToInsert.site_id = resolvedSiteId;
+      }
       let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {
         const submittedPdf = recordToInsert.pdf_url;
