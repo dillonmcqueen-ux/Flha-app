@@ -485,18 +485,33 @@ assignment-and-close-out. Equipment inspections have neither.
 
 ### #6 — Nothing enforces the doc-key ↔ module invariant
 **Severity: medium**, but the failure is a billing one.
-`pricing.js:51-56` says every key in `BUILTIN_DOC_KEYS` must appear in
-exactly one module, "or a company could be charged for something it cannot
-see, or see something it was not charged for." That invariant lives in a
-comment. `customforms.js:268-283` treats a missing settings row as
-**active**, so the failure direction is: add a doc key, forget the module,
-every company gets it free.
+**Status: fixed in PR #120.** The invariant is now a test
+(`tests/unit/doc-key-module-invariant.test.js`) instead of a sentence in a
+comment, which is the entire fix — no application code changed, because
+nothing was wrong with it. The lists agreed. Nothing guaranteed they would
+keep agreeing.
 
-*Verified equal 2026-09-16: 12 keys each, no duplicates.* The check:
-```bash
-node -e "import('./server-lib/pricing.js').then(p=>{const a=[...p.ALL_DOC_KEYS].sort();console.log(JSON.stringify(a))})"
-grep -n "BUILTIN_DOC_KEYS = " api/customforms.js
-```
+`server-lib/pricing.js:50-55` says every key in `BUILTIN_DOC_KEYS`
+(`api/customforms.js:100`) must appear in exactly one module, "or a company
+could be charged for something it cannot see, or see something it was not
+charged for."
+
+**The failure has a direction, and it is the expensive one.**
+`api/customforms.js` treats a missing `company_document_settings` row as
+**active**, so a document key no module sells is not withheld — it ships to
+every company free, silently, with no error and nothing in a log. The
+reverse (a module selling a key no document uses) bills for a feature that
+cannot be switched on.
+
+Four checks, each confirmed to fail against the mistake it describes: a new
+doc key with no module, a key sold by two modules, a module billing for a
+key that does not exist, and a `requires` naming a module that does not
+exist. The last one matters because `resolveModules()` uses it to reject
+buying preventative maintenance without equipment inspections — a typo there
+either blocks a legitimate purchase or stops enforcing the dependency.
+
+The test needs no database and no session, which is why this should never
+have been a comment in the first place.
 
 ### #7 — Weekly equipment reports group by label, not fleet id
 **Severity: medium. Status: fixed in PR #119.** The report now groups by a
@@ -620,6 +635,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
 | 2026-09-17 | — | `linked_inspection_id` recorded as a weak link (unvalidated client-supplied foreign id, inert today). Found by `tenant-scope-reviewer` while verifying `afee546`. **Not being worked** — it needs a decision on missing-id semantics and on offline pre-trip ids, not a copy of `equipmentScope.js`. |
+| 2026-09-17 | PR #120 | Break #6 **closed**: the doc-key ↔ module invariant is a test now, not a comment. No application code changed — the lists already agreed; nothing guaranteed they would keep agreeing. |
 | 2026-09-17 | PR #120 | Break #4 **closed**: daily reports now emit a `daily_report` signal carrying working conditions only (fixed-vocabulary weather + parsed temperature). Custom documents and corrective actions excluded on purpose. The writers-vs-counters guard was itself stale and now scans `api/` instead of hardcoding a list. |
 | 2026-09-17 | PR #120 | Break #2 **closed**: `site_id` now survives the read boundary (five list payloads were dropping it) and the analytics site tables key on it. Two tables kept on purpose. |
 | 2026-09-17 | PR #120 | Break #1 **closed**: the weekly report's ending reading now reads fuel logs too, via reading helpers moved into `server-lib/readings.js` so maintenance and the report share one definition. "Used" stays trip-derived by definition, recorded as a boundary rather than a gap. |
