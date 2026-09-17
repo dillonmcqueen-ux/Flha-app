@@ -707,14 +707,14 @@ export default async function handler(req, res) {
       const incidentIds = idsFor('incident');
       if (incidentIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('incidents').select('id, site, occurred_at, reporter_name, incident_type')
+          .from('incidents').select('id, site, site_id, occurred_at, reporter_name, incident_type')
           .in('id', incidentIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { incidentMap[r.id] = r; });
       }
       const nearMissIds = idsFor('near_miss');
       if (nearMissIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('near_misses').select('id, site, occurred_at, reporter_name')
+          .from('near_misses').select('id, site, site_id, occurred_at, reporter_name')
           .in('id', nearMissIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { nearMissMap[r.id] = r; });
       }
@@ -743,6 +743,12 @@ export default async function handler(req, res) {
             source_label: 'Monthly site inspection',
             question_text: ans ? (qMap[ans.question_id] || 'Unknown question') : 'Unknown question',
             site_name: rec ? (siteMap[rec.site_id] || 'Unknown site') : 'Unknown site',
+            // Break #2 — the analytics site tables key on the id when a row
+            // has one. Without it here, an open corrective action bucketed
+            // by NAME while the monthly record it came from bucketed by id,
+            // splitting one site into two rows with the open-actions row
+            // sorting to the top. Found by tenant-scope-reviewer.
+            site_id: rec?.site_id ?? null,
             period_month: rec?.period_month || null,
             submitted_by: rec?.submitted_by || null,
           };
@@ -754,6 +760,7 @@ export default async function handler(req, res) {
             source_label: ca.source_type === 'incident' ? 'Incident report' : 'Near miss report',
             question_text: r?.incident_type || null,
             site_name: r?.site || 'Unknown site',
+            site_id: r?.site_id ?? null,
             period_month: r?.occurred_at || null,
             submitted_by: r?.reporter_name || null,
           };
@@ -764,12 +771,18 @@ export default async function handler(req, res) {
             ...base,
             source_label: r?.trip_type === 'posttrip' ? 'Post-trip inspection' : 'Pre-use inspection',
             question_text: r?.equipment_label || null,
+            // Deliberately no site_id: this action came from an equipment
+            // inspection, so what fills the "site" slot is a MACHINE. It
+            // must never adopt a site's id and merge into that site's row.
+            // (That a machine appears in a site column at all is a
+            // pre-existing oddity of this list, not introduced here.)
             site_name: r?.equipment_label || 'Unknown equipment',
+            site_id: null,
             period_month: r?.created_at || null,
             submitted_by: r?.worker_name || null,
           };
         }
-        return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', period_month: null, submitted_by: null };
+        return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', site_id: null, period_month: null, submitted_by: null };
       });
 
       return res.status(200).json({ actions: enriched });

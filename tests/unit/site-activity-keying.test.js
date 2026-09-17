@@ -148,3 +148,36 @@ test('a typed site name cannot collide with a real site\'s bucket', () => {
   assert.equal(real.flhas, 1);
   assert.equal(real.toolbox, 0, 'the typed "id:1" row must not be counted against the real site');
 });
+
+test('a site with open corrective actions is ONE row, not two', () => {
+  // A regression this change introduced and tenant-scope-reviewer caught.
+  // monthlyRecords and customDocs carry site_id, but the enriched
+  // corrective-action rows did not, so they bucketed by name while
+  // everything else bucketed by id. The site split into two rows -- one
+  // with the monthly counts and openActions: 0, one with only the open
+  // actions -- and since the table sorts by openActions desc, the fragment
+  // sorted to the top where a supervisor reads it first.
+  const rows = scheduledSiteActivity(
+    [{ site_name: 'Camrose County', site_id: 1 }],
+    [{ site_name: 'Camrose County', site_id: 1, status: 'open' }],
+    [],
+    siteNames,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].monthly, 1);
+  assert.equal(rows[0].openActions, 1);
+});
+
+test('an action whose "site" is really a machine never merges into a site', () => {
+  // Corrective actions from equipment inspections fill the site slot with
+  // an equipment_label. api/monthly.js gives those rows a null site_id on
+  // purpose so they cannot adopt a real site's bucket.
+  const rows = scheduledSiteActivity(
+    [{ site_name: 'Camrose County', site_id: 1 }],
+    [{ site_name: 'Excavator 2', site_id: null, status: 'open' }],
+    [],
+    siteNames,
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find(r => r.siteId === 1).openActions, 0);
+});
