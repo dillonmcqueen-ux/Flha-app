@@ -150,3 +150,58 @@ export async function resolveEquipmentIds(supabaseAdmin, companyId, rawIds) {
   }
   return resolved.length > 0 ? resolved : null;
 }
+
+/**
+ * The ids of this company's RETIRED machines, as a Set keyed on
+ * `String(id)` — the same "can't miss on type alone" discipline as
+ * companyEquipmentIndex above, because the ids being checked against it
+ * come off other tables' columns.
+ *
+ * This is the "operationally gone" half of retirement (break #15 in
+ * docs/feature-interaction-map.md). `retired_at` already hides a sold
+ * machine from every worker picker (api/companydata.js's list_equipment),
+ * but the surfaces that read the `equipment` table directly bypassed that
+ * filter, so a machine sold in June kept a live PM clock and a live expired
+ * CVIP. The historical half is deliberately untouched: resolveEquipmentId,
+ * resolveEquipmentIds and companyEquipmentIndex above all still see retired
+ * machines, and must — see the note in §5 of the map about wedging a
+ * worker's offline queue.
+ *
+ * Returns `null` when the fleet can't be read — "I don't know", not "none
+ * are retired" — for the same reason companyEquipmentIndex does. A caller
+ * that treated an outage as "everything is retired" would empty a
+ * supervisor's Compliance screen and drop every line off a weekly report,
+ * which is far worse than briefly showing a machine that has been sold.
+ */
+export async function retiredEquipmentIds(supabaseAdmin, companyId) {
+  const { data: rows, error } = await supabaseAdmin
+    .from('equipment')
+    .select('id')
+    .eq('company_id', companyId)
+    .not('retired_at', 'is', null);
+  if (error || !rows) return null;
+  return new Set(rows.map(r => String(r.id)));
+}
+
+/**
+ * Drops the rows that belong to a retired machine. One definition of the
+ * rule, because the three surfaces that apply it — the Compliance tab list,
+ * the overview banner's counts, and the weekly report's compliance section —
+ * have to agree to the row. A banner counting 2 while the screen below it
+ * lists 3 is the failure this helper exists to prevent.
+ *
+ * Two kinds of row are KEPT on purpose:
+ *   * one whose `equipment_id` is null (nothing to retire), and
+ *   * one naming a machine that isn't in `retiredIds` at all — including a
+ *     machine whose fleet row couldn't be read. An unresolvable id is not
+ *     evidence of retirement, and foldComplianceSnapshot already prints
+ *     those under "Unknown machine" rather than dropping them.
+ *
+ * `retiredIds` of `null` (see above) means "unknown", so nothing is
+ * dropped and the caller behaves exactly as it did before this shipped.
+ */
+export function withoutRetiredEquipment(rows, retiredIds, key = 'equipment_id') {
+  if (!Array.isArray(rows)) return [];
+  if (!retiredIds || retiredIds.size === 0) return rows;
+  return rows.filter(r => r[key] == null || !retiredIds.has(String(r[key])));
+}
