@@ -69,11 +69,21 @@ const COMPLIANCE = [
   { id: 303, company_id: 'acme', equipment_id: 1, doc_type: 'registration', label: null, expiry_date: '2027-12-31', notes: null, updated_at: '2026-01-01T00:00:00.000Z' },
 ];
 
+// acme has bought the Equipment Compliance module. Without this the weekly
+// report's compliance section is skipped entirely and correctly — the
+// section is gated on the doc key, deny-by-default — and these cases would
+// pass for the wrong reason, asserting a retired machine is absent from a
+// section that was never built.
+const DOC_SETTINGS = [
+  { company_id: 'acme', document_key: 'equipment_compliance', is_active: true },
+];
+
 const TABLES = {
   equipment: EQUIPMENT,
   inspections: INSPECTIONS,
   equipment_maintenance_log: MAINTENANCE_LOG,
   equipment_compliance: COMPLIANCE,
+  company_document_settings: DOC_SETTINGS,
   fuel_logs: [],
 };
 

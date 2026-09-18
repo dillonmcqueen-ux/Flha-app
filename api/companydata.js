@@ -253,6 +253,44 @@ function isUniqueViolation(error) {
   return error && error.code === '23505';
 }
 
+// Normalises an employer's employee number. Trimmed and capped; the stored
+// spelling is whatever the supervisor typed, because it is their number and
+// it appears on their HRIS exports.
+function employeeIdText(value) {
+  return String(value == null ? '' : value).trim().slice(0, 60);
+}
+
+// Whether another roster row in the same company already carries this
+// employee number, returning that person's name so the error can say who.
+// Returns '' when the number is free.
+//
+// Unlike equipment asset IDs (activeUnitNumberClash above, which ignores
+// retired machines because unit numbers get reused), this spans INACTIVE
+// rows too: an employee number is not reused when someone leaves, and a
+// future HRIS sync keying on it cannot tolerate two rows answering to one
+// number. Somebody rehired keeps their row via reactivate_roster_member.
+//
+// A blank is not a collision — most rows will never have a number.
+//
+// The database enforces this as well (roster_company_employee_id_unique,
+// partial and case-insensitive). This check exists to produce a message
+// naming the person instead of a raw constraint error; the index is what
+// makes it true under a race.
+async function employeeIdClash(companyId, employeeId, excludeId) {
+  const wanted = employeeIdText(employeeId).toLowerCase();
+  if (!wanted) return '';
+  const { data, error } = await supabaseAdmin
+    .from('roster')
+    .select('id, name, employee_id, active')
+    .eq('company_id', companyId);
+  // Fail open on a read error: the unique index still refuses a genuine
+  // duplicate, so the cost is a worse error message, not a bad row.
+  if (error || !data) return '';
+  const hit = data.find(r => r.id !== excludeId && employeeIdText(r.employee_id).toLowerCase() === wanted);
+  if (!hit) return '';
+  return hit.active ? hit.name : `${hit.name} (deactivated)`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -302,7 +340,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -354,14 +392,28 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: `"${name}" is already active on this roster. Add a last initial to tell them apart.` });
       }
 
+      // Optional. A company that has no employee numbers, or does not know
+      // them yet, adds people exactly as before; set_roster_employee_id
+      // below fills them in later, which is the path an existing roster
+      // takes.
+      const employeeId = employeeIdText(req.body.employeeId);
+      if (employeeId) {
+        const clash = await employeeIdClash(companyId, employeeId, null);
+        if (clash) return res.status(409).json({ error: `Employee ID ${employeeId} already belongs to ${clash}.` });
+      }
+
       const salt = genSalt();
       const pin = genPin();
       const { data, error } = await supabaseAdmin
         .from('roster')
-        .insert({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt })
-        .select('id, name, role, active, created_at')
+        .insert({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt, employee_id: employeeId || null })
+        .select('id, name, role, active, created_at, employee_id')
         .single();
-      if (error) { console.error("roster add failed:", error.message); return res.status(500).json({ error: "Couldn't add to the roster. Try again." }); }
+      if (error) {
+        if (isUniqueViolation(error)) return res.status(409).json({ error: `Employee ID ${employeeId} is already in use on this roster.` });
+        console.error("roster add failed:", error.message);
+        return res.status(500).json({ error: "Couldn't add to the roster. Try again." });
+      }
       return res.status(200).json({ ok: true, member: data, pin });
     }
 
@@ -400,6 +452,15 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: `"${name}" is already active on this roster. Add a last initial to tell them apart.` });
       }
 
+      // Same optional employee number as add_roster_member. A new hire is
+      // the one moment somebody actually has the number to hand, so it is
+      // offered here rather than only after the fact.
+      const employeeId = employeeIdText(req.body.employeeId);
+      if (employeeId) {
+        const clash = await employeeIdClash(companyId, employeeId, null);
+        if (clash) return res.status(409).json({ error: `Employee ID ${employeeId} already belongs to ${clash}.` });
+      }
+
       const salt = genSalt();
       const pin = genPin(); // replaced by the new hire's own PIN during onboarding — never sent in this email
       const inviteToken = randomToken();
@@ -407,14 +468,19 @@ export default async function handler(req, res) {
         .from('roster')
         .insert({
           company_id: companyId, name, role, email,
+          employee_id: employeeId || null,
           pin_hash: hashPin(pin, salt), pin_salt: salt,
           wallet_enabled: true,
           wallet_invite_token: inviteToken,
           wallet_invite_token_expires_at: new Date(Date.now() + WALLET_INVITE_TTL_MS).toISOString(),
         })
-        .select('id, name, role, email, created_at')
+        .select('id, name, role, email, created_at, employee_id')
         .single();
-      if (error) { console.error("onboard_new_employee failed:", error.message); return res.status(500).json({ error: "Couldn't add to the roster. Try again." }); }
+      if (error) {
+        if (isUniqueViolation(error)) return res.status(409).json({ error: `Employee ID ${employeeId} is already in use on this roster.` });
+        console.error("onboard_new_employee failed:", error.message);
+        return res.status(500).json({ error: "Couldn't add to the roster. Try again." });
+      }
 
       const inviteUrl = `${siteOrigin(req)}/wallet?token=${inviteToken}`;
       let emailSent = false;
@@ -430,6 +496,51 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({ ok: true, member: data, inviteUrl, emailSent });
+    }
+
+    // Set or clear one person's employee number after the fact. This is the
+    // path that matters: every roster already in production predates the
+    // column, so the numbers get filled in on people who are already there
+    // rather than at add time.
+    //
+    // Deliberately allowed on an INACTIVE member too. Somebody who left and
+    // is coming back keeps their row and their number, and an HRIS export
+    // being reconciled after the fact routinely names people who are no
+    // longer active.
+    if (action === 'set_roster_employee_id') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin
+        .from('roster').select('id, company_id, name').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Roster member not found.' });
+      const member = rows[0];
+      if (session.role === 'supervisor' && member.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed to change this person.' });
+      }
+
+      // Blank clears it. That is a real thing to want: a number entered
+      // against the wrong person has to be removable before it can be put
+      // on the right one.
+      const employeeId = employeeIdText(req.body.employeeId);
+      if (employeeId) {
+        const clash = await employeeIdClash(member.company_id, employeeId, member.id);
+        if (clash) return res.status(409).json({ error: `Employee ID ${employeeId} already belongs to ${clash}.` });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('roster')
+        .update({ employee_id: employeeId || null })
+        .eq('id', member.id)
+        .select('id, name, employee_id')
+        .single();
+      if (error) {
+        if (isUniqueViolation(error)) return res.status(409).json({ error: `Employee ID ${employeeId} is already in use on this roster.` });
+        console.error('set_roster_employee_id failed:', error.message);
+        return res.status(500).json({ error: "Couldn't save that employee ID." });
+      }
+      return res.status(200).json({ ok: true, member: data });
     }
 
     if (action === 'deactivate_roster_member' || action === 'reactivate_roster_member') {

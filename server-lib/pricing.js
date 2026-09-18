@@ -95,6 +95,12 @@ export const MODULES = {
     price: { basic: 18, advanced: 40 },
     docKeys: ['certifications'],
   },
+  compliance: {
+    label: 'Equipment Compliance',
+    blurb: 'CVIP, registration and insurance expiry dates per machine, with alerts',
+    price: { basic: 20, advanced: 45 },
+    docKeys: ['equipment_compliance'],
+  },
   fuel: {
     label: 'Fuel & Consumables',
     blurb: 'Fuel-ups logged against the actual unit',

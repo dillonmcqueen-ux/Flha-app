@@ -32,6 +32,11 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ah, bh);
 }
 
+// Deny-by-default, matching api/customforms.js and the identical copy in
+// api/equipmentreports.js. This used to return true for a missing row, which
+// is the direction that hands a company a module it never bought — and here
+// it would do it on a schedule, generating and emailing a weekly report for
+// a company whose dashboard says that document type is off.
 async function isDocKeyActive(companyId, documentKey) {
   const { data: settingRows } = await supabaseAdmin
     .from('company_document_settings')
@@ -39,7 +44,7 @@ async function isDocKeyActive(companyId, documentKey) {
     .eq('company_id', companyId)
     .eq('document_key', documentKey)
     .limit(1);
-  return settingRows && settingRows.length > 0 ? settingRows[0].is_active : true;
+  return !!(settingRows && settingRows.length > 0 && settingRows[0].is_active);
 }
 
 export default async function handler(req, res) {

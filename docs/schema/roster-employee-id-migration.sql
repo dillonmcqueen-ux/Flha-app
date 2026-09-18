@@ -1,0 +1,84 @@
+-- docs/schema/roster-employee-id-migration.sql
+--
+-- The employer's own employee number on a roster row.
+--
+-- Dillon, 2026-09-18: "I want to be able to connect in the future with APIs
+-- to places like myworkday, they require employees to have a employee id,
+-- add that in with the roster."
+--
+-- ── Why a column and not a note field ────────────────────────────────────
+--
+-- This is a JOIN KEY, not a label. An HRIS (Workday, BambooHR, ADP) keys
+-- every person on its own employee number, and a future sync has to answer
+-- "which FORA roster row is this Workday worker?" without guessing from a
+-- name. Names are exactly what cannot be matched on: the roster already
+-- de-duplicates by `name_normalized` and tells a supervisor to "add a last
+-- initial to tell them apart" (api/companydata.js's add_roster_member), so
+-- two Dave Smiths are two rows whose names differ from whatever the HRIS
+-- calls them.
+--
+-- Nothing reads this column yet. That is deliberate and it is recorded as
+-- such on the interaction map rather than left implied — the same shape as
+-- `daily_reports.equipment_ids` (break #13). It is added now because the
+-- cost of collecting it from the first day of a company's roster is zero,
+-- and the cost of backfilling it across a live workforce later is not.
+--
+-- ── Uniqueness, and why it spans inactive rows too ───────────────────────
+--
+-- Unique per company, case-insensitively, across ACTIVE AND INACTIVE rows
+-- alike. This is the opposite of the rule for equipment asset IDs
+-- (api/companydata.js's activeUnitNumberClash, which deliberately ignores
+-- retired machines) and the difference is real: a unit number gets reused
+-- when a machine is replaced, an employee number does not get reused when
+-- someone leaves. Two roster rows sharing one would make an HRIS sync
+-- ambiguous, which is the entire failure this column exists to prevent.
+--
+-- Someone rehired keeps their row and their number — the roster already has
+-- reactivate_roster_member for exactly that, so no legitimate flow needs a
+-- second row with the same id.
+--
+-- Blank is not a collision: the column is nullable and most existing rows
+-- will never have one, so the index is partial. Enforced in the database
+-- rather than only in the handler, because a join key that can go ambiguous
+-- under a race is not a join key.
+--
+-- ── Backward compatibility ───────────────────────────────────────────────
+--
+-- Nullable, no default, no existing writer touches it. Every roster row in
+-- production keeps working unchanged, and every existing insert path
+-- (add_roster_member, onboard_new_employee, approve_onboarding_request)
+-- satisfies it without modification.
+
+alter table public.roster
+  add column if not exists employee_id text;
+
+-- Case-insensitive, per company, blanks excluded. `lower(btrim(...))` so
+-- " A-1047 " and "a-1047" are the same number, which is what a human typing
+-- it into two different screens will produce.
+create unique index if not exists roster_company_employee_id_unique
+  on public.roster (company_id, lower(btrim(employee_id)))
+  where employee_id is not null and btrim(employee_id) <> '';
+
+-- ── Verification ─────────────────────────────────────────────────────────
+--
+-- -- column present and nullable, nothing forced:
+-- select column_name, is_nullable, column_default
+-- from information_schema.columns
+-- where table_schema = 'public' and table_name = 'roster'
+--   and column_name = 'employee_id';
+--
+-- -- no existing row was given one:
+-- select count(*) filter (where employee_id is not null) as have_id,
+--        count(*)                                        as total
+-- from public.roster;
+--
+-- -- the partial unique index exists:
+-- select indexdef from pg_indexes
+-- where tablename = 'roster' and indexname = 'roster_company_employee_id_unique';
+--
+-- -- two blanks in one company must NOT collide (expect 0 rows, no error):
+-- -- (covered by the partial predicate above; no query needed)
+--
+-- ── Rollback ─────────────────────────────────────────────────────────────
+-- drop index if exists roster_company_employee_id_unique;
+-- alter table public.roster drop column if exists employee_id;

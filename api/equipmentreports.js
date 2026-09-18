@@ -151,6 +151,25 @@ function mondayOf(d) {
   return date;
 }
 
+// Whether a company has a document type switched on.
+//
+// Deny-by-default, matching api/customforms.js: a missing row means nobody
+// decided to give this company the feature, and for a key that a module
+// sells that means it was not bought. api/cron-equipment-reports.js carries
+// an identical copy for the same reason, and the two have to stay in step --
+// they gate the same weekly report from two entry points, and a cron that
+// disagrees with the builder would produce a document the dashboard says
+// should not exist.
+async function isDocKeyActive(companyId, documentKey) {
+  const { data: rows } = await supabaseAdmin
+    .from('company_document_settings')
+    .select('is_active')
+    .eq('company_id', companyId)
+    .eq('document_key', documentKey)
+    .limit(1);
+  return !!(rows && rows.length > 0 && rows[0].is_active);
+}
+
 function toISODate(d) {
   return d.toISOString().slice(0, 10);
 }
@@ -588,13 +607,21 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   // Read failures and a company that tracks nothing are the same outcome
   // here -- no `compliance` key at all -- so a report is never lost over
   // this, and every report generated before today renders exactly as it
-  // did. The section is not gated on a doc key because compliance has no
-  // module to gate on (break #19, open); a company that has never added an
-  // expiry date gets no section, which is what it had before.
-  const { data: complianceRows, error: complianceErr } = await supabaseAdmin
-    .from('equipment_compliance')
-    .select('id, equipment_id, doc_type, label, expiry_date, notes')
-    .eq('company_id', companyId);
+  // did.
+  //
+  // Gated on the Equipment Compliance module (break #19, closed). This
+  // report is the Equipment Inspections module's artifact, so without the
+  // gate a company that bought inspections but not compliance would receive
+  // a paid module's output inside another module's document every Monday.
+  // Skipping the query entirely rather than filtering afterwards: the point
+  // is not to read a feature's data for a company that did not buy it.
+  const complianceActive = await isDocKeyActive(companyId, 'equipment_compliance');
+  const { data: complianceRows, error: complianceErr } = complianceActive
+    ? await supabaseAdmin
+        .from('equipment_compliance')
+        .select('id, equipment_id, doc_type, label, expiry_date, notes')
+        .eq('company_id', companyId)
+    : { data: null, error: null };
 
   let compliance = null;
   if (!complianceErr && complianceRows && complianceRows.length > 0) {
