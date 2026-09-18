@@ -182,14 +182,40 @@ test('a report written before this shipped still renders', async () => {
   assert.ok(Buffer.isBuffer(buf) && buf.length > 1000);
 });
 
-test('a company that tracks no expiry dates gets the same PDF it always got', async () => {
+test('a company that tracks no expiry dates at all gets the same PDF it always got', async () => {
   // `compliance` is absent, not an empty object — the build only attaches
-  // the key when the company has rows.
-  const withEmpty = { ...baseReport, report_json: { ...baseReport.report_json, compliance: { asOf: ASOF, warningDays: 30, expiredCount: 0, dueSoonCount: 0, currentCount: 4, items: [] } } };
+  // the key when the company has rows. The nothing-tracked case is
+  // currentCount 0 AND no items, which is what this asserts; a company with
+  // rows that all happen to be current is the separate case below.
+  const nothingTracked = { ...baseReport, report_json: { ...baseReport.report_json, compliance: { asOf: ASOF, warningDays: 30, expiredCount: 0, dueSoonCount: 0, currentCount: 0, items: [] } } };
   const a = await renderEquipmentReportPdf({ report: baseReport, companyName: 'Test Co', companyLogo: '' });
-  const b = await renderEquipmentReportPdf({ report: withEmpty, companyName: 'Test Co', companyLogo: '' });
-  // Same length: nothing is drawn for a section with no actionable rows.
+  const b = await renderEquipmentReportPdf({ report: nothingTracked, companyName: 'Test Co', companyLogo: '' });
+  // Same length: nothing is drawn when there is nothing to draw.
   assert.equal(a.length, b.length);
+});
+
+test('a company whose dates are all current still gets the section, not silence', async () => {
+  // This test previously carried currentCount 4 under the name "tracks no
+  // expiry dates" and asserted the PDF was unchanged, which locked in the
+  // bug: foldComplianceSnapshot drops every current row from `items`, so the
+  // company doing the best job of staying current produced an empty `items`
+  // and got no section — indistinguishable in the report from a company that
+  // tracks nothing. The supervisor who keeps every CVIP current should see
+  // that stated, not inferred from an absence.
+  const allCurrent = { ...baseReport, report_json: { ...baseReport.report_json, compliance: { asOf: ASOF, warningDays: 30, expiredCount: 0, dueSoonCount: 0, currentCount: 4, items: [] } } };
+  const a = await renderEquipmentReportPdf({ report: baseReport, companyName: 'Test Co', companyLogo: '' });
+  const b = await renderEquipmentReportPdf({ report: allCurrent, companyName: 'Test Co', companyLogo: '' });
+  assert.ok(b.length > a.length, 'an all-current fleet should still get a Compliance & Documents section');
+});
+
+test('the all-current section is smaller than one listing actual expiries', async () => {
+  // Guards the other direction: the all-clear line must not be drawing the
+  // table header and an empty grid.
+  const allCurrent = { ...baseReport, report_json: { ...baseReport.report_json, compliance: { asOf: ASOF, warningDays: 30, expiredCount: 0, dueSoonCount: 0, currentCount: 4, items: [] } } };
+  const withRows = { ...baseReport, report_json: { ...baseReport.report_json, compliance: foldComplianceSnapshot(rows, fleet, ASOF) } };
+  const a = await renderEquipmentReportPdf({ report: allCurrent, companyName: 'Test Co', companyLogo: '' });
+  const b = await renderEquipmentReportPdf({ report: withRows, companyName: 'Test Co', companyLogo: '' });
+  assert.ok(b.length > a.length, 'a listed expiry should cost more page than the all-clear line');
 });
 
 test('a report carrying compliance rows renders more than one without them', async () => {
