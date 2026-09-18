@@ -53,7 +53,7 @@ An idea is worth proposing only if all five hold:
 - **Warnings FORA could raise but doesn't.** It knows a certificate
   expires Friday, that a machine is 40 hours overdue, that a hazard shows
   up on every FLHA at one site. Who gets told?
-- **Module combinations.** `server-lib/pricing.js` sells eight modules. For
+- **Module combinations.** `server-lib/pricing.js` sells nine modules (count them there rather than trusting this line). For
   each pair a customer might buy together, what should the pair do that
   neither does alone? That's where modular pricing either feels worth it
   or doesn't.
