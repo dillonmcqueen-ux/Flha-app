@@ -28,7 +28,11 @@ import {
   resolveModules, quote, buildCheckoutLineItems,
 } from '../../server-lib/pricing.js';
 
-const ALL = 'safety,inspections,maintenance,timeclock,daily,certifications,fuel,monthly';
+// Every module key, and it has to be kept in step BY HAND: this is a string,
+// so doc-key-module-invariant.test.js cannot see it. Forget a module here and
+// every "all modules" assertion below quietly stops covering it while the
+// suite still goes green.
+const ALL = 'safety,inspections,maintenance,timeclock,daily,certifications,compliance,fuel,monthly';
 const cents = d => Math.round(d * 100 * (1 + CARD_SURCHARGE_RATE));
 
 function build(tier, raw = ALL) {

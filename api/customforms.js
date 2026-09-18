@@ -116,7 +116,7 @@ function resolveCompanyId(session, requestedCompanyId) {
 
 // Built-in document keys — used so the toggle system has a fixed list
 // of the non-custom types to show alongside custom ones.
-const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports', 'maintenance', 'timeclock', 'fuellog', 'certifications'];
+const BUILTIN_DOC_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'equipment_reports', 'maintenance', 'timeclock', 'fuellog', 'certifications', 'equipment_compliance'];
 
 // Which top-level Dashboard menu group (Safety / Operations / Workforce) a
 // custom form's submissions and analytics show up under.
@@ -729,4 +729,7 @@ const BUILTIN_LABELS = {
   timeclock: 'Time Clock',
   fuellog: 'Log Fuel',
   certifications: 'Certification Tracker (Onboarding Wallet)',
+  // Without a label here the Admin Panel renders the raw key, because the
+  // builtins list falls back to `BUILTIN_LABELS[key] || key`.
+  equipment_compliance: 'Equipment Compliance',
 };

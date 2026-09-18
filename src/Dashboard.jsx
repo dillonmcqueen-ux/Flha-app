@@ -2745,6 +2745,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const maintenanceEnabled = isDocActive("maintenance");
   const fuelEnabled = isDocActive("fuellog");
   const inspectionsEnabled = isDocActive("inspection");
+  const complianceEnabled = isDocActive("equipment_compliance");
   // Each custom form now carries a `category` (safety/operations/workforce,
   // set by the admin when creating it) — a separate "Custom Docs" tab per
   // category, only shown when that company has at least one active custom
@@ -2808,16 +2809,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // done to it, how hard is it working, what paperwork is about to lapse,
   // what did it burn, what went out in the weekly report.
   //
-  // `on` is what the company bought. Fleet and Compliance have no module
-  // behind them — they are facts about machines a company already owns, not
-  // a document type — so they are always on.
+  // `on` is what the company bought. Fleet Overview is the exception and
+  // stays unconditional: the fleet list is reference data every other module
+  // joins to, the same way Analytics and SOPs are, not a document type a
+  // company buys. Compliance USED to be in that exception too, which was
+  // break #19 — it is a tracked-record feature with its own table and its
+  // own CRUD, and it shipped free to every company because nothing sold it.
+  // It has its own module now.
   const EQUIPMENT_SUBTABS = [
     { key: "fleet", label: "Fleet Overview", on: true },
     { key: "maintenance", label: "Maintenance", on: maintenanceEnabled },
     { key: "records", label: "Maintenance Records", on: maintenanceEnabled },
     { key: "actions", label: "Corrective Actions", on: maintenanceEnabled },
     { key: "hours", label: "Weekly Hours", on: inspectionsEnabled },
-    { key: "compliance", label: "Compliance", on: true },
+    { key: "compliance", label: "Compliance", on: complianceEnabled },
     { key: "fuel", label: "Fuel Logs", on: fuelEnabled },
     { key: "reports", label: "Weekly Reports", on: equipmentReportsEnabled },
   ];
@@ -4716,12 +4721,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {/* ── Equipment compliance alerts (break #14) ──────────────────────
             The dates that park a machine when they lapse, on the page a
             supervisor actually lands on. Same shape as the certification
-            banner above, and gated the same way the Compliance tab itself
-            is: on having something to show, not on a doc key — compliance
-            has no purchasable module (break #19, open), so adding one here
-            would change who can see it. Red when something is already
-            expired, amber when it is only coming due. */}
-        {(complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
+            banner above and gated the same way it is, on the module's own
+            doc key — that is break #19 closed: compliance had no module
+            behind it and so reached every company free. Red when something
+            is already expired, amber when it is only coming due. */}
+        {complianceEnabled && (complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
           const tone = complianceAlerts.expiredCount > 0 ? C.status.danger : C.status.warning;
           const rows = [...complianceAlerts.expired, ...complianceAlerts.expiringSoon];
           return (
