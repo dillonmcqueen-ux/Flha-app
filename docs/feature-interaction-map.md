@@ -84,7 +84,7 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Weekly Hours | — | ✅ `equipmentreports.js:300` (`foldWeeklyUsage`) |
 | Maintenance Records | — | ✅ `maintenance.js:376-390` |
 | Corrective Actions | ✅ *(#11, PR #121)* `logs.js:463` | ✅ `recurrence.js:51`, `correctiveActions.js:298` |
-| Equipment Compliance | ✅ `companydata.js:934` | ✅ `companydata.js:907`, `:941` (`compliance_summary`), `equipmentreports.js:595` — **#14** fix in PR #122, unmerged |
+| Equipment Compliance | ✅ `companydata.js:1027` (`upsert_equipment_compliance`) | ✅ `companydata.js:914`, `:960` (`compliance_summary`), `equipmentreports.js:595` — **#14** closed in PR #122; all three now drop retired machines (**#15**, PR #123) |
 | Daily Report | ⚠️ array form `equipment_ids`, **nothing reads it** — **#13** | — |
 | Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) |
 
@@ -177,11 +177,11 @@ which is right for some and wrong for one:
 
 | Direct reader | Includes retired? | Correct? |
 |---|---|---|
-| `maintenance.js:133-137` (`list_status`) | yes | ❌ **#15** — a sold machine keeps a live PM clock |
+| `maintenance.js:148-153` (`list_status`) | **no** — `.is('retired_at', null)` | ✅ **#15** fixed, PR #123 (draft) |
 | `maintenance.js:376-379` (`list_records`) | yes | ✅ deliberate; a history that drops the machines you no longer own is not a history |
 | `equipmentScope.js:80-88` (`companyEquipmentIndex`) | yes | ✅ historical ids must still vet |
 | `equipmentScope.js:42,119` (`resolveEquipmentId(s)`) | yes | ✅ deliberate — see §5 |
-| `companydata.js:902-910` (compliance list) | yes | ⚠️ **#15** — a retired unit's expired CVIP still counts |
+| `companydata.js:902-910` (compliance list) | **no** — `withoutRetiredEquipment` | ✅ **#15** fixed, PR #123 (draft); same for `compliance_summary` (`:979`) and the weekly report's snapshot (`equipmentreports.js:619,630`) |
 
 ### `daily_reports.equipment_ids` (jsonb array → `equipment.id`)
 The joinable half of the free-text `daily_reports.equipment`, the same
@@ -196,11 +196,14 @@ absent from `EDITABLE_FIELDS.daily` (`logs.js:620-625`).
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
 `api/companydata.js:902-1020`. Until **#14** the only consumer was Equipment ▸
 Compliance (`Dashboard.jsx:5899-5989`) — not the weekly equipment report, not
-the cron, not the overview banner, not the Brain. PR #122 (draft, unmerged)
-adds two: the overview banner via `compliance_summary` (`companydata.js:941` →
+the cron, not the overview banner, not the Brain. PR #122 (merged)
+added two: the overview banner via `compliance_summary` (`companydata.js:941` →
 `Dashboard.jsx:4681`) and the weekly equipment report's compliance section
 (`equipmentreports.js:593-618` → `reportPdfs.js:142`). The Brain still never
-sees an expiry date — that was never in #14's approved scope.
+sees an expiry date — that was never in #14's approved scope. All three drop a
+retired machine's rows as of **#15** (PR #123, draft), through one shared rule
+(`withoutRetiredEquipment`, `equipmentScope.js`) so the counts and the lists
+cannot disagree.
 
 ### `linked_inspection_id` → `inspections.id` (the trip pair)
 Set on a post-trip to point back at its pre-trip (`Inspection.jsx:53`;
@@ -391,8 +394,8 @@ corrective actions the fourth writer of that table, alongside
 | Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 | Attachments (`is_attachment`) | ❌ #18 | — | ✅ `equipmentreports:343,491` | ❌ #17 | — | ❌ #17 | — |
-| Equipment Compliance | ❌ #14 | — | ⏳ #14 *(PR #122, unmerged: `reportPdfs.js:142`)* | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4650`; the overview banner it now matches is `Dashboard.jsx:4681`, PR #122, unmerged)* |
-| Fleet retirement (`retired_at`) | ❌ #15 | ✅ picker filtered | ✅ | — | — | — | — |
+| Equipment Compliance | ❌ #14 | — | ✅ *(#14, PR #122: `reportPdfs.js:142`)* | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4650`; the overview banner it now matches is `Dashboard.jsx:4681`, PR #122)* |
+| Fleet retirement (`retired_at`) | ✅ *(#15, PR #123 draft: no PM clock)* | ✅ picker filtered | ✅ *(#15: off the weekly report)* | — | — | — | — |
 
 ---
 
@@ -956,10 +959,9 @@ the weekly equipment report. Not all three at once. No migration.
 
 ### #14 — A machine's compliance expiries reach nothing but their own screen
 
-**Severity: high. Status: fix built and pushed on
-`claude/equipment-tab-fleet-mgmt-9g0xra` (PR #122, draft). NOT closed — it
-closes when #122 merges.** Found 2026-09-17 on the fleet branch, approved by
-Dillon 2026-09-18, both approved halves built the same day.
+**Severity: high. Status: CLOSED — PR #122 merged as `d91fcb6`, 2026-09-18.**
+Found 2026-09-17 on the fleet branch, approved by Dillon 2026-09-18, both
+approved halves built and merged the same day.
 
 **What was built** (only the two halves Dillon approved):
 
@@ -980,10 +982,13 @@ Dillon 2026-09-18, both approved halves built the same day.
   it is as of.
 * Classification is as of the report's own **week end**, so a report pulled
   for an old week says what was expired *then*. That is what a snapshot is.
-* Retired machines still count, because they still count on the Compliance
-  tab, and three surfaces disagreeing is worse than one being wrong. **That a
-  sold machine's expired CVIP counts at all is #15** — shipping this gives
-  #15 two more places to be seen, weekly and in print.
+* Retired machines still counted, because they still counted on the Compliance
+  tab, and three surfaces disagreeing is worse than one being wrong. Shipping
+  this gave **#15** two more places to be seen, weekly and in print —
+  deliberately, so all three could then be filtered together rather than one at
+  a time. **#15 (PR #123, draft) is that follow-up**: all three now drop a
+  retired machine, and the comment here saying `compliance_summary` does not
+  filter was removed from the code rather than left contradicting it.
 * No doc key and no pricing module were added — that is **#19**, open and not
   approved.
 
@@ -1022,7 +1027,10 @@ the thing a supervisor reads without opening the dashboard. No migration.
 
 ### #15 — Retiring a machine doesn't retire its maintenance clock
 
-**Severity: medium. Status: open, found 2026-09-17 on the fleet branch.**
+**Severity: medium. Status: fix built and pushed on
+`claude/equipment-tab-fleet-mgmt-9g0xra` (PR #123, draft). NOT closed — it
+closes when #123 merges.** Found 2026-09-17 on the fleet branch, approved by
+Dillon 2026-09-18 including the product call below, built the same day.
 
 Retiring is the whole point of the new column: hide a sold or scrapped machine
 from every worker picker while keeping every row that references its id
@@ -1043,14 +1051,44 @@ Expired / Due-in-30 stat strip. The **add** dropdown uses `activeFleet`
 (`src/Dashboard.jsx:5907`) but the list and the counters use the unfiltered
 `compliance` array (`:5918-5920`).
 
-*Re-check:* `grep -n "retired" api/maintenance.js` → four hits, all inside
-`list_records` (`:367,377,385,402`). `list_status` has none. Run 2026-09-17
-against `ea1c9e1`.
+*Re-check, before the fix:* `grep -n "retired" api/maintenance.js` → four hits,
+all inside `list_records`. `list_status` had none. Run 2026-09-17 against
+`ea1c9e1`, and re-run 2026-09-18 against `d91fcb6` — still open, which is why
+this was built rather than closed on sight.
 
-**A fix would touch:** the fleet query in `list_status` (exclude retired, or
-return them flagged so the screen can group them), and the compliance counters.
-Whether a retired machine should vanish from the PM screen or appear greyed out
-is a product call, not a mechanical one. No migration.
+*Re-check, after:* `npm run test:unit` → 313 pass. Reverting only `api/` to
+`d91fcb6` with the tests in place fails 5 of 13 in
+`tests/unit/retired-equipment-scope.test.js` — PM status, the Compliance list,
+the banner/list agreement and the report snapshot — while the three
+must-not-change guards pass both before and after. That before/after pair is
+the evidence, not the grep.
+
+**The product call, settled by Dillon 2026-09-18: filter them out.** A retired
+machine is *operationally gone* — no PM clock, no expiry counts, not on the
+weekly report, not in any stat tile or nav badge — and *historically present* —
+every inspection, fuel log, service entry and corrective action kept, and still
+in Fleet Overview behind the "Show retired machines" toggle.
+
+**What was built** (PR #123, draft):
+
+| Surface | Where |
+|---|---|
+| PM status | `maintenance.js:132-153` — `.is('retired_at', null)` on the fleet query, the same filter `list_equipment` already used. The only filter added in that file |
+| Compliance tab list | `companydata.js:914-942` (filter at `:941`) — `withoutRetiredEquipment`, asking for the retired set only when there is something to filter |
+| Overview banner counts | `companydata.js:960-1021` (filter at `:979-980`) — the same rule, applied *before* anything is counted. #14's comment saying this deliberately did NOT filter is removed rather than left stale |
+| Weekly report snapshot | `equipmentreports.js:594-630` (drop at `:619,630`) — dropped before the fold, reading `retired_at` off the fleet rows the builder already fetched, so no extra query |
+| The shared rule | `server-lib/equipmentScope.js` — `retiredEquipmentIds` (company-scoped query) and `withoutRetiredEquipment` (pure). One definition, because the counts and the lists have to agree on every screen |
+| Tests | `tests/unit/retired-equipment-scope.test.js` — 13 cases against the real handlers via a PostgREST stand-in. Four pin the break closed; three pin `list_records`, `resolveEquipmentId(s)` and `companyEquipmentIndex` *open*, so a later "make it consistent" pass can't wedge an offline queue |
+
+Fails toward showing too much: `retiredEquipmentIds` returns `null` for "I
+don't know" on a read error, which leaves every row in place. Emptying a
+supervisor's Compliance screen over a transient outage is worse than briefly
+showing a machine that has been sold.
+
+Untouched on purpose: `list_records`, `companyEquipmentIndex`,
+`resolveEquipmentId`/`resolveEquipmentIds` and Fleet Overview — see §5. No
+migration, no `src/` change (the stat tiles are computed in the browser from
+these same payloads), no new `api/` file.
 
 ### #16 — The inspection PDF grouped checklist items by a tag the form stopped writing
 
@@ -1307,7 +1345,8 @@ Do **not** flag these. They are decisions, not gaps.
   purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
   history or a vetting index
   that drops the machines you no longer own is not a history or an index.
-  Break #15 is about `list_status` only.
+  Break #15 is about `list_status` and the three compliance surfaces only, and
+  its fix (PR #123) deliberately left all three of these alone.
 - **`equipment_ids` is not editable on a submitted daily report**
   (`api/logs.js:620-625`). The supervisor edit corrects the free-text summary;
   the ids record what the worker actually picked in the field. Deliberate.
@@ -1353,3 +1392,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #122 | Break #7's root cause **half closed**: `activeUnitNumberClash` (`companydata.js:127-145`) enforces unit-number uniqueness among ACTIVE machines on add, edit and un-retire. Blank unit numbers still collide, and a machine still needs only one of make/model/type. Two statements in break #7 corrected — `update_equipment` exists now, and after a rename Weekly Hours shows the old label while Maintenance Records shows the new one. |
 | 2026-09-17 | PR #122 | Not an interaction break, recorded because it was found by the same sweep: `api/login.js`'s roleless roster **ticket** — minted after the company code, before any PIN — was accepted as a full session by every `verifySession` in `api/`, since a ticket has no `userId` and every copy short-circuits on that. The endpoints scoping by company rather than by role answered it for a 7-day TTL. Every verifier now rejects a payload carrying `purpose`. Found by `tenant-scope-reviewer`; the comment in `login.js` asserting this could never happen was the thing that made it invisible. |
 | 2026-09-18 | PR #122 | **#14 built, not closed** — approved by Dillon, both halves: a `compliance_summary` action (`companydata.js:941`) feeding an overview banner (`Dashboard.jsx:4681`), and a compliance section snapshotted into `report_json` at build time (`equipmentreports.js:377,593-618`) and rendered on the weekly equipment report (`reportPdfs.js:142`). The 30-day window and the doc-type names moved out of `Dashboard.jsx` into `server-lib/compliance.js` so the browser, the API and the PDF answer from one definition — copying a threshold onto the server to close a §4 break would have opened the next one. Snapshot-at-build rather than live-at-render is deliberate: the PDF is cached on first view, so "live" would mean "live for whoever opened it first". **Shipping this makes #15 more visible, not less** — a retired machine's expired CVIP now reaches the banner and the weekly PDF, because filtering it here alone would make three surfaces disagree. No migration, no doc key, no pricing module (#19 untouched). Marked closed only when #122 merges. |
+| 2026-09-18 | PR #122 (`d91fcb6`) | **#14 closed on merge.** Nothing further was built — this row records the state change the map had been carrying as "built, not closed" since the row above it. The compliance banner and the weekly report's compliance section are live for every company that tracks an expiry date. |
+| 2026-09-18 | PR #123 | **#15 built, not closed** — approved by Dillon, including the product call the map had left open. Retirement now means *operationally gone, historically present*: `list_status` filters `retired_at`, and the three compliance surfaces (tab list, `compliance_summary` banner, weekly report snapshot) drop a retired machine's rows through **one** shared rule in `server-lib/equipmentScope.js` rather than three copies — the break was that counts and lists must agree, so three separate filters would have been the same bug in a new shape. #14's comment claiming `compliance_summary` deliberately does not filter was stale the moment this landed and was removed, not left. **The three readers that were already correct stayed correct** and now have tests saying so: `list_records`, `companyEquipmentIndex`, and especially `resolveEquipmentId(s)`, where a "consistency" fix would 403 a submit from a worker whose report sat in the offline queue while the machine was retired and wedge their queue forever (§5, break #2's follow-up). No migration, no `src/` change, no new `api/` file, no doc key (#19 untouched). Marked closed only when #123 merges. |
