@@ -45,7 +45,24 @@
 -- (api/companydata.js add_equipment, src/Inspection.jsx's rental auto-save
 -- via the same action) keep working untouched. The new table is additive.
 --
--- Run in the Supabase SQL editor against the production project.
+-- ── APPLIED ──────────────────────────────────────────────────────────────
+--
+-- Applied to the production project (FORA, wzyvbtzxxdcxgvbkcqmt) on
+-- 2026-09-18 as migration `equipment_fleet_management`, and verified against
+-- the live database immediately after:
+--
+--   * all five new `equipment` columns present; `is_attachment` NOT NULL
+--     DEFAULT false, the other four nullable, nothing forced NOT NULL;
+--   * 11 existing machines, 0 retired, 0 flagged as attachments — every
+--     existing row untouched, which is what the defaults exist to guarantee;
+--   * `equipment_compliance` created with RLS enabled and 0 policies, the
+--     deny-by-default backstop every other table in this schema uses;
+--   * `daily_reports.equipment_ids` present;
+--   * the exact column list `list_equipment` selects, with its
+--     `retired_at is null` filter, returns live rows.
+--
+-- Kept here rather than deleted: this file is the record of what the schema
+-- is, and the rollback block at the bottom is only useful while it exists.
 
 -- ── 1. Fleet rows: editable identity, attachments, retirement ────────────
 
