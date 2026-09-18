@@ -84,7 +84,7 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Weekly Hours | — | ✅ `equipmentreports.js:300` (`foldWeeklyUsage`) |
 | Maintenance Records | — | ✅ `maintenance.js:376-390` |
 | Corrective Actions | ✅ *(#11, PR #121)* `logs.js:463` | ✅ `recurrence.js:51`, `correctiveActions.js:298` |
-| Equipment Compliance | ✅ `companydata.js:934` | ✅ `companydata.js:907` (own screen only — **#14**) |
+| Equipment Compliance | ✅ `companydata.js:934` | ✅ `companydata.js:907`, `:941` (`compliance_summary`), `equipmentreports.js:595` — **#14** fix in PR #122, unmerged |
 | Daily Report | ⚠️ array form `equipment_ids`, **nothing reads it** — **#13** | — |
 | Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) |
 
@@ -194,10 +194,13 @@ absent from `EDITABLE_FIELDS.daily` (`logs.js:620-625`).
 
 ### `equipment_compliance.equipment_id` → `equipment.id`
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
-`api/companydata.js:902-969`; the only consumer is Equipment ▸ Compliance
-(`Dashboard.jsx:5899-5989`). Nothing else in the product — not the weekly
-equipment report, not the cron, not the overview banner, not the Brain — knows
-these dates exist. **That is break #14.**
+`api/companydata.js:902-1020`. Until **#14** the only consumer was Equipment ▸
+Compliance (`Dashboard.jsx:5899-5989`) — not the weekly equipment report, not
+the cron, not the overview banner, not the Brain. PR #122 (draft, unmerged)
+adds two: the overview banner via `compliance_summary` (`companydata.js:941` →
+`Dashboard.jsx:4681`) and the weekly equipment report's compliance section
+(`equipmentreports.js:593-618` → `reportPdfs.js:142`). The Brain still never
+sees an expiry date — that was never in #14's approved scope.
 
 ### `linked_inspection_id` → `inspections.id` (the trip pair)
 Set on a post-trip to point back at its pre-trip (`Inspection.jsx:53`;
@@ -388,7 +391,7 @@ corrective actions the fourth writer of that table, alongside
 | Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 | Attachments (`is_attachment`) | ❌ #18 | — | ✅ `equipmentreports:343,491` | ❌ #17 | — | ❌ #17 | — |
-| Equipment Compliance | ❌ #14 | — | ❌ #14 | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue that DOES surface: `Dashboard.jsx:4650`)* |
+| Equipment Compliance | ❌ #14 | — | ⏳ #14 *(PR #122, unmerged: `reportPdfs.js:142`)* | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4650`; the overview banner it now matches is `Dashboard.jsx:4681`, PR #122, unmerged)* |
 | Fleet retirement (`retired_at`) | ❌ #15 | ✅ picker filtered | ✅ | — | — | — | — |
 
 ---
@@ -953,7 +956,36 @@ the weekly equipment report. Not all three at once. No migration.
 
 ### #14 — A machine's compliance expiries reach nothing but their own screen
 
-**Severity: high. Status: open, found 2026-09-17 on the fleet branch.**
+**Severity: high. Status: fix built and pushed on
+`claude/equipment-tab-fleet-mgmt-9g0xra` (PR #122, draft). NOT closed — it
+closes when #122 merges.** Found 2026-09-17 on the fleet branch, approved by
+Dillon 2026-09-18, both approved halves built the same day.
+
+**What was built** (only the two halves Dillon approved):
+
+| Half | Where |
+|---|---|
+| `compliance_summary` action | `companydata.js:941` — same shape as `certification_summary`: `resolveCompanyId` + `company_id` on the row, supervisor/admin only, machine names resolved in a second `company_id`-scoped query and only when there is something to name |
+| Overview banner | `Dashboard.jsx:4681` (state `:2006`, loader `:2618`) — red when something is already expired, amber when only coming due; gated on having something to show, the same way the Compliance sub-tab is gated today |
+| Weekly report section | `equipmentreports.js:377` (`foldComplianceSnapshot`) + `:593-618` (the company-scoped query, into `report_json.compliance`) → `reportPdfs.js:142-232` (the rendered section). `cron-equipment-reports.js:74` uses the same builder, so the Sunday-night PDF carries it |
+| One definition of the vocabulary | `server-lib/compliance.js` — `EXPIRY_WARNING_DAYS` / `expiryStatus` / `expiryText` and `COMPLIANCE_DOC_TYPES` / `complianceDocLabel` moved out of `Dashboard.jsx` unchanged, now imported by the browser bundle and by both handlers. A second 30-day window on the server would have been this map's own §4 shape, one release later |
+| Tests | `tests/unit/equipment-compliance-expiry.test.js` — the today/yesterday boundary, the 30-day edge, as-of-week-end classification, an unresolvable machine, and that a report written before this renders byte-identical |
+
+**Deliberate decisions, worth re-reading before changing any of it:**
+
+* Compliance rows are snapshotted into `report_json` **at build time**, not
+  read live at render time. The PDF is rendered once and cached on the row
+  (`equipmentreports.js:127`), so "live" would really mean "live for whoever
+  opened it first" and would freeze from then on. The section prints the date
+  it is as of.
+* Classification is as of the report's own **week end**, so a report pulled
+  for an old week says what was expired *then*. That is what a snapshot is.
+* Retired machines still count, because they still count on the Compliance
+  tab, and three surfaces disagreeing is worse than one being wrong. **That a
+  sold machine's expired CVIP counts at all is #15** — shipping this gives
+  #15 two more places to be seen, weekly and in print.
+* No doc key and no pricing module were added — that is **#19**, open and not
+  approved.
 
 `equipment_compliance` is written and read by `api/companydata.js:902-969` and
 consumed by exactly one screen, Equipment ▸ Compliance
@@ -1320,3 +1352,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #122 | Surfaces 19–22 added and the Equipment hub re-mapped: Maintenance and Fuel Logs stopped being top-level tabs, and `TAB_VISIBLE.equipment` went from `equipmentReportsEnabled` to `true`. **Break #19 opened** — Fleet Overview and Compliance are `on: true` with no `BUILTIN_DOC_KEYS` entry and no `server-lib/pricing.js` module, which is break #6's expensive direction: a feature no module sells ships to every company free. Filed as a decision for Dillon, not a defect; the code states a rationale and nothing in the repo records an approval. |
 | 2026-09-17 | PR #122 | Break #7's root cause **half closed**: `activeUnitNumberClash` (`companydata.js:127-145`) enforces unit-number uniqueness among ACTIVE machines on add, edit and un-retire. Blank unit numbers still collide, and a machine still needs only one of make/model/type. Two statements in break #7 corrected — `update_equipment` exists now, and after a rename Weekly Hours shows the old label while Maintenance Records shows the new one. |
 | 2026-09-17 | PR #122 | Not an interaction break, recorded because it was found by the same sweep: `api/login.js`'s roleless roster **ticket** — minted after the company code, before any PIN — was accepted as a full session by every `verifySession` in `api/`, since a ticket has no `userId` and every copy short-circuits on that. The endpoints scoping by company rather than by role answered it for a 7-day TTL. Every verifier now rejects a payload carrying `purpose`. Found by `tenant-scope-reviewer`; the comment in `login.js` asserting this could never happen was the thing that made it invisible. |
+| 2026-09-18 | PR #122 | **#14 built, not closed** — approved by Dillon, both halves: a `compliance_summary` action (`companydata.js:941`) feeding an overview banner (`Dashboard.jsx:4681`), and a compliance section snapshotted into `report_json` at build time (`equipmentreports.js:377,593-618`) and rendered on the weekly equipment report (`reportPdfs.js:142`). The 30-day window and the doc-type names moved out of `Dashboard.jsx` into `server-lib/compliance.js` so the browser, the API and the PDF answer from one definition — copying a threshold onto the server to close a §4 break would have opened the next one. Snapshot-at-build rather than live-at-render is deliberate: the PDF is cached on first view, so "live" would mean "live for whoever opened it first". **Shipping this makes #15 more visible, not less** — a retired machine's expired CVIP now reaches the banner and the weekly PDF, because filtering it here alone would make three surfaces disagree. No migration, no doc key, no pricing module (#19 untouched). Marked closed only when #122 merges. |

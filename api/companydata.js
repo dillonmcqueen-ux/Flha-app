@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
 import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
@@ -107,6 +108,16 @@ function fleetText(value, max = 120) {
 function complianceDocType(value) {
   const t = fleetText(value, 40).toLowerCase();
   return t || 'other';
+}
+
+// The one way a machine is named. Same shape as src/Dashboard.jsx's
+// machineLabel and api/maintenance.js:187 — the same unit has to read the
+// same on the Compliance tab, in the overview banner and on the weekly
+// report, or a supervisor sees two machines where there is one.
+function machineLabel(eq) {
+  if (!eq) return 'Unknown machine';
+  const base = [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ');
+  return (base || `Machine #${eq.id}`) + (eq.unit_number ? ` (Unit ${eq.unit_number})` : '');
 }
 
 // Whether another ACTIVE machine in the same company already answers to
@@ -910,6 +921,84 @@ export default async function handler(req, res) {
         .order('expiry_date', { ascending: true });
       if (error) return res.status(500).json({ error: 'Could not load compliance records.' });
       return res.status(200).json({ compliance: data || [] });
+    }
+
+    // ── The same dates, as an alert instead of a screen ────────────────
+    //
+    // Break #14 in docs/feature-interaction-map.md: a CVIP that lapsed last
+    // Tuesday was invisible unless somebody opened Equipment > Compliance.
+    // This is the same shape as certification_summary in
+    // api/certifications.js — expired + expiring-soon lists with counts,
+    // names resolved in a second query only when there is something to
+    // name — because FORA already solved this problem once for the other
+    // expiry date it tracks, and the two should behave alike.
+    //
+    // Gated exactly like list_equipment_compliance above (supervisor or
+    // admin, company-scoped): this surfaces data that was already readable
+    // by the same callers, it does not widen who can see it. Compliance
+    // still has no doc key and no pricing module — that is break #19, filed
+    // and not approved — so nothing here consults docSettings.
+    if (action === 'compliance_summary') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data, error } = await supabaseAdmin
+        .from('equipment_compliance')
+        .select('id, equipment_id, doc_type, label, expiry_date')
+        .eq('company_id', companyId)
+        .not('expiry_date', 'is', null)
+        .order('expiry_date', { ascending: true });
+      if (error) return res.status(500).json({ error: 'Could not load compliance status.' });
+
+      const expired = [];
+      const expiringSoon = [];
+      for (const row of data || []) {
+        const status = expiryStatus(row.expiry_date);
+        if (status === 'expired') expired.push(row);
+        else if (status === 'due_soon') expiringSoon.push(row);
+      }
+
+      // Named only when there is something to name, and only from THIS
+      // company's fleet: the ids come off rows already scoped by
+      // company_id, and the lookup is scoped again so a row pointing at
+      // another company's machine (which the FK and the upsert's ownership
+      // check both prevent, but which a hand-written row could still carry)
+      // resolves to nothing rather than leaking that machine's name.
+      let names = {};
+      if (expired.length || expiringSoon.length) {
+        const ids = [...new Set([...expired, ...expiringSoon].map(r => r.equipment_id).filter(id => id != null))];
+        if (ids.length) {
+          const { data: eqRows } = await supabaseAdmin
+            .from('equipment')
+            .select('id, year, make, model, type, unit_number')
+            .eq('company_id', companyId)
+            .in('id', ids);
+          names = Object.fromEntries((eqRows || []).map(e => [String(e.id), machineLabel(e)]));
+        }
+      }
+
+      // Retired machines are deliberately NOT filtered out here, because the
+      // Compliance tab does not filter them either — a banner that counted
+      // 2 while the screen below it listed 3 would be worse than either
+      // number alone. That a retired unit still counts at all is break #15,
+      // which is open and is not this change.
+      const shape = (row) => ({
+        id: row.id,
+        equipmentId: row.equipment_id,
+        equipmentName: names[String(row.equipment_id)] || 'Unknown machine',
+        docType: row.doc_type,
+        label: row.label,
+        expiryDate: row.expiry_date,
+      });
+
+      return res.status(200).json({
+        warningDays: EXPIRY_WARNING_DAYS,
+        expiredCount: expired.length,
+        expiringSoonCount: expiringSoon.length,
+        expired: expired.map(shape),
+        expiringSoon: expiringSoon.map(shape),
+      });
     }
 
     if (action === 'upsert_equipment_compliance') {

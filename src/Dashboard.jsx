@@ -19,6 +19,13 @@ import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { reviewBacklog, fieldSiteActivity, fuelSummary } from "./analyticsUtils";
 import { authorCertificationFlags, authorCertificationLabel } from "./certificationStatus";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+// The compliance vocabulary — doc-type labels and the 30-day expiry window —
+// is shared with the server rather than defined here: the same window and the
+// same names now answer the Compliance tab, the overview banner and the
+// weekly equipment report's compliance section, and copies of them would
+// drift. The module is pure data and date math with no imports of its own —
+// see the header of server-lib/compliance.js for why it lives outside src/.
+import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, COMPLIANCE_DOC_TYPES, complianceDocLabel } from "../server-lib/compliance.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
@@ -109,44 +116,15 @@ function RiskBadge({ risk }) {
 // Panel header: icon tile + title + subtitle, optional right-aligned
 // actions (bulk export/delete). Same icon-tile-plus-heading shape as the
 // Overview "Site Activity" / "Recent Activity" panel headers.
-// Doc types the compliance editor offers. The server stores whatever it is
-// sent (see api/companydata.js) — this list is the shortlist, not the
-// constraint, because what expires on a machine varies by industry.
-const COMPLIANCE_DOC_TYPES = [
-  { key: "cvip", label: "CVIP / safety inspection" },
-  { key: "registration", label: "Registration" },
-  { key: "insurance", label: "Insurance" },
-  { key: "certification", label: "Certification" },
-  { key: "warranty", label: "Warranty" },
-  { key: "other", label: "Other" },
-];
-function complianceDocLabel(key) {
-  return (COMPLIANCE_DOC_TYPES.find(t => t.key === key) || {}).label || key;
-}
+// COMPLIANCE_DOC_TYPES / complianceDocLabel used to be defined right here.
+// They moved to server-lib/compliance.js (imported at the top of this file)
+// unchanged, so the weekly report's compliance section can name a document
+// the same way the editor that created it does.
 
-// How close an expiry date is, in the only three buckets a supervisor acts
-// on. 30 days is the window because that is roughly the notice needed to
-// book a CVIP and still have the machine working in the meantime.
-const EXPIRY_WARNING_DAYS = 30;
-function expiryStatus(dateStr) {
-  if (!dateStr) return "ok";
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(`${dateStr}T00:00:00`);
-  if (Number.isNaN(due.getTime())) return "ok";
-  const days = Math.round((due - today) / 86400000);
-  if (days < 0) return "expired";
-  if (days <= EXPIRY_WARNING_DAYS) return "due_soon";
-  return "ok";
-}
-function expiryText(dateStr) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(`${dateStr}T00:00:00`);
-  if (Number.isNaN(due.getTime())) return "No expiry date";
-  const days = Math.round((due - today) / 86400000);
-  if (days < 0) return `Expired ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago`;
-  if (days === 0) return "Expires today";
-  return `Expires in ${days} day${days === 1 ? "" : "s"}`;
-}
+// expiryStatus / expiryText / EXPIRY_WARNING_DAYS used to be defined right
+// here. They moved to server-lib/compliance.js (imported at the top of this
+// file) unchanged, so the banner below, this screen, and the server both
+// answer from one 30-day window instead of three.
 
 // The one way a machine is named across this screen. Identical to the label
 // api/maintenance.js and api/equipmentreports.js build server-side — the two
@@ -2020,6 +1998,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // per-document, as-of-then question.
   const [companyCertifications, setCompanyCertifications] = useState([]);
 
+  // ── Equipment compliance expiry alerts (break #14) ────────────────────
+  // The same three-state model the Compliance tab uses, fetched as a
+  // summary so the overview banner can show it without the supervisor
+  // opening Equipment > Compliance. Server-classified (one 30-day window,
+  // server-lib/expiry.js) so the banner and the tab cannot disagree.
+  const [complianceAlerts, setComplianceAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
+
   // ── Time Clock: my own status + everyone's entries + reports ──────────
   const [myTimeStatus, setMyTimeStatus] = useState(null);
   const [myTimeLoading, setMyTimeLoading] = useState(true);
@@ -2585,6 +2570,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       if (!res.ok) { setComplianceError(data.error || "Couldn't save that expiry date."); setSavingCompliance(false); return; }
       setComplianceDraft(null);
       await loadCompliance();
+      // The banner reads a server-side summary, so it has to be re-pulled
+      // after an edit or it keeps counting yesterday's dates.
+      loadComplianceAlerts();
     } catch (e) {
       setComplianceError("Couldn't save that expiry date. Try again.");
     }
@@ -2599,6 +2587,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
     } catch (e) { /* leave the list as-is if the request fails */ }
     setCompliance(prev => prev.filter(r => r.id !== id));
+    loadComplianceAlerts();
   };
 
   const loadCertAlerts = async () => {
@@ -2622,8 +2611,25 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { /* leave alerts as-is if the request fails */ }
   };
 
+  // Same shape as loadCertAlerts above. A worker never gets here (the
+  // Dashboard is supervisor/admin only) and the endpoint 403s them anyway;
+  // a 403 or a network failure just leaves the banner empty, which is how
+  // it looked before this existed.
+  const loadComplianceAlerts = async () => {
+    if (!selectedCompany || !token) { setComplianceAlerts({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] }); return; }
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "compliance_summary", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setComplianceAlerts(data);
+    } catch (e) { /* leave alerts as-is if the request fails */ }
+  };
+
   useEffect(() => {
     loadCertAlerts();
+    loadComplianceAlerts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
@@ -3211,6 +3217,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     if (refreshKey === 0) return; // first mount — every loader above just ran
     loadDocSettings();
     loadCertAlerts();
+    loadComplianceAlerts();
     loadMaintenanceStatus();
     loadFuelLogs({ silent: true });
     loadEmployeeDirectory({ silent: true });
@@ -4670,6 +4677,42 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
           </div>
         )}
+
+        {/* ── Equipment compliance alerts (break #14) ──────────────────────
+            The dates that park a machine when they lapse, on the page a
+            supervisor actually lands on. Same shape as the certification
+            banner above, and gated the same way the Compliance tab itself
+            is: on having something to show, not on a doc key — compliance
+            has no purchasable module (break #19, open), so adding one here
+            would change who can see it. Red when something is already
+            expired, amber when it is only coming due. */}
+        {(complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
+          const tone = complianceAlerts.expiredCount > 0 ? C.status.danger : C.status.warning;
+          const rows = [...complianceAlerts.expired, ...complianceAlerts.expiringSoon];
+          return (
+            <div style={{ background: tone.bg, border: `1.5px solid ${tone.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: tone.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                <ShieldCheck size={14} strokeWidth={2.5} />
+                Equipment compliance alerts
+              </div>
+              <div style={{ fontSize: 13, color: tone.text, marginBottom: rows.length > 0 ? 8 : 0 }}>
+                {complianceAlerts.expiredCount > 0 && <span>{complianceAlerts.expiredCount} document{complianceAlerts.expiredCount === 1 ? "" : "s"} expired</span>}
+                {complianceAlerts.expiredCount > 0 && complianceAlerts.expiringSoonCount > 0 && <span> — </span>}
+                {complianceAlerts.expiringSoonCount > 0 && <span>{complianceAlerts.expiringSoonCount} expiring within {complianceAlerts.warningDays || EXPIRY_WARNING_DAYS} days</span>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {rows.slice(0, 6).map((r) => (
+                  <div key={r.id} style={{ fontSize: 12.5, color: tone.text }}>
+                    <strong>{r.equipmentName}</strong> — {r.label || complianceDocLabel(r.docType)} ({expiryText(r.expiryDate)})
+                  </div>
+                ))}
+                {rows.length > 6 && (
+                  <div style={{ fontSize: 12, color: tone.text, opacity: 0.8 }}>+ {rows.length - 6} more — see Equipment ▸ Compliance for the full list.</div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {isAdmin && companies.length > 1 && (
           <div style={styles.card}>

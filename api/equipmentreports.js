@@ -13,6 +13,7 @@ import { renderEquipmentReportPdf, equipmentReportFilename } from '../server-lib
 import { companyEquipmentIndex } from '../server-lib/equipmentScope.js';
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 import { inspectionAttachments, attachmentForItem } from '../server-lib/inspectionAttachments.js';
+import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, complianceDocLabel } from '../server-lib/compliance.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -349,6 +350,67 @@ export function foldWeeklyUsage(records, weekOf) {
   return Object.values(machines).sort((a, b) => b.total - a.total);
 }
 
+// Folds a company's compliance rows into the report's compliance section --
+// break #14. The dates that park a machine when they lapse (CVIP,
+// registration, insurance) reached exactly one screen before this; the
+// weekly report is the thing a supervisor reads WITHOUT opening the
+// dashboard, which is why it is the half worth having.
+//
+// Only what needs acting on is listed: anything expired, plus anything due
+// inside the shared 30-day window (server-lib/expiry.js -- the same window
+// the Compliance tab and the overview banner use). Everything else is a
+// count, so "14 other documents current" still tells a supervisor the
+// company is tracking them.
+//
+// `asOf` is the report's own week-end date, not today. A stored report is a
+// snapshot: the PDF is rendered once and cached on the row
+// (ensureEquipmentReportPdf), so "live at render time" would really mean
+// "live the first time anyone opened it" and would then freeze anyway --
+// two different answers for the same report depending on who opened it
+// first. Classifying against the week the report covers gives one answer
+// that stays true, and the section says which date it is as of.
+//
+// A machine whose fleet row cannot be read (deleted mid-week -- the FK
+// cascades, so this is belt and braces) still lists, under a label rather
+// than being dropped: an expired CVIP is worth printing even when the
+// machine's name is not resolvable.
+export function foldComplianceSnapshot(rows, fleetById, asOf) {
+  const items = [];
+  let currentCount = 0;
+  for (const row of rows || []) {
+    const status = expiryStatus(row.expiry_date, asOf);
+    if (status === 'ok') { currentCount += 1; continue; }
+    const eq = fleetById ? fleetById.get(String(row.equipment_id)) : null;
+    const base = eq ? [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ') : '';
+    const label = eq
+      ? (base || `Machine #${eq.id}`) + (eq.unit_number ? ` (Unit ${eq.unit_number})` : '')
+      : 'Unknown machine';
+    items.push({
+      equipmentId: row.equipment_id ?? null,
+      equipmentLabel: label,
+      docType: row.doc_type,
+      // The supervisor's own wording wins; the doc type is the fallback, and
+      // it is spelled the way the Compliance editor spells it rather than as
+      // the raw 'cvip' the column stores.
+      label: row.label || complianceDocLabel(row.doc_type),
+      expiryDate: row.expiry_date,
+      status,
+      detail: expiryText(row.expiry_date, asOf),
+      notes: row.notes || null,
+    });
+  }
+  // Soonest first, so the worst-expired line is the first thing read.
+  items.sort((a, b) => String(a.expiryDate).localeCompare(String(b.expiryDate)));
+  return {
+    asOf,
+    warningDays: EXPIRY_WARNING_DAYS,
+    expiredCount: items.filter(i => i.status === 'expired').length,
+    dueSoonCount: items.filter(i => i.status === 'due_soon').length,
+    currentCount,
+    items,
+  };
+}
+
 // Builds the report_json for one company + week by pulling every
 // pre-trip/post-trip inspection pair whose post-trip falls in the range.
 async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
@@ -513,7 +575,51 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   applyLatestReadings(byEquipment, records || [], fuelLogs);
 
   const equipment = Object.values(byEquipment).sort((a, b) => a.equipmentLabel.localeCompare(b.equipmentLabel));
-  return { weekStart: weekStartISO, weekEnd: toISODate(new Date(new Date(weekEndISO).getTime() - 86400000)), equipment };
+  const weekEnd = toISODate(new Date(new Date(weekEndISO).getTime() - 86400000));
+
+  // Break #14: compliance expiries, snapshotted into report_json alongside
+  // the week's usage -- see foldComplianceSnapshot above for why they are
+  // stored at build time rather than read live at render time.
+  //
+  // Scoped by company_id on the row, like every other compliance query in
+  // this app (api/companydata.js): never by an equipment id, which the
+  // report has no reason to trust.
+  //
+  // Read failures and a company that tracks nothing are the same outcome
+  // here -- no `compliance` key at all -- so a report is never lost over
+  // this, and every report generated before today renders exactly as it
+  // did. The section is not gated on a doc key because compliance has no
+  // module to gate on (break #19, open); a company that has never added an
+  // expiry date gets no section, which is what it had before.
+  const { data: complianceRows, error: complianceErr } = await supabaseAdmin
+    .from('equipment_compliance')
+    .select('id, equipment_id, doc_type, label, expiry_date, notes')
+    .eq('company_id', companyId);
+
+  let compliance = null;
+  if (!complianceErr && complianceRows && complianceRows.length > 0) {
+    // Named from this company's own fleet only, and only the machines the
+    // compliance rows actually point at.
+    const ids = [...new Set(complianceRows.map(r => r.equipment_id).filter(id => id != null))];
+    let fleetById = new Map();
+    if (ids.length > 0) {
+      const { data: eqRows } = await supabaseAdmin
+        .from('equipment')
+        .select('id, year, make, model, type, unit_number')
+        .eq('company_id', companyId)
+        .in('id', ids);
+      fleetById = new Map((eqRows || []).map(e => [String(e.id), e]));
+    }
+    // Retired machines are included, exactly as they are on the Compliance
+    // tab and in the overview banner. That a sold machine's expired CVIP
+    // still counts anywhere is break #15, which is open and is not this
+    // change -- filtering it here alone would make three surfaces disagree.
+    compliance = foldComplianceSnapshot(complianceRows, fleetById, weekEnd);
+  }
+
+  const report = { weekStart: weekStartISO, weekEnd, equipment };
+  if (compliance) report.compliance = compliance;
+  return report;
 }
 
 export default async function handler(req, res) {

@@ -139,6 +139,92 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
     y += 6;
   }
 
+  // ── Compliance & documents (break #14) ────────────────────────────────
+  //
+  // The expiry dates that take a machine off the road, on the page a
+  // supervisor already reads every Monday morning. Snapshotted into
+  // report_json at build time (api/equipmentreports.js's
+  // foldComplianceSnapshot explains why), so this only draws what it was
+  // handed -- it makes no query of its own, exactly like every other part
+  // of this renderer.
+  //
+  // Absent on every report generated before this shipped, and on every
+  // company that tracks no expiry dates, in which case nothing below runs
+  // and the PDF is what it always was. Header and footer are untouched.
+  const compliance = rj.compliance;
+  const complianceItems = (compliance && compliance.items) || [];
+  if (complianceItems.length > 0) {
+    if (y + 26 > 270) { doc.addPage(); y = 20; }
+    doc.setTextColor(3, 105, 161); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text('Compliance & Documents', margin, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
+    const expiredN = compliance.expiredCount || 0;
+    const dueN = compliance.dueSoonCount || 0;
+    const currentN = compliance.currentCount || 0;
+    doc.text(
+      `${expiredN} expired, ${dueN} due within ${compliance.warningDays || 30} days, ${currentN} current (as of ${compliance.asOf || rj.weekEnd})`,
+      margin, y,
+    );
+    y += 6;
+
+    const kMachineX = margin, kMachineW = 62;
+    const kDocX = kMachineX + kMachineW, kDocW = 46;
+    const kDateX = kDocX + kDocW, kDateW = 26;
+    const kStatusX = kDateX + kDateW, kStatusW = contentW - kMachineW - kDocW - kDateW;
+
+    const drawComplianceHeader = () => {
+      doc.setFillColor(3, 105, 161); doc.rect(margin, y, contentW, 8, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      doc.text('MACHINE', kMachineX + 2, y + 5.5);
+      doc.text('DOCUMENT', kDocX + 2, y + 5.5);
+      doc.text('EXPIRES', kDateX + 2, y + 5.5);
+      doc.text('STATUS', kStatusX + 2, y + 5.5);
+      y += 8;
+    };
+
+    drawComplianceHeader();
+    complianceItems.forEach((item, i) => {
+      const machineLines = doc.splitTextToSize(item.equipmentLabel || 'Unknown machine', kMachineW - 4);
+      // `label` is the supervisor's own wording ("Alberta CVIP") when they
+      // gave one; doc_type is the fallback, free text by design.
+      const docLines = doc.splitTextToSize(item.label || item.docType || 'Document', kDocW - 4);
+      const statusLines = doc.splitTextToSize(item.detail || '', kStatusW - 4);
+      // The supervisor's own note ("shop booked Sept 22") is the difference
+      // between an expiry that is being dealt with and one that is not, so
+      // it rides along under the status rather than staying on the tab.
+      const noteLines = item.notes ? doc.splitTextToSize(item.notes, kStatusW - 4) : [];
+      const statusCellLines = statusLines.length + noteLines.length;
+      const rowH = Math.max(9, Math.max(machineLines.length, docLines.length, statusCellLines) * 4.2 + 3);
+
+      if (y + rowH > 280) { doc.addPage(); y = 20; drawComplianceHeader(); }
+
+      const zebra = i % 2 === 1;
+      doc.setFillColor(...(zebra ? [248, 250, 252] : [255, 255, 255]));
+      doc.rect(margin, y, contentW, rowH, 'F');
+      doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.15);
+      doc.rect(margin, y, contentW, rowH, 'S');
+
+      const textY = y + 5;
+      doc.setTextColor(30, 41, 59); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      machineLines.forEach((line, li) => doc.text(line, kMachineX + 2, textY + li * 4.2));
+
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 65, 81);
+      docLines.forEach((line, li) => doc.text(line, kDocX + 2, textY + li * 4.2));
+      doc.text(String(item.expiryDate || '—'), kDateX + 2, textY);
+
+      const expired = item.status === 'expired';
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...(expired ? [220, 38, 38] : [180, 83, 9]));
+      statusLines.forEach((line, li) => doc.text(line, kStatusX + 2, textY + li * 4.2));
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
+      noteLines.forEach((line, li) => doc.text(line, kStatusX + 2, textY + (statusLines.length + li) * 4.2));
+
+      y += rowH;
+    });
+    y += 6;
+  }
+
   const H = 297; const pageCount = doc.internal.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
