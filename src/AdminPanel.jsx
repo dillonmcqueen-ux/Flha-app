@@ -663,7 +663,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_equipment", token, companyId: c.id }),
+        body: JSON.stringify({ action: "list_equipment", token, companyId: c.id, includeRetired: true }),
       });
       const data = await res.json();
       if (res.ok) setEquipList(data.equipment || []);
@@ -995,7 +995,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       setNewEquip({ year: "", make: "", model: "", type: "", unit_number: "" });
       const listRes = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_equipment", token, companyId: activeId }),
+        body: JSON.stringify({ action: "list_equipment", token, companyId: activeId, includeRetired: true }),
       });
       const listData = await listRes.json();
       if (listRes.ok) setEquipList(listData.equipment || []);
@@ -1948,7 +1948,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 <div key={eq.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < equipList.length - 1 ? `1px solid ${C.line}` : "none" }}>
                   <Tractor size={18} color={C.inkSoft} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>{[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.inkSoft }}>
+                      {[eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ")}
+                      {eq.is_attachment && <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 700, color: C.muted }}>ATTACHMENT</span>}
+                      {eq.retired_at && <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 700, color: C.muted }}>RETIRED</span>}
+                    </div>
+                    {/* Day-to-day fleet edits happen in the supervisor's own
+                        Equipment tab now (Dashboard.jsx). This panel keeps
+                        the add and the hard delete, which is the one action
+                        that is still admin-only because it cannot be undone. */}
                     {eq.unit_number && <div style={{ fontSize: 12, color: C.muted }}>Unit {eq.unit_number}</div>}
                   </div>
                   <button onClick={() => deleteEquip(eq.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>

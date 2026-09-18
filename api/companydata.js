@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
 import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
@@ -45,6 +46,25 @@ async function verifySession(token) {
   }
   if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
 
+  // A login TICKET is not a session. api/login.js mints two roleless,
+  // short-lived tokens with this same signature and secret — the roster
+  // ticket (`purpose: 'roster'`, handed out after the company code alone,
+  // BEFORE any PIN) and the master ticket (`purpose: 'master'`) — and the
+  // comment there claims they can never be replayed as a session because
+  // "every other protected endpoint in this app gates on session.role".
+  // That was not true: a ticket carries no `userId`, so the roster
+  // short-circuit below returned it as a valid session, and the handlers
+  // that gate only on company scope rather than on role (list_equipment,
+  // list_sops, list_sites, list_custom_fields, get_company_logo) answered
+  // it — for this file's 7-day TTL, not the ticket's 5 minutes. Anyone
+  // holding a company's worker code could read that company's reference
+  // data without ever knowing a PIN.
+  //
+  // Nothing that is genuinely a session carries `purpose`, so rejecting it
+  // outright is the whole fix, and it belongs here rather than in each
+  // handler: the next endpoint added without a role check inherits it.
+  if (payload.purpose) return null;
+
   // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
   // no userId — nothing to live-check beyond the signature+TTL above.
   if (payload.role === 'admin' || !payload.userId) return payload;
@@ -52,19 +72,85 @@ async function verifySession(token) {
   // Individually-identified (roster) sessions: re-check `active` on every
   // request, so deactivating someone takes effect on their very next call
   // instead of waiting out the token's TTL.
+  // `name` comes from the roster row, never from the token payload: a token
+  // minted before someone's name was corrected would otherwise stamp the
+  // old one onto whatever they did today. Matches api/maintenance.js's
+  // verifySession, which resolves it the same way and for the same reason —
+  // retire_equipment records who took a machine out of the fleet.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 // For any read/write scoped to a company: admins may act on any company
 // they specify; supervisors and workers are always locked to their own
 // session.companyId, regardless of what companyId they send.
+// Every column a fleet row exposes. One list, so the supervisor fleet
+// editor, the worker-facing pickers and the maintenance screens can never
+// drift into showing different versions of the same machine.
+const EQUIPMENT_COLUMNS = 'id, year, make, model, type, unit_number, serial_number, notes, pm_interval, is_attachment, retired_at, retired_by';
+
+// Trims and caps a fleet text field. Unit numbers and serials end up on
+// generated PDFs and in weekly-report grouping keys, so an unbounded string
+// is a layout problem as much as a storage one.
+function fleetText(value, max = 120) {
+  return String(value == null ? '' : value).trim().slice(0, max);
+}
+
+// Doc types the compliance UI suggests. Free text rather than a check
+// constraint on purpose (see the migration): the list is open-ended by
+// industry. This only bounds the length.
+function complianceDocType(value) {
+  const t = fleetText(value, 40).toLowerCase();
+  return t || 'other';
+}
+
+// The one way a machine is named. Same shape as src/Dashboard.jsx's
+// machineLabel and api/maintenance.js:187 — the same unit has to read the
+// same on the Compliance tab, in the overview banner and on the weekly
+// report, or a supervisor sees two machines where there is one.
+function machineLabel(eq) {
+  if (!eq) return 'Unknown machine';
+  const base = [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ');
+  return (base || `Machine #${eq.id}`) + (eq.unit_number ? ` (Unit ${eq.unit_number})` : '');
+}
+
+// Whether another ACTIVE machine in the same company already answers to
+// this asset/unit number, returning that machine's label so the error can
+// name it. Returns '' when the number is free.
+//
+// Retired rows are deliberately excluded: reusing the unit number of a
+// machine that was sold or scrapped is normal fleet practice, and blocking
+// it would push people back to editing the retired row instead, which is
+// how two different machines end up sharing one service history.
+//
+// Uniqueness is enforced here rather than by a database constraint because
+// unit_number is optional and blank on plenty of existing rows — a unique
+// index would either need a partial predicate that silently stops matching
+// on a stray space, or would reject the second blank. This check treats
+// blank as "no asset ID" and skips it entirely, which is the behaviour the
+// weekly-report grouping in api/equipmentreports.js already assumes.
+async function activeUnitNumberClash(companyId, unitNumber, excludeId) {
+  const unit = fleetText(unitNumber, 40);
+  if (!unit) return '';
+  const { data, error } = await supabaseAdmin
+    .from('equipment')
+    .select('id, year, make, model, type, unit_number')
+    .eq('company_id', companyId)
+    .is('retired_at', null);
+  // Fail open on a read error rather than block a legitimate edit over an
+  // outage — the cost is a duplicate that a supervisor can still fix.
+  if (error || !data) return '';
+  const hit = data.find(e => e.id !== excludeId && fleetText(e.unit_number, 40).toLowerCase() === unit.toLowerCase());
+  if (!hit) return '';
+  return [hit.year, hit.make, hit.model, hit.type].filter(Boolean).join(' ') || `equipment #${hit.id}`;
+}
+
 function resolveCompanyId(session, requestedCompanyId) {
   if (session.role === 'admin') return requestedCompanyId || null;
   return session.companyId;
@@ -646,10 +732,20 @@ export default async function handler(req, res) {
 
     // ══ EQUIPMENT ════════════════════════════════════════════════════
 
+    // Retired machines are hidden unless the caller asks for them, so every
+    // worker-facing picker (Inspection, DailyReport, FuelLog, FieldService)
+    // drops a sold or scrapped unit the moment a supervisor retires it, with
+    // no change needed on their side. Only the supervisor fleet editor and
+    // the Admin Panel pass includeRetired — a retired machine keeps every
+    // inspection, fuel log and service entry hanging off its id, which is
+    // the entire reason retiring exists next to delete_equipment rather
+    // than instead of it.
     if (action === 'list_equipment') {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { data, error } = await supabaseAdmin.from('equipment').select('id, year, make, model, type, unit_number, pm_interval').eq('company_id', companyId).order('id');
+      let query = supabaseAdmin.from('equipment').select(EQUIPMENT_COLUMNS).eq('company_id', companyId);
+      if (req.body.includeRetired !== true) query = query.is('retired_at', null);
+      const { data, error } = await query.order('id');
       if (error) return res.status(500).json({ error: 'Could not load equipment.' });
       return res.status(200).json({ equipment: data || [] });
     }
@@ -661,16 +757,117 @@ export default async function handler(req, res) {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { year, make, model, type, unitNumber } = req.body;
-      if (!(make || '').trim() && !(model || '').trim() && !(type || '').trim()) {
+      if (!fleetText(make) && !fleetText(model) && !fleetText(type)) {
         return res.status(400).json({ error: 'Enter at least a make, model or type.' });
       }
-      const { error } = await supabaseAdmin.from('equipment').insert({
+
+      const unit = fleetText(unitNumber, 40);
+      const clash = await activeUnitNumberClash(companyId, unit, null);
+      if (clash) return res.status(409).json({ error: `Unit ${unit} is already used by ${clash}. Asset IDs have to be unique so readings and service history land on the right machine.` });
+
+      const { data, error } = await supabaseAdmin.from('equipment').insert({
         company_id: companyId,
-        year: (year || '').trim(), make: (make || '').trim(), model: (model || '').trim(),
-        type: (type || '').trim(), unit_number: (unitNumber || '').trim(),
-      });
+        year: fleetText(year, 10), make: fleetText(make), model: fleetText(model),
+        type: fleetText(type), unit_number: unit,
+        serial_number: fleetText(req.body.serialNumber, 60),
+        notes: fleetText(req.body.notes, 500),
+        is_attachment: req.body.isAttachment === true,
+      }).select(EQUIPMENT_COLUMNS).limit(1);
       if (error) { console.error("equipment add failed:", error.message); return res.status(500).json({ error: "Couldn't add equipment. Try again." }); }
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, equipment: (data && data[0]) || null });
+    }
+
+    // Correcting a machine's details — the asset/unit number above all.
+    //
+    // Dillon, 2026-09-17: "the supervisor should be able to edit their fleet
+    // including the asset id if needed." Until now the only way to fix a
+    // typo'd unit number was delete_equipment + add_equipment, which detaches
+    // every inspection filed against that machine and hard-deletes its whole
+    // maintenance log. An edit keeps the row's id, so every reading, service
+    // entry, corrective action and weekly report line stays attached.
+    //
+    // Only fields actually present in the body are written, so a caller that
+    // knows about three columns cannot blank the two it has never heard of.
+    if (action === 'update_equipment') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: eqRows, error: eqErr } = await supabaseAdmin
+        .from('equipment').select('id, company_id, make, model, type, unit_number').eq('id', id).limit(1);
+      if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+      const existing = eqRows[0];
+      if (session.role === 'supervisor' && existing.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed to change this equipment.' });
+      }
+
+      const has = (key) => Object.prototype.hasOwnProperty.call(req.body, key);
+      const patch = {};
+      if (has('year')) patch.year = fleetText(req.body.year, 10);
+      if (has('make')) patch.make = fleetText(req.body.make);
+      if (has('model')) patch.model = fleetText(req.body.model);
+      if (has('type')) patch.type = fleetText(req.body.type);
+      if (has('unitNumber')) patch.unit_number = fleetText(req.body.unitNumber, 40);
+      if (has('serialNumber')) patch.serial_number = fleetText(req.body.serialNumber, 60);
+      if (has('notes')) patch.notes = fleetText(req.body.notes, 500);
+      if (has('isAttachment')) patch.is_attachment = req.body.isAttachment === true;
+      if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to change.' });
+
+      // A machine still needs something to call it by. Check the result of
+      // the edit, not the body, so clearing `make` on a row that has a model
+      // is fine and clearing the last one of the three is not.
+      const after = { ...existing, ...patch };
+      if (!fleetText(after.make) && !fleetText(after.model) && !fleetText(after.type)) {
+        return res.status(400).json({ error: 'A machine needs at least a make, model or type.' });
+      }
+
+      if (patch.unit_number) {
+        const clash = await activeUnitNumberClash(existing.company_id, patch.unit_number, existing.id);
+        if (clash) return res.status(409).json({ error: `Unit ${patch.unit_number} is already used by ${clash}. Asset IDs have to be unique so readings and service history land on the right machine.` });
+      }
+
+      const { data, error } = await supabaseAdmin.from('equipment').update(patch).eq('id', existing.id).select(EQUIPMENT_COLUMNS).limit(1);
+      if (error) { console.error('equipment update failed:', error.message); return res.status(500).json({ error: "Couldn't save this machine. Try again." }); }
+      return res.status(200).json({ ok: true, equipment: (data && data[0]) || null });
+    }
+
+    // Retire / un-retire — the non-destructive half of removing a machine.
+    //
+    // Retiring takes a unit out of every worker-facing dropdown (see the
+    // note on list_equipment) without touching a single row that references
+    // it. Sold the skid steer, scrapped the trailer, gave the rental back:
+    // this is that, and it is reversible by anyone who can do it.
+    if (action === 'retire_equipment' || action === 'restore_equipment') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: eqRows, error: eqErr } = await supabaseAdmin
+        .from('equipment').select('id, company_id, unit_number').eq('id', id).limit(1);
+      if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+      if (session.role === 'supervisor' && eqRows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed to change this equipment.' });
+      }
+
+      const retiring = action === 'retire_equipment';
+
+      // Bringing a machine back can collide with a unit number that was
+      // reused after it left — which is a normal thing to do, and exactly
+      // why the clash check only ever looks at ACTIVE rows.
+      if (!retiring && eqRows[0].unit_number) {
+        const clash = await activeUnitNumberClash(eqRows[0].company_id, eqRows[0].unit_number, eqRows[0].id);
+        if (clash) return res.status(409).json({ error: `Unit ${eqRows[0].unit_number} is in use by ${clash} now. Change one of their asset IDs before bringing this machine back.` });
+      }
+
+      // `name` is the roster row's, never the request's — same rule as
+      // api/maintenance.js's log_field_service attribution.
+      const patch = retiring
+        ? { retired_at: new Date().toISOString(), retired_by: fleetText(session.name || (session.role === 'admin' ? 'Admin' : 'Supervisor'), 80) }
+        : { retired_at: null, retired_by: null };
+
+      const { data, error } = await supabaseAdmin.from('equipment').update(patch).eq('id', eqRows[0].id).select(EQUIPMENT_COLUMNS).limit(1);
+      if (error) return res.status(500).json({ error: retiring ? "Couldn't retire this machine." : "Couldn't bring this machine back." });
+      return res.status(200).json({ ok: true, equipment: (data && data[0]) || null });
     }
 
     if (action === 'delete_equipment') {
@@ -699,6 +896,166 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('equipment').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove equipment." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ── Equipment compliance: CVIP, registration, insurance, anything ──
+    //
+    // The dates that take a machine off the road when they lapse. Nothing
+    // in the product could warn about them before, because they had nowhere
+    // to live — see docs/schema/equipment-fleet-management-migration.sql for
+    // why this is its own table rather than three columns on `equipment`.
+    //
+    // Every action here scopes by company_id on the row itself, never by the
+    // equipment_id the client sent: an id alone would let a caller read or
+    // overwrite another company's expiry dates by guessing a number.
+
+    if (action === 'list_equipment_compliance') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin
+        .from('equipment_compliance')
+        .select('id, equipment_id, doc_type, label, expiry_date, notes, updated_at')
+        .eq('company_id', companyId)
+        .order('expiry_date', { ascending: true });
+      if (error) return res.status(500).json({ error: 'Could not load compliance records.' });
+      return res.status(200).json({ compliance: data || [] });
+    }
+
+    // ── The same dates, as an alert instead of a screen ────────────────
+    //
+    // Break #14 in docs/feature-interaction-map.md: a CVIP that lapsed last
+    // Tuesday was invisible unless somebody opened Equipment > Compliance.
+    // This is the same shape as certification_summary in
+    // api/certifications.js — expired + expiring-soon lists with counts,
+    // names resolved in a second query only when there is something to
+    // name — because FORA already solved this problem once for the other
+    // expiry date it tracks, and the two should behave alike.
+    //
+    // Gated exactly like list_equipment_compliance above (supervisor or
+    // admin, company-scoped): this surfaces data that was already readable
+    // by the same callers, it does not widen who can see it. Compliance
+    // still has no doc key and no pricing module — that is break #19, filed
+    // and not approved — so nothing here consults docSettings.
+    if (action === 'compliance_summary') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data, error } = await supabaseAdmin
+        .from('equipment_compliance')
+        .select('id, equipment_id, doc_type, label, expiry_date')
+        .eq('company_id', companyId)
+        .not('expiry_date', 'is', null)
+        .order('expiry_date', { ascending: true });
+      if (error) return res.status(500).json({ error: 'Could not load compliance status.' });
+
+      const expired = [];
+      const expiringSoon = [];
+      for (const row of data || []) {
+        const status = expiryStatus(row.expiry_date);
+        if (status === 'expired') expired.push(row);
+        else if (status === 'due_soon') expiringSoon.push(row);
+      }
+
+      // Named only when there is something to name, and only from THIS
+      // company's fleet: the ids come off rows already scoped by
+      // company_id, and the lookup is scoped again so a row pointing at
+      // another company's machine (which the FK and the upsert's ownership
+      // check both prevent, but which a hand-written row could still carry)
+      // resolves to nothing rather than leaking that machine's name.
+      let names = {};
+      if (expired.length || expiringSoon.length) {
+        const ids = [...new Set([...expired, ...expiringSoon].map(r => r.equipment_id).filter(id => id != null))];
+        if (ids.length) {
+          const { data: eqRows } = await supabaseAdmin
+            .from('equipment')
+            .select('id, year, make, model, type, unit_number')
+            .eq('company_id', companyId)
+            .in('id', ids);
+          names = Object.fromEntries((eqRows || []).map(e => [String(e.id), machineLabel(e)]));
+        }
+      }
+
+      // Retired machines are deliberately NOT filtered out here, because the
+      // Compliance tab does not filter them either — a banner that counted
+      // 2 while the screen below it listed 3 would be worse than either
+      // number alone. That a retired unit still counts at all is break #15,
+      // which is open and is not this change.
+      const shape = (row) => ({
+        id: row.id,
+        equipmentId: row.equipment_id,
+        equipmentName: names[String(row.equipment_id)] || 'Unknown machine',
+        docType: row.doc_type,
+        label: row.label,
+        expiryDate: row.expiry_date,
+      });
+
+      return res.status(200).json({
+        warningDays: EXPIRY_WARNING_DAYS,
+        expiredCount: expired.length,
+        expiringSoonCount: expiringSoon.length,
+        expired: expired.map(shape),
+        expiringSoon: expiringSoon.map(shape),
+      });
+    }
+
+    if (action === 'upsert_equipment_compliance') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { id, equipmentId, expiryDate } = req.body;
+
+      // A date that isn't one would store as null and read back as "no
+      // expiry", i.e. compliant — the wrong way for this to fail.
+      const expiry = fleetText(expiryDate, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry) || Number.isNaN(new Date(expiry).getTime())) {
+        return res.status(400).json({ error: 'Enter a valid expiry date.' });
+      }
+
+      const { data: eqRows, error: eqErr } = await supabaseAdmin
+        .from('equipment').select('id, company_id').eq('id', equipmentId).limit(1);
+      if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
+      if (eqRows[0].company_id !== companyId) return res.status(403).json({ error: 'Not allowed.' });
+
+      const row = {
+        company_id: companyId,
+        equipment_id: eqRows[0].id,
+        doc_type: complianceDocType(req.body.docType),
+        label: fleetText(req.body.label, 80) || null,
+        expiry_date: expiry,
+        notes: fleetText(req.body.notes, 300) || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (id) {
+        // Scoped by company_id as well as id, so a guessed id updates
+        // nothing rather than someone else's record.
+        const { data, error } = await supabaseAdmin
+          .from('equipment_compliance').update(row).eq('id', id).eq('company_id', companyId)
+          .select('id, equipment_id, doc_type, label, expiry_date, notes, updated_at').limit(1);
+        if (error) return res.status(500).json({ error: "Couldn't save that expiry date." });
+        if (!data || data.length === 0) return res.status(404).json({ error: 'Compliance record not found.' });
+        return res.status(200).json({ ok: true, record: data[0] });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('equipment_compliance').insert(row)
+        .select('id, equipment_id, doc_type, label, expiry_date, notes, updated_at').limit(1);
+      if (error) { console.error('compliance insert failed:', error.message); return res.status(500).json({ error: "Couldn't save that expiry date." }); }
+      return res.status(200).json({ ok: true, record: (data && data[0]) || null });
+    }
+
+    if (action === 'delete_equipment_compliance') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+      const { error } = await supabaseAdmin
+        .from('equipment_compliance').delete().eq('id', id).eq('company_id', companyId);
+      if (error) return res.status(500).json({ error: "Couldn't remove that record." });
       return res.status(200).json({ ok: true });
     }
 

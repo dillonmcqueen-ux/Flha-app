@@ -42,6 +42,25 @@ async function verifySession(token) {
   }
   if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
 
+  // A login TICKET is not a session. api/login.js mints two roleless,
+  // short-lived tokens with this same signature and secret — the roster
+  // ticket (`purpose: 'roster'`, handed out after the company code alone,
+  // BEFORE any PIN) and the master ticket (`purpose: 'master'`) — and the
+  // comment there claims they can never be replayed as a session because
+  // "every other protected endpoint in this app gates on session.role".
+  // That was not true: a ticket carries no `userId`, so the roster
+  // short-circuit below returned it as a valid session, and the handlers
+  // that gate only on company scope rather than on role (list_equipment,
+  // list_sops, list_sites, list_custom_fields, get_company_logo) answered
+  // it — for this file's 7-day TTL, not the ticket's 5 minutes. Anyone
+  // holding a company's worker code could read that company's reference
+  // data without ever knowing a PIN.
+  //
+  // Nothing that is genuinely a session carries `purpose`, so rejecting it
+  // outright is the whole fix, and it belongs here rather than in each
+  // handler: the next endpoint added without a role check inherits it.
+  if (payload.purpose) return null;
+
   // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
   // no userId — nothing to live-check beyond the signature+TTL above.
   if (payload.role === 'admin' || !payload.userId) return payload;
@@ -333,6 +352,64 @@ export default async function handler(req, res) {
       });
       if (error) return res.status(500).json({ error: "Couldn't log service." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ── The full service history, not just the current status ──────────
+    //
+    // list_status answers "is anything due?" and deliberately caps field
+    // entries at 5 per machine because it is a status screen. This answers
+    // the other question a supervisor asks — "what has actually been done to
+    // this machine?" — which is the one a buyer, an auditor or a warranty
+    // claim needs, and it needs every row, not the latest five.
+    //
+    // Labels are resolved here rather than client-side so a record for a
+    // RETIRED machine still reads as that machine. The fleet query is
+    // deliberately unfiltered on retired_at for exactly that reason: a
+    // history that silently drops the machines you no longer own is not a
+    // history.
+    if (action === 'list_records') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const { data: fleet, error: eqErr } = await supabaseAdmin
+        .from('equipment')
+        .select('id, year, make, model, type, unit_number, retired_at')
+        .eq('company_id', companyId);
+      if (eqErr) return res.status(500).json({ error: 'Could not load equipment.' });
+
+      const labels = {};
+      (fleet || []).forEach(eq => {
+        labels[eq.id] = {
+          label: [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ') + (eq.unit_number ? ` (Unit ${eq.unit_number})` : ''),
+          retired: !!eq.retired_at,
+        };
+      });
+
+      const { data: logs, error: logErr } = await supabaseAdmin
+        .from('equipment_maintenance_log')
+        .select('id, equipment_id, entry_type, service_date, service_reading, reading_unit, performed_by, notes, created_at')
+        .eq('company_id', companyId)
+        .order('service_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      if (logErr) return res.status(500).json({ error: 'Could not load maintenance records.' });
+
+      const records = (logs || []).map(row => ({
+        id: row.id,
+        equipmentId: row.equipment_id,
+        equipmentLabel: labels[row.equipment_id]?.label || 'Unknown equipment',
+        equipmentRetired: labels[row.equipment_id]?.retired || false,
+        entryType: row.entry_type || 'pm_service',
+        serviceDate: row.service_date,
+        serviceReading: row.service_reading,
+        readingUnit: row.reading_unit,
+        performedBy: row.performed_by,
+        notes: row.notes,
+        createdAt: row.created_at,
+      }));
+
+      return res.status(200).json({ records });
     }
 
     return res.status(400).json({ error: 'Unknown action.' });

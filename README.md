@@ -38,8 +38,10 @@ on that company's Analytics tab.
   Incident, Daily Report, Monthly Site Inspection, and admin-defined Custom
   Documents — each toggleable per company from the Admin Panel.
 - **Supervisor Dashboard**: reviews every submission type, groupable and
-  collapsible for high-volume companies, plus equipment/preventative-
-  maintenance tracking, a tiered Analytics view, and SOP management.
+  collapsible for high-volume companies, plus an Equipment hub (editable
+  fleet, preventative maintenance, service records, weekly hours, expiry
+  dates, fuel logs and the weekly usage report, each gated on the modules
+  that company bought), a tiered Analytics view, and SOP management.
 - **Admin Panel**: onboard and configure companies, manage plan tier,
   manage each company's login codes and roster, toggle which document
   types a company uses, and view cross-company code/login activity.

@@ -85,3 +85,68 @@ export async function companyEquipmentIndex(supabaseAdmin, companyId) {
   if (error || !rows) return null;
   return new Map(rows.map(r => [String(r.id), r.id]));
 }
+
+/**
+ * The array form, for a record that names SEVERAL machines — a daily report
+ * lists everything that was on site that day, not one unit.
+ *
+ * Semantics are deliberately identical to `resolveEquipmentId` above,
+ * because the failure modes are the same and a second set of rules here
+ * would be a second set of bugs: an id belonging to another company returns
+ * `false` (the caller 403s, keeping the cross-tenant tripwire), an id that
+ * simply does not exist is DROPPED rather than rejected (so a machine
+ * retired while a worker's report sat in the offline queue can't wedge that
+ * queue forever — see the note above), and what survives is the fleet row's
+ * OWN id rather than the value that arrived.
+ *
+ * Returns `null` for "nothing to link", matching the single-id form, so a
+ * report submitted with an empty list stores null instead of `[]` — one
+ * spelling of "no machines", not two.
+ *
+ * Capped at 50 ids: a daily report naming more machines than that is a
+ * malformed or hostile payload, not a jobsite. Over the cap the whole list
+ * is REJECTED rather than truncated — truncating would drop ids before the
+ * ownership loop below ever sees them, which means padding the array past
+ * 50 would silence the cross-tenant 403 this function exists to raise.
+ *
+ * Anything that is not a plain integer id is dropped BEFORE the query, per
+ * id, rather than being sent and allowed to fail the batch. `.in()` on a
+ * bigint column 400s on a value it cannot coerce, and a single `"none"`
+ * from a client bug would otherwise take every legitimately-picked machine
+ * on that report down with it — silently, since the fallback is a
+ * label-only record with no error anywhere.
+ */
+export async function resolveEquipmentIds(supabaseAdmin, companyId, rawIds) {
+  if (!Array.isArray(rawIds) || rawIds.length === 0) return null;
+  if (rawIds.length > 50) return false;
+
+  const wanted = [];
+  const seen = new Set();
+  for (const raw of rawIds) {
+    if (raw === undefined || raw === null || raw === '') continue;
+    const key = String(raw).trim();
+    if (!/^\d+$/.test(key)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    wanted.push(key);
+  }
+  if (wanted.length === 0) return null;
+
+  const { data: rows, error } = await supabaseAdmin
+    .from('equipment')
+    .select('id, company_id')
+    .in('id', wanted);
+  // Fail toward the label-only record rather than 403ing a worker over an
+  // outage, and rather than wedging their offline queue over one.
+  if (error || !rows) return null;
+
+  const byId = new Map(rows.map(r => [String(r.id), r]));
+  const resolved = [];
+  for (const key of wanted) {
+    const row = byId.get(key);
+    if (!row) continue;
+    if (row.company_id !== companyId) return false;
+    resolved.push(row.id);
+  }
+  return resolved.length > 0 ? resolved : null;
+}

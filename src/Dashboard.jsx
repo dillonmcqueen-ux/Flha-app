@@ -19,6 +19,13 @@ import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { reviewBacklog, fieldSiteActivity, fuelSummary } from "./analyticsUtils";
 import { authorCertificationFlags, authorCertificationLabel } from "./certificationStatus";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+// The compliance vocabulary — doc-type labels and the 30-day expiry window —
+// is shared with the server rather than defined here: the same window and the
+// same names now answer the Compliance tab, the overview banner and the
+// weekly equipment report's compliance section, and copies of them would
+// drift. The module is pure data and date math with no imports of its own —
+// see the header of server-lib/compliance.js for why it lives outside src/.
+import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, COMPLIANCE_DOC_TYPES, complianceDocLabel } from "../server-lib/compliance.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
@@ -109,6 +116,26 @@ function RiskBadge({ risk }) {
 // Panel header: icon tile + title + subtitle, optional right-aligned
 // actions (bulk export/delete). Same icon-tile-plus-heading shape as the
 // Overview "Site Activity" / "Recent Activity" panel headers.
+// COMPLIANCE_DOC_TYPES / complianceDocLabel used to be defined right here.
+// They moved to server-lib/compliance.js (imported at the top of this file)
+// unchanged, so the weekly report's compliance section can name a document
+// the same way the editor that created it does.
+
+// expiryStatus / expiryText / EXPIRY_WARNING_DAYS used to be defined right
+// here. They moved to server-lib/compliance.js (imported at the top of this
+// file) unchanged, so the banner below, this screen, and the server both
+// answer from one 30-day window instead of three.
+
+// The one way a machine is named across this screen. Identical to the label
+// api/maintenance.js and api/equipmentreports.js build server-side — the two
+// must agree or the same machine reads as two different ones depending on
+// which panel you are looking at.
+function machineLabel(eq) {
+  if (!eq) return "Unknown machine";
+  const base = [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(" ");
+  return (base || `Machine #${eq.id}`) + (eq.unit_number ? ` (Unit ${eq.unit_number})` : "");
+}
+
 function PanelHeader({ icon: Icon, title, subtitle, actions }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
@@ -1908,7 +1935,36 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // Maintenance splits into the machines themselves and the open defects
   // against them. Monthly no longer has sub-tabs at all — its corrective
   // actions moved out to their own Safety tab.
-  const [maintenanceSubTab, setMaintenanceSubTab] = useState("machines"); // machines | actions
+
+  // ── Equipment hub ──────────────────────────────────────────────────────
+  // Dillon, 2026-09-17: "The equipment tab should have sub tabs for
+  // maintenance records, weekly hours, fleet overview and anything else a
+  // business would need to keep track of for their machines."
+  //
+  // Maintenance and Fuel Logs used to be their own top-level tabs. A machine
+  // is one thing, so everything about it now lives behind one tab — each
+  // sub-tab still gated on whichever module the company actually bought, so
+  // absorbing them changed where they are, not who can see them.
+  const [equipmentSubTab, setEquipmentSubTab] = useState("fleet");
+  const [fleet, setFleet] = useState([]);
+  const [loadingFleet, setLoadingFleet] = useState(false);
+  const [fleetError, setFleetError] = useState("");
+  const [fleetSearch, setFleetSearch] = useState("");
+  const [showRetired, setShowRetired] = useState(false);
+  const [editingMachineId, setEditingMachineId] = useState(null);
+  const [addingMachine, setAddingMachine] = useState(false);
+  const [machineDraft, setMachineDraft] = useState({ year: "", make: "", model: "", type: "", unit_number: "", serial_number: "", notes: "", is_attachment: false });
+  const [savingMachine, setSavingMachine] = useState(false);
+  const [maintenanceRecords, setMaintenanceRecords] = useState([]);
+  const [recordsMachine, setRecordsMachine] = useState("all");
+  const [recordsSearch, setRecordsSearch] = useState("");
+  const [weeklyHours, setWeeklyHours] = useState({ weekStarts: [], machines: [] });
+  const [hoursWeeks, setHoursWeeks] = useState(8);
+  const [loadingHours, setLoadingHours] = useState(false);
+  const [compliance, setCompliance] = useState([]);
+  const [complianceDraft, setComplianceDraft] = useState(null);
+  const [complianceError, setComplianceError] = useState("");
+  const [savingCompliance, setSavingCompliance] = useState(false);
   const [inspectionsSubTab, setInspectionsSubTab] = useState("records");  // records | actions
   const [equipmentReports, setEquipmentReports] = useState([]);
   const [loadingEquipmentReports, setLoadingEquipmentReports] = useState(false);
@@ -1941,6 +1997,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // certification_summary returns counts only, which cannot answer a
   // per-document, as-of-then question.
   const [companyCertifications, setCompanyCertifications] = useState([]);
+
+  // ── Equipment compliance expiry alerts (break #14) ────────────────────
+  // The same three-state model the Compliance tab uses, fetched as a
+  // summary so the overview banner can show it without the supervisor
+  // opening Equipment > Compliance. Server-classified (one 30-day window,
+  // server-lib/expiry.js) so the banner and the tab cannot disagree.
+  const [complianceAlerts, setComplianceAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
 
   // ── Time Clock: my own status + everyone's entries + reports ──────────
   const [myTimeStatus, setMyTimeStatus] = useState(null);
@@ -2347,6 +2410,186 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
+  // ── Fleet: the editable list every other equipment screen reads from ──
+  //
+  // Dillon, 2026-09-17: "the supervisor should be able to edit their fleet
+  // including the asset id if needed, so that list becomes available
+  // anywhere that uses a piece of equipment."
+  //
+  // Pulled with includeRetired so a supervisor can see and un-retire a
+  // machine here. Every WORKER-facing picker calls the same action without
+  // that flag and therefore only ever sees live machines — see the note on
+  // list_equipment in api/companydata.js.
+  const loadFleet = async ({ silent = false } = {}) => {
+    if (!selectedCompany) { setFleet([]); return; }
+    if (!silent) setLoadingFleet(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_equipment", token, companyId: selectedCompany, includeRetired: true }),
+      });
+      const data = await res.json();
+      if (res.ok) setFleet(data.equipment || []);
+    } catch (e) { /* leave the list as-is if the request fails */ }
+    setLoadingFleet(false);
+  };
+
+  const loadMaintenanceRecords = async () => {
+    if (!selectedCompany) { setMaintenanceRecords([]); return; }
+    try {
+      const res = await fetch("/api/maintenance", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_records", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setMaintenanceRecords(data.records || []);
+    } catch (e) { /* leave the list as-is if the request fails */ }
+  };
+
+  const loadWeeklyHours = async (weeks = hoursWeeks) => {
+    if (!selectedCompany) { setWeeklyHours({ weekStarts: [], machines: [] }); return; }
+    setLoadingHours(true);
+    try {
+      const res = await fetch("/api/equipmentreports", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_weekly_hours", token, companyId: selectedCompany, weeks }),
+      });
+      const data = await res.json();
+      if (res.ok) setWeeklyHours({ weekStarts: data.weekStarts || [], machines: data.machines || [] });
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingHours(false);
+  };
+
+  const loadCompliance = async () => {
+    if (!selectedCompany) { setCompliance([]); return; }
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_equipment_compliance", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setCompliance(data.compliance || []);
+    } catch (e) { /* leave as-is if the request fails */ }
+  };
+
+  useEffect(() => {
+    loadFleet();
+    loadMaintenanceRecords();
+    loadCompliance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, token]);
+
+  // Hours are the one equipment view that re-queries a whole span of
+  // inspections, so it loads when its sub-tab is actually opened rather
+  // than on every company switch.
+  useEffect(() => {
+    if (activeTab !== "equipment" || equipmentSubTab !== "hours") return;
+    loadWeeklyHours(hoursWeeks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, equipmentSubTab, hoursWeeks, selectedCompany, token]);
+
+  const blankMachine = { year: "", make: "", model: "", type: "", unit_number: "", serial_number: "", notes: "", is_attachment: false };
+
+  const startEditMachine = (eq) => {
+    setFleetError("");
+    setEditingMachineId(eq.id);
+    setMachineDraft({
+      year: eq.year || "", make: eq.make || "", model: eq.model || "", type: eq.type || "",
+      unit_number: eq.unit_number || "", serial_number: eq.serial_number || "", notes: eq.notes || "",
+      is_attachment: !!eq.is_attachment,
+    });
+  };
+
+  const cancelEditMachine = () => { setEditingMachineId(null); setAddingMachine(false); setMachineDraft(blankMachine); setFleetError(""); };
+
+  // One handler for both add and edit — the only difference is the action
+  // and whether an id goes along, and splitting them means two places to
+  // forget a field the next time the fleet row grows one.
+  const saveMachine = async () => {
+    setFleetError(""); setSavingMachine(true);
+    const editing = editingMachineId != null;
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: editing ? "update_equipment" : "add_equipment",
+          token, companyId: selectedCompany,
+          ...(editing ? { id: editingMachineId } : {}),
+          year: machineDraft.year, make: machineDraft.make, model: machineDraft.model, type: machineDraft.type,
+          unitNumber: machineDraft.unit_number, serialNumber: machineDraft.serial_number,
+          notes: machineDraft.notes, isAttachment: machineDraft.is_attachment,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setFleetError(data.error || "Couldn't save this machine."); setSavingMachine(false); return; }
+      cancelEditMachine();
+      await loadFleet({ silent: true });
+      // The PM screen shows the same machines under their label, so an edit
+      // that changes a name or a unit number has to refresh it too or the
+      // two views disagree until the next reload.
+      await loadMaintenanceStatus();
+    } catch (e) {
+      setFleetError("Couldn't save this machine. Try again.");
+    }
+    setSavingMachine(false);
+  };
+
+  const setMachineRetired = async (eq, retired) => {
+    setFleetError("");
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: retired ? "retire_equipment" : "restore_equipment", token, id: eq.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setFleetError(data.error || "Couldn't update this machine."); return; }
+      await loadFleet({ silent: true });
+      await loadMaintenanceStatus();
+    } catch (e) {
+      setFleetError("Couldn't update this machine. Try again.");
+    }
+  };
+
+  const saveComplianceRecord = async () => {
+    if (!complianceDraft) return;
+    setComplianceError(""); setSavingCompliance(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "upsert_equipment_compliance", token, companyId: selectedCompany,
+          id: complianceDraft.id || null,
+          equipmentId: complianceDraft.equipment_id,
+          docType: complianceDraft.doc_type,
+          label: complianceDraft.label,
+          expiryDate: complianceDraft.expiry_date,
+          notes: complianceDraft.notes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setComplianceError(data.error || "Couldn't save that expiry date."); setSavingCompliance(false); return; }
+      setComplianceDraft(null);
+      await loadCompliance();
+      // The banner reads a server-side summary, so it has to be re-pulled
+      // after an edit or it keeps counting yesterday's dates.
+      loadComplianceAlerts();
+    } catch (e) {
+      setComplianceError("Couldn't save that expiry date. Try again.");
+    }
+    setSavingCompliance(false);
+  };
+
+  const deleteComplianceRecord = async (id) => {
+    try {
+      await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_equipment_compliance", token, companyId: selectedCompany, id }),
+      });
+    } catch (e) { /* leave the list as-is if the request fails */ }
+    setCompliance(prev => prev.filter(r => r.id !== id));
+    loadComplianceAlerts();
+  };
+
   const loadCertAlerts = async () => {
     if (!selectedCompany || !token) { setCertAlerts({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] }); return; }
     try {
@@ -2368,8 +2611,25 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { /* leave alerts as-is if the request fails */ }
   };
 
+  // Same shape as loadCertAlerts above. A worker never gets here (the
+  // Dashboard is supervisor/admin only) and the endpoint 403s them anyway;
+  // a 403 or a network failure just leaves the banner empty, which is how
+  // it looked before this existed.
+  const loadComplianceAlerts = async () => {
+    if (!selectedCompany || !token) { setComplianceAlerts({ expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] }); return; }
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "compliance_summary", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setComplianceAlerts(data);
+    } catch (e) { /* leave alerts as-is if the request fails */ }
+  };
+
   useEffect(() => {
     loadCertAlerts();
+    loadComplianceAlerts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompany, token]);
 
@@ -2474,6 +2734,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     return entry ? entry.isActive : true; // not loaded yet / unknown key → default to shown
   };
   const equipmentReportsEnabled = isDocActive("equipment_reports");
+  const maintenanceEnabled = isDocActive("maintenance");
+  const fuelEnabled = isDocActive("fuellog");
+  const inspectionsEnabled = isDocActive("inspection");
   // Each custom form now carries a `category` (safety/operations/workforce,
   // set by the admin when creating it) — a separate "Custom Docs" tab per
   // category, only shown when that company has at least one active custom
@@ -2502,12 +2765,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // defects deliberately do NOT appear here — they live with the machine,
     // in Maintenance. See equipmentCorrectiveActions below.
     corrective: isDocActive("monthly") || isDocActive("incident") || isDocActive("nearmiss"),
-    equipment: equipmentReportsEnabled,
+    // The Equipment hub is always available to a supervisor, because the
+    // fleet list itself is not a purchasable module — it is the reference
+    // data every other module joins to. What each SUB-tab shows is still
+    // gated on what the company bought (see EQUIPMENT_SUBTABS below), so a
+    // company with no equipment modules sees the fleet and nothing else.
+    equipment: true,
     customdocs: hasActiveCustomFormIn("operations"),
     safetycustomdocs: hasActiveCustomFormIn("safety"),
     workforcecustomdocs: hasActiveCustomFormIn("workforce"),
-    maintenance: isDocActive("maintenance"),
-    fuel: isDocActive("fuellog"),
     timeclock: isDocActive("timeclock"),
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
@@ -2526,9 +2792,38 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // Custom documents follow whichever category the admin assigned them to.
   const CATEGORIES = [
     { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "corrective", "sops", "safetycustomdocs", "safetyanalytics"] },
-    { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "maintenance", "fuel", "customdocs", "analytics"] },
+    { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "customdocs", "analytics"] },
     { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "certifications", "workforcecustomdocs"] },
   ];
+  // The Equipment hub's own sub-tabs, in the order a supervisor actually
+  // works through them: what do I own, what needs service, what has been
+  // done to it, how hard is it working, what paperwork is about to lapse,
+  // what did it burn, what went out in the weekly report.
+  //
+  // `on` is what the company bought. Fleet and Compliance have no module
+  // behind them — they are facts about machines a company already owns, not
+  // a document type — so they are always on.
+  const EQUIPMENT_SUBTABS = [
+    { key: "fleet", label: "Fleet Overview", on: true },
+    { key: "maintenance", label: "Maintenance", on: maintenanceEnabled },
+    { key: "records", label: "Maintenance Records", on: maintenanceEnabled },
+    { key: "actions", label: "Corrective Actions", on: maintenanceEnabled },
+    { key: "hours", label: "Weekly Hours", on: inspectionsEnabled },
+    { key: "compliance", label: "Compliance", on: true },
+    { key: "fuel", label: "Fuel Logs", on: fuelEnabled },
+    { key: "reports", label: "Weekly Reports", on: equipmentReportsEnabled },
+  ];
+  const visibleEquipmentSubTabs = EQUIPMENT_SUBTABS.filter(t => t.on);
+
+  // Same bounce the top-level tabs get below: a sub-tab that just went away
+  // (module switched off, company changed) must not leave the hub rendering
+  // nothing at all.
+  useEffect(() => {
+    if (visibleEquipmentSubTabs.some(t => t.key === equipmentSubTab)) return;
+    setEquipmentSubTab(visibleEquipmentSubTabs[0]?.key || "fleet");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docSettings, selectedCompany]);
+
   // If the currently open tab just got deactivated (or the company changed
   // to one that doesn't have it active), bounce to the first tab that is.
   useEffect(() => {
@@ -2540,9 +2835,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docSettings, selectedCompany]);
 
-  // Load equipment reports for the selected company whenever that tab is opened or the company changes.
+  // Load equipment reports for the selected company whenever that sub-tab is
+  // opened or the company changes. Gated on the sub-tab, not just the tab:
+  // the Equipment hub is now always reachable, so without this a company
+  // that never bought weekly reports would fetch them on every visit.
   const loadEquipmentReports = async ({ silent = false } = {}) => {
-    if (activeTab !== "equipment" || !selectedCompany) return;
+    if (activeTab !== "equipment" || equipmentSubTab !== "reports" || !selectedCompany) return;
     if (!silent) setLoadingEquipmentReports(true);
     try {
       const res = await fetch("/api/equipmentreports", {
@@ -2558,7 +2856,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   useEffect(() => {
     loadEquipmentReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, selectedCompany, token]);
+  }, [activeTab, equipmentSubTab, selectedCompany, token]);
 
   const openEquipmentReport = async (report) => {
     setEquipmentPdfError("");
@@ -2919,10 +3217,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     if (refreshKey === 0) return; // first mount — every loader above just ran
     loadDocSettings();
     loadCertAlerts();
+    loadComplianceAlerts();
     loadMaintenanceStatus();
     loadFuelLogs({ silent: true });
     loadEmployeeDirectory({ silent: true });
-    if (activeTab === "equipment") loadEquipmentReports({ silent: true });
+    if (activeTab === "equipment" && equipmentSubTab === "reports") loadEquipmentReports({ silent: true });
     if (activeTab === "roster") loadRosterList({ silent: true });
     if (activeTab === "timeclock") {
       loadTimeClockEntries({ silent: true });
@@ -3071,9 +3370,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     try {
       await generateEquipmentAnalyticsPDF({
         companyName: company?.name, companyLogo: company?.logo_url,
-        inspections: companyInspections, maintenanceStatus: TAB_VISIBLE.maintenance ? maintenanceStatus : [],
+        inspections: companyInspections, maintenanceStatus: maintenanceEnabled ? maintenanceStatus : [],
         customDocs: companyOperationsCustomDocs,
-        fuelLogs: TAB_VISIBLE.fuel ? fuelLogs : [], siteNames: siteNamesById,
+        fuelLogs: fuelEnabled ? fuelLogs : [], siteNames: siteNamesById,
       });
     } catch (e) {
       setAnalyticsPdfError("Couldn't generate the equipment analytics PDF.");
@@ -3107,6 +3406,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const equipmentCorrectiveActions = companyMonthlyActions.filter(a => a.source_type === "equipment_inspection");
   const safetyCorrectiveActions = companyMonthlyActions.filter(a => a.source_type !== "equipment_inspection");
   const openEquipmentActions = equipmentCorrectiveActions.filter(a => a.status !== "resolved");
+
+  // ── Fleet-derived views ────────────────────────────────────────────────
+  const activeFleet = fleet.filter(eq => !eq.retired_at);
+  const retiredFleet = fleet.filter(eq => !!eq.retired_at);
+  const visibleFleet = (showRetired ? fleet : activeFleet).filter(eq => {
+    const q = fleetSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [eq.year, eq.make, eq.model, eq.type, eq.unit_number, eq.serial_number]
+      .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+  });
+
+  const filteredMaintenanceRecords = maintenanceRecords.filter(r => {
+    if (recordsMachine !== "all" && String(r.equipmentId) !== String(recordsMachine)) return false;
+    const q = recordsSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [r.equipmentLabel, r.performedBy, r.notes].filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+  });
   const openSafetyActions = safetyCorrectiveActions.filter(a => a.status !== "resolved");
 
   // Recurrence groups that crossed the threshold, keyed by equipment id.
@@ -4068,7 +4384,55 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     }),
     select: { flex: "1 1 auto", minWidth: 0, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panelInset, color: C.text.body, cursor: "pointer", outline: "none" },
     searchInput: { width: "100%", padding: "9px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 14, boxSizing: "border-box", marginBottom: 10, outline: "none", background: C.panelInset, color: C.text.primary },
+    // Small tinted row action ("Edit", "Retire", "Remove") — takes a tone
+    // straight off the palette so the same button reads the same wherever
+    // it turns up in the Equipment hub.
+    rowBtn: (tone) => ({
+      background: tone.bg, color: tone.text, border: `1px solid ${tone.border}`, borderRadius: RAD.sm,
+      padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+    }),
+    th: (align) => ({
+      textAlign: align, padding: "8px 10px", fontSize: 10.5, fontWeight: 700, color: C.text.faint,
+      textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1.5px solid ${C.line}`, whiteSpace: "nowrap",
+    }),
+    td: (align) => ({
+      textAlign: align, padding: "9px 10px", borderBottom: `1px solid ${C.line}`,
+      fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+    }),
+    fleetInput: { padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, background: C.panel, color: C.text.primary, outline: "none", minWidth: 0 },
   };
+
+  // The add/edit form for one machine.
+  //
+  // A plain render function rather than a nested component on purpose: a
+  // component declared inside this render gets a new identity every keypress,
+  // so React unmounts and remounts it and the field loses focus after every
+  // character typed. This is the same JSX without that boundary.
+  const renderMachineEditor = (title) => (
+    <div style={{ background: C.panelInset, border: `1.5px solid ${C.orange}`, borderRadius: RAD.md, padding: 12, marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, fontSize: 13, color: C.text.primary, marginBottom: 10 }}>{title}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 8 }}>
+        <input style={styles.fleetInput} placeholder="Asset ID / unit #" value={machineDraft.unit_number} onChange={e => setMachineDraft(d => ({ ...d, unit_number: e.target.value }))} />
+        <input style={styles.fleetInput} placeholder="Year" value={machineDraft.year} onChange={e => setMachineDraft(d => ({ ...d, year: e.target.value }))} />
+        <input style={styles.fleetInput} placeholder="Make" value={machineDraft.make} onChange={e => setMachineDraft(d => ({ ...d, make: e.target.value }))} />
+        <input style={styles.fleetInput} placeholder="Model" value={machineDraft.model} onChange={e => setMachineDraft(d => ({ ...d, model: e.target.value }))} />
+        <input style={styles.fleetInput} placeholder="Type (e.g. Excavator)" value={machineDraft.type} onChange={e => setMachineDraft(d => ({ ...d, type: e.target.value }))} />
+        <input style={styles.fleetInput} placeholder="Serial number" value={machineDraft.serial_number} onChange={e => setMachineDraft(d => ({ ...d, serial_number: e.target.value }))} />
+      </div>
+      <input style={{ ...styles.fleetInput, width: "100%", boxSizing: "border-box", marginBottom: 8 }} placeholder="Notes (optional)" value={machineDraft.notes} onChange={e => setMachineDraft(d => ({ ...d, notes: e.target.value }))} />
+      <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: C.text.body, marginBottom: 10, cursor: "pointer" }}>
+        <input type="checkbox" checked={machineDraft.is_attachment} onChange={e => setMachineDraft(d => ({ ...d, is_attachment: e.target.checked }))} />
+        This is an attachment (trailer, bucket, hammer, forks)
+      </label>
+      <div style={{ fontSize: 11.5, color: C.text.faint, marginBottom: 10, lineHeight: 1.5 }}>
+        An attachment can be added to another machine's inspection instead of being inspected on its own, and isn't asked for an hour or kilometre reading.
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={saveMachine} disabled={savingMachine} style={styles.rowBtn(C.status.success)}>{savingMachine ? "Saving…" : "Save"}</button>
+        <button onClick={cancelEditMachine} style={styles.rowBtn(C.status.info)}>Cancel</button>
+      </div>
+    </div>
+  );
 
   // Sparkline stat-tile renderer — a headline number with a real trailing-
   // 7-day trend beneath it (see `bucketByDay` above). Tone only changes the
@@ -4227,8 +4591,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             // itself as a monthly-inspection problem in the nav. Each count
             // now sits on the tab that actually holds those rows.
             corrective: openSafetyActions.length,
-            inspections: TAB_VISIBLE.maintenance ? 0 : openEquipmentActions.length,
-            maintenance: maintenanceStatus.filter(e => e.status === "overdue").length + openEquipmentActions.length,
+            // Equipment absorbed Maintenance, so the badge that used to sit
+            // on that tab moves here with it — otherwise an overdue service
+            // and an open defect stop being visible from the nav at all.
+            // The Inspections fallback is gone with it: there is no longer a
+            // state where Maintenance is missing from the menu.
+            equipment: maintenanceEnabled
+              ? maintenanceStatus.filter(e => e.status === "overdue").length + openEquipmentActions.length
+              : 0,
           }}
           activeTab={activeTab}
           onSelectTab={setActiveTab}
@@ -4308,6 +4678,42 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
+        {/* ── Equipment compliance alerts (break #14) ──────────────────────
+            The dates that park a machine when they lapse, on the page a
+            supervisor actually lands on. Same shape as the certification
+            banner above, and gated the same way the Compliance tab itself
+            is: on having something to show, not on a doc key — compliance
+            has no purchasable module (break #19, open), so adding one here
+            would change who can see it. Red when something is already
+            expired, amber when it is only coming due. */}
+        {(complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
+          const tone = complianceAlerts.expiredCount > 0 ? C.status.danger : C.status.warning;
+          const rows = [...complianceAlerts.expired, ...complianceAlerts.expiringSoon];
+          return (
+            <div style={{ background: tone.bg, border: `1.5px solid ${tone.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: tone.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                <ShieldCheck size={14} strokeWidth={2.5} />
+                Equipment compliance alerts
+              </div>
+              <div style={{ fontSize: 13, color: tone.text, marginBottom: rows.length > 0 ? 8 : 0 }}>
+                {complianceAlerts.expiredCount > 0 && <span>{complianceAlerts.expiredCount} document{complianceAlerts.expiredCount === 1 ? "" : "s"} expired</span>}
+                {complianceAlerts.expiredCount > 0 && complianceAlerts.expiringSoonCount > 0 && <span> — </span>}
+                {complianceAlerts.expiringSoonCount > 0 && <span>{complianceAlerts.expiringSoonCount} expiring within {complianceAlerts.warningDays || EXPIRY_WARNING_DAYS} days</span>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {rows.slice(0, 6).map((r) => (
+                  <div key={r.id} style={{ fontSize: 12.5, color: tone.text }}>
+                    <strong>{r.equipmentName}</strong> — {r.label || complianceDocLabel(r.docType)} ({expiryText(r.expiryDate)})
+                  </div>
+                ))}
+                {rows.length > 6 && (
+                  <div style={{ fontSize: 12, color: tone.text, opacity: 0.8 }}>+ {rows.length - 6} more — see Equipment ▸ Compliance for the full list.</div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {isAdmin && companies.length > 1 && (
           <div style={styles.card}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#A1A1AA", marginBottom: 8 }}>COMPANY</div>
@@ -4371,15 +4777,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               {sparkTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions", correctiveSpark,
                 () => {
                   const equipmentHeavy = openEquipmentActions.length > openSafetyActions.length;
-                  if (equipmentHeavy && TAB_VISIBLE.maintenance) { setActiveTab("maintenance"); setMaintenanceSubTab("actions"); return; }
+                  if (equipmentHeavy && maintenanceEnabled) { setActiveTab("equipment"); setEquipmentSubTab("actions"); return; }
                   if (equipmentHeavy && TAB_VISIBLE.inspections) { setActiveTab("inspections"); setInspectionsSubTab("actions"); return; }
                   if (TAB_VISIBLE.corrective) { setActiveTab("corrective"); return; }
-                  if (TAB_VISIBLE.maintenance) { setActiveTab("maintenance"); setMaintenanceSubTab("actions"); }
+                  if (maintenanceEnabled) { setActiveTab("equipment"); setEquipmentSubTab("actions"); }
                 },
                 openCorrectiveCount > 0 ? "accent" : "neutral")}
               {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "neutral")}
               {sparkTile(Fuel, fuelFlagged.length, "Fuel Alerts", fuelSpark,
-                () => { if (TAB_VISIBLE.fuel) setActiveTab("fuel"); else if (TAB_VISIBLE.analytics) setActiveTab("analytics"); },
+                () => { if (fuelEnabled) { setActiveTab("equipment"); setEquipmentSubTab("fuel"); } else if (TAB_VISIBLE.analytics) setActiveTab("analytics"); },
                 fuelFlagged.length > 0 ? "warning" : "neutral")}
             </div>
 
@@ -4621,7 +5027,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             unreachable — which is the exact bug this whole change is
             fixing, one module over — the Inspections tab grows the same
             sub-tab, rendering the same component. */}
-        {activeTab === "inspections" && TAB_VISIBLE.inspections && !TAB_VISIBLE.maintenance && (
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && !maintenanceEnabled && (
           <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
             <button style={styles.tab(inspectionsSubTab === "records")} onClick={() => setInspectionsSubTab("records")}>Submissions</button>
             <button style={styles.tab(inspectionsSubTab === "actions")} onClick={() => setInspectionsSubTab("actions")}>
@@ -4630,7 +5036,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {activeTab === "inspections" && TAB_VISIBLE.inspections && !TAB_VISIBLE.maintenance && inspectionsSubTab === "actions" && (
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && !maintenanceEnabled && inspectionsSubTab === "actions" && (
           <CorrectiveActionsPanel
             title={`${company?.name || ""} — Equipment Corrective Actions`}
             subtitle={`Defects flagged on pre-trip and post-trip inspections. The same fault ${recurrenceRule.threshold}× on one machine within ${recurrenceRule.windowDays} days is flagged as recurring.`}
@@ -4641,7 +5047,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           />
         )}
 
-        {activeTab === "inspections" && TAB_VISIBLE.inspections && (TAB_VISIBLE.maintenance || inspectionsSubTab === "records") && (
+        {activeTab === "inspections" && TAB_VISIBLE.inspections && (maintenanceEnabled || inspectionsSubTab === "records") && (
           <div style={styles.card}>
             <PanelHeader
               icon={TAB_ICON.inspections}
@@ -5305,15 +5711,326 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               companyName={company?.name}
               inspections={companyInspections}
               daily={companyDaily}
-              maintenanceStatus={TAB_VISIBLE.maintenance ? maintenanceStatus : []}
+              maintenanceStatus={maintenanceEnabled ? maintenanceStatus : []}
               customDocs={companyOperationsCustomDocs}
-              fuelLogs={TAB_VISIBLE.fuel ? fuelLogs : []}
+              fuelLogs={fuelEnabled ? fuelLogs : []}
               siteNames={siteNamesById}
             />
           </>
         )}
 
-        {activeTab === "equipment" && equipmentReportsEnabled && (
+        {/* ── Equipment hub sub-tab bar ─────────────────────────────────
+            One tab for the machine, not four scattered across the menu. */}
+        {activeTab === "equipment" && (
+          <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {visibleEquipmentSubTabs.map(t => (
+              <button key={t.key} style={styles.tab(equipmentSubTab === t.key)} onClick={() => setEquipmentSubTab(t.key)}>
+                {t.label}
+                {t.key === "actions" && openEquipmentActions.length > 0 ? ` (${openEquipmentActions.length})` : ""}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── Fleet Overview: the list everything else joins to ──────────── */}
+        {activeTab === "equipment" && equipmentSubTab === "fleet" && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={TAB_ICON.equipment}
+              title={`${company?.name || ""} — Fleet`}
+              subtitle="Every machine you own. Editing one here updates it everywhere it's used — inspections, daily reports, fuel logs and maintenance all read this list"
+              actions={
+                <button onClick={() => { setAddingMachine(true); setEditingMachineId(null); setMachineDraft(blankMachine); setFleetError(""); }} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                  padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer"
+                }}><FilePlus2 size={14} strokeWidth={2.5} />Add Machine</button>
+              }
+            />
+
+            <StatStrip items={[
+              { icon: Wrench, value: activeFleet.length, label: "Active machines", tone: "neutral" },
+              { icon: Hammer, value: activeFleet.filter(e => e.is_attachment).length, label: "Attachments", tone: "neutral" },
+              { icon: KeyRound, value: activeFleet.filter(e => !(e.unit_number || "").trim()).length, label: "No asset ID", tone: activeFleet.some(e => !(e.unit_number || "").trim()) ? "warning" : "neutral" },
+              { icon: Trash2, value: retiredFleet.length, label: "Retired", tone: "neutral" },
+            ]} />
+
+            {fleetError && (
+              <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: RAD.sm, background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, color: C.status.danger.text, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} />{fleetError}
+              </div>
+            )}
+
+            {addingMachine && renderMachineEditor("New machine")}
+
+            <input style={styles.searchInput} placeholder="Search make, model, type or asset ID…" value={fleetSearch} onChange={e => setFleetSearch(e.target.value)} />
+
+            {retiredFleet.length > 0 && (
+              <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: C.text.muted, marginBottom: 12, cursor: "pointer" }}>
+                <input type="checkbox" checked={showRetired} onChange={e => setShowRetired(e.target.checked)} />
+                Show retired machines ({retiredFleet.length})
+              </label>
+            )}
+
+            {loadingFleet ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+            ) : visibleFleet.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Wrench size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+                {fleet.length === 0 ? "No machines registered yet. Add one to get started." : "Nothing matches that search."}
+              </div>
+            ) : (
+              visibleFleet.map((eq, i) => (
+                editingMachineId === eq.id ? (
+                  <div key={eq.id}>{renderMachineEditor(`Editing ${machineLabel(eq)}`)}</div>
+                ) : (
+                  <div key={eq.id} style={{ padding: "12px 4px", borderBottom: i < visibleFleet.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "center", gap: 10, opacity: eq.retired_at ? 0.55 : 1 }}>
+                    <RowIconTile icon={eq.is_attachment ? Hammer : Wrench} color={eq.retired_at ? C.text.faint : C.text.muted} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>
+                        {machineLabel(eq)}
+                        {eq.is_attachment && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: C.status.info.text, background: C.status.info.bg, border: `1px solid ${C.status.info.border}`, padding: "1px 7px", borderRadius: RAD.pill }}>ATTACHMENT</span>}
+                        {eq.retired_at && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: C.text.faint, background: C.panelInset, border: `1px solid ${C.line}`, padding: "1px 7px", borderRadius: RAD.pill }}>RETIRED</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
+                        {[
+                          (eq.unit_number || "").trim() ? `Asset ID ${eq.unit_number}` : "No asset ID",
+                          (eq.serial_number || "").trim() ? `S/N ${eq.serial_number}` : null,
+                          eq.pm_interval != null ? `PM every ${eq.pm_interval}` : null,
+                          eq.retired_at ? `Retired ${new Date(eq.retired_at).toLocaleDateString("en-CA")}${eq.retired_by ? ` by ${eq.retired_by}` : ""}` : null,
+                        ].filter(Boolean).join(" · ")}
+                      </div>
+                      {(eq.notes || "").trim() && <div style={{ fontSize: 12, color: C.text.faint, marginTop: 3 }}>{eq.notes}</div>}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => startEditMachine(eq)} style={styles.rowBtn(C.status.info)}>Edit</button>
+                      <button onClick={() => setMachineRetired(eq, !eq.retired_at)} style={styles.rowBtn(eq.retired_at ? C.status.success : C.status.warning)}>
+                        {eq.retired_at ? "Bring back" : "Retire"}
+                      </button>
+                    </div>
+                  </div>
+                )
+              ))
+            )}
+
+            <div style={{ marginTop: 14, fontSize: 11.5, color: C.text.faint, lineHeight: 1.5 }}>
+              Retiring a machine takes it out of every worker's dropdown but keeps its inspections, fuel logs and service history. Permanently deleting one is an admin job, on purpose — it can't be undone.
+            </div>
+          </div>
+        )}
+
+        {/* ── Maintenance Records: what has actually been done ───────────── */}
+        {activeTab === "equipment" && maintenanceEnabled && equipmentSubTab === "records" && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={TAB_ICON.maintenance}
+              title={`${company?.name || ""} — Maintenance Records`}
+              subtitle="Every service logged against a machine: scheduled services that reset the PM clock, and the filter changes and repairs your operators logged themselves"
+            />
+
+            <StatStrip items={[
+              { icon: Settings2, value: maintenanceRecords.filter(r => r.entryType === "pm_service").length, label: "Scheduled services", tone: "neutral" },
+              { icon: Wrench, value: maintenanceRecords.filter(r => r.entryType === "field_service").length, label: "Field entries", tone: "neutral" },
+              { icon: CalendarClock, value: maintenanceRecords[0] ? new Date(maintenanceRecords[0].serviceDate).toLocaleDateString("en-CA") : "—", label: "Most recent", tone: "neutral" },
+            ]} />
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <select value={recordsMachine} onChange={e => setRecordsMachine(e.target.value)} style={styles.select}>
+                <option value="all">All machines</option>
+                {fleet.map(eq => <option key={eq.id} value={String(eq.id)}>{machineLabel(eq)}</option>)}
+              </select>
+            </div>
+            <input style={styles.searchInput} placeholder="Search machine, who did it, or what was done…" value={recordsSearch} onChange={e => setRecordsSearch(e.target.value)} />
+
+            {filteredMaintenanceRecords.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><Settings2 size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+                {maintenanceRecords.length === 0 ? "Nothing serviced yet." : "Nothing matches that filter."}
+              </div>
+            ) : (
+              filteredMaintenanceRecords.map((r, i) => {
+                const scheduled = r.entryType === "pm_service";
+                return (
+                  <div key={r.id} style={{ padding: "12px 4px", borderBottom: i < filteredMaintenanceRecords.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <RowIconTile icon={scheduled ? Settings2 : Wrench} color={scheduled ? C.status.success.text : C.text.muted} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.equipmentLabel}</span>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: scheduled ? C.status.success.text : C.text.muted, background: scheduled ? C.status.success.bg : C.panelInset, border: `1px solid ${scheduled ? C.status.success.border : C.line}`, padding: "1px 7px", borderRadius: RAD.pill }}>
+                          {scheduled ? "SCHEDULED SERVICE" : "FIELD SERVICE"}
+                        </span>
+                        {r.equipmentRetired && <span style={{ fontSize: 10.5, fontWeight: 700, color: C.text.faint }}>retired machine</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: C.text.muted, marginTop: 3 }}>
+                        {[
+                          new Date(r.serviceDate).toLocaleDateString("en-CA"),
+                          r.performedBy,
+                          r.serviceReading != null ? `${r.serviceReading} ${r.readingUnit || ""}`.trim() : null,
+                        ].filter(Boolean).join(" · ")}
+                      </div>
+                      {(r.notes || "").trim() && <div style={{ fontSize: 13, color: C.text.body, marginTop: 4 }}>{r.notes}</div>}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* ── Weekly Hours: usage per machine, week over week ────────────── */}
+        {activeTab === "equipment" && inspectionsEnabled && equipmentSubTab === "hours" && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={CalendarClock}
+              title={`${company?.name || ""} — Weekly Hours`}
+              subtitle="Hours and kilometres per machine per week, summed from completed pre-trip to post-trip pairs. A towed unit is credited whatever the machine pulling it logged"
+              actions={
+                <select value={hoursWeeks} onChange={e => setHoursWeeks(Number(e.target.value))} style={{ ...styles.select, flex: "0 0 auto", minWidth: 130 }}>
+                  <option value={4}>Last 4 weeks</option>
+                  <option value={8}>Last 8 weeks</option>
+                  <option value={13}>Last 13 weeks</option>
+                  <option value={26}>Last 26 weeks</option>
+                </select>
+              }
+            />
+
+            {loadingHours ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+            ) : weeklyHours.machines.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><CalendarClock size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+                No completed trips in this span yet. Hours are counted when a pre-trip gets its matching post-trip.
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th("left")}>Machine</th>
+                      {weeklyHours.weekStarts.map(w => (
+                        <th key={w} style={styles.th("right")}>{w.slice(5)}</th>
+                      ))}
+                      <th style={styles.th("right")}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weeklyHours.machines.map(m => (
+                      <tr key={m.equipmentId ?? m.equipmentLabel}>
+                        <td style={{ ...styles.td("left"), fontWeight: 700, color: C.text.primary, whiteSpace: "nowrap" }}>
+                          {m.equipmentLabel}
+                          <span style={{ fontWeight: 600, color: C.text.faint, marginLeft: 6, fontSize: 11 }}>{m.unit || ""}</span>
+                        </td>
+                        {weeklyHours.weekStarts.map(w => {
+                          const v = m.weeks[w];
+                          return <td key={w} style={{ ...styles.td("right"), color: v ? C.text.body : C.text.faint }}>{v ? v.toFixed(1) : "—"}</td>;
+                        })}
+                        <td style={{ ...styles.td("right"), fontWeight: 800, color: C.text.primary }}>{m.total.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ marginTop: 14, fontSize: 11.5, color: C.text.faint, lineHeight: 1.5 }}>
+              Week columns are Monday dates. A week reads zero for a machine that was checked out but never closed out — usage only counts once the post-trip is in.
+            </div>
+          </div>
+        )}
+
+        {/* ── Compliance: the dates that park a machine when they lapse ──── */}
+        {activeTab === "equipment" && equipmentSubTab === "compliance" && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={ShieldCheck}
+              title={`${company?.name || ""} — Compliance & Documents`}
+              subtitle="CVIP, registration, insurance and anything else with an expiry date on it — tracked per machine so nothing goes out the gate expired"
+              actions={
+                <button
+                  onClick={() => { setComplianceError(""); setComplianceDraft({ id: null, equipment_id: activeFleet[0]?.id || "", doc_type: "cvip", label: "", expiry_date: "", notes: "" }); }}
+                  disabled={activeFleet.length === 0}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: activeFleet.length === 0 ? C.text.faint : C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm,
+                    padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: activeFleet.length === 0 ? "default" : "pointer"
+                  }}><FilePlus2 size={14} strokeWidth={2.5} />Add Expiry</button>
+              }
+            />
+
+            <StatStrip items={[
+              { icon: AlertTriangle, value: compliance.filter(r => expiryStatus(r.expiry_date) === "expired").length, label: "Expired", tone: compliance.some(r => expiryStatus(r.expiry_date) === "expired") ? "danger" : "neutral" },
+              { icon: CalendarClock, value: compliance.filter(r => expiryStatus(r.expiry_date) === "due_soon").length, label: "Due in 30 days", tone: compliance.some(r => expiryStatus(r.expiry_date) === "due_soon") ? "warning" : "neutral" },
+              { icon: CircleCheckBig, value: compliance.filter(r => expiryStatus(r.expiry_date) === "ok").length, label: "Current", tone: "success" },
+            ]} />
+
+            {complianceError && (
+              <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: RAD.sm, background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, color: C.status.danger.text, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} />{complianceError}
+              </div>
+            )}
+
+            {complianceDraft && (
+              <div style={{ background: C.panelInset, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, padding: 12, marginBottom: 14 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <select value={complianceDraft.equipment_id} onChange={e => setComplianceDraft(d => ({ ...d, equipment_id: e.target.value }))} style={styles.select}>
+                    {activeFleet.map(eq => <option key={eq.id} value={eq.id}>{machineLabel(eq)}</option>)}
+                  </select>
+                  <select value={complianceDraft.doc_type} onChange={e => setComplianceDraft(d => ({ ...d, doc_type: e.target.value }))} style={styles.select}>
+                    {COMPLIANCE_DOC_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  </select>
+                  <input type="date" value={complianceDraft.expiry_date} onChange={e => setComplianceDraft(d => ({ ...d, expiry_date: e.target.value }))} style={styles.select} />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <input placeholder="Label (optional) — e.g. Alberta CVIP" value={complianceDraft.label} onChange={e => setComplianceDraft(d => ({ ...d, label: e.target.value }))} style={styles.select} />
+                  <input placeholder="Notes (optional)" value={complianceDraft.notes} onChange={e => setComplianceDraft(d => ({ ...d, notes: e.target.value }))} style={styles.select} />
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={saveComplianceRecord} disabled={savingCompliance} style={styles.rowBtn(C.status.success)}>{savingCompliance ? "Saving…" : "Save"}</button>
+                  <button onClick={() => { setComplianceDraft(null); setComplianceError(""); }} style={styles.rowBtn(C.status.info)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {compliance.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                <div style={{ marginBottom: 8 }}><ShieldCheck size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+                {activeFleet.length === 0 ? "Add a machine to the fleet first." : "Nothing tracked yet."}
+              </div>
+            ) : (
+              compliance.map((r, i) => {
+                const status = expiryStatus(r.expiry_date);
+                const tone = status === "expired" ? C.status.danger : status === "due_soon" ? C.status.warning : C.status.success;
+                const eq = fleet.find(e => String(e.id) === String(r.equipment_id));
+                return (
+                  <div key={r.id} style={{ padding: "12px 4px", borderBottom: i < compliance.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "center", gap: 10 }}>
+                    <RowIconTile icon={ShieldCheck} color={tone.text} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>
+                        {eq ? machineLabel(eq) : "Unknown machine"}
+                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: C.text.muted }}>{r.label || complianceDocLabel(r.doc_type)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
+                        {r.notes ? `${r.notes} · ` : ""}{expiryText(r.expiry_date)}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: tone.text, background: tone.bg, border: `1px solid ${tone.border}`, padding: "3px 9px", borderRadius: RAD.pill, whiteSpace: "nowrap" }}>
+                        {r.expiry_date}
+                      </span>
+                      {/* label and notes come back null from Postgres when
+                          they were left blank; a controlled input given null
+                          flips to uncontrolled and React complains. */}
+                      <button onClick={() => { setComplianceError(""); setComplianceDraft({ ...r, label: r.label || "", notes: r.notes || "" }); }} style={styles.rowBtn(C.status.info)}>Edit</button>
+                      <button onClick={() => deleteComplianceRecord(r.id)} style={styles.rowBtn(C.status.danger)}>Remove</button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {activeTab === "equipment" && equipmentReportsEnabled && equipmentSubTab === "reports" && (
           <div style={styles.card}>
             <PanelHeader
               icon={TAB_ICON.equipment}
@@ -5402,19 +6119,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {/* ── Maintenance: the machines, and the defects against them ──────
             Dillon, 2026-09-17: "When someone does a pretrip and flags an
             issue, it must display in maintenance as a corrective action."
-            Two sub-tabs rather than one long page, because "is anything due
-            for service?" and "what is broken right now?" are two different
-            questions a supervisor asks on two different days. */}
-        {activeTab === "maintenance" && TAB_VISIBLE.maintenance && (
-          <div style={{ ...styles.card, padding: "8px 10px", display: "flex", gap: 4 }}>
-            <button style={styles.tab(maintenanceSubTab === "machines")} onClick={() => setMaintenanceSubTab("machines")}>Machines</button>
-            <button style={styles.tab(maintenanceSubTab === "actions")} onClick={() => setMaintenanceSubTab("actions")}>
-              Corrective Actions{openEquipmentActions.length > 0 ? ` (${openEquipmentActions.length})` : ""}
-            </button>
-          </div>
-        )}
-
-        {activeTab === "maintenance" && TAB_VISIBLE.maintenance && maintenanceSubTab === "actions" && (
+            Separate sub-tabs rather than one long page, because "is anything
+            due for service?" and "what is broken right now?" are two
+            different questions a supervisor asks on two different days.
+            Both now hang off the Equipment hub above. */}
+        {activeTab === "equipment" && maintenanceEnabled && equipmentSubTab === "actions" && (
           <CorrectiveActionsPanel
             title={`${company?.name || ""} — Equipment Corrective Actions`}
             subtitle={`Defects flagged on pre-trip and post-trip inspections. The same fault ${recurrenceRule.threshold}× on one machine within ${recurrenceRule.windowDays} days is flagged as recurring.`}
@@ -5425,7 +6134,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           />
         )}
 
-        {activeTab === "maintenance" && TAB_VISIBLE.maintenance && maintenanceSubTab === "machines" && (
+        {activeTab === "equipment" && maintenanceEnabled && equipmentSubTab === "maintenance" && (
           <div style={styles.card}>
             <PanelHeader
               icon={TAB_ICON.maintenance}
@@ -5608,7 +6317,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {activeTab === "fuel" && TAB_VISIBLE.fuel && (
+        {activeTab === "equipment" && fuelEnabled && equipmentSubTab === "fuel" && (
           <div style={styles.card}>
             <PanelHeader
               icon={TAB_ICON.fuel}

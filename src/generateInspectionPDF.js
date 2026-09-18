@@ -1,7 +1,26 @@
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+import { inspectionAttachments } from "../server-lib/inspectionAttachments.js";
 import { loadJsPDF } from "./loadJsPDF.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 import { getForaLogoDataUrl } from "./foraLogo.js";
+
+// Which machine a checklist item belongs to, for banner purposes.
+//
+// `unit` alone is not enough any more. It is 'truck' for the machine,
+// 'trailer' on records written before attachments went plural, and
+// 'attachment' on every new one — so keying on it would print a bent set of
+// forks under a "TRUCK / TOW VEHICLE" banner, and would merge a truck's pup
+// and its trailer into one group labelled after whichever came first. The
+// id is what tells two attachments apart; the label is the fallback for a
+// free-typed one that has no id.
+function unitKey(item) {
+  if (!item || !item.unit) return null;
+  if (item.unit === "truck") return "truck";
+  return `att:${item.attachmentId ?? item.unitLabel ?? item.unit}`;
+}
+function isAttachmentItem(item) {
+  return !!item && item.unit != null && item.unit !== "truck";
+}
 
 const CHECK_COLS = [
   { key: "Good", label: "G", color: [22, 163, 74] },
@@ -43,20 +62,20 @@ function drawChecklistCompact(doc, items, { margin, contentW, y, W }) {
       lastCategory = null;
       lastUnit = null;
     }
-    // A trailer attached to a tow unit gets its own checklist appended,
-    // tagged by unit — call that out with its own banner so a reader can't
-    // mistake a trailer defect for a defect on the tow vehicle, or vice
+    // Each attachment gets its own checklist appended, tagged by unit —
+    // call that out with its own banner so a reader can't mistake an
+    // attachment's defect for one on the machine carrying it, or vice
     // versa, the same way the on-screen checklist separates them.
-    if (it.unit && it.unit !== lastUnit) {
+    if (it.unit && unitKey(it) !== lastUnit) {
       if (y > 265) { doc.addPage(); y = 20; }
-      const isTrailer = it.unit === "trailer";
-      doc.setFillColor(...(isTrailer ? [237, 233, 254] : [219, 234, 254]));
+      const attached = isAttachmentItem(it);
+      doc.setFillColor(...(attached ? [237, 233, 254] : [219, 234, 254]));
       doc.roundedRect(margin, y - 4, contentW, 7, 1.5, 1.5, "F");
       doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
-      doc.setTextColor(...(isTrailer ? [91, 33, 182] : [30, 64, 175]));
-      doc.text(`${isTrailer ? "TRAILER" : "TRUCK / TOW VEHICLE"}${it.unitLabel ? ` — ${it.unitLabel}` : ""}`, margin + 3, y);
+      doc.setTextColor(...(attached ? [91, 33, 182] : [30, 64, 175]));
+      doc.text(`${attached ? "ATTACHMENT" : "MACHINE"}${it.unitLabel ? ` — ${it.unitLabel}` : ""}`, margin + 3, y);
       y += 6.5;
-      lastUnit = it.unit;
+      lastUnit = unitKey(it);
       lastCategory = null; // force the category header to redraw under the new unit
     }
     if (it.category && it.category !== lastCategory) {
@@ -114,21 +133,21 @@ function drawDeficienciesSection(doc, items, { margin, contentW, y, W }) {
     return y + 16;
   }
 
-  // A trailer's deficiencies must never read as the tow vehicle's (or vice
-  // versa), so group by unit when items carry that tag — a plain,
+  // An attachment's deficiencies must never read as the carrying machine's
+  // (or vice versa), so group by unit when items carry that tag — a plain,
   // non-combined inspection (no unit tags at all) renders exactly as before.
   const anyUnitTagged = flagged.some(it => it.unit);
   const groups = anyUnitTagged
-    ? [...new Set(flagged.map(it => it.unit || "—"))].map(u => ({ unit: u, list: flagged.filter(it => (it.unit || "—") === u) }))
+    ? [...new Set(flagged.map(it => unitKey(it) || "—"))].map(u => ({ unit: u, list: flagged.filter(it => (unitKey(it) || "—") === u) }))
     : [{ unit: null, list: flagged }];
 
   groups.forEach(({ unit, list }) => {
     if (unit) {
       if (y > 270) { doc.addPage(); y = 20; }
-      const isTrailer = unit === "trailer";
+      const attached = isAttachmentItem(list[0]);
       doc.setFontSize(7.5); doc.setFont("helvetica", "bold");
-      doc.setTextColor(...(isTrailer ? [91, 33, 182] : [30, 64, 175]));
-      doc.text(`${isTrailer ? "TRAILER" : "TRUCK / TOW VEHICLE"}${list[0]?.unitLabel ? ` — ${list[0].unitLabel}` : ""}`, margin, y);
+      doc.setTextColor(...(attached ? [91, 33, 182] : [30, 64, 175]));
+      doc.text(`${attached ? "ATTACHMENT" : "MACHINE"}${list[0]?.unitLabel ? ` — ${list[0].unitLabel}` : ""}`, margin, y);
       y += 5;
     }
     list
@@ -195,9 +214,14 @@ export async function generateAndUploadInspection({
 
   const isPost = tripType === "posttrip";
   const pretripItems = isPost ? (linkedPretrip?.results_json?.items || []) : [];
-  const attachedTrailerLabel = isPost
-    ? linkedPretrip?.results_json?.attachedTrailer?.label
-    : results?.attachedTrailer?.label;
+  // A machine can carry several attachments now (a truck and a pup, a
+  // loader with forks). Read through the shared normaliser so a record
+  // written before attachments went plural — which stored a single
+  // `attachedTrailer` — still renders its trailer on the header rather than
+  // silently losing it. Post-trip reads the PRE-trip's copy, because that
+  // is the half of the trip where what was hooked up got recorded.
+  const attachmentLabels = inspectionAttachments(isPost ? linkedPretrip?.results_json : results).map(a => a.label);
+  const attachedTrailerLabel = attachmentLabels.join(", ");
 
   // header
   doc.setFillColor(12, 74, 110); doc.rect(0, 0, W, 30, "F");
@@ -215,7 +239,7 @@ export async function generateAndUploadInspection({
       margin, contentW, y, W,
       rows: [
         attachedTrailerLabel
-          ? [{ label: "TOW VEHICLE", value: equipmentLabel }, { label: "TRAILER", value: attachedTrailerLabel }, { label: "COMPANY", value: companyName }]
+          ? [{ label: "MACHINE", value: equipmentLabel }, { label: attachmentLabels.length > 1 ? "ATTACHMENTS" : "ATTACHMENT", value: attachedTrailerLabel }, { label: "COMPANY", value: companyName }]
           : [{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }],
         [
           { label: "PRE-TRIP INSPECTOR", value: linkedPretrip ? `${linkedPretrip.worker_name || "—"} · ${linkedPretrip.created_at ? new Date(linkedPretrip.created_at).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" }) : ""}` : "—" },
@@ -228,7 +252,7 @@ export async function generateAndUploadInspection({
       margin, contentW, y, W,
       rows: attachedTrailerLabel
         ? [
-            [{ label: "TOW VEHICLE", value: equipmentLabel }, { label: "TRAILER", value: attachedTrailerLabel }],
+            [{ label: "MACHINE", value: equipmentLabel }, { label: attachmentLabels.length > 1 ? "ATTACHMENTS" : "ATTACHMENT", value: attachedTrailerLabel }],
             [{ label: "COMPANY", value: companyName }, { label: "INSPECTOR", value: workerName }],
           ]
         : [[{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }, { label: "INSPECTOR", value: workerName }]],
