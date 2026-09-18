@@ -10,7 +10,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderEquipmentReportPdf, equipmentReportFilename } from '../server-lib/reportPdfs.js';
-import { companyEquipmentIndex } from '../server-lib/equipmentScope.js';
+import { companyEquipmentIndex, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 import { inspectionAttachments, attachmentForItem } from '../server-lib/inspectionAttachments.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, complianceDocLabel } from '../server-lib/compliance.js';
@@ -602,19 +602,32 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
     // compliance rows actually point at.
     const ids = [...new Set(complianceRows.map(r => r.equipment_id).filter(id => id != null))];
     let fleetById = new Map();
+    let retired = null;
     if (ids.length > 0) {
       const { data: eqRows } = await supabaseAdmin
         .from('equipment')
-        .select('id, year, make, model, type, unit_number')
+        .select('id, year, make, model, type, unit_number, retired_at')
         .eq('company_id', companyId)
         .in('id', ids);
       fleetById = new Map((eqRows || []).map(e => [String(e.id), e]));
+      // The retired set comes off the fleet rows already fetched above
+      // rather than a second query: these are exactly the machines the
+      // compliance rows name, which is exactly the set that needs checking.
+      // Left null when the fleet read failed, so an outage prints the
+      // section as it printed last week instead of silently shrinking it --
+      // see retiredEquipmentIds in server-lib/equipmentScope.js.
+      if (eqRows) retired = new Set(eqRows.filter(e => e.retired_at).map(e => String(e.id)));
     }
-    // Retired machines are included, exactly as they are on the Compliance
-    // tab and in the overview banner. That a sold machine's expired CVIP
-    // still counts anywhere is break #15, which is open and is not this
-    // change -- filtering it here alone would make three surfaces disagree.
-    compliance = foldComplianceSnapshot(complianceRows, fleetById, weekEnd);
+    // Break #15: a machine sold in June does not belong on this week's
+    // report. Its expiry rows are dropped before the fold, so the section's
+    // expired / due-soon / current counts and the lines under them come
+    // from the same set -- and match what `compliance_summary` puts on the
+    // dashboard banner and what the Compliance tab lists, which is the
+    // whole point of filtering all three together rather than one at a
+    // time. Rows naming a machine that cannot be resolved are still kept
+    // and still print, under "Unknown machine" (see foldComplianceSnapshot):
+    // an unreadable fleet row is not evidence of retirement.
+    compliance = foldComplianceSnapshot(withoutRetiredEquipment(complianceRows, retired), fleetById, weekEnd);
   }
 
   const report = { weekStart: weekStartISO, weekEnd, equipment };

@@ -129,10 +129,27 @@ export default async function handler(req, res) {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
+      // Retired machines are excluded here and ONLY here in this file --
+      // break #15 in docs/feature-interaction-map.md. `retired_at` is what a
+      // supervisor sets when a machine is sold or scrapped, and it already
+      // takes the machine out of every worker-facing picker
+      // (api/companydata.js's list_equipment). Preventative maintenance read
+      // the table directly and so never saw it: a sold machine kept its last
+      // known reading forever, so usageSinceService froze past the interval
+      // and it reported `overdue` permanently -- on the PM screen, in the
+      // Overdue stat tile and in the Equipment nav badge -- with no way to
+      // clear it short of hard-deleting the row, which destroys the history
+      // retirement exists to preserve.
+      //
+      // A retired machine is operationally gone (no PM clock) but
+      // historically present: list_records below stays deliberately
+      // unfiltered, so its service history survives intact, and Fleet
+      // Overview still shows it behind "Show retired machines".
       const { data: fleet, error: eqErr } = await supabaseAdmin
         .from('equipment')
         .select('id, year, make, model, type, unit_number, pm_interval')
         .eq('company_id', companyId)
+        .is('retired_at', null)
         .order('id');
       if (eqErr) return res.status(500).json({ error: 'Could not load equipment.' });
       if (!fleet || fleet.length === 0) return res.status(200).json({ equipment: [] });

@@ -11,6 +11,7 @@ import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
 import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
+import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
@@ -920,7 +921,25 @@ export default async function handler(req, res) {
         .eq('company_id', companyId)
         .order('expiry_date', { ascending: true });
       if (error) return res.status(500).json({ error: 'Could not load compliance records.' });
-      return res.status(200).json({ compliance: data || [] });
+
+      // Break #15: a sold machine's expired CVIP is not a compliance
+      // problem the company still has. The add dropdown already offered
+      // only active machines (src/Dashboard.jsx builds it from activeFleet)
+      // while the list and its three stat tiles read everything, so
+      // retiring a unit left its expiry rows counting against a fleet that
+      // no longer includes it. Both of those tiles and the rows below them
+      // are computed in the browser from this one array, so filtering here
+      // keeps them agreeing by construction.
+      //
+      // The rows are not deleted and nothing is written: un-retiring the
+      // machine brings its dates straight back.
+      //
+      // Asked only when there is something to filter, matching how
+      // compliance_summary below resolves names only when there is
+      // something to name: a company that tracks no expiry dates makes no
+      // extra query and sees no change at all.
+      const retired = (data && data.length) ? await retiredEquipmentIds(supabaseAdmin, companyId) : null;
+      return res.status(200).json({ compliance: withoutRetiredEquipment(data || [], retired) });
     }
 
     // ── The same dates, as an alert instead of a screen ────────────────
@@ -951,9 +970,18 @@ export default async function handler(req, res) {
         .order('expiry_date', { ascending: true });
       if (error) return res.status(500).json({ error: 'Could not load compliance status.' });
 
+      // Filtered before anything is counted, using the same helper and the
+      // same rule as list_equipment_compliance above -- see break #15. This
+      // used to be the one place that deliberately did NOT filter retired
+      // machines, because the Compliance tab did not either and a banner
+      // counting 2 over a screen listing 3 is worse than either number
+      // alone. Both sides filter now, so the two still answer the same.
+      const retired = (data && data.length) ? await retiredEquipmentIds(supabaseAdmin, companyId) : null;
+      const rows = withoutRetiredEquipment(data || [], retired);
+
       const expired = [];
       const expiringSoon = [];
-      for (const row of data || []) {
+      for (const row of rows) {
         const status = expiryStatus(row.expiry_date);
         if (status === 'expired') expired.push(row);
         else if (status === 'due_soon') expiringSoon.push(row);
@@ -978,11 +1006,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Retired machines are deliberately NOT filtered out here, because the
-      // Compliance tab does not filter them either — a banner that counted
-      // 2 while the screen below it listed 3 would be worse than either
-      // number alone. That a retired unit still counts at all is break #15,
-      // which is open and is not this change.
       const shape = (row) => ({
         id: row.id,
         equipmentId: row.equipment_id,
