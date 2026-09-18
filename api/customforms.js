@@ -298,13 +298,39 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: true });
       if (cfErr) return res.status(500).json({ error: 'Could not load custom forms.' });
 
+      // A built-in document type is OFF unless a row says otherwise.
+      //
+      // This used to default to ON, which is break #6's expensive direction
+      // written into the code: `documentSettingsFor` provisions a row for
+      // every key a module can unlock, so a company that went through
+      // checkout is unaffected either way — but a company created outside
+      // that path, or a doc key added to BUILTIN_DOC_KEYS after a company
+      // was provisioned, had no row and therefore got the feature free,
+      // silently, with nothing in a log. Found live on 2026-09-18: two of
+      // three companies were running document types nobody had decided to
+      // give them, one of them all twelve.
+      //
+      // Deny-by-default is the same posture the database uses (RLS on, no
+      // policies) and it is what makes adding a new module safe: a new key
+      // now withholds until it is provisioned, instead of shipping to
+      // everyone and being noticed at the next billing conversation.
+      //
+      // Custom forms below deliberately keep the opposite default — see there.
       const builtins = BUILTIN_DOC_KEYS.map(key => ({
         key,
         label: BUILTIN_LABELS[key] || key,
         isCustom: false,
-        isActive: settingsMap[key] !== undefined ? settingsMap[key] : true,
+        isActive: settingsMap[key] === true,
       }));
 
+      // Custom forms stay ON by default, and that is not an oversight.
+      // A built-in key is something a company BUYS, so the absence of a
+      // decision means it was not bought. A custom form is something this
+      // company's own admin BUILT, for itself, in this panel — the absence
+      // of a decision there means they just made it and have not toggled
+      // anything. Denying by default would make every new custom form
+      // invisible until its creator went and switched on the thing they had
+      // just created.
       const customs = (customForms || []).map(f => ({
         key: `custom_${f.id}`,
         label: f.title,
@@ -312,7 +338,7 @@ export default async function handler(req, res) {
         isCustom: true,
         formId: f.id,
         category: normalizeCategory(f.category),
-        isActive: settingsMap[`custom_${f.id}`] !== undefined ? settingsMap[`custom_${f.id}`] : true,
+        isActive: settingsMap[`custom_${f.id}`] !== false,
       }));
 
       return res.status(200).json({ documents: [...builtins, ...customs] });
@@ -349,15 +375,15 @@ export default async function handler(req, res) {
         .eq('is_active', true)
         .order('created_at', { ascending: true });
 
+      // Same two rules as get_document_settings above, and they have to stay
+      // the same two rules: a worker seeing a form their supervisor's own
+      // settings screen says is off would be worse than either default.
       const builtinActive = {};
       BUILTIN_DOC_KEYS.forEach(key => {
-        builtinActive[key] = settingsMap[key] !== undefined ? settingsMap[key] : true;
+        builtinActive[key] = settingsMap[key] === true;
       });
 
-      const activeCustoms = (customForms || []).filter(f => {
-        const key = `custom_${f.id}`;
-        return settingsMap[key] !== undefined ? settingsMap[key] : true;
-      });
+      const activeCustoms = (customForms || []).filter(f => settingsMap[`custom_${f.id}`] !== false);
 
       return res.status(200).json({ builtinActive, customForms: activeCustoms });
     }
