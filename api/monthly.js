@@ -10,6 +10,7 @@ import { annotateRecurrence, patternsByEquipment, RECURRENCE_THRESHOLD, RECURREN
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -125,6 +126,9 @@ export default async function handler(req, res) {
     }
 
     // ══ ADMIN: form builder ═══════════════════════════════════════════
+    // Ungated on purpose: every action in this section is already
+    // admin-only, and admin is the founder, who requireDocKey exempts —
+    // adding a guard here would be dead code. See server-lib/docKeyGate.js.
 
     if (action === 'list_forms') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
@@ -233,6 +237,8 @@ export default async function handler(req, res) {
 
     if (action === 'get_active_form') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'monthly');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { siteId } = req.body;
       if (!siteId) return res.status(400).json({ error: 'Missing site.' });
 
@@ -274,6 +280,8 @@ export default async function handler(req, res) {
 
     if (action === 'submit_monthly') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'monthly');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -477,6 +485,8 @@ export default async function handler(req, res) {
 
     if (action === 'list_records') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'monthly');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
 
       let formsQuery = supabaseAdmin.from('inspection_forms').select('id, company_id, title');
       if (session.role === 'supervisor') formsQuery = formsQuery.eq('company_id', session.companyId);
@@ -527,6 +537,8 @@ export default async function handler(req, res) {
 
     if (action === 'get_record_detail') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'monthly');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { recordId } = req.body;
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
 
@@ -572,6 +584,8 @@ export default async function handler(req, res) {
     // record -> form -> company_id, never trust a client-supplied company.
     if (action === 'update_record') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'monthly');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { recordId, answers, aiSummary, pdfUrl } = req.body;
       if (!recordId || !Array.isArray(answers)) return res.status(400).json({ error: 'Missing details.' });
 
@@ -644,6 +658,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl, pdfLinked });
     }
 
+    // NOT gated on the `monthly` doc key, and that is the whole point of the
+    // comment below: since break #5 a corrective action can come from an
+    // incident, a near miss or a failed equipment inspection. Gating these
+    // two on `monthly` would hide a company's incident follow-ups behind a
+    // module it may never have bought. They stay scoped by company and role
+    // only; the honest fix is the api/correctiveactions.js split the comment
+    // below already calls a follow-up.
+    //
     // Corrective actions are no longer a monthly-inspection concept — since
     // break #5 they can come from an incident, a near miss or a failed
     // equipment inspection too. The endpoint still lives in this file so the

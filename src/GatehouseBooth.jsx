@@ -93,6 +93,7 @@ export async function resubmitGatehouseTransaction(payload, clientSubmissionId, 
     const errBody = await res.json().catch(() => ({}));
     const err = new Error(errBody.error || `Save failed (${res.status})`);
     err.isServerError = true;
+    err.status = res.status;
     throw err;
   }
   return res.json();
@@ -116,6 +117,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
   const [error, setError] = useState("");
   const [todaysLog, setTodaysLog] = useState([]); // client-side running list for this session
   const [queuedCount, setQueuedCount] = useState(0);
+  const [droppedCount, setDroppedCount] = useState(0);
   const fileInputRef = useRef(null);
 
   // Who's actually working the booth right now. Defaults to the logged-in
@@ -194,7 +196,14 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
 
   const refreshQueueCount = () => {
     drainQueue("gatehouse", (payload, csid) => resubmitGatehouseTransaction(payload, csid, token))
-      .then((r) => setQueuedCount(r.remaining))
+      .then((r) => {
+        setQueuedCount(r.remaining);
+        // A transaction the server rejected for good is removed from the
+        // queue (otherwise it wedges every later one behind it — see
+        // drainQueue), so it has to be said out loud here rather than just
+        // disappearing out of the "saved offline" count.
+        if (r.dropped && r.dropped.length > 0) setDroppedCount((prev) => prev + r.dropped.length);
+      })
       .catch(() => {});
   };
   useEffect(() => {
@@ -420,6 +429,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {queuedCount > 0 && <span style={{ fontSize: 12, color: C.bad, fontWeight: 700 }}>{queuedCount} saved offline, syncing…</span>}
+          {droppedCount > 0 && <span style={{ fontSize: 12, color: C.bad, fontWeight: 700 }}>{droppedCount} offline {droppedCount === 1 ? "entry was" : "entries were"} refused by the server and not saved.</span>}
           <button style={styles.ghost} onClick={onLogout}>Sign out</button>
         </div>
       </div>

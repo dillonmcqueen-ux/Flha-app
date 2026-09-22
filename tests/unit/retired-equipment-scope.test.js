@@ -18,10 +18,11 @@
 //
 // The "historically present" half is not a nicety. resolveEquipmentId
 // filtering on retired_at would 403 a worker whose report sat in the offline
-// queue while the machine was retired, and src/offlineQueue.js's drainQueue
-// has no attempt cap and no drop path, so that one 403 wedges their whole
-// queue forever. The cases at the bottom are there to stop a later "make it
-// consistent" pass from doing exactly that.
+// queue while the machine was retired. That used to wedge their whole queue
+// forever; since break #21's prerequisite, src/offlineQueue.js's drainQueue
+// DROPS a 4xx instead, so the same 403 now deletes that report rather than
+// stalling behind it. The cases at the bottom are there to stop a later
+// "make it consistent" pass from doing either.
 //
 // These run the real handlers against the real @supabase/supabase-js client,
 // pointed at a stand-in PostgREST server — the approach
@@ -69,11 +70,31 @@ const COMPLIANCE = [
   { id: 303, company_id: 'acme', equipment_id: 1, doc_type: 'registration', label: null, expiry_date: '2027-12-31', notes: null, updated_at: '2026-01-01T00:00:00.000Z' },
 ];
 
+// acme has bought the Equipment Compliance module. Without this the weekly
+// report's compliance section is skipped entirely and correctly — the
+// section is gated on the doc key, deny-by-default — and these cases would
+// pass for the wrong reason, asserting a retired machine is absent from a
+// section that was never built.
+//
+// Since break #21 the same is true of the handlers themselves, not just the
+// report section: api/maintenance.js's actions now refuse a company that
+// does not have Preventative Maintenance, so acme needs that row too.
+// `maintenance` requires `inspections` in server-lib/pricing.js, so a real
+// company holding one holds the other — spelled out here rather than
+// implied, the same way provisioning writes every row explicitly.
+const DOC_SETTINGS = [
+  { company_id: 'acme', document_key: 'equipment_compliance', is_active: true },
+  { company_id: 'acme', document_key: 'maintenance', is_active: true },
+  { company_id: 'acme', document_key: 'inspection', is_active: true },
+  { company_id: 'acme', document_key: 'equipment_reports', is_active: true },
+];
+
 const TABLES = {
   equipment: EQUIPMENT,
   inspections: INSPECTIONS,
   equipment_maintenance_log: MAINTENANCE_LOG,
   equipment_compliance: COMPLIANCE,
+  company_document_settings: DOC_SETTINGS,
   fuel_logs: [],
 };
 
@@ -299,9 +320,11 @@ test('the retired machine keeps its full service history in list_records', async
 
 test('a retired machine\'s id still resolves on submit — filtering here wedges an offline queue', async () => {
   // A worker inspects the dozer, goes out of service, the supervisor retires
-  // it, the worker's queue drains a day later. This must still succeed:
-  // drainQueue has no attempt cap, so a 403 blocks every later submission of
-  // that form type forever.
+  // it, the worker's queue drains a day later. This must still succeed: a
+  // 403 used to block every later submission of that form type forever, and
+  // since drainQueue gained a drop path it would instead throw this
+  // inspection away. Neither is an acceptable answer to "the machine was
+  // sold while you were offline".
   assert.equal(await resolveEquipmentId({ from: () => fakeSelect([{ id: 2, company_id: 'acme' }]) }, 'acme', 2), 2);
   assert.deepEqual(await resolveEquipmentIds({ from: () => fakeSelect([{ id: 2, company_id: 'acme' }]) }, 'acme', [2]), [2]);
 });

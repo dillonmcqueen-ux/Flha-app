@@ -19,11 +19,22 @@ instead of five.
 
 ## Current known-good state (verify against this, not from memory)
 
-- `pricing.html`: Basic $150/mo + $350 setup; Advanced $350/mo + $500
-  setup; Custom Forms $150/form. Two `buy.stripe.com/...` Payment Links
-  (Basic, Advanced). A `price-note` disclosing "Credit card purchases are
-  subject to a 3% processing fee, applied at checkout" with a
-  pre-authorized-debit alternative for the listed price.
+- `pricing.html`: there are no plan prices any more and **no Payment
+  Links**. A company pays a platform base fee (`BASE` in
+  `server-lib/pricing.js`, currently $60 basic / $140 advanced) plus one
+  line per module it buys, with a one-time `SETUP` fee ($350 / $500) on
+  the first invoice. Custom Forms are $150/form. Each module row on the
+  page carries `data-key` / `data-s` / `data-l` attributes that must match
+  `MODULES` in `server-lib/pricing.js` key-for-key and price-for-price.
+  A `price-note` (`pricing.html:202`) discloses "Card payments, credit or
+  debit, are subject to a 3% processing fee, applied at checkout" with a
+  pre-authorized-debit alternative at the listed price.
+- Checkout goes through **`api/checkout.js`**, not Stripe Payment Links:
+  `pricing.html:297` (no-JS fallback `href`) and `pricing.html:455` (the
+  `CHECKOUT` constant) both point at
+  `https://portal.forafieldsolutions.com/api/checkout?tier=...&modules=...`.
+  Verified 2026-09-18: there is not a single `buy.stripe.com` URL left
+  anywhere in the repo outside this sentence.
 - `terms.html:149` deliberately does **not** hardcode any dollar figure —
   it says plan tiers/fees "are as described on our pricing page at the
   time of purchase." This indirection is intentional and prevents exactly
@@ -35,14 +46,23 @@ instead of five.
    whether `price-note`'s fee-disclosure text is still accurate (the 3%
    figure, or its removal, must move together with any pricing change
    that affects what's actually charged).
-2. **If a `buy.stripe.com/...` Payment Link URL changes**, flag it
-   explicitly as needing manual verification in the Stripe dashboard —
-   the actual configured amount and the `metadata.plan_tier` value
-   (read by `api/cron-equipment-reports.js:87` via
-   `session.metadata?.plan_tier`, used to provision the correct plan on
-   `checkout.session.completed`) live entirely in Stripe, outside this
-   repo, and cannot be verified from a diff alone. Don't claim it's
-   correct; say it needs a manual check.
+2. **Check every module row's attributes against `server-lib/pricing.js`.**
+   This replaces the old "verify the Payment Link in the Stripe dashboard"
+   step, which no longer applies and should not be reinstated: there is no
+   Stripe-side configured amount to drift from. `api/checkout.js` builds
+   every `unit_amount` and all of `metadata` (`plan_tier`, `modules`,
+   `quoted_monthly`, `quoted_setup`) server-side from `server-lib/pricing.js`,
+   so the URL only ever chooses *which* modules, never what they cost, and
+   `api/stripe-webhook.js` reads `session.metadata?.plan_tier` back off
+   what the server itself set. The drift this hazard used to create was
+   designed out; what can still drift is the page's own calculator. So:
+   every `data-key` must be a real `MODULES` key (a typo is silently
+   dropped by `resolveModules`, and the buyer is charged for less than the
+   page quoted them), every `data-s`/`data-l` pair and every no-JS
+   `[data-price]` figure must match that module's `price`, a module with a
+   `requires` dependency must carry the matching `data-requires`, and the
+   all-module totals on the page must be `BASE` plus every module's price,
+   recomputed rather than eyeballed.
 3. **If `terms.html` gains a hardcoded dollar figure or plan-fee
    description**, flag it — that reintroduces the drift risk the current
    "as described on our pricing page" indirection was designed to avoid.

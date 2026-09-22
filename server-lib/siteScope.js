@@ -23,14 +23,19 @@
  * distinction is load-bearing rather than cosmetic.
  *
  * Returning 403 for a missing site permanently wedged the offline queue.
- * src/offlineQueue.js's drainQueue marks an attempt and `break`s on any
- * throw, with no attempt cap and no drop path, so a submission that can
- * never succeed is retried forever AND blocks every later submission of
- * that form type behind it. The scenario is not hypothetical: a worker
- * fills an FLHA offline at a site, an admin removes that site, and the
- * worker's queue silently stops draining. Removing a used site only became
- * possible at all in the same change that added these ids, so this was a
- * bug introduced alongside the feature.
+ * src/offlineQueue.js's drainQueue marked an attempt and `break`ed on any
+ * throw, with no drop path, so a submission that could never succeed was
+ * retried forever AND blocked every later submission of that form type
+ * behind it. The scenario is not hypothetical: a worker fills an FLHA
+ * offline at a site, an admin removes that site, and the worker's queue
+ * silently stops draining. Removing a used site only became possible at all
+ * in the same change that added these ids, so this was a bug introduced
+ * alongside the feature.
+ *
+ * drainQueue now DROPS a 4xx rather than wedging on it (break #21's
+ * prerequisite), which changes the cost of getting this wrong rather than
+ * removing it: the same 403 would now silently delete that worker's FLHA
+ * instead of stalling their queue. Still `null`.
  *
  * A guessed or stale id therefore stores a text-only record — exactly what
  * the "other" path already does — while a genuine cross-tenant attempt

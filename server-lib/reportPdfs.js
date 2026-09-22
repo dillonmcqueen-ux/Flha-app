@@ -153,7 +153,17 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
   // and the PDF is what it always was. Header and footer are untouched.
   const compliance = rj.compliance;
   const complianceItems = (compliance && compliance.items) || [];
-  if (complianceItems.length > 0) {
+  // foldComplianceSnapshot only puts expired and due-soon rows in `items`;
+  // every current one is folded into currentCount and dropped. So a company
+  // that tracks expiry dates and has nothing lapsing has an empty `items`
+  // and a non-zero currentCount, and gating the section on `items` alone
+  // hid it from exactly the companies doing it right -- the supervisor who
+  // keeps every CVIP current got no confirmation of that in the report,
+  // which reads as "this company tracks nothing". Gate on either, then draw
+  // the table only when there is something to put in it.
+  const complianceTracked =
+    complianceItems.length > 0 || (compliance ? (compliance.currentCount || 0) > 0 : false);
+  if (complianceTracked) {
     if (y + 26 > 270) { doc.addPage(); y = 20; }
     doc.setTextColor(3, 105, 161); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
     doc.text('Compliance & Documents', margin, y);
@@ -182,6 +192,12 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
       doc.text('STATUS', kStatusX + 2, y + 5.5);
       y += 8;
     };
+
+    if (complianceItems.length === 0) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(22, 101, 52);
+      doc.text('Nothing expired or expiring soon.', margin, y + 4);
+      y += 10;
+    } else {
 
     drawComplianceHeader();
     complianceItems.forEach((item, i) => {
@@ -222,6 +238,8 @@ export async function renderEquipmentReportPdf({ report, companyName, companyLog
 
       y += rowH;
     });
+
+    }
     y += 6;
   }
 

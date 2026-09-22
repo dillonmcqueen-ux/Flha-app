@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { parseSiteLines, parseUserLines, planSeatCap, randomToken } from '../server-lib/onboardingHelpers.js';
+import { allDocumentSettingsOn } from '../server-lib/pricing.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
 import {
   CLAIM_TOKEN_TTL_MS,
@@ -401,12 +402,37 @@ export default async function handler(req, res) {
         acct = genAccountNumber();
       }
 
-      const { error } = await supabaseAdmin.from('companies').insert({
+      const { data: created, error } = await supabaseAdmin.from('companies').insert({
         name: name.trim(),
         company_code: companyCode.trim(),
         account_number: acct,
-      });
+      }).select('id').single();
       if (error) { console.error("create_company failed:", error.message); return res.status(500).json({ error: "Couldn't add company. Try again." }); }
+
+      // Switch every document type on, as explicit rows.
+      //
+      // No checkout chose modules for a company created here, so it gets
+      // everything — which is what it got before `edd7a41`, when it got it by
+      // having no rows at all and a missing row resolving as active. A missing
+      // row resolves OFF now, so without this the founder would create a
+      // company and hand over an empty worker menu: no documents, no error,
+      // nothing on screen saying why (break #20).
+      //
+      // Switch keys off per company from the Admin Panel's document toggles.
+      const { error: settingsErr } = await supabaseAdmin
+        .from('company_document_settings')
+        .upsert(allDocumentSettingsOn(created.id), { onConflict: 'company_id,document_key' });
+      if (settingsErr) {
+        // The company row is already in. Deleting it to roll back would be a
+        // destructive fix for a recoverable problem, so say what happened
+        // instead: the toggles are all reachable in the Admin Panel, but
+        // somebody has to be told they are currently all off.
+        console.error('create_company: could not write document settings:', settingsErr.message);
+        return res.status(200).json({
+          ok: true,
+          warning: 'Company created, but its document types could not be switched on. Set them from the document toggles before anyone logs in.',
+        });
+      }
       return res.status(200).json({ ok: true });
     }
 

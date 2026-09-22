@@ -52,6 +52,7 @@ export async function resubmitFieldService(payload, clientSubmissionId, tokenFor
     const errBody = await res.json().catch(() => ({}));
     const err = new Error(errBody.error || `Save failed (${res.status})`);
     err.isServerError = true;
+    err.status = res.status;
     throw err;
   }
   return await res.json().catch(() => ({}));

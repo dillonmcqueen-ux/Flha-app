@@ -141,13 +141,22 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // nobody reads (see receiptWasDropped in server-lib/uploadUrls.js).
   const [pdfUnlinkedCount, setPdfUnlinkedCount] = useState(0);
 
+  // Queued submissions the server rejected for good (a 4xx — see
+  // isPermanentRejection in offlineQueue.js). They are removed from the
+  // queue, because leaving one there wedges every later submission of the
+  // same form behind it, but they are REAL lost work: shown here with the
+  // server's own reason so the worker knows their entry went nowhere and
+  // why, rather than it vanishing between two app opens.
+  const [droppedSubmissions, setDroppedSubmissions] = useState([]);
+
   useEffect(() => {
     if (!token) return;
     const drainAll = () => {
       Object.entries(RESUBMIT_HANDLERS).forEach(([formType, resubmit]) => {
         drainQueue(formType, (payload, clientSubmissionId) => resubmit(payload, clientSubmissionId, token))
-          .then(({ pdfUnlinked }) => {
+          .then(({ pdfUnlinked, dropped }) => {
             if (pdfUnlinked > 0) setPdfUnlinkedCount(prev => prev + pdfUnlinked);
+            if (dropped && dropped.length > 0) setDroppedSubmissions(prev => [...prev, ...dropped]);
           })
           .catch(() => { /* best-effort — stays queued, tried again next time */ });
       });
@@ -370,6 +379,29 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
                 {pdfUnlinkedCount === 1 ? "A queued submission" : `${pdfUnlinkedCount} queued submissions`} synced without {pdfUnlinkedCount === 1 ? "its" : "their"} PDF.
               </strong>{" "}
               The {pdfUnlinkedCount === 1 ? "report was" : "reports were"} saved and nothing was lost. Ask your supervisor to open {pdfUnlinkedCount === 1 ? "it" : "them"} in the dashboard and re-save, which regenerates the PDF.
+            </div>
+          </div>
+        )}
+
+        {droppedSubmissions.length > 0 && (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: 10,
+            background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`,
+            borderRadius: RAD.md, padding: 14, marginTop: 16,
+          }}>
+            <AlertTriangle size={16} color={C.status.danger.text} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 13, color: C.text.body, lineHeight: 1.5 }}>
+              <strong style={{ color: C.status.danger.text }}>
+                {droppedSubmissions.length === 1 ? "A saved-offline submission" : `${droppedSubmissions.length} saved-offline submissions`} could not be sent.
+              </strong>{" "}
+              The server refused {droppedSubmissions.length === 1 ? "it" : "them"}, so {droppedSubmissions.length === 1 ? "it was" : "they were"} removed from the sync queue — everything behind {droppedSubmissions.length === 1 ? "it" : "them"} has been sent. Tell your supervisor.
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                {droppedSubmissions.map((d) => (
+                  <li key={d.id} style={{ marginBottom: 2 }}>
+                    <strong>{d.formType}</strong>{d.createdAt ? ` (${new Date(d.createdAt).toLocaleString()})` : ""}: {d.reason}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         )}

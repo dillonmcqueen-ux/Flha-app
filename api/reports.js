@@ -10,6 +10,7 @@ import { openCorrectiveActions, correctiveActionsFromReport } from '../server-li
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -112,11 +113,13 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
 const TABLES = {
   incident: {
     name: 'incidents',
+    docKey: 'incident',
     jsonColumn: 'report_json',
     listColumns: 'id, reporter_name, site, site_id, occurred_at, incident_type, injured_person, body_part, treatment, medical_attention, witnesses, evidence, report_json, photo_urls, company_id, pdf_url, signature_url, created_at, reviewed, reviewed_by, reviewed_at, review_notes, submitted_by_roster_id',
   },
   nearmiss: {
     name: 'near_misses',
+    docKey: 'nearmiss',
     jsonColumn: 'report_json',
     // submitted_by_roster_id rides along here like everywhere else, and the
     // reasoning for that is worth stating because an earlier version of this
@@ -182,6 +185,11 @@ export default async function handler(req, res) {
   try {
     // ── Photo/signature/PDF uploads for incident + near-miss reports ────
     if (action === 'create_upload_url') {
+      // Deliberately ungated: this mints a signed upload slot inside the
+      // caller's own company namespace and is reached before the record
+      // type is known, so there is no doc key to check. The submit that
+      // would use the uploaded file IS gated, which is where a company
+      // without the module is stopped.
       const { bucket, filename } = req.body;
       if (!['incident-photos', 'signatures', 'flha-reports'].includes(bucket)) {
         return res.status(400).json({ error: 'Invalid bucket.' });
@@ -197,6 +205,8 @@ export default async function handler(req, res) {
     // ── Worker: submit a new report ─────────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -326,6 +336,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: load reports for the dashboard ──────────
     if (action === 'list') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin.from(table.name).select(table.listColumns).order('created_at', { ascending: false });
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
@@ -341,6 +353,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: mark a report reviewed ───────────────────
     if (action === 'review') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, notes, pdfUrl, reviewedBy: reviewedByInput } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
@@ -381,6 +395,8 @@ export default async function handler(req, res) {
     // `fields`. Same tenant-ownership re-check as `review`/`delete` above.
     if (action === 'update') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, fields, pdfUrl } = req.body;
       if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
 
@@ -423,6 +439,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: delete a report ──────────────────────────
     if (action === 'delete') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 

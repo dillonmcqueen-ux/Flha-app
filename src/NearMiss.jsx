@@ -73,6 +73,7 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
     const errBody = await res.json().catch(() => ({}));
     const err = new Error(errBody.error || `Save failed (${res.status})`);
     err.isServerError = true;
+    err.status = res.status;
     throw err;
   }
   // The server reports whether the generated PDF actually got attached to

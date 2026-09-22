@@ -23,15 +23,20 @@
  * label.
  *
  * An id that does not exist returns `null`, NOT `false`. That distinction
- * is load-bearing, for the same reason it is in siteScope.js:
- * src/offlineQueue.js's drainQueue marks an attempt and `break`s on any
- * throw, with no attempt cap and no drop path, so a submission that can
- * never succeed is retried forever AND blocks every later submission of
- * that form type behind it. Both callers here are offline-queued
- * (src/Inspection.jsx:389, src/FuelLog.jsx:164) and api/companydata.js's
- * delete_equipment really does remove fleet rows, so "worker inspects a
- * machine offline, admin retires that machine, worker's queue silently
- * stops draining" is a live scenario rather than a hypothetical.
+ * is load-bearing, for the same reason it is in siteScope.js. Both callers
+ * here are offline-queued (src/Inspection.jsx:389, src/FuelLog.jsx:164) and
+ * api/companydata.js's delete_equipment really does remove fleet rows, so
+ * "worker inspects a machine offline, admin retires that machine, worker's
+ * queue stops draining" is a live scenario rather than a hypothetical.
+ *
+ * What a 403 costs there has changed, not gone away. It used to wedge:
+ * drainQueue marked an attempt and `break`ed on any throw, with no drop
+ * path, so a submission that could never succeed was retried forever AND
+ * blocked every later submission of that form type behind it. drainQueue
+ * now DROPS a 4xx and reports it (break #21's prerequisite), so the same
+ * 403 would instead delete that worker's inspection outright. Losing one
+ * record is better than losing the queue, but it is still losing a signed
+ * document over a machine somebody retired — so this stays `null`.
  *
  * A stale or guessed id therefore stores a label-only record — what the
  * free-text path already does — while a genuine cross-tenant attempt still

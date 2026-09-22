@@ -8,6 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 
 const supabaseAdmin = createClient(
@@ -240,6 +241,8 @@ export default async function handler(req, res) {
     // ── Worker: find today's FLHA to resume/amend ─────────────────────
     if (action === 'resume') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { workerName } = req.body;
       // Individually-identified (roster) sessions have a real authenticated
       // name — use that instead of whatever the client sent, so a signed-in
@@ -267,6 +270,8 @@ export default async function handler(req, res) {
     // ── Worker: submit a new FLHA or save an amendment ─────────────────
     if (action === 'submit') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -431,6 +436,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: load FLHAs for the dashboard ────────────────
     if (action === 'list') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin
         .from('flhas')
         .select('id, worker_name, job_site, site_id, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature, submitted_by_roster_id')
@@ -452,6 +459,8 @@ export default async function handler(req, res) {
     // status, or supervisor sign-off fields through `fields`.
     if (action === 'update') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, fields, pdfUrl } = req.body;
       if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
 
@@ -511,6 +520,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: delete one or more FLHAs ────────────────────
     if (action === 'delete') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { ids } = req.body;
       if (!ids || !ids.length) return res.status(400).json({ error: 'No records specified.' });
 
@@ -528,6 +539,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: approve an extreme-risk FLHA ────────────────
     if (action === 'approve') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, supName, supSignature, pdfUrl } = req.body;
       if (!id || !supName || !supSignature) return res.status(400).json({ error: 'Missing approval details.' });
 

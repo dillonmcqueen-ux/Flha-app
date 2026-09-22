@@ -95,6 +95,12 @@ export const MODULES = {
     price: { basic: 18, advanced: 40 },
     docKeys: ['certifications'],
   },
+  compliance: {
+    label: 'Equipment Compliance',
+    blurb: 'CVIP, registration and insurance expiry dates per machine, with alerts',
+    price: { basic: 20, advanced: 45 },
+    docKeys: ['equipment_compliance'],
+  },
   fuel: {
     label: 'Fuel & Consumables',
     blurb: 'Fuel-ups logged against the actual unit',
@@ -231,4 +237,21 @@ export function documentSettingsFor(companyId, modules) {
     document_key: documentKey,
     is_active: bought.has(documentKey),
   }));
+}
+
+// Every key switched ON, as explicit rows.
+//
+// This is what a company that did not come through a checkout gets: one the
+// founder creates by hand in the Admin Panel, or an onboarding request whose
+// `modules` is NULL because it predates modular pricing. Before `edd7a41` such
+// a company got every document type by having NO rows at all, since a missing
+// row resolved as active. That default is gone, so the same outcome now has to
+// be written down rather than inferred from an absence — which is the point:
+// the state is recorded and visible in the Admin Panel either way, instead of
+// depending on which way the code reads an empty table.
+//
+// Derived from MODULE_KEYS rather than listing keys, so a module added later
+// is switched on here too without anyone remembering to come back.
+export function allDocumentSettingsOn(companyId) {
+  return documentSettingsFor(companyId, MODULE_KEYS);
 }

@@ -14,6 +14,7 @@ import { companyEquipmentIndex, withoutRetiredEquipment } from '../server-lib/eq
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 import { inspectionAttachments, attachmentForItem } from '../server-lib/inspectionAttachments.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, complianceDocLabel } from '../server-lib/compliance.js';
+import { isDocKeyActive, requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -588,13 +589,21 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   // Read failures and a company that tracks nothing are the same outcome
   // here -- no `compliance` key at all -- so a report is never lost over
   // this, and every report generated before today renders exactly as it
-  // did. The section is not gated on a doc key because compliance has no
-  // module to gate on (break #19, open); a company that has never added an
-  // expiry date gets no section, which is what it had before.
-  const { data: complianceRows, error: complianceErr } = await supabaseAdmin
-    .from('equipment_compliance')
-    .select('id, equipment_id, doc_type, label, expiry_date, notes')
-    .eq('company_id', companyId);
+  // did.
+  //
+  // Gated on the Equipment Compliance module (break #19, closed). This
+  // report is the Equipment Inspections module's artifact, so without the
+  // gate a company that bought inspections but not compliance would receive
+  // a paid module's output inside another module's document every Monday.
+  // Skipping the query entirely rather than filtering afterwards: the point
+  // is not to read a feature's data for a company that did not buy it.
+  const complianceActive = await isDocKeyActive(supabaseAdmin, companyId, 'equipment_compliance');
+  const { data: complianceRows, error: complianceErr } = complianceActive
+    ? await supabaseAdmin
+        .from('equipment_compliance')
+        .select('id, equipment_id, doc_type, label, expiry_date, notes')
+        .eq('company_id', companyId)
+    : { data: null, error: null };
 
   let compliance = null;
   if (!complianceErr && complianceRows && complianceRows.length > 0) {
@@ -646,6 +655,16 @@ export default async function handler(req, res) {
   try {
     // List all generated reports for a company, newest first.
     if (action === 'list_reports') {
+      // The weekly report is the Equipment Inspections module's artifact, and
+      // api/cron-equipment-reports.js already refuses to build one for a
+      // company without it. Ungated here, a supervisor could call this and
+      // get back the exact document the cron declined to produce on Sunday
+      // -- two entry points to one artifact disagreeing, which is the shape
+      // break #1 exists to warn about. Found by tenant-scope-reviewer on the
+      // break #21 diff, which gated ten other handlers and missed this file
+      // because it was already an enforcement point for the report *body*.
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_reports');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { data, error } = await supabaseAdmin
@@ -661,6 +680,8 @@ export default async function handler(req, res) {
     // Full detail (report_json) for one report. Generates the PDF
     // server-side on first view if it doesn't exist yet.
     if (action === 'get_report') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_reports');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { reportId } = req.body;
       if (!reportId) return res.status(400).json({ error: 'Missing report id.' });
       const { data, error } = await supabaseAdmin.from('equipment_reports').select('*').eq('id', reportId).limit(1);
@@ -690,6 +711,8 @@ export default async function handler(req, res) {
     // actually closes, the automatic full-week pull overwrites any earlier
     // manual partial pull for that week.
     if (action === 'generate_now') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_reports');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { weekStart, pullUntil } = req.body;
@@ -734,6 +757,11 @@ export default async function handler(req, res) {
     // at a machine across weeks, which is the question behind every rental
     // decision, utilization argument and service forecast.
     if (action === 'list_weekly_hours') {
+      // `inspection`, not `equipment_reports`: Weekly Hours is folded from
+      // inspection readings and the Dashboard sub-tab gates it on
+      // inspectionsEnabled (src/Dashboard.jsx), so the server must agree.
+      const denied = await requireDocKey(supabaseAdmin, session, 'inspection');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 

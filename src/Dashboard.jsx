@@ -2036,6 +2036,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // ── Roster: view the company's roster and reset an individual PIN ─────
   const [rosterList, setRosterList] = useState([]);
   const [loadingRosterList, setLoadingRosterList] = useState(false);
+  // Which roster row's employee number is being edited, and the draft value.
+  // A per-row inline edit rather than a modal: a supervisor filling these in
+  // off an HRIS export is doing twenty in a row, and a modal per person is
+  // twenty extra clicks.
+  const [editingEmployeeIdFor, setEditingEmployeeIdFor] = useState(null);
+  const [employeeIdDraft, setEmployeeIdDraft] = useState("");
+  const [savingEmployeeId, setSavingEmployeeId] = useState(false);
+  const [employeeIdError, setEmployeeIdError] = useState("");
   const [rosterRevealedPin, setRosterRevealedPin] = useState(null); // { name, pin }
   const [resettingRosterId, setResettingRosterId] = useState(null);
   const [togglingWalletId, setTogglingWalletId] = useState(null);
@@ -2043,7 +2051,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   // ── Onboard New Employee (onboarding wallet, Phase 4) ───────────────────
   const [showOnboardForm, setShowOnboardForm] = useState(false);
-  const [onboardForm, setOnboardForm] = useState({ name: "", role: "worker", email: "" });
+  const [onboardForm, setOnboardForm] = useState({ name: "", role: "worker", email: "", employeeId: "" });
   const [onboardingEmployee, setOnboardingEmployee] = useState(false);
   const [onboardError, setOnboardError] = useState("");
   const [onboardResult, setOnboardResult] = useState(null); // { name, email, emailSent, inviteUrl }
@@ -2744,6 +2752,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const maintenanceEnabled = isDocActive("maintenance");
   const fuelEnabled = isDocActive("fuellog");
   const inspectionsEnabled = isDocActive("inspection");
+  const complianceEnabled = isDocActive("equipment_compliance");
   // Each custom form now carries a `category` (safety/operations/workforce,
   // set by the admin when creating it) — a separate "Custom Docs" tab per
   // category, only shown when that company has at least one active custom
@@ -2807,16 +2816,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // done to it, how hard is it working, what paperwork is about to lapse,
   // what did it burn, what went out in the weekly report.
   //
-  // `on` is what the company bought. Fleet and Compliance have no module
-  // behind them — they are facts about machines a company already owns, not
-  // a document type — so they are always on.
+  // `on` is what the company bought. Fleet Overview is the exception and
+  // stays unconditional: the fleet list is reference data every other module
+  // joins to, the same way Analytics and SOPs are, not a document type a
+  // company buys. Compliance USED to be in that exception too, which was
+  // break #19 — it is a tracked-record feature with its own table and its
+  // own CRUD, and it shipped free to every company because nothing sold it.
+  // It has its own module now.
   const EQUIPMENT_SUBTABS = [
     { key: "fleet", label: "Fleet Overview", on: true },
     { key: "maintenance", label: "Maintenance", on: maintenanceEnabled },
     { key: "records", label: "Maintenance Records", on: maintenanceEnabled },
     { key: "actions", label: "Corrective Actions", on: maintenanceEnabled },
     { key: "hours", label: "Weekly Hours", on: inspectionsEnabled },
-    { key: "compliance", label: "Compliance", on: true },
+    { key: "compliance", label: "Compliance", on: complianceEnabled },
     { key: "fuel", label: "Fuel Logs", on: fuelEnabled },
     { key: "reports", label: "Weekly Reports", on: equipmentReportsEnabled },
   ];
@@ -3046,6 +3059,33 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setResettingRosterId(null);
   };
 
+  const startEditEmployeeId = (m) => {
+    setEmployeeIdError("");
+    setEditingEmployeeIdFor(m.id);
+    setEmployeeIdDraft(m.employee_id || "");
+  };
+
+  const saveEmployeeId = async (id) => {
+    setEmployeeIdError(""); setSavingEmployeeId(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_roster_employee_id", token, id, employeeId: employeeIdDraft }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setEmployeeIdError(data.error || "Couldn't save that employee ID."); setSavingEmployeeId(false); return; }
+      // Patch the one row rather than refetching the whole roster: a
+      // supervisor working down an HRIS export is saving these one after
+      // another, and a full reload between each collapses the groups.
+      setRosterList(prev => prev.map(m => m.id === id ? { ...m, employee_id: data.member.employee_id } : m));
+      setEditingEmployeeIdFor(null);
+      setEmployeeIdDraft("");
+    } catch (e) {
+      setEmployeeIdError("Couldn't save that employee ID. Try again.");
+    }
+    setSavingEmployeeId(false);
+  };
+
   const toggleRosterWallet = async (id, enabled) => {
     setTogglingWalletId(id);
     setRosterList(prev => prev.map(m => m.id === id ? { ...m, wallet_enabled: enabled } : m));
@@ -3081,12 +3121,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "onboard_new_employee", token, companyId: selectedCompany, name, role: onboardForm.role, email }),
+        body: JSON.stringify({ action: "onboard_new_employee", token, companyId: selectedCompany, name, role: onboardForm.role, email, employeeId: onboardForm.employeeId }),
       });
       const data = await res.json();
       if (!res.ok) { setOnboardError(data.error || "Couldn't onboard this person."); setOnboardingEmployee(false); return; }
       setOnboardResult({ name, email, emailSent: data.emailSent, inviteUrl: data.inviteUrl });
-      setOnboardForm({ name: "", role: "worker", email: "" });
+      setOnboardForm({ name: "", role: "worker", email: "", employeeId: "" });
       setShowOnboardForm(false);
       await loadRosterList();
     } catch (e) {
@@ -4787,12 +4827,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {/* ── Equipment compliance alerts (break #14) ──────────────────────
             The dates that park a machine when they lapse, on the page a
             supervisor actually lands on. Same shape as the certification
-            banner above, and gated the same way the Compliance tab itself
-            is: on having something to show, not on a doc key — compliance
-            has no purchasable module (break #19, open), so adding one here
-            would change who can see it. Red when something is already
-            expired, amber when it is only coming due. */}
-        {(complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
+            banner above and gated the same way it is, on the module's own
+            doc key — that is break #19 closed: compliance had no module
+            behind it and so reached every company free. Red when something
+            is already expired, amber when it is only coming due.
+
+            Resolved against #126: that rebuild still carried the pre-module
+            wording ("compliance has no purchasable module (break #19,
+            open)") and no gate, because it branched before the module
+            existed. Dropping the gate here would hand the banner back to
+            every company free, so the gate stays and the comment is the
+            one that matches the code. #126's inlined `tone` is kept. */}
+        {complianceEnabled && (complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
           const rows = [...complianceAlerts.expired, ...complianceAlerts.expiringSoon];
           const actionCount = complianceAlerts.expiredCount + complianceAlerts.expiringSoonCount;
           return alertBanner({
@@ -6849,6 +6895,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 </div>
                 <input placeholder="Email address" type="email" value={onboardForm.email} onChange={e => setOnboardForm(f => ({ ...f, email: e.target.value }))}
                   style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panelInset, color: C.text.primary, fontSize: 14, marginBottom: 10 }} />
+                {/* Optional. Hiring is the one moment somebody has this
+                    number to hand; everyone already on the roster gets one
+                    from the inline editor on their row instead. */}
+                <input placeholder="Employee ID (optional)" value={onboardForm.employeeId} onChange={e => setOnboardForm(f => ({ ...f, employeeId: e.target.value }))}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panelInset, color: C.text.primary, fontSize: 14, marginBottom: 10 }} />
                 {onboardError && <div style={{ fontSize: 12, color: C.status.danger.text, marginBottom: 8 }}>{onboardError}</div>}
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={onboardNewEmployee} disabled={onboardingEmployee} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: onboardingEmployee ? 0.6 : 1 }}>
@@ -6899,8 +6950,43 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div key={m.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "11px 4px", borderBottom: i < group.length - 1 ? `1px solid ${C.line}` : "none" }}>
                           <RowIconTile icon={roleGroup === "supervisor" ? HardHat : CircleUserRound} color={C.text.muted} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>{m.name}</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>
+                              {m.name}
+                              {m.employee_id && (
+                                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: C.text.muted, background: C.panelInset, border: `1px solid ${C.line}`, padding: "1px 7px", borderRadius: RAD.pill }}>
+                                  ID {m.employee_id}
+                                </span>
+                              )}
+                            </div>
                             <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
+                            {/* Inline, per row: filling these in off an HRIS
+                                export is twenty people in a row, and a modal
+                                each would be twenty extra clicks. */}
+                            {editingEmployeeIdFor === m.id ? (
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+                                <input
+                                  autoFocus
+                                  value={employeeIdDraft}
+                                  onChange={e => setEmployeeIdDraft(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === "Enter") saveEmployeeId(m.id);
+                                    if (e.key === "Escape") { setEditingEmployeeIdFor(null); setEmployeeIdError(""); }
+                                  }}
+                                  placeholder="Employee ID"
+                                  style={{ padding: "5px 8px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 12, background: C.panel, color: C.text.primary, outline: "none", width: 140 }}
+                                />
+                                <button onClick={() => saveEmployeeId(m.id)} disabled={savingEmployeeId} style={styles.rowBtn(C.status.success)}>{savingEmployeeId ? "Saving…" : "Save"}</button>
+                                <button onClick={() => { setEditingEmployeeIdFor(null); setEmployeeIdError(""); }} style={styles.rowBtn(C.status.info)}>Cancel</button>
+                                {employeeIdError && <div style={{ fontSize: 11.5, color: C.status.danger.text, fontWeight: 600, width: "100%" }}>{employeeIdError}</div>}
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => startEditEmployeeId(m)}
+                                style={{ background: "transparent", border: "none", padding: 0, marginTop: 4, color: C.text.faint, fontSize: 11.5, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}
+                              >
+                                {m.employee_id ? "Change employee ID" : "Add employee ID"}
+                              </button>
+                            )}
                           </div>
                           {isDocActive("certifications") && (
                             <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title={`Lets ${m.name.split(" ")[0]} upload their own safety tickets. Turn this on, then use "Invite" to send them a one-time link.`}>

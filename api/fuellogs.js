@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 import crypto from 'crypto';
 
 const supabaseAdmin = createClient(
@@ -112,6 +113,8 @@ export default async function handler(req, res) {
     // "last known reading" regardless of which table it came from.
     if (action === 'check_equipment') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'fuellog');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { equipmentLabel } = req.body;
       if (!equipmentLabel) return res.status(400).json({ error: 'Missing equipment.' });
 
@@ -150,6 +153,8 @@ export default async function handler(req, res) {
     // ── Worker: submit a fuel-up entry ──────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'fuellog');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -172,10 +177,12 @@ export default async function handler(req, res) {
       // inspection submit so the two can't drift. The one behaviour change
       // is deliberate: an id that does not EXIST now stores a label-only
       // fuel log instead of 403ing. Fuel logs are offline-queued
-      // (src/FuelLog.jsx:164) and drainQueue has no attempt cap or drop
-      // path, so 403ing a retired machine's id wedged the worker's whole
-      // fuel-log queue behind a submission that could never succeed. A
-      // cross-tenant id still 403s. See the long note in that file.
+      // (src/FuelLog.jsx:164), and 403ing a retired machine's id used to
+      // wedge the worker's whole fuel-log queue behind a submission that
+      // could never succeed — since break #21's prerequisite, drainQueue
+      // drops a 4xx instead, so the same 403 would now delete that fuel-up
+      // rather than stall the queue. Either way it must not 403. A
+      // cross-tenant id still does. See the long note in that file.
       //
       // The resolved value is assigned back onto `record` (which pickAllowed
       // below reads) only when the client actually sent the key, so a
@@ -230,6 +237,8 @@ export default async function handler(req, res) {
     // alone, so one tenant's machine history can never feed another's.
     if (action === 'list') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'fuellog');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin.from('fuel_logs').select(LIST_COLUMNS).order('created_at', { ascending: false });
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data: fuelRows, error } = await query;
