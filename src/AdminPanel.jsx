@@ -623,7 +623,16 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "Couldn't add company."); setSaving(false); return; }
-      setNewName(""); setNewCompanyCode(""); await loadAll(); setView("home");
+      setNewName(""); setNewCompanyCode(""); await loadAll();
+      // A 200 can still carry bad news: `warning` means the company was
+      // created but its document types could not be switched on, so it is
+      // sitting there with an empty worker menu. That is the one case
+      // create_company deliberately does not roll back for, and this is the
+      // only place the founder can be told — without it they see the plain
+      // success path and hand over the account (break #22).
+      // "could not" in the text puts the banner into its error colours.
+      if (data.warning) setMsg(data.warning);
+      setView("home");
     } catch (e) {
       setMsg("Couldn't add company. Try again.");
     }
