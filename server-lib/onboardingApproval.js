@@ -211,7 +211,32 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   // So both paths write. The outcome is the same as it always was; what
   // changed is that the company's state is recorded rather than inferred from
   // an empty table, which is the whole reason deny-by-default is worth having.
-  const settings = Array.isArray(request.modules) && request.modules.length > 0
+  const bought = Array.isArray(request.modules) && request.modules.length > 0;
+
+  // A PAID request reaching the all-on fallback is the one case here worth a
+  // log line. `api/checkout.js` cannot produce it: `resolveModules` rejects an
+  // empty selection (`pricing.js`) and the handler bounces before a Stripe
+  // session exists, so every session it creates carries a non-empty
+  // `metadata.modules` that the webhook stages verbatim
+  // (`api/stripe-webhook.js:140-156`). That leaves a session made outside this
+  // code — one of the retired Payment Links, or one created by hand in the
+  // Stripe Dashboard — which stages `modules` NULL and would now switch every
+  // module on for somebody who paid for a subset.
+  //
+  // Not a regression: before `edd7a41` that request wrote no rows and a
+  // missing row read as active, so the outcome was the same. The difference
+  // is that it used to be invisible, and a module given away free is exactly
+  // what this branch's deny-by-default work exists to stop. Logged rather
+  // than blocked, because refusing to provision a company that has already
+  // paid is worse than over-granting it.
+  if (!bought && request.stripe_customer_id) {
+    console.warn(
+      'Paid onboarding request has no module list; switching every document type on.',
+      'company:', companyId, 'stripe_customer:', request.stripe_customer_id,
+    );
+  }
+
+  const settings = bought
     ? documentSettingsFor(companyId, request.modules)
     : allDocumentSettingsOn(companyId);
   const { error: settingsErr } = await supabaseAdmin
