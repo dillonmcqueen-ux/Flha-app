@@ -32,7 +32,7 @@ import {
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
   Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu, Fuel,
-  RefreshCw, Repeat,
+  RefreshCw, Repeat, ChevronRight,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -231,16 +231,16 @@ function timeAgo(iso) {
 // Circular progress ring — real value/max pair (never a fabricated %).
 // Number lives inside the ring, label beneath, matching a stat-tile's
 // visual weight but as a ratio rather than a bare count.
-function ProgressRing({ value, max, label, sublabel, color, size = 100, thickness = 9 }) {
+function ProgressRing({ value, max, label, sublabel, color, sublabelColor, size = 124, thickness = 8 }) {
   const r = (size - thickness) / 2;
   const circumference = 2 * Math.PI * r;
   const ratio = max > 0 ? Math.min(1, value / max) : 0;
   const offset = circumference * (1 - ratio);
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, minWidth: 100 }}>
-      <div style={{ position: "relative", width: size, height: size }}>
-        <svg width={size} height={size}>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.line} strokeWidth={thickness} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, width: "100%" }}>
+      <div style={{ position: "relative", width: size, height: size, margin: "18px 0" }}>
+        <svg width={size} height={size} style={{ filter: ratio > 0 ? `drop-shadow(0 0 10px ${color}55)` : "none" }}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.panelInset} strokeWidth={thickness} />
           <circle
             cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={thickness}
             strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
@@ -249,13 +249,13 @@ function ProgressRing({ value, max, label, sublabel, color, size = 100, thicknes
           />
         </svg>
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 21, color: C.text.primary, lineHeight: 1 }}>{value}</div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: C.text.faint, marginTop: 2 }}>of {max}</div>
+          <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 36, color: C.text.primary, lineHeight: 1 }}>{value}</div>
+          <div style={{ fontFamily: FONT.mono, fontSize: 12, color: C.text.muted, marginTop: 4 }}>of {max}</div>
         </div>
       </div>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text.body, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
-        {sublabel && <div style={{ fontSize: 11, color: C.text.faint, marginTop: 1 }}>{sublabel}</div>}
+      <div style={{ textAlign: "center", marginTop: "auto", paddingTop: 14, borderTop: `1px solid ${C.line}`, width: "100%" }}>
+        <div style={{ fontFamily: FONT.heading, fontSize: 13.5, fontWeight: 700, color: C.text.primary, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+        {sublabel && <div style={{ fontFamily: FONT.mono, fontSize: 12, color: sublabelColor || C.text.muted, marginTop: 4 }}>{sublabel}</div>}
       </div>
     </div>
   );
@@ -2090,6 +2090,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // the current tab is still valid.
   const [activeTab, setActiveTab] = useState("overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Drives the live date/time line in the page header. Minute resolution
+  // is all it shows, so a 30s tick is plenty.
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setClockNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState("newest");
   const [dateFilter, setDateFilter] = useState("all");
@@ -4439,20 +4446,90 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // icon/trend colour; the card surface stays a plain dark panel so the
   // colour is a signal, not a background fill (per the accent-as-highlight
   // rule, not a block).
-  const SPARK_TONE = { accent: C.orange, danger: C.status.danger.solid, warning: C.status.warning.solid, neutral: C.text.faint };
-  const sparkTile = (Icon, value, label, sparkData, onClick, tone = "neutral") => {
+  const SPARK_TONE = { accent: C.orange, danger: C.status.danger.solid, warning: C.status.warning.solid, success: C.status.success.solid, neutral: C.text.faint };
+  // Mono uppercase micro-label, the label style from the supervisor
+  // dashboard mockup (docs/design/supervisor-dashboard/).
+  const kpiLabel = { fontFamily: FONT.mono, fontSize: 11.5, fontWeight: 600, color: C.text.body, textTransform: "uppercase", letterSpacing: "0.12em", lineHeight: 1.45 };
+  const kpiCard = { background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: "18px 18px 16px", boxShadow: `${SHAD.md}, ${SHAD.inset}`, display: "flex", flexDirection: "column", minWidth: 0, boxSizing: "border-box" };
+  // `caption` is { text, tone, chip }: a chip renders as a bordered pill
+  // (the mockup's "All Clear"), otherwise it's a plain mono status line.
+  const sparkTile = (Icon, value, label, sparkData, onClick, tone = "neutral", caption = null) => {
     const color = SPARK_TONE[tone] || SPARK_TONE.neutral;
+    const capTone = caption?.tone ? (C.status[caption.tone] || null) : null;
     return (
-      <div onClick={onClick} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px", cursor: onClick ? "pointer" : "default", boxShadow: SHAD.md }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <Icon size={14} color={color} strokeWidth={2.25} />
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: C.text.muted, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+      <div onClick={onClick} style={{ ...kpiCard, cursor: onClick ? "pointer" : "default" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+          <span style={kpiLabel}>{label}</span>
+          <span style={{ width: 30, height: 30, borderRadius: RAD.sm, background: C.panelInset, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon size={15} color={tone === "neutral" ? C.text.muted : color} strokeWidth={2} />
+          </span>
         </div>
-        <div style={{ fontFamily: FONT.heading, fontSize: 26, fontWeight: 700, color: C.text.primary, lineHeight: 1, marginTop: 8 }}>{value}</div>
-        <Sparkline data={sparkData} color={color} />
+        <div style={{ fontFamily: FONT.heading, fontSize: 40, fontWeight: 700, color: C.text.primary, lineHeight: 1, marginTop: 16 }}>{value}</div>
+        <div style={{ minHeight: 26, marginTop: 10 }}>
+          {caption && (caption.chip ? (
+            <span style={{
+              display: "inline-block", fontFamily: FONT.mono, fontSize: 11.5, fontWeight: 600, padding: "3px 8px", borderRadius: 4,
+              color: capTone ? capTone.text : C.text.muted, background: capTone ? capTone.bg : C.panelInset, border: `1px solid ${capTone ? capTone.border : C.line}`,
+            }}>{caption.text}</span>
+          ) : (
+            <span style={{ fontFamily: FONT.mono, fontSize: 12, color: capTone ? capTone.text : C.text.muted }}>{caption.text}</span>
+          ))}
+        </div>
+        <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+          <Sparkline data={sparkData} color={tone === "neutral" ? C.text.muted : color} />
+        </div>
       </div>
     );
   };
+
+  // Ratio tile: a real value/max ring with a status dot in the header and
+  // the ring's label beneath a divider, per the mockup's first two tiles.
+  const ringTile = (label, ring, dotColor, onClick, labelColor = C.text.body) => (
+    <div onClick={onClick} style={{ ...kpiCard, cursor: onClick ? "pointer" : "default" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <span style={{ ...kpiLabel, color: labelColor }}>{label}</span>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0, boxShadow: dotColor === C.text.faint ? "none" : `0 0 8px ${dotColor}` }} />
+      </div>
+      {ring}
+    </div>
+  );
+
+  // Alert banner (certifications, equipment compliance): icon tile, mono
+  // uppercase title with an action-count pill, one row per item with its
+  // date in a bordered chip, and a single action button on the right.
+  const alertBanner = ({ tone, icon: Icon, title, pill, summary, rows, more, action }) => (
+    <div style={{
+      background: `linear-gradient(90deg, ${tone.bg} 0%, rgba(20,20,20,0.6) 100%)`, border: `1px solid ${tone.border}`,
+      borderRadius: RAD.md, padding: "18px 20px", marginBottom: 16, display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap",
+    }}>
+      <span style={{ width: 40, height: 40, borderRadius: RAD.sm, border: `1px solid ${tone.border}`, background: tone.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Icon size={18} color={tone.text} strokeWidth={2.25} />
+      </span>
+      <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+          <span style={{ fontFamily: FONT.heading, fontWeight: 600, fontSize: 15, color: tone.text, textTransform: "uppercase", letterSpacing: "0.06em" }}>{title}</span>
+          <span style={{ fontFamily: FONT.mono, fontSize: 11.5, fontWeight: 600, color: tone.text, background: tone.bg, border: `1px solid ${tone.border}`, borderRadius: RAD.pill, padding: "2px 9px" }}>{pill}</span>
+        </div>
+        <div style={{ fontSize: 15, color: C.text.primary, marginBottom: rows.length > 0 ? 10 : 0 }}>{summary}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {rows.map(r => (
+            <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontFamily: FONT.mono, fontSize: 12.5 }}>
+              <strong style={{ color: C.text.primary }}>{r.name}</strong>
+              <span style={{ color: tone.text, border: `1px solid ${tone.border}`, borderRadius: 4, padding: "2px 8px" }}>{r.chip}</span>
+            </div>
+          ))}
+          {more && <div style={{ fontFamily: FONT.mono, fontSize: 12, color: C.text.muted }}>{more}</div>}
+        </div>
+      </div>
+      {action && (
+        <button onClick={action.onClick} style={{
+          display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", flexShrink: 0,
+          background: "transparent", color: tone.text, border: `1px solid ${tone.border}`, borderRadius: RAD.sm,
+          padding: "9px 14px", fontFamily: FONT.heading, fontWeight: 600, fontSize: 13.5, cursor: "pointer",
+        }}>{action.label} <ChevronRight size={15} /></button>
+      )}
+    </div>
+  );
 
   if (loading) return (
     <div style={{ ...styles.wrap, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
@@ -4492,10 +4569,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         .fora-spin { animation: fora-spin-kf 900ms linear infinite; }
         @media (prefers-reduced-motion: reduce) { .fora-spin { animation: none; } }
         @media (max-width: 560px) { .fora-refresh-label { display: none; } }
-        @media (max-width: 880px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }
+        @media (max-width: 1100px) { .fora-overview-grid { grid-template-columns: 1fr !important; } }
+        .fora-kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+        @media (max-width: 1280px) { .fora-kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 760px) {
+          .fora-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+          .fora-kpi-row > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+        }
+        @media (max-width: 340px) { .fora-kpi-row { grid-template-columns: 1fr; } }
+        /* The full-height sidebar and full-bleed page header assume no
+           default 8px body margin; only applies while the dashboard is up. */
+        body { margin: 0; }
+        .fora-main { padding: 16px; }
+        .fora-hero { margin: -16px -16px 20px; padding: 22px 16px; }
+        @media (min-width: 769px) {
+          .fora-main { padding: 24px 32px; }
+          .fora-hero { margin: -24px -32px 28px; padding: 30px 32px; }
+        }
+        .fora-mobile-header { display: none !important; }
         .fora-mobile-menu-btn { display: none; }
         .fora-sidebar-backdrop { display: none; }
         @media (max-width: 768px) {
+          .fora-mobile-header { display: flex !important; }
           .fora-mobile-menu-btn { display: inline-flex !important; }
           .fora-sidebar {
             position: fixed !important; top: 57px !important; left: 0 !important;
@@ -4520,60 +4615,31 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} certifications={companyCertifications} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}
 
-      <header style={{
+      {/* Mobile-only top bar: the hamburger that opens the sidebar drawer.
+          On desktop the FORA mark lives at the top of the sidebar and the
+          page actions (Refresh / Fill Out a Form / Exit) live in the page
+          header below, per the approved mockup. */}
+      <header className="fora-mobile-header" style={{
         position: "sticky", top: 0, zIndex: 40,
         background: "rgba(10,10,10,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
-        borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
+        borderBottom: `1px solid ${C.line}`, padding: "14px 16px",
+        display: "flex", alignItems: "center", gap: 10,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            className="fora-mobile-menu-btn"
-            onClick={() => setMobileNavOpen(o => !o)}
-            aria-label="Toggle navigation"
-            style={{
-              alignItems: "center", justifyContent: "center", width: 32, height: 32,
-              border: `1px solid ${C.line}`, borderRadius: RAD.md, background: "transparent",
-              color: C.text.body, cursor: "pointer", marginRight: 2,
-            }}
-          ><Menu size={16} /></button>
-          <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)" }} />
-          <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 18, color: C.text.primary, letterSpacing: "-0.01em" }}>FORA</span>
-          <span style={{
-            marginLeft: 2, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
-            color: C.text.muted, border: `1px solid ${C.line}`, borderRadius: RAD.pill, padding: "3px 10px",
-          }}>{isAdmin ? "Admin" : "Supervisor"}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Manual refresh — the automatic ones (returning to the tab, the
-              poll, coming back from the worker forms) cover most of it, but
-              a supervisor waiting on a specific submission wants a button
-              they can press rather than a wait they can't see. */}
-          <button
-            onClick={refreshNow}
-            disabled={refreshing}
-            title={lastRefreshAt ? `Last updated ${new Date(lastRefreshAt).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}` : "Refresh"}
-            aria-label="Refresh dashboard data"
-            style={{
-              display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
-              border: `1px solid ${C.line}`, background: "transparent", padding: "7px 12px",
-              borderRadius: RAD.md, cursor: refreshing ? "default" : "pointer", fontWeight: 600,
-              opacity: refreshing ? 0.6 : 1,
-            }}
-          >
-            <RefreshCw size={14} className={refreshing ? "fora-spin" : undefined} />
-            <span className="fora-refresh-label">{refreshing ? "Refreshing" : "Refresh"}</span>
-          </button>
-          {onLogout && (
-            <button onClick={onLogout} style={{
-              display: "flex", alignItems: "center", gap: 6, color: C.text.body, fontSize: 13,
-              border: `1px solid ${C.line}`, background: "transparent", padding: "7px 14px",
-              borderRadius: RAD.md, cursor: "pointer", fontWeight: 600,
-            }}>
-              <LogOut size={14} /> {backLabel}
-            </button>
-          )}
-        </div>
+        <button
+          className="fora-mobile-menu-btn"
+          onClick={() => setMobileNavOpen(o => !o)}
+          aria-label="Toggle navigation"
+          style={{
+            alignItems: "center", justifyContent: "center", width: 32, height: 32,
+            border: `1px solid ${C.line}`, borderRadius: RAD.sm, background: "transparent",
+            color: C.text.body, cursor: "pointer", marginRight: 2,
+          }}
+        ><Menu size={16} /></button>
+        <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, letterSpacing: "0.04em" }}>FORA</span>
+        <span style={{
+          fontFamily: FONT.mono, fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase",
+          color: C.orange, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.3)", borderRadius: 4, padding: "2px 6px",
+        }}>{isAdmin ? "Admin" : "Supervisor"}</span>
       </header>
 
       <div style={{ display: "flex", alignItems: "flex-start" }}>
@@ -4583,6 +4649,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           tabIcon={TAB_ICON}
           tabLabel={TAB_LABEL}
           tabVisible={TAB_VISIBLE}
+          brand={{ roleLabel: isAdmin ? "Admin" : "Supervisor" }}
+          topOffset={0}
+          tabDots={{
+            certifications: certAlerts.expiredCount > 0 ? C.status.danger.solid
+              : certAlerts.expiringSoonCount > 0 ? C.status.warning.solid : undefined,
+          }}
           tabCounts={{
             nearmiss: companyNearMisses.filter(n => !n.reviewed).length,
             incident: companyIncidents.filter(n => !n.reviewed).length,
@@ -4606,44 +4678,84 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           onMobileClose={() => setMobileNavOpen(false)}
         />
 
-      <div style={{ padding: 16, flex: 1, minWidth: 0 }}>
+      <div className="fora-main" style={{ flex: 1, minWidth: 0 }}>
 
-        {/* Hero / welcome moment — the thing the flat-white-card version didn't
-            have at all. Company greeting up front, orange radial glow behind
-            it (same visual language as website's .hero .glow), and the primary
-            "Fill Out a Form" action promoted out of the header into here. */}
-        <div style={{
+        {/* Page header: full-bleed band with the orange glow from the
+            mockup, live date/time, greeting, and the page actions (moved
+            here from the old top bar so they sit on every tab). */}
+        <div className="fora-hero" style={{
           position: "relative", overflow: "hidden",
-          background: "linear-gradient(180deg,#171717 0%,#131313 100%)",
-          border: `1px solid ${C.line}`, borderRadius: RAD.xl,
-          padding: "26px 26px", marginBottom: 16, boxShadow: SHAD.lg,
+          background: "linear-gradient(180deg,#141414 0%,#0F0F0F 100%)",
+          borderBottom: `1px solid ${C.line}`,
         }}>
           <div style={{
-            position: "absolute", width: 420, height: 420, borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(249,115,22,0.22) 0%, transparent 68%)",
-            top: -190, right: -140, pointerEvents: "none",
+            position: "absolute", width: 620, height: 420, borderRadius: "50%",
+            background: "radial-gradient(ellipse, rgba(249,115,22,0.16) 0%, transparent 70%)",
+            top: -220, right: -120, pointerEvents: "none",
           }} />
-          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 18 }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.orange, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>
-                {new Date().toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric" })}
+          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 18 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: FONT.mono, fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 10 }}>
+                <span style={{ color: C.orange }}>{new Date(clockNow).toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric" })}</span>
+                <span style={{ color: C.text.faint, margin: "0 8px" }}>/</span>
+                <span style={{ color: C.text.body }}>{new Date(clockNow).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short" })}</span>
               </div>
-              <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: "clamp(22px,3.6vw,32px)", color: C.text.primary, letterSpacing: "-0.02em", marginBottom: 8 }}>
+              <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: "clamp(26px,3.4vw,40px)", color: C.text.primary, letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 8 }}>
                 Welcome back{userName ? `, ${userName.split(" ")[0]}` : ""}
               </div>
-              <div style={{ fontSize: 14, color: C.text.muted }}>
-                {isAdmin ? "Admin view — all companies" : company?.name ? `Supervising ${company.name}` : "Supervisor view"}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 15, color: C.text.muted }}>
+                  {isAdmin ? "Admin view: all companies" : company?.name ? `Supervising ${company.name}` : "Supervisor view"}
+                </span>
+                {lastRefreshAt && (
+                  <>
+                    <span style={{ width: 4, height: 4, borderRadius: "50%", background: C.text.faint }} />
+                    <span style={{ fontFamily: FONT.mono, fontSize: 12.5, color: C.text.muted }}>
+                      Synced {new Date(lastRefreshAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
-            {viewerRole === "supervisor" && (
-              <button onClick={() => setShowWorkerForms(true)} style={{
-                display: "flex", alignItems: "center", gap: 8, background: C.orange, color: C.text.onOrange,
-                border: "none", borderRadius: RAD.md, padding: "12px 20px", fontWeight: 700, fontSize: 14,
-                cursor: "pointer", boxShadow: GLOW.orangeSoft,
-              }}>
-                <FilePlus2 size={16} /> Fill Out a Form
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {/* Manual refresh — the automatic ones (returning to the tab, the
+                  poll, coming back from the worker forms) cover most of it, but
+                  a supervisor waiting on a specific submission wants a button
+                  they can press rather than a wait they can't see. */}
+              <button
+                onClick={refreshNow}
+                disabled={refreshing}
+                title={lastRefreshAt ? `Last updated ${new Date(lastRefreshAt).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}` : "Refresh"}
+                aria-label="Refresh dashboard data"
+                style={{
+                  display: "flex", alignItems: "center", gap: 7, color: C.text.primary, fontSize: 14,
+                  border: `1px solid ${C.lineStrong}`, background: "rgba(20,20,20,0.7)", padding: "10px 16px",
+                  borderRadius: RAD.sm, cursor: refreshing ? "default" : "pointer", fontFamily: FONT.heading, fontWeight: 500,
+                  opacity: refreshing ? 0.6 : 1,
+                }}
+              >
+                <RefreshCw size={15} className={refreshing ? "fora-spin" : undefined} />
+                <span className="fora-refresh-label">{refreshing ? "Refreshing" : "Refresh"}</span>
               </button>
-            )}
+              {viewerRole === "supervisor" && (
+                <button onClick={() => setShowWorkerForms(true)} style={{
+                  display: "flex", alignItems: "center", gap: 8, background: C.orange, color: C.text.onOrange,
+                  border: "none", borderRadius: RAD.sm, padding: "11px 22px", fontFamily: FONT.heading, fontWeight: 700, fontSize: 14,
+                  cursor: "pointer", boxShadow: GLOW.orangeSoft,
+                }}>
+                  <FilePlus2 size={16} /> Fill Out a Form
+                </button>
+              )}
+              {onLogout && (
+                <button onClick={onLogout} style={{
+                  display: "flex", alignItems: "center", gap: 7, color: C.text.body, fontSize: 14,
+                  border: `1px solid ${C.lineStrong}`, background: "rgba(20,20,20,0.7)", padding: "10px 16px",
+                  borderRadius: RAD.sm, cursor: "pointer", fontFamily: FONT.heading, fontWeight: 500,
+                }}>
+                  <LogOut size={15} /> {backLabel}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -4654,29 +4766,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           </div>
         )}
 
-        {isDocActive("certifications") && (certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (
-          <div style={{ background: "rgba(234,88,12,0.14)", border: "1.5px solid rgba(234,88,12,0.4)", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#FB923C", marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
-              <AlertTriangle size={14} strokeWidth={2.5} />
-              Certification alerts
-            </div>
-            <div style={{ fontSize: 13, color: "#FDBA74", marginBottom: certAlerts.expired.length + certAlerts.expiringSoon.length > 0 ? 8 : 0 }}>
-              {certAlerts.expiredCount > 0 && <span>{certAlerts.expiredCount} certification{certAlerts.expiredCount === 1 ? "" : "s"} expired</span>}
-              {certAlerts.expiredCount > 0 && certAlerts.expiringSoonCount > 0 && <span> — </span>}
-              {certAlerts.expiringSoonCount > 0 && <span>{certAlerts.expiringSoonCount} expiring within 30 days</span>}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {[...certAlerts.expired, ...certAlerts.expiringSoon].slice(0, 6).map((c) => (
-                <div key={c.id} style={{ fontSize: 12.5, color: "#FDBA74" }}>
-                  <strong>{c.workerName || "Unknown"}</strong> — {c.certName} ({new Date(c.expiryDate).toLocaleDateString("en-CA")})
-                </div>
-              ))}
-              {(certAlerts.expired.length + certAlerts.expiringSoon.length) > 6 && (
-                <div style={{ fontSize: 12, color: "#FDBA74", opacity: 0.8 }}>+ {(certAlerts.expired.length + certAlerts.expiringSoon.length) - 6} more — see Analytics for the full list.</div>
-              )}
-            </div>
-          </div>
-        )}
+        {isDocActive("certifications") && (certAlerts.expiredCount > 0 || certAlerts.expiringSoonCount > 0) && (() => {
+          const rows = [...certAlerts.expired, ...certAlerts.expiringSoon];
+          const actionCount = certAlerts.expiredCount + certAlerts.expiringSoonCount;
+          return alertBanner({
+            tone: certAlerts.expiredCount > 0 ? { ...C.status.warning, text: "#FB923C", border: "rgba(249,115,22,0.45)", bg: "rgba(249,115,22,0.10)" } : C.status.warning,
+            icon: AlertTriangle,
+            title: "Certification alerts",
+            pill: `${actionCount} Action${actionCount === 1 ? "" : "s"} Required`,
+            summary: [
+              certAlerts.expiredCount > 0 && `${certAlerts.expiredCount} certification${certAlerts.expiredCount === 1 ? "" : "s"} expired`,
+              certAlerts.expiringSoonCount > 0 && `${certAlerts.expiringSoonCount} expiring within 30 days`,
+            ].filter(Boolean).join(", "),
+            rows: rows.slice(0, 6).map(c => ({ key: c.id, name: c.workerName || "Unknown", chip: `${c.certName} (${new Date(c.expiryDate).toLocaleDateString("en-CA")})` })),
+            more: rows.length > 6 ? `+ ${rows.length - 6} more in Certifications` : null,
+            action: TAB_VISIBLE.certifications ? { label: "View Certifications", onClick: () => setActiveTab("certifications") } : null,
+          });
+        })()}
 
         {/* ── Equipment compliance alerts (break #14) ──────────────────────
             The dates that park a machine when they lapse, on the page a
@@ -4687,31 +4793,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             would change who can see it. Red when something is already
             expired, amber when it is only coming due. */}
         {(complianceAlerts.expiredCount > 0 || complianceAlerts.expiringSoonCount > 0) && (() => {
-          const tone = complianceAlerts.expiredCount > 0 ? C.status.danger : C.status.warning;
           const rows = [...complianceAlerts.expired, ...complianceAlerts.expiringSoon];
-          return (
-            <div style={{ background: tone.bg, border: `1.5px solid ${tone.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-              <div style={{ fontWeight: 800, fontSize: 14, color: tone.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
-                <ShieldCheck size={14} strokeWidth={2.5} />
-                Equipment compliance alerts
-              </div>
-              <div style={{ fontSize: 13, color: tone.text, marginBottom: rows.length > 0 ? 8 : 0 }}>
-                {complianceAlerts.expiredCount > 0 && <span>{complianceAlerts.expiredCount} document{complianceAlerts.expiredCount === 1 ? "" : "s"} expired</span>}
-                {complianceAlerts.expiredCount > 0 && complianceAlerts.expiringSoonCount > 0 && <span> — </span>}
-                {complianceAlerts.expiringSoonCount > 0 && <span>{complianceAlerts.expiringSoonCount} expiring within {complianceAlerts.warningDays || EXPIRY_WARNING_DAYS} days</span>}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {rows.slice(0, 6).map((r) => (
-                  <div key={r.id} style={{ fontSize: 12.5, color: tone.text }}>
-                    <strong>{r.equipmentName}</strong> — {r.label || complianceDocLabel(r.docType)} ({expiryText(r.expiryDate)})
-                  </div>
-                ))}
-                {rows.length > 6 && (
-                  <div style={{ fontSize: 12, color: tone.text, opacity: 0.8 }}>+ {rows.length - 6} more — see Equipment ▸ Compliance for the full list.</div>
-                )}
-              </div>
-            </div>
-          );
+          const actionCount = complianceAlerts.expiredCount + complianceAlerts.expiringSoonCount;
+          return alertBanner({
+            tone: complianceAlerts.expiredCount > 0 ? C.status.danger : C.status.warning,
+            icon: ShieldCheck,
+            title: "Equipment compliance alerts",
+            pill: `${actionCount} Action${actionCount === 1 ? "" : "s"} Required`,
+            summary: [
+              complianceAlerts.expiredCount > 0 && `${complianceAlerts.expiredCount} document${complianceAlerts.expiredCount === 1 ? "" : "s"} expired`,
+              complianceAlerts.expiringSoonCount > 0 && `${complianceAlerts.expiringSoonCount} expiring within ${complianceAlerts.warningDays || EXPIRY_WARNING_DAYS} days`,
+            ].filter(Boolean).join(", "),
+            rows: rows.slice(0, 6).map(r => ({ key: r.id, name: r.equipmentName, chip: `${r.label || complianceDocLabel(r.docType)} (${expiryText(r.expiryDate)})` })),
+            more: rows.length > 6 ? `+ ${rows.length - 6} more in Equipment, Compliance` : null,
+            action: TAB_VISIBLE.equipment ? { label: "View Compliance", onClick: () => { setActiveTab("equipment"); setEquipmentSubTab("compliance"); } } : null,
+          });
         })()}
 
         {isAdmin && companies.length > 1 && (
@@ -4740,89 +4836,177 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             Shown only on "overview" itself — clicking any sidebar item
             replaces this with that tab's own content, it doesn't stack
             underneath. */}
-        {activeTab === "overview" && (
-        <div className="fora-overview-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(260px,1fr)", gap: 12, marginBottom: 16, alignItems: "start" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
-              <div
-                onClick={() => TAB_VISIBLE.flhas && setActiveTab("flhas")}
-                style={{ ...styles.card, margin: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: TAB_VISIBLE.flhas ? "pointer" : "default" }}
-              >
-                <ProgressRing
-                  value={awaitingSignOff} max={Math.max(flhaReviewStats.total, 1)}
-                  label="Awaiting Sign-Off"
-                  sublabel={flhaReviewStats.total > 0 ? `of ${flhaReviewStats.total} FLHAs` : "No FLHAs yet"}
-                  color={awaitingSignOff > 0 ? C.orange : C.status.success.solid}
-                />
-              </div>
-              <div
-                onClick={() => {
-                  const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
-                  if (TAB_VISIBLE[target]) setActiveTab(target);
-                  else if (TAB_VISIBLE.incident) setActiveTab("incident");
-                  else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
-                }}
-                style={{ ...styles.card, margin: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-              >
-                <ProgressRing
-                  value={reportReviewStats.reviewed} max={Math.max(reportReviewStats.total, 1)}
-                  label="Reports Reviewed"
-                  sublabel={reportReviewStats.total > 0 ? `${reportReviewStats.outstanding} outstanding` : "No reports yet"}
-                  color={reportReviewStats.total > 0 && reportReviewStats.caughtUp ? C.status.success.solid : C.orange}
-                />
-              </div>
-              {/* Routes to whichever tab actually holds the majority of
-                  what is open, instead of always dropping the supervisor
-                  into Monthly Inspections. */}
-              {sparkTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions", correctiveSpark,
-                () => {
-                  const equipmentHeavy = openEquipmentActions.length > openSafetyActions.length;
-                  if (equipmentHeavy && maintenanceEnabled) { setActiveTab("equipment"); setEquipmentSubTab("actions"); return; }
-                  if (equipmentHeavy && TAB_VISIBLE.inspections) { setActiveTab("inspections"); setInspectionsSubTab("actions"); return; }
-                  if (TAB_VISIBLE.corrective) { setActiveTab("corrective"); return; }
-                  if (maintenanceEnabled) { setActiveTab("equipment"); setEquipmentSubTab("actions"); }
-                },
-                openCorrectiveCount > 0 ? "accent" : "neutral")}
-              {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "neutral")}
-              {sparkTile(Fuel, fuelFlagged.length, "Fuel Alerts", fuelSpark,
-                () => { if (fuelEnabled) { setActiveTab("equipment"); setEquipmentSubTab("fuel"); } else if (TAB_VISIBLE.analytics) setActiveTab("analytics"); },
-                fuelFlagged.length > 0 ? "warning" : "neutral")}
-            </div>
+        {activeTab === "overview" && (() => {
+          const reviewPct = reportReviewStats.total > 0 ? Math.round((reportReviewStats.reviewed / reportReviewStats.total) * 100) : null;
+          const reviewsCaughtUp = reportReviewStats.total > 0 && reportReviewStats.caughtUp;
+          // Tone per document type for the Recent Activity feed's icon tile
+          // and type label, so an incident reads differently from a toolbox
+          // talk at a glance (the mockup's red / orange / green rows).
+          const orangeTone = { text: "#FB923C", bg: "rgba(249,115,22,0.12)", border: "rgba(249,115,22,0.35)" };
+          const neutralTone = { text: C.text.body, bg: C.panelInset, border: C.line };
+          const feedTone = (type, doc) => {
+            if (type === "incident") return C.status.danger;
+            if (type === "nearmiss") return C.status.warning;
+            if (type === "flha") return doc.status === "pending_approval" ? C.status.warning : C.status.success;
+            if (type === "toolbox" || type === "monthly") return orangeTone;
+            if (type === "inspection" || type === "daily") return C.status.info;
+            if (type === "certification") return doc.status === "expired" ? C.status.danger : doc.status === "expiring_soon" || doc.unverified ? C.status.warning : C.status.success;
+            if (type === "onboarding") return C.status.success;
+            return neutralTone;
+          };
+          return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 16 }}>
+          <div className="fora-kpi-row">
+            {ringTile(
+              "Sign-Off Status",
+              <ProgressRing
+                value={awaitingSignOff} max={Math.max(flhaReviewStats.total, 1)}
+                label="Awaiting Sign-Off"
+                sublabel={flhaReviewStats.total > 0 ? `of ${flhaReviewStats.total} FLHAs` : "No FLHAs yet"}
+                color={awaitingSignOff > 0 ? C.orange : C.status.success.solid}
+              />,
+              awaitingSignOff > 0 ? C.orange : C.text.faint,
+              TAB_VISIBLE.flhas ? () => setActiveTab("flhas") : undefined,
+            )}
+            {ringTile(
+              reviewPct === null ? "Report Review" : `Review Rate ${reviewPct}%`,
+              <ProgressRing
+                value={reportReviewStats.reviewed} max={Math.max(reportReviewStats.total, 1)}
+                label="Reports Reviewed"
+                sublabel={reportReviewStats.total > 0 ? `${reportReviewStats.outstanding} outstanding` : "No reports yet"}
+                sublabelColor={reviewsCaughtUp ? C.status.success.text : undefined}
+                color={reviewsCaughtUp ? C.status.success.solid : C.orange}
+              />,
+              reviewsCaughtUp ? C.status.success.solid : reportReviewStats.total > 0 ? C.orange : C.text.faint,
+              () => {
+                const target = companyIncidents.filter(n => !n.reviewed).length > 0 ? "incident" : "nearmiss";
+                if (TAB_VISIBLE[target]) setActiveTab(target);
+                else if (TAB_VISIBLE.incident) setActiveTab("incident");
+                else if (TAB_VISIBLE.nearmiss) setActiveTab("nearmiss");
+              },
+              reviewsCaughtUp ? C.status.success.text : C.text.body,
+            )}
+            {/* Routes to whichever tab actually holds the majority of
+                what is open, instead of always dropping the supervisor
+                into Monthly Inspections. */}
+            {sparkTile(CalendarClock, openCorrectiveCount, "Open Corrective Actions", correctiveSpark,
+              () => {
+                const equipmentHeavy = openEquipmentActions.length > openSafetyActions.length;
+                if (equipmentHeavy && maintenanceEnabled) { setActiveTab("equipment"); setEquipmentSubTab("actions"); return; }
+                if (equipmentHeavy && TAB_VISIBLE.inspections) { setActiveTab("inspections"); setInspectionsSubTab("actions"); return; }
+                if (TAB_VISIBLE.corrective) { setActiveTab("corrective"); return; }
+                if (maintenanceEnabled) { setActiveTab("equipment"); setEquipmentSubTab("actions"); }
+              },
+              openCorrectiveCount > 0 ? "accent" : "neutral",
+              openCorrectiveCount > 0 ? { text: `${openCorrectiveCount} open`, tone: "warning", chip: true } : { text: "All Clear", tone: "success", chip: true })}
+            {sparkTile(FileText, docsThisWeek, "Docs This Week", docsSpark, () => setShowThisWeekModal(true), "accent",
+              { text: "Since Sunday" })}
+            {sparkTile(Fuel, fuelFlagged.length, "Fuel Alerts", fuelSpark,
+              () => { if (fuelEnabled) { setActiveTab("equipment"); setEquipmentSubTab("fuel"); } else if (TAB_VISIBLE.analytics) setActiveTab("analytics"); },
+              fuelFlagged.length > 0 ? "warning" : "neutral",
+              fuelFlagged.length > 0
+                ? { text: `${fuelFlagged.length} machine${fuelFlagged.length === 1 ? "" : "s"} flagged`, tone: "warning" }
+                : { text: "No machines flagged", tone: "success" })}
+          </div>
 
-            {/* Site activity — FORA's own take on a "live operations" centerpiece:
-                real per-site submission counts across the last activity on file,
-                not a copied network/topology visual. Warm accent = a site has an
-                open near-miss/incident sitting in it; green = clean. */}
-            <div style={{
-              position: "relative", overflow: "hidden",
-              background: "linear-gradient(180deg,#151515 0%,#111111 100%)",
-              border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "18px 20px", boxShadow: SHAD.md,
-            }}>
-              <div style={{
-                position: "absolute", width: 320, height: 320, borderRadius: "50%",
-                background: "radial-gradient(circle, rgba(249,115,22,0.10) 0%, transparent 70%)",
-                top: -150, right: -110, pointerEvents: "none",
-              }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, position: "relative" }}>
-                <MapPin size={15} color={C.orange} strokeWidth={2.25} />
-                <span style={{ fontSize: 13, fontWeight: 800, color: C.text.primary }}>Site Activity</span>
-                <span style={{ fontSize: 11, color: C.text.faint, marginLeft: "auto" }}>Field submissions by site</span>
+          <div className="fora-overview-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(300px,1fr)", gap: 20, alignItems: "start" }}>
+            {/* Site activity: real per-site submission counts across the
+                last activity on file. Orange bar = share of the busiest
+                site; a red dot and "Open report" tag mean the site has an
+                unreviewed near-miss/incident sitting in it. */}
+            <div style={{ ...kpiCard, padding: "22px 24px" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 14, paddingBottom: 18, marginBottom: 18, borderBottom: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+                <span style={{ width: 40, height: 40, borderRadius: RAD.sm, border: "1px solid rgba(249,115,22,0.35)", background: "rgba(249,115,22,0.10)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <MapPin size={18} color={C.orange} strokeWidth={2.25} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: FONT.heading, fontSize: 20, fontWeight: 600, color: C.text.primary }}>Site Activity</div>
+                  <div style={{ fontFamily: FONT.mono, fontSize: 12.5, color: C.text.muted, marginTop: 3 }}>Field submissions by site</div>
+                </div>
               </div>
               {siteActivity.length === 0 ? (
-                <div style={{ color: C.text.faint, fontSize: 13, position: "relative" }}>No field activity logged yet.</div>
+                <div style={{ color: C.text.faint, fontSize: 13 }}>No field activity logged yet.</div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 11, position: "relative" }}>
-                  {siteActivity.map(s => {
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                  {siteActivity.map((s, i) => {
                     const pctOfMax = Math.round((s.total / siteActivityMax) * 100);
-                    const barColor = s.needsAttention ? C.status.warning.solid : C.status.success.solid;
                     return (
                       <div key={s.site}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
-                          <span style={{ fontWeight: 700, color: C.text.body }}>{s.site}</span>
-                          <span style={{ color: C.text.faint }}>{s.total} submission{s.total === 1 ? "" : "s"} · {pctOfMax}%</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                          <span title={s.needsAttention ? "Open near miss or incident at this site" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: s.needsAttention ? C.status.danger.solid : C.orange }} />
+                          <span style={{ fontWeight: 500, fontSize: 14.5, color: C.text.primary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site}</span>
+                          {s.needsAttention && (
+                            <span style={{ fontFamily: FONT.mono, fontSize: 10.5, fontWeight: 600, color: C.status.danger.text, border: `1px solid ${C.status.danger.border}`, borderRadius: 4, padding: "1px 6px", flexShrink: 0 }}>Open report</span>
+                          )}
+                          <span style={{ marginLeft: "auto", fontFamily: FONT.mono, fontSize: 13, color: C.text.body, whiteSpace: "nowrap" }}>
+                            {s.total} submission{s.total === 1 ? "" : "s"}
+                            <span style={{ color: C.text.faint, margin: "0 8px" }}>·</span>
+                            <span style={{ color: i === 0 || pctOfMax >= 90 ? C.orange : C.text.muted }}>{pctOfMax}%</span>
+                          </span>
                         </div>
-                        <div style={{ height: 7, borderRadius: 99, background: C.panelInset, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pctOfMax}%`, borderRadius: 99, background: barColor }} />
+                        <div style={{ height: 6, borderRadius: 99, background: C.panelInset, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pctOfMax}%`, borderRadius: 99, background: `linear-gradient(90deg, #C2410C 0%, ${C.orange} 100%)` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Recent activity — a live feed of real submissions, newest first,
+                with each item's real status (sign-off/review state where the
+                document type has one, "Logged" where it doesn't). */}
+            <div style={{ ...kpiCard, padding: "20px 22px", maxHeight: 640 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: 16, marginBottom: 4, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.status.success.solid, boxShadow: "0 0 8px rgba(34,197,94,0.6)" }} />
+                <span style={{ fontFamily: FONT.heading, fontSize: 16, fontWeight: 600, color: C.text.primary, textTransform: "uppercase", letterSpacing: "0.06em" }}>Recent Activity</span>
+                <span style={{ marginLeft: "auto", fontFamily: FONT.mono, fontSize: 11, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: refreshing ? C.orange : C.text.muted, border: `1px solid ${C.line}`, background: C.panelInset, borderRadius: 4, padding: "3px 8px" }}>
+                  {refreshing ? "Syncing" : "Live"}
+                </span>
+              </div>
+              {recentActivityList.length === 0 ? (
+                <div style={{ color: C.text.faint, fontSize: 13, paddingTop: 12 }}>Nothing submitted yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}>
+                  {recentActivityList.map(({ type, doc }, i) => {
+                    const meta = DOC_TYPE_META[type];
+                    const Icon = meta.icon;
+                    const tone = feedTone(type, doc);
+                    let statusLabel = "Logged", statusColor = C.text.muted;
+                    if (type === "flha") {
+                      statusLabel = doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
+                      statusColor = doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
+                    } else if (type === "nearmiss" || type === "incident") {
+                      statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
+                      statusColor = doc.reviewed ? C.text.muted : C.status.warning.text;
+                    } else if (type === "certification") {
+                      statusLabel = doc.status === "expired" ? "Expired" : doc.status === "expiring_soon" ? "Expiring soon" : doc.unverified ? "Unverified" : "Uploaded";
+                      statusColor = doc.status === "expired" ? C.status.danger.text : doc.status === "expiring_soon" || doc.unverified ? C.status.warning.text : C.status.success.text;
+                    } else if (type === "onboarding") {
+                      statusLabel = "Completed";
+                      statusColor = C.status.success.text;
+                    }
+                    return (
+                      <div
+                        key={`${type}-${doc.id}-${i}`}
+                        onClick={() => openWeekDoc(type, doc)}
+                        style={{ display: "flex", gap: 14, alignItems: "center", padding: "14px 4px", borderBottom: i < recentActivityList.length - 1 ? `1px solid ${C.line}` : "none", cursor: "pointer" }}
+                      >
+                        <div style={{ width: 38, height: 38, borderRadius: RAD.sm, background: tone.bg, border: `1px solid ${tone.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Icon size={16} color={tone.text} strokeWidth={2.25} />
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 14.5, fontWeight: 500, color: C.text.primary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            <span style={{ color: tone.text, fontWeight: 600 }}>{meta.label}</span>
+                            <span style={{ color: C.text.faint }}> · </span>
+                            {meta.primary(doc) || "Unnamed"}
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, fontFamily: FONT.mono, fontSize: 12 }}>
+                            <span style={{ color: statusColor }}>{statusLabel}</span>
+                            <span style={{ color: C.text.faint }}>·</span>
+                            <span style={{ color: C.text.muted }}>{timeAgo(doc.created_at)}</span>
+                          </div>
                         </div>
                       </div>
                     );
@@ -4831,62 +5015,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               )}
             </div>
           </div>
-
-          {/* Recent activity — a live feed of real submissions, newest first,
-              with each item's real status (sign-off/review state where the
-              document type has one, "Logged" where it doesn't). */}
-          <div style={{ ...styles.card, margin: 0, display: "flex", flexDirection: "column", maxHeight: 468, boxSizing: "border-box" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10, flexShrink: 0 }}>
-              <Radio size={13} color={C.status.success.solid} strokeWidth={2.5} />
-              <span style={{ fontSize: 13, fontWeight: 800, color: C.text.primary }}>Recent Activity</span>
-            </div>
-            {recentActivityList.length === 0 ? (
-              <div style={{ color: C.text.faint, fontSize: 13 }}>Nothing submitted yet.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}>
-                {recentActivityList.map(({ type, doc }, i) => {
-                  const meta = DOC_TYPE_META[type];
-                  const Icon = meta.icon;
-                  let statusLabel = "Logged", statusColor = C.text.faint;
-                  if (type === "flha") {
-                    statusLabel = doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
-                    statusColor = doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
-                  } else if (type === "nearmiss" || type === "incident") {
-                    statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
-                    statusColor = doc.reviewed ? C.status.success.text : C.status.warning.text;
-                  } else if (type === "certification") {
-                    statusLabel = doc.status === "expired" ? "Expired" : doc.status === "expiring_soon" ? "Expiring soon" : doc.unverified ? "Unverified" : "Uploaded";
-                    statusColor = doc.status === "expired" ? C.status.danger.text : doc.status === "expiring_soon" || doc.unverified ? C.status.warning.text : C.status.success.text;
-                  } else if (type === "onboarding") {
-                    statusLabel = "Completed";
-                    statusColor = C.status.success.text;
-                  }
-                  return (
-                    <div
-                      key={`${type}-${doc.id}-${i}`}
-                      onClick={() => openWeekDoc(type, doc)}
-                      style={{ display: "flex", gap: 10, padding: "9px 2px", borderBottom: i < recentActivityList.length - 1 ? `1px solid ${C.line}` : "none", cursor: "pointer" }}
-                    >
-                      <div style={{ width: 28, height: 28, borderRadius: 8, background: C.panelInset, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <Icon size={14} color={C.text.muted} strokeWidth={2.25} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text.body, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {meta.label} · {meta.primary(doc) || "—"}
-                        </div>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
-                          <span style={{ fontSize: 10.5, fontWeight: 700, color: statusColor }}>{statusLabel}</span>
-                          <span style={{ fontSize: 10.5, color: C.text.faint }}>· {timeAgo(doc.created_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
-        )}
+          );
+        })()}
 
         {activeTab === "flhas" && TAB_VISIBLE.flhas && (
           <div style={styles.card}>
