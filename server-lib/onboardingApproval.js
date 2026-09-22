@@ -197,17 +197,24 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   }
 
   // ── Switch on exactly what was bought ─────────────────────────────────
-  // api/customforms.js treats a missing company_document_settings row as
-  // "active", so a company with no rows at all sees every built-in document
-  // type. That was harmless when every plan included everything; under
-  // modular pricing it would hand a company modules it never paid for. So
-  // write an explicit row for every key any module can unlock: true for the
+  // Write an explicit row for every key any module can unlock: true for the
   // ones this purchase covers, false for the rest.
   //
   // Only when the request actually carries a module list. A request with
-  // `modules` NULL predates modular pricing (or came in without a checkout,
-  // e.g. an admin creating a company by hand), and those keep the old
-  // everything-on default rather than being silently stripped back.
+  // `modules` NULL predates modular pricing, or came in without a checkout
+  // (e.g. an admin creating a company by hand), and falls straight past this.
+  //
+  // WARNING, and the reason this is not just a style note: until `edd7a41`
+  // a missing company_document_settings row resolved as ACTIVE, so falling
+  // past this left such a company with every built-in document type, which
+  // is what the comment here used to describe as the deliberate intent.
+  // Since `edd7a41` a missing row resolves OFF (`api/customforms.js:323,383`),
+  // so falling past this now leaves a brand-new company with **zero**
+  // document types — an empty worker menu and a Dashboard with nothing but
+  // Overview and Fleet Overview, with no error and nothing on screen saying
+  // why. That is break #20 in docs/feature-interaction-map.md: OPEN, awaiting
+  // a decision on what a company created outside checkout should default to.
+  // Do not read the `if` below as a considered no-op; it is a gap.
   if (Array.isArray(request.modules) && request.modules.length > 0) {
     const settings = documentSettingsFor(companyId, request.modules);
     const { error: settingsErr } = await supabaseAdmin
