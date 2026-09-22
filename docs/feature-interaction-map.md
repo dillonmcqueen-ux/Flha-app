@@ -16,8 +16,11 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-2026-09-22 against commit `98f9d70` on `claude/modular-pricing-enforcement-rzdib2`
-(break #27 built, UI only; `main` is at `d4b8aa3`, the squash of PR #127, which
+2026-09-22 against the **uncommitted** working tree on `f561f42`
+(`claude/modular-pricing-enforcement-rzdib2`, PR #128) — #27's week paging,
+which closes the current-week-only residual; the #27/§2/§5 time-clock anchors
+below are read against that tree. Before that, against `98f9d70` on the same
+branch (break #27 built, UI only; `main` is at `d4b8aa3`, the squash of PR #127, which
 carries #23). Before that, against `ac80f96` (break #23 built; #27 opened); before that, against `48d5889` on
 `claude/equipment-tab-fleet-mgmt-9g0xra` (breaks #20, #21 and #22 all built, closing when PR #124 merges — **module
 gating is now enforced server-side**, both non-checkout provisioning paths
@@ -33,7 +36,8 @@ offers a ticket upload a gated company cannot use) and **#25** (custom
 documents ignore their own `custom_<id>` setting server-side). **#27** (those
 #23 carve-outs were open on the server and unreachable from the product) is
 **built, not closed** as of `98f9d70` — approved by Dillon ("readable in the
-app"); the worker's card and the supervisor's tab now reach them read-only.
+app"); the worker's card and the supervisor's tab now reach them read-only,
+and (uncommitted, on `f561f42`) the tab pages back through every past week.
 **#26** was split out of #23 the same day
 and is built, not open: `api/equipmentreports.js`'s own four actions were
 ungated until `89ca755`. Every ❌ and ⚠️ in "Known breaks" was read in the
@@ -596,8 +600,8 @@ same count via `git grep` at `57efbeb` → **45**):
 | `list_corrective_actions` / `update_corrective_action` | `api/monthly.js:681,865`; reasoning at `:661-667` (immediately above `list_corrective_actions`) | Polymorphic since break #5 — an action can come from an incident, a near miss or a failed inspection. Gating them on `monthly` would hide a company's incident follow-ups behind a module it may never have bought. Still scoped by company and role |
 | Admin-only actions | `docKeyGate.js:113` | The founder is on the other side of the paid boundary; gating them would break the console that decides what a company is sold |
 | `create_upload_url` | `api/logs.js:288-293`, `api/reports.js:187`, `api/flhas.js:235`, `api/monthly.js:122`, `api/customforms.js:137` | It mints a signed upload slot inside the caller's own company namespace and runs **before the record type is known**, so there is no doc key to check. The submit that would use the file is gated, which is where a company without the module is stopped |
-| `clock_out`, `my_time_status` | `api/companydata.js:1455,1476`; reasoning at `:1425-1435` | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *Reached from the UI as of `98f9d70` (#27, built): the worker's Time Clock card stays while `my_time_status` reports an open shift (`src/WorkerMenu.jsx:137-150,272-273`) and opens a clock-out-only screen (`src/TimeClock.jsx:157`); a supervisor's own open shift keeps its Clock Out button on the read-only tab (`src/Dashboard.jsx:6634`).* |
-| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1495,1603,1617`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`. *Reached from the UI as of `98f9d70` (#27, built): the Time Clock tab stays, read-only, for a company without the module that has reports, entries this week or the viewer's own open shift (`src/Dashboard.jsx:2805,3262-3280`). The UI reads only the current week's entries (`:3020`, no `weekStart`), so the last partial week is readable in-app only until it ends — see #27's residual.* |
+| `clock_out`, `my_time_status` | `api/companydata.js:1455,1476`; reasoning at `:1425-1435` | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *Reached from the UI as of `98f9d70` (#27, built): the worker's Time Clock card stays while `my_time_status` reports an open shift (`src/WorkerMenu.jsx:137-150,272-273`) and opens a clock-out-only screen (`src/TimeClock.jsx:157`); a supervisor's own open shift keeps its Clock Out button on the read-only tab (`src/Dashboard.jsx:6677`, re-anchored against the uncommitted tree on `f561f42`).* |
+| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1495,1603,1628`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`; `list_time_reports` now also returns `latestEntryAt`, the newest `time_clock_entries.clock_in` for the resolved company (`companydata.js:1614-1625`), pinned company-scoped by `:206`. *Reached from the UI as of `98f9d70` (#27, built): the Time Clock tab stays, read-only, for a company without the module that has any report, any recorded entry in any week (`latestEntryAt`), or the viewer's own open shift (`src/Dashboard.jsx:2811,3281-3305`). Since the uncommitted change on `f561f42` the tab pages through past weeks — `list_time_entries` sends `weekStart` (`:3026`), Previous / Next / This week at `:6636-6653` — so a week that never became a report stays readable; the current-week-only residual is closed. See #27.* |
 
 **`custom_<id>` documents are still ungated — that is #25.** The time-clock and
 PM-interval half (#23) is built as of `ac80f96`; see the table above for the
