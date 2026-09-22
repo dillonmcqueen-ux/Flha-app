@@ -530,7 +530,7 @@ it; neither defines its own.
 |---|---|---|
 | Key → module | `docKeyGate.js:33-35` | `MODULE_BY_DOC_KEY`, derived by flattening `MODULES[k].docKeys` from `pricing.js`, so a module added there is covered without anyone coming back |
 | Customer-facing name | `docKeyGate.js:43-46` | `moduleLabelForDocKey` — the 403 says "Fuel & Consumables", not `fuellog` |
-| The raw read | `docKeyGate.js:66-77` | missing row → off; `is_active: false` → off; read error → off **and** flagged `unavailable` |
+| The raw read | `docKeyGate.js:66-76` | missing row → off; `is_active: false` → off; read error → off **and** flagged `unavailable` |
 | Report/cron use | `docKeyGate.js:84-87` | `isDocKeyActive` — denies on a read error too; skipping a company's weekly PDF is the cheap failure |
 | The handler guard | `docKeyGate.js:111-124` | `requireDocKey` → `null` to proceed, `{status, error}` to return verbatim |
 
