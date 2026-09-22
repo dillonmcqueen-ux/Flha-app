@@ -16,17 +16,23 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-2026-09-22 against commit `48d5889` on `claude/equipment-tab-fleet-mgmt-9g0xra`
-(breaks #20, #21 and #22 all built, closing when PR #124 merges — **module
+2026-09-22 against commit `ac80f96` on `claude/modular-pricing-enforcement-rzdib2`
+(break #23 built; #27 opened). Before that, against `48d5889` on
+`claude/equipment-tab-fleet-mgmt-9g0xra` (breaks #20, #21 and #22 all built, closing when PR #124 merges — **module
 gating is now enforced server-side**, both non-checkout provisioning paths
 write explicit all-on rows, and the one warning that path can raise now
 reaches the founder; Equipment Compliance sold as a module in `2560819`;
 built-in document keys flipped to deny-by-default in `edd7a41`;
-`roster.employee_id` in `8916156`). Three breaks opened by this pass and
-awaiting a decision: **#23** (the time-clock and PM-interval handlers #21's
-scope did not reach), **#24** (`WalletInvite.jsx` still offers a ticket upload
-a gated company cannot use) and **#25** (custom documents ignore their own
-`custom_<id>` setting server-side). **#26** was split out of #23 the same day
+`roster.employee_id` in `8916156`). **#23** (the time-clock and PM-interval
+handlers #21's scope did not reach) is **built, not closed** as of `ac80f96` on
+`claude/modular-pricing-enforcement-rzdib2` — six new guards, with `clock_out`,
+`my_time_status` and the three time-clock reads left open by Dillon's decision
+(§5). Two breaks still awaiting a decision: **#24** (`WalletInvite.jsx` still
+offers a ticket upload a gated company cannot use) and **#25** (custom
+documents ignore their own `custom_<id>` setting server-side). **#27**, opened
+by the `ac80f96` pass: those #23 carve-outs are open on the server and
+unreachable from the product, because both screens that call them hide once
+the module is off. **#26** was split out of #23 the same day
 and is built, not open: `api/equipmentreports.js`'s own four actions were
 ungated until `89ca755`. Every ❌ and ⚠️ in "Known breaks" was read in the
 code, not inferred.
@@ -41,7 +47,7 @@ for a company created by hand and for an approval with no module list, not only
 for one that came through a checkout (break #20 — built, closes when PR #124
 merges). And as of `48d5889` the rows are **enforced by the server**, not only
 read by the browser: 41 handler actions across eight files call
-`requireDocKey` (`server-lib/docKeyGate.js:111`) before doing anything, so a
+`requireDocKey` (51 as of `ac80f96` — four more in `89ca755`, six in #23's fix) (`server-lib/docKeyGate.js:111`) before doing anything, so a
 company that never bought a module can no longer reach it through a saved URL,
 a stale tab, or a client whose settings fetch failed (break #21 — built, closes
 when PR #124 merges).
@@ -123,8 +129,9 @@ Admin Panel, SOPs, Sites, Equipment fleet, Roster, Custom Fields, Billing
 
 **Every doc-key column above is now enforced, not just displayed.**
 `server-lib/docKeyGate.js` (`48d5889`) is the one gate every handler asks; see
-§2's `document_key` section for the 41 guards, the four deliberate exemptions,
-and what is still ungated (break #23).
+§2's `document_key` section for the 51 guards (as of `ac80f96`), the
+deliberate exemptions — including the five time-clock actions left open by
+decision in #23 — and what is still ungated (#25).
 
 ---
 
@@ -562,8 +569,10 @@ founder, not a customer — there is no customer admin role — and the Admin Pa
 reads across every company at once. The boundary this closes is the customer's
 own supervisor and worker sessions, which is exactly who break #21 named.
 
-**Where the 45 guards are** — 41 in `48d5889`, four more in `89ca755`, all
-verified 2026-09-22 (`grep -rn "await requireDocKey(" api/ | wc -l` → **45**):
+**Where the 51 guards are** — 41 in `48d5889`, four more in `89ca755`, six
+more in `ac80f96` (break #23), all verified 2026-09-22
+(`grep -rn "await requireDocKey(" api/ | wc -l` → **51** at `ac80f96`; the
+same count via `git grep` at `57efbeb` → **45**):
 
 | File | Guards | Doc key | Actions |
 |---|---|---|---|
@@ -572,7 +581,7 @@ verified 2026-09-22 (`grep -rn "await requireDocKey(" api/ | wc -l` → **45**):
 | `api/flhas.js` | 6 (`:244,273,439,462,523,542`) | `flha` | `resume`, `submit`, `list`, `update`, `delete`, `approve` |
 | `api/monthly.js` | 5 (`:240,283,488,540,587`) | `monthly` | `get_active_form`, `submit_monthly`, `list_records`, `get_record_detail`, `update_record` |
 | `api/reports.js` | 5 (`:208,339,356,398,442`) | `table.docKey` — `incident` `:116`, `nearmiss` `:122` | `submit`, `list`, `review`, `update`, `delete` |
-| `api/companydata.js` | 4 (`:1028,1077,1146,1194`) | `equipment_compliance` | the four compliance actions — the ones #19 gated in the UI only |
+| `api/companydata.js` | 10 — 4 (`:1028,1077,1146,1194`) + 6 added in `ac80f96` | `equipment_compliance` ×4; `maintenance` ×1 (`:1216`); `timeclock` ×5 (`:1438,1530,1562,1590,1639`) | the four compliance actions (the ones #19 gated in the UI only); `set_equipment_pm_interval`; `clock_in`, `edit_time_entry`, `add_time_entry`, `delete_time_entry`, `generate_time_report_now` |
 | `api/maintenance.js` | 4 (`:130,247,327,396`) | `maintenance` | `list_status`, `log_field_service`, `log_service`, `list_records` |
 | `api/fuellogs.js` | 3 (`:116,156,240`) | `fuellog` | `check_equipment`, `submit`, `list` — every action in the file |
 | `api/equipmentreports.js` | 4 (`:666,683,714,763`), added in `89ca755` | `equipment_reports`; **`inspection`** for `list_weekly_hours` | `list_reports`, `get_report`, `generate_now`, `list_weekly_hours` |
@@ -585,10 +594,12 @@ verified 2026-09-22 (`grep -rn "await requireDocKey(" api/ | wc -l` → **45**):
 | `list_corrective_actions` / `update_corrective_action` | `api/monthly.js:681,865`; reasoning at `:661-667` (immediately above `list_corrective_actions`) | Polymorphic since break #5 — an action can come from an incident, a near miss or a failed inspection. Gating them on `monthly` would hide a company's incident follow-ups behind a module it may never have bought. Still scoped by company and role |
 | Admin-only actions | `docKeyGate.js:113` | The founder is on the other side of the paid boundary; gating them would break the console that decides what a company is sold |
 | `create_upload_url` | `api/logs.js:288-293`, `api/reports.js:187`, `api/flhas.js:235`, `api/monthly.js:122`, `api/customforms.js:137` | It mints a signed upload slot inside the caller's own company namespace and runs **before the record type is known**, so there is no doc key to check. The submit that would use the file is gated, which is where a company without the module is stopped |
+| `clock_out`, `my_time_status` | `api/companydata.js:1455,1476`; reasoning at `:1425-1435` | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *(Whether a worker can actually reach that screen once the module is off is #27.)* |
+| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1495,1603,1617`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`. *(Reachability from the Dashboard once the module is off is #27.)* |
 
-**Still ungated and now inconsistent with their neighbours — that is break
-#23** (ten time-clock actions and `set_equipment_pm_interval`, both in
-`api/companydata.js`), and `custom_<id>` documents are **#25**.
+**`custom_<id>` documents are still ungated — that is #25.** The time-clock and
+PM-interval half (#23) is built as of `ac80f96`; see the table above for the
+six guards and the carve-outs.
 
 **Weekly Hours gates on `inspection`, not `equipment_reports`, and that is not a
 slip** (`equipmentreports.js:763`): it is folded from inspection readings
@@ -1830,14 +1841,58 @@ render to — but it is the same customer outcome on the path where a company
 has already paid, and it is the obvious next thing if this class of failure
 ever actually happens.
 
-### #23 — Time Clock and the PM interval are still gated only in the browser
+### #23 — Time Clock and the PM interval were gated only in the browser
 
-**Severity: low, same class as #21 was. Status: OPEN, awaiting a decision.
-Opened 2026-09-22 by this map's pass against `48d5889`. SPLIT the same day:**
-this entry originally also covered `api/equipmentreports.js`'s four
-supervisor-callable actions, which were fixed in `89ca755` hours later — that
-half is now **#26**, built and closing with PR #124. What remains here is
-open, unapproved and untouched.
+**Severity: low, same class as #21 was. Status: fix BUILT on
+`claude/modular-pricing-enforcement-rzdib2` (`ac80f96`). NOT closed — it
+closes when that branch's PR merges.** Approved by Dillon 2026-09-22, with two
+product decisions that shaped it (below). Opened 2026-09-22 by this map's pass
+against `48d5889`. **SPLIT the same day:** this entry originally also covered
+`api/equipmentreports.js`'s four supervisor-callable actions, which were fixed
+in `89ca755` hours later — that half is **#26**, built and closing with PR #124.
+
+**What was built** (`ac80f96`, every line re-read 2026-09-22 against the
+branch head — the action line numbers all moved from the table below, which is
+kept as the as-found record at `48d5889`):
+
+| Action | Guard | Doc key |
+|---|---|---|
+| `set_equipment_pm_interval` (`api/companydata.js:1214`) | `:1216` — after the role check, before the equipment lookup | `maintenance` |
+| `clock_in` (`:1436`) | `:1438` — after the `userId` check | `timeclock` |
+| `edit_time_entry` (`:1528`) | `:1530` | `timeclock` |
+| `add_time_entry` (`:1560`) | `:1562` | `timeclock` |
+| `delete_time_entry` (`:1588`) | `:1590` | `timeclock` |
+| `generate_time_report_now` (`:1637`) | `:1639` — the one that disagreed with the Sunday cron (`cron-equipment-reports.js:93`) | `timeclock` |
+
+**Deliberately left open, by Dillon's decision — recorded in §2's exemption
+table and §5 so they are not re-filed:** `clock_out` (`:1455`) and
+`my_time_status` (`:1476`), so a shift open when the module is dropped can
+always be closed; `list_time_entries` (`:1495`), `list_time_reports` (`:1603`)
+and `get_time_report` (`:1617`), so recorded hours stay readable after
+cancelling. The reasoning is in the code at `:1425-1435`.
+
+*Re-check:* `grep -n "requireDocKey" api/companydata.js` → 11 hits: the import
+(`:16`), four `equipment_compliance` guards (`:1028,1077,1146,1194`), one
+`maintenance` (`:1216`) and five `timeclock` (`:1438,1530,1562,1590,1639`).
+Nothing between `:1455` and `:1528` and nothing between `:1603` and `:1637`.
+Across `api/`: `grep -rn "await requireDocKey(" api/ | wc -l` → **51** (was 45
+at `57efbeb`). Run 2026-09-22.
+
+*Tests:* `tests/unit/timeclock-gate.test.js`, 19 tests, drives the real
+handler. `node --test tests/unit/timeclock-gate.test.js` → 19 pass at
+`ac80f96`; the same file run against a `57efbeb` worktree → **12 fail, 7
+pass** — the 12 are exactly the gating cases (five actions × OFF/no-row, plus
+the two PM-interval cases), the 7 that pass are the carve-outs and the
+positive cases, which is what they should do on the pre-fix file.
+`npm run test:unit` → **387 pass, 0 fail**. Both re-run by this map's pass,
+not taken from the build report.
+
+**What the fix does not reach — filed as #27, not folded in here:** the
+carve-outs are open on the server, but both screens that call them hide when
+the module is off, so "can always be closed" and "stays readable" hold at the
+API and not in the product.
+
+*As found at `48d5889`:*
 
 `48d5889` put a server-side gate on 41 actions. These were **outside the scope
 Dillon approved**, so they are filed rather than folded into #21 — #21 is
@@ -1879,9 +1934,11 @@ the write that starts a machine's maintenance clock, and `api/maintenance.js`'s
 four actions — the ones that *read* that clock — are gated as of `48d5889`. So
 a company without the maintenance module can set an interval it cannot then see.
 
-**A fix would touch:** `api/companydata.js` only — eleven `requireDocKey` calls
-using the helper that already exists, ten on `timeclock` and one on
-`maintenance`. No migration, no new file, no client change.
+**A fix would touch** (as proposed before approval): `api/companydata.js` only
+— eleven `requireDocKey` calls, ten on `timeclock` and one on `maintenance`.
+**As built it is six, not eleven** — Dillon's decision kept five time-clock
+actions open (above). No migration, no new file, no client change, as
+predicted.
 
 **Checked before writing that, because it is the trap #21's step 1 exists for:
 time-clock punches are NOT offline-queued.** `src/TimeClock.jsx:62-64` posts
@@ -1889,7 +1946,49 @@ time-clock punches are NOT offline-queued.** `src/TimeClock.jsx:62-64` posts
 anywhere in the file, and `timeclock` is not one of the ten form types in
 `RESUBMIT_HANDLERS` (`src/WorkerMenu.jsx:26-37`). So a 403 here surfaces as an
 on-screen error, not a dropped punch — this guard is safe to write in a way the
-document-submit guards were not.
+document-submit guards were not. Re-checked at `ac80f96`: `src/TimeClock.jsx`
+still posts the punch directly (`:62-64`) and has no `enqueueSubmission`.
+
+### #27 — The time-clock carve-outs are open on the server and unreachable in the product
+
+**Severity: low. Status: OPEN, awaiting a decision. Opened 2026-09-22 by this
+map's pass against `ac80f96`** — found while recording #23's carve-outs, not
+handed to this pass.
+
+Dillon's decisions on #23 were that a shift open when Time Clock + GPS is
+dropped can **always** be closed, and that time reports stay **readable** after
+cancelling. `ac80f96` honours both at the API. Neither is reachable from a
+screen, because both screens hide when the module is off:
+
+| Decision | Server (open) | The only UI that calls it | Hidden by |
+|---|---|---|---|
+| Close an open shift | `clock_out` `companydata.js:1455`, `my_time_status` `:1476` | `src/TimeClock.jsx:36,64` | `src/WorkerMenu.jsx:247,250` — `visibleBuiltins` drops any built-in whose setting is `false`, and `timeclockItem` is found in that filtered list, so the Time Clock card (`:453`) does not render |
+| Read recorded hours / reports | `list_time_entries` `:1495`, `list_time_reports` `:1603`, `get_time_report` `:1617` | `src/Dashboard.jsx:3008,3242,3331` | `TAB_VISIBLE.timeclock: isDocActive("timeclock")` (`Dashboard.jsx:2793`); the entries, the report list (`:6813-6825`) and "Generate This Week" (`:6778`) all render inside `activeTab === "timeclock" && TAB_VISIBLE.timeclock` (`:6567`, block closes at `:6841`) |
+
+*Re-check:* `grep -rn "list_time_reports\|get_time_report\|list_time_entries" src/`
+→ only `Dashboard.jsx:3008,3242,3331`; `grep -n "clock_out\|my_time_status" src/TimeClock.jsx`
+→ `:36,64`; and the gates at `WorkerMenu.jsx:247` and `Dashboard.jsx:2793`.
+Run 2026-09-22.
+
+**What the customer gets.** A worker clocked in when their company drops the
+module opens the app and the Time Clock card is gone — the open shift stays
+open, and the supervisor cannot fix it either, because `edit_time_entry` is
+gated (`:1530`, correctly) and the tab it lives on is hidden. A company that
+cancels and wants last month's hours for payroll finds no Time Clock tab. The
+data is kept and the API would hand it over; the product offers no way to ask.
+Only a screen already open when the module was switched off still works — the
+"stale tab" path the rest of #21/#23 exists to close.
+
+**Not filed as a defect in `ac80f96`.** It built exactly the approved server
+scope; the UI was never in it. This is the gap between the decision's intent
+and its reach, which is a product call rather than a mechanical patch.
+
+**A fix would touch:** `src/WorkerMenu.jsx` (show the Time Clock card, clock-out
+only, when the module is off *and* `my_time_status` reports an open shift) and
+`src/Dashboard.jsx` (a read-only Time Clock tab, or its report list, when the
+module is off). No server change, no migration. Worth deciding whether
+"readable after cancelling" means in the app or on request — if the latter,
+this narrows to the worker half.
 
 ### #24 — The wallet invite still offers a ticket upload a gated company can't use
 
@@ -2138,7 +2237,18 @@ Do **not** flag these. They are decisions, not gaps.
   side of the paid boundary), and `create_upload_url` in all five handlers
   (it runs before the record type is known; the submit that would use the file
   is gated). Full reasoning in §2's `document_key` section. **Do not file
-  these as #21 leftovers.** #23 and #25 are the real leftovers.
+  these as #21 leftovers.** #23 and #25 were the real leftovers; #23 is built.
+- **Five time-clock actions are ungated on purpose, as of `ac80f96` — Dillon's
+  decision on #23, 2026-09-22.** `clock_out` and `my_time_status`
+  (`companydata.js:1455,1476`): a shift open when a company drops Time Clock +
+  GPS must always be closable, and the clock-out screen needs `my_time_status`
+  to find it. `list_time_entries`, `list_time_reports` and `get_time_report`
+  (`:1495,1603,1617`): recorded hours are payroll records and stay readable
+  after cancelling. Reasoning in the code at `:1425-1435`, pinned by
+  `tests/unit/timeclock-gate.test.js:156,161,170,176`. **Do not file these as
+  #23 leftovers** and do not "make them consistent" with `clock_in`. Their
+  *UI* reachability once the module is off is a separate open question — #27 —
+  and the answer there is never to gate these.
 - **`list_records` and `companyEquipmentIndex` include retired machines on
   purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
   history or a vetting index
@@ -2223,3 +2333,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-22 | `82fa4a2` + `34925b0` | **Every `src/Dashboard.jsx` citation in this map re-anchored — 46 of them, 33 distinct line numbers, against a 7138-line file.** PR #126 rebuilt the supervisor dashboard from a Stitch mockup on `main` (`82fa4a2`, ~673 lines of `Dashboard.jsx`, plus `Sidebar.jsx`, `theme.js`, `index.html`), and this branch merged it forward in `34925b0`. **No offset was applied.** Each claim was re-read in the current file and re-cited where the code it describes actually lives — a diff-derived offset is exactly how a confidently wrong `file:line` gets into a document whose entire value is that a later session can re-check it. Some citations had already drifted *before* #126: `:816,957,3166`, `:1626`, `:1905`, `:3429`, `:4329-4330`, `:4650-4670`, `:5509`, `:5710,5745,5749` and `:6175` all landed on `}}>`, `</div>` or unrelated code at `07795a7` — the branch head the previous map pass was written against — so this was two overlapping drifts, not one. Three citations that were **historical** claims (#19's original finding: "is now `true`", "marks Fleet Overview and Compliance `on: true`") are pinned as `git show ea1c9e1:src/Dashboard.jsx` instead of live line numbers, because the second is false of the file today and a live number would keep asserting it. Zero line-numbered citations to `Sidebar.jsx` or `theme.js` exist in this map — confirmed by grep, not assumed. Two `api/monthly.js` numbers riding on the same claims (`:809`, `:819`/`:838`) were corrected to `:850` and `:860` while verifying them. No application code touched. |
 | 2026-09-22 | `34925b0` | **The merge's one conflict was semantic, not structural, and the shape belongs on the map: a rebuild branched before a module existed and silently reverted that module's gate.** #126 was cut from `main` before Equipment Compliance became purchasable, so its version of the compliance alert banner carried **no** `complianceEnabled &&` test and a comment reading *"compliance has no purchasable module (break #19, open)"* — true on the day it was written, and a paid feature given away free on the day it would have merged. Resolved in favour of keeping the gate (`Dashboard.jsx:4841`); the comment now matches the code. **Nothing would have failed.** No test asks "is this banner gated", the stale comment reads as an explanation rather than a contradiction, and the only symptom is a company seeing a module it never bought — break #6's expensive direction arriving through a *merge* instead of through a new feature, which is this map's first instance of it. The check it argues for: when a long-lived UI branch merges, re-verify every module gate inside the files it rewrote, not only the hunks git marked as conflicting. `EQUIPMENT_SUBTABS`' compliance entry was the same risk and did **not** conflict — verified on the merged file as `{ key: "compliance", label: "Compliance", on: complianceEnabled }` (`:2832`), and `isDocActive` still fails open (`:2749`), unchanged and still presentation-only per #21. |
 | 2026-09-22 | `82fa4a2` | **One genuinely new interaction arrived with #126.** Both overview alert banners now render through a shared `alertBanner` helper (`Dashboard.jsx:4540`) instead of two hand-copied blocks, and each gained a click-through: "View Certifications" (`:4823`) into the Certifications tab, "View Compliance" (`:4855`) into Equipment ▸ Compliance. An expiry a supervisor sees on the overview is now one click from the screen that fixes it — an increment on the reach break #14 was opened about, not a new break. Both actions are gated on their target tab's own `TAB_VISIBLE` entry; the compliance one resolves to `true` unconditionally and is safe only because the banner around it is `complianceEnabled`-gated, which is recorded in §1. The shared helper also removes the hand-copy that let the two banners drift — the `pdf-consistency-reviewer` shape, in the dashboard. |
+| 2026-09-22 | `ac80f96` | **#23 built, not closed** — approved by Dillon, on `claude/modular-pricing-enforcement-rzdib2`. Six new guards in `api/companydata.js`: `set_equipment_pm_interval` on `maintenance` (`:1216`), and `clock_in`, `edit_time_entry`, `add_time_entry`, `delete_time_entry`, `generate_time_report_now` on `timeclock` (`:1438,1530,1562,1590,1639`). The sharpest instance is gone: `generate_time_report_now` now agrees with the Sunday cron (`cron-equipment-reports.js:93`) on who gets a time-clock report. **Two product decisions, recorded in §2's exemption table and §5 so they are never re-filed:** `clock_out`/`my_time_status` stay open so a shift open when the module is dropped can be closed, and `list_time_entries`/`list_time_reports`/`get_time_report` stay open so recorded hours remain readable after cancelling (`:1455,1476,1495,1603,1617`; reasoning `:1425-1435`). Guard count across `api/` **45 → 51** (`grep -rn "await requireDocKey(" api/ \| wc -l`, re-run by this pass; 45 via `git grep` at `57efbeb`). `tests/unit/timeclock-gate.test.js` — 19 pass at `ac80f96`; against a `57efbeb` worktree, **12 fail / 7 pass**, the 12 being exactly the gating cases. `npm run test:unit` → 387 pass. All re-run by this pass. Time-clock punches are still not offline-queued (`TimeClock.jsx:62-64`), so these 403s show on screen rather than dropping a punch. Closes when the branch's PR merges. |
+| 2026-09-22 | `ac80f96` | **#27 opened by this pass, not worked, not approved.** #23's two carve-outs are open on the server and unreachable in the product: the worker's Time Clock card is filtered out when the module is off (`WorkerMenu.jsx:247,250`) and the supervisor's Time Clock tab — entries, report list and all — is hidden by `TAB_VISIBLE.timeclock` (`Dashboard.jsx:2793,6567`). So a worker clocked in when the module is dropped has no screen to clock out from, and a cancelled company has no screen to read its hours from; the API would answer both. Not a defect in `ac80f96`, which built exactly the approved server scope — a gap between a decision's intent and its reach. The fix is UI-only and must never be "gate the carve-outs"; see §5. |
