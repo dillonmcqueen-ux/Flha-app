@@ -83,6 +83,11 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [showMyDocs, setShowMyDocs] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
+  // True when the company no longer has Time Clock but this person is still
+  // clocked in (break #27). clock_out stays open on the server for exactly
+  // this case (api/companydata.js), and without this the card that leads to
+  // it was hidden with the module, stranding the shift.
+  const [openShiftWhileOff, setOpenShiftWhileOff] = useState(false);
 
   useEffect(() => {
     async function loadDocs() {
@@ -127,6 +132,23 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       } catch (e) { /* leave alert as-is if the request fails */ }
     })();
   }, [token, userId, companyId, builtinActive]);
+
+  // Re-checked every time the worker lands on the menu, so the card goes away
+  // once the shift is closed.
+  useEffect(() => {
+    if (!token || !userId || doc !== null) return;
+    if (!builtinActive || builtinActive.timeclock !== false) { setOpenShiftWhileOff(false); return; }
+    (async () => {
+      try {
+        const res = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "my_time_status", token }),
+        });
+        const data = await res.json();
+        if (res.ok) setOpenShiftWhileOff(!!data.open);
+      } catch (e) { /* leave as-is; the check runs again next time the menu shows */ }
+    })();
+  }, [token, userId, builtinActive, doc]);
 
   // Drain any queued offline submissions (docs/scope-offline-capability.md
   // Phase 1) whenever a worker lands back on this menu — covers reopening
@@ -208,7 +230,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     return <CustomForm companyId={companyId} companyName={companyName} userName={userName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
   }
   if (doc === "timeclock") {
-    return <TimeClock companyId={companyId} companyName={companyName} userName={userName} userId={userId} onBack={() => setDoc(null)} token={token} />;
+    return <TimeClock companyId={companyId} companyName={companyName} userName={userName} userId={userId} onBack={() => setDoc(null)} token={token} clockOutOnly={builtinActive?.timeclock === false} />;
   }
   if (doc === "maintenance") {
     return <FieldService companyId={companyId} userName={userName} onBack={() => setDoc(null)} token={token} />;
@@ -247,7 +269,8 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     ? BUILTIN_TYPES.filter(d => builtinActive[d.key] !== false)
     : BUILTIN_TYPES; // show everything while loading, then narrow once loaded
 
-  const timeclockItem = visibleBuiltins.find(d => d.key === "timeclock" && userId); // needs a real per-person identity, regardless of loading state
+  const timeclockItem = visibleBuiltins.find(d => d.key === "timeclock" && userId) // needs a real per-person identity, regardless of loading state
+    || (openShiftWhileOff && userId ? BUILTIN_TYPES.find(d => d.key === "timeclock") : null);
   // Certifications also needs a real per-person identity — a shared-code
   // login has no roster row for a cert wallet to belong to.
   const categorizedBuiltins = visibleBuiltins.filter(d => d.category && (d.key !== "certifications" || userId));
@@ -468,7 +491,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 20, color: C.text.primary, letterSpacing: "-0.01em" }}>
               Time Clock
             </div>
-            <div style={{ fontSize: 13, color: C.text.muted }}>Clock in and out</div>
+            <div style={{ fontSize: 13, color: openShiftWhileOff ? C.status.warning.text : C.text.muted }}>
+              {openShiftWhileOff ? "You're still clocked in. Tap to clock out." : "Clock in and out"}
+            </div>
           </button>
         )}
 

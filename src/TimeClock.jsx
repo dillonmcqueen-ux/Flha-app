@@ -21,7 +21,10 @@ function fmtElapsed(ms) {
 // two-part shadows, orange glow accent. This screen is used to punch in/out
 // on a phone in the field, so the clock-in/out button stays large (full-
 // width, tall) and the status text stays high-contrast for outdoor use.
-export default function TimeClock({ companyId, companyName, userName = "", userId, onBack, token }) {
+// `clockOutOnly`: the company no longer has Time Clock (break #27). The worker
+// only gets here to close a shift that was already open, so there is no
+// Clock In button once it is closed; the server refuses clock_in anyway.
+export default function TimeClock({ companyId, companyName, userName = "", userId, onBack, token, clockOutOnly = false }) {
   const [status, setStatus] = useState(null); // { open, recent } | null while loading
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -151,19 +154,25 @@ export default function TimeClock({ companyId, companyName, userName = "", userI
                 ) : (
                   <div style={{ fontSize: 14, color: C.text.muted, margin: "10px 0 20px" }}>You're not clocked in.</div>
                 )}
-                <button
-                  onClick={toggle}
-                  disabled={working}
-                  style={{
-                    width: "100%", padding: "17px", borderRadius: RAD.md, border: "none", cursor: working ? "default" : "pointer",
-                    fontWeight: 800, fontSize: 17, color: "#fff", minHeight: 56,
-                    background: working ? C.panelInset : clockedIn ? C.status.danger.solid : C.status.success.solid,
-                    boxShadow: working ? "none" : clockedIn ? `0 0 0 1px ${C.status.danger.border}` : `0 0 0 1px ${C.status.success.border}`,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  }}
-                >
-                  {gettingLocation ? (<><MapPin size={18} /> Getting location…</>) : working ? "Please wait…" : clockedIn ? "Clock Out" : "Clock In"}
-                </button>
+                {!clockedIn && clockOutOnly ? (
+                  <div style={{ fontSize: 13, color: C.text.muted }}>
+                    Time Clock isn't part of your company's plan anymore, so you can't clock in. Your recorded hours are kept.
+                  </div>
+                ) : (
+                  <button
+                    onClick={toggle}
+                    disabled={working}
+                    style={{
+                      width: "100%", padding: "17px", borderRadius: RAD.md, border: "none", cursor: working ? "default" : "pointer",
+                      fontWeight: 800, fontSize: 17, color: "#fff", minHeight: 56,
+                      background: working ? C.panelInset : clockedIn ? C.status.danger.solid : C.status.success.solid,
+                      boxShadow: working ? "none" : clockedIn ? `0 0 0 1px ${C.status.danger.border}` : `0 0 0 1px ${C.status.success.border}`,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    }}
+                  >
+                    {gettingLocation ? (<><MapPin size={18} /> Getting location…</>) : working ? "Please wait…" : clockedIn ? "Clock Out" : "Clock In"}
+                  </button>
+                )}
                 {error && (
                   <div style={{
                     marginTop: 12, display: "flex", alignItems: "center", gap: 6, justifyContent: "center",
