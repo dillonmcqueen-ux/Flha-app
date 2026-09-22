@@ -70,41 +70,52 @@ when PR #124 merges).
 | 16 | Company Brain | `AdminPanel.jsx` Brain tab | `api/cron-company-brain-summary.js` | *(none — always on)* |
 | 17 | Analytics | `src/Analytics.jsx` | `api/companydata.js` | *(none — tier-gated)* |
 | 18 | Gatehouse | `src/GatehouseBooth.jsx` | `api/gatehouse.js` | *(none — `app_type`)* |
-| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5775`) | `api/companydata.js:903` update, `:952` retire/restore | *(none — BASE by decision, see #19)* |
-| 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:5981`) | `api/companydata.js:1025-1203` | `equipment_compliance` — module `compliance` (`pricing.js:98-103`), added `2560819` |
-| 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:5920`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:300`) | `inspection` |
-| 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:5862`) | `api/maintenance.js:357` | `maintenance` |
+| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5913`) | `api/companydata.js:903` update, `:952` retire/restore | *(none — BASE by decision, see #19)* |
+| 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:6119`) | `api/companydata.js:1025-1203` | `equipment_compliance` — module `compliance` (`pricing.js:98-103`), added `2560819` |
+| 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:6058`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:300`) | `inspection` |
+| 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6000`) | `api/maintenance.js:357` | `maintenance` |
 
 **The Equipment hub, 2026-09-17, corrected 2026-09-18.** Maintenance and Fuel
 Logs stopped being top-level tabs and became sub-tabs of Equipment, and the hub
 itself went from module-gated to always-visible: `TAB_VISIBLE.equipment` was
 `equipmentReportsEnabled` (`git show c68f57d:src/Dashboard.jsx`, line 2505) and
-is now `true` (`src/Dashboard.jsx:2782`). Per-sub-tab gating moved to
-`EQUIPMENT_SUBTABS` (`src/Dashboard.jsx:2819-2828`), where each entry carries
+is now `true` (`src/Dashboard.jsx:2789`). Per-sub-tab gating moved to
+`EQUIPMENT_SUBTABS` (`src/Dashboard.jsx:2826-2835`), where each entry carries
 its own `on:`. **One of the eight is now `on: true`** — Fleet Overview
-(`:2820`), BASE by decision. Compliance was the other, which was break #19; it
-gates on `complianceEnabled` (`:2748` → `:2825`) as of `2560819`.
+(`:2827`), BASE by decision. Compliance was the other, which was break #19; it
+gates on `complianceEnabled` (`:2755` → `:2832`) as of `2560819`.
 
 Which sub-tab is gated on what, verified 2026-09-18 against `2560819`:
 
 | Sub-tab | `on:` | Doc key |
 |---|---|---|
-| Fleet Overview (`:2820`) | `true` | none — BASE, see #19 |
-| Maintenance / Maintenance Records / Corrective Actions (`:2821-2823`) | `maintenanceEnabled` | `maintenance` |
-| Weekly Hours (`:2824`) | `inspectionsEnabled` | `inspection` |
-| Compliance (`:2825`) | `complianceEnabled` | `equipment_compliance` |
-| Fuel Logs (`:2826`) | `fuelEnabled` | `fuellog` |
-| Weekly Reports (`:2827`) | `equipmentReportsEnabled` | `equipment_reports` |
+| Fleet Overview (`:2827`) | `true` | none — BASE, see #19 |
+| Maintenance / Maintenance Records / Corrective Actions (`:2828-2830`) | `maintenanceEnabled` | `maintenance` |
+| Weekly Hours (`:2831`) | `inspectionsEnabled` | `inspection` |
+| Compliance (`:2832`) | `complianceEnabled` | `equipment_compliance` |
+| Fuel Logs (`:2833`) | `fuelEnabled` | `fuellog` |
+| Weekly Reports (`:2834`) | `equipmentReportsEnabled` | `equipment_reports` |
 
-One asymmetry, recorded but not filed: the Compliance panel's own render
-condition is `activeTab === "equipment" && equipmentSubTab === "compliance"`
-(`Dashboard.jsx:5981`) with no module flag, while Maintenance Records (`:5862`),
-Weekly Hours (`:5920`), Weekly Reports (`:6072`) and Corrective Actions
-(`:6165`) each repeat their flag in the render condition too. It is unreachable
-today — `equipmentSubTab` is only ever set from the filtered tab list
-(`:5766`), from two `maintenanceEnabled`/`fuelEnabled`-gated shortcuts
-(`:4819,4827`), or bounced to a visible tab (`:2836`) — so this is defence in
-depth that Compliance alone doesn't have, not a live hole.
+One asymmetry, recorded but not filed, re-verified 2026-09-22 against
+`34925b0`: the Compliance panel's own render condition is
+`activeTab === "equipment" && equipmentSubTab === "compliance"`
+(`Dashboard.jsx:6119`) with no module flag, while Maintenance Records
+(`:6000`), Weekly Hours (`:6058`), Weekly Reports (`:6210`) and Corrective
+Actions (`:6303`) each repeat their flag in the render condition too. It is
+still unreachable today — `equipmentSubTab` is only ever set from the filtered
+tab list (`:5904`), from three `maintenanceEnabled`/`fuelEnabled`-gated
+shortcuts (`:4941,4944,4951`), from the overview compliance banner's **new**
+"View Compliance" action (`:4855`, added by #126), or bounced to a visible tab
+(`:2843`) — so this is defence in depth that Compliance alone doesn't have, not
+a live hole.
+
+**The setter that needed checking is the new one.** `:4855` is gated on
+`TAB_VISIBLE.equipment`, which is unconditionally `true` (`:2789`). On its own
+that would be the first setter able to select Compliance for a company that did
+not buy it. It cannot, because the whole banner it lives in sits inside
+`complianceEnabled && …` (`:4841`) — the gate is on the banner, fourteen lines
+above, rather than on the button itself. If that banner is ever refactored
+so the action outlives the guard, this asymmetry stops being theoretical.
 
 Supporting surfaces: Onboarding → Claim (`Onboarding.jsx` → `ClaimAccount.jsx`),
 Admin Panel, SOPs, Sites, Equipment fleet, Roster, Custom Fields, Billing
@@ -227,7 +238,7 @@ silently failed for a bucket, a hammer, a mulcher or a plate tamper.
 |---|---|
 | Inspection — no-readings path, attachment picker | `Inspection.jsx:275,283,291` |
 | Daily Report picker label | `DailyReport.jsx:403` |
-| Fleet Overview / Admin Panel badges | `Dashboard.jsx:5710,5745,5749`, `AdminPanel.jsx:1962` |
+| Fleet Overview / Admin Panel badges | `Dashboard.jsx:5930,5965,5969`, `AdminPanel.jsx:1962` |
 | Preventative Maintenance | ❌ nothing — **#18** |
 | Fuel Log picker | ❌ nothing — an attachment with no tank is still offered (`FuelLog.jsx:84`). Cosmetic, not filed. |
 
@@ -272,9 +283,9 @@ on across systems.
 | Side | Where |
 |---|---|
 | Written on hire | `companydata.js:409` (`add_roster_member`), `:471` (`onboard_new_employee`) |
-| Written after the fact | `companydata.js:510-541` (`set_roster_employee_id`) → `Dashboard.jsx:3058,3066` |
+| Written after the fact | `companydata.js:510-541` (`set_roster_employee_id`) → `Dashboard.jsx:3065,3073` |
 | Uniqueness | per company, case-insensitive, **across active and inactive rows** — handler `companydata.js:275-291`, index `docs/schema/roster-employee-id-migration.sql:58-60` |
-| Read by | `Dashboard.jsx:6817,6849` — displayed on the roster row. Nothing else |
+| Read by | `Dashboard.jsx:6955,6987` — displayed on the roster row. Nothing else |
 
 **The opposite rule to `equipment.unit_number` on purpose.** A unit number may
 be reused after a machine is scrapped (`activeUnitNumberClash` skips retired
@@ -293,10 +304,10 @@ existence for a working sync. If an integration is ever built, the check is
 ### `equipment_compliance.equipment_id` → `equipment.id`
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
 `api/companydata.js:1025-1203`. Until **#14** the only consumer was Equipment ▸
-Compliance (`Dashboard.jsx:5981-6071`) — not the weekly equipment report, not
+Compliance (`Dashboard.jsx:6119-6208`) — not the weekly equipment report, not
 the cron, not the overview banner, not the Brain. PR #122 (merged)
 added two: the overview banner via `compliance_summary` (`companydata.js:1071` →
-`Dashboard.jsx:4728`) and the weekly equipment report's compliance section
+`Dashboard.jsx:4841`) and the weekly equipment report's compliance section
 (`equipmentreports.js:607-657` → `reportPdfs.js:142`). The Brain still never
 sees an expiry date — that was never in #14's approved scope. All three drop a
 retired machine's rows as of **#15** (PR #123, merged as `18645f0`), through one
@@ -304,7 +315,7 @@ shared rule (`withoutRetiredEquipment`, `equipmentScope.js`) so the counts and
 the lists cannot disagree.
 
 **Gated as of `2560819` (#19 closed).** All three surfaces now hang off the
-`equipment_compliance` doc key: the sub-tab (`Dashboard.jsx:2748,2825`), the
+`equipment_compliance` doc key: the sub-tab (`Dashboard.jsx:2755,2832`), the
 overview banner (`:4728`), and the weekly report's compliance section, where
 the query is **skipped entirely** rather than filtered afterwards
 (`equipmentreports.js:618-625`). The weekly report is the Equipment Inspections
@@ -326,7 +337,7 @@ post-trip carrying this id.
 | Weekly Equipment Report — open-trip count | `equipmentreports.js:316` |
 | Weekly Equipment Report — towed distance | `equipmentreports.js:331` |
 | `api/logs.js` open-pretrip list | `logs.js:223` |
-| Dashboard inspection detail | `src/Dashboard.jsx:3283` |
+| Dashboard inspection detail | `src/Dashboard.jsx:3913` |
 
 **Weak link, recorded 2026-09-17, not being worked.** This is the last
 client-supplied foreign id in `SUBMITTABLE_FIELDS.inspection`
@@ -367,8 +378,8 @@ therefore differs on every report of the same fault.
 
 | Consumer | Reads it |
 |---|---|
-| Recurrence count on each action | `api/monthly.js:809` (`annotateRecurrence`) |
-| Per-machine repeat-offender list | `api/monthly.js:819` (`patternsByEquipment`) → `src/Dashboard.jsx:1905,5509` |
+| Recurrence count on each action | `api/monthly.js:850` (`annotateRecurrence`) |
+| Per-machine repeat-offender list | `api/monthly.js:860` (`patternsByEquipment`) → `src/Dashboard.jsx:2368,6395` |
 | Post-trip resolution | `server-lib/correctiveActions.js:327` |
 | Open-defect dedupe on submit | `server-lib/correctiveActions.js:153-199` |
 
@@ -512,7 +523,7 @@ the query itself — it has no database access — so it is recorded with its da
 and its author, for the next session to re-run rather than assume.
 
 **The client's default is still the old one, and it no longer decides
-anything.** `isDocActive` (`Dashboard.jsx:2740-2742`) returns `true` when the
+anything.** `isDocActive` (`Dashboard.jsx:2747-2749`) returns `true` when the
 key is not in the loaded payload — *"not loaded yet / unknown key → default to
 shown"*. Harmless for a known key, because `get_document_settings` returns an
 entry for all 13 built-ins whether or not a row exists
@@ -582,7 +593,7 @@ verified 2026-09-22 (`grep -rn "await requireDocKey(" api/ | wc -l` → **45**):
 **Weekly Hours gates on `inspection`, not `equipment_reports`, and that is not a
 slip** (`equipmentreports.js:763`): it is folded from inspection readings
 (`foldWeeklyUsage`, `:300`) and the Dashboard sub-tab gates it on
-`inspectionsEnabled` (`Dashboard.jsx:2824`), so `equipment_reports` there would
+`inspectionsEnabled` (`Dashboard.jsx:2831`), so `equipment_reports` there would
 lock out a company that bought Equipment Inspections and not the weekly report.
 The surface table in §1 has said `inspection` for Weekly Hours since it was
 added; the server now agrees with it.
@@ -656,7 +667,7 @@ corrective actions the fourth writer of that table, alongside
 | Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 | Attachments (`is_attachment`) | ❌ #18 | — | ✅ `equipmentreports:343,491` | ❌ #17 | — | ❌ #17 | — |
-| Equipment Compliance | ❌ #14 | — | ✅ *(#14, PR #122: `reportPdfs.js:142`)*, gated on its own doc key since `2560819` (`equipmentreports.js:618`) | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4697`; the overview banner it now matches is `Dashboard.jsx:4728`, and both are now gated the same way — cert on `isDocActive("certifications")`, compliance on `complianceEnabled`)* |
+| Equipment Compliance | ❌ #14 | — | ✅ *(#14, PR #122: `reportPdfs.js:142`)*, gated on its own doc key since `2560819` (`equipmentreports.js:618`) | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4809`; the overview banner it now matches is `Dashboard.jsx:4841`, and both are now gated the same way — cert on `isDocActive("certifications")`, compliance on `complianceEnabled`)* |
 | Fleet retirement (`retired_at`) | ✅ *(#15, PR #123 merged `18645f0`: no PM clock)* | ✅ picker filtered | ✅ *(#15: off the weekly report)* | — | — | — | — |
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
@@ -704,7 +715,7 @@ reading** is multi-source. The live consequence is worth knowing: a machine
 fuelled far more than its inspections account for still under-reports
 "Used", and the ending reading is where that discrepancy becomes visible —
 which is why a fuel-derived reading is now labelled as such in both
-consumers (`server-lib/reportPdfs.js:129`, `src/Dashboard.jsx:1626`) rather
+consumers (`server-lib/reportPdfs.js:129`, `src/Dashboard.jsx:1838`) rather
 than silently replacing a trip-derived one.
 
 `api/maintenance.js:128-133` builds PM status from the `inspections` table
@@ -1054,7 +1065,7 @@ reviewing.
   withheld `submitted_by_roster_id` from the near-miss list payload, arguing
   that a column always null for anonymous rows would make "this one is null"
   readable beside rows where it is set. It protects nothing: `is_anonymous`
-  is selected on the same line and `src/Dashboard.jsx:816,957,3166` renders
+  is selected on the same line and `src/Dashboard.jsx:894,1035,3764` renders
   it as the literal word "Anonymous". Anonymity is a *designed, visible*
   property of a near miss, and denying an inference the payload already
   states outright only cost the badge on the non-anonymous ones.
@@ -1090,7 +1101,7 @@ post-trip record too.
 So the one screen meant to answer "which machine keeps failing" is blind to
 damage caught at the *end* of a shift, which is when in-service damage
 actually surfaces. Worse, three readers disagree on one number:
-`Dashboard.jsx:4329-4330` sums both trip types, `analyticsUtils.js` counts
+`Dashboard.jsx:5276-5277` (and `inspIssueCount`, `:4083-4085`) sums both trip types, `analyticsUtils.js` counts
 pretrip only, and `api/equipmentreports.js:172-180` counts post-trip changes
 via `has_changes`. The Inspections tab and the Analytics tab are computed
 from the same array and will not reconcile.
@@ -1248,7 +1259,7 @@ approved halves built and merged the same day.
 | Half | Where |
 |---|---|
 | `compliance_summary` action | `companydata.js:941` — same shape as `certification_summary`: `resolveCompanyId` + `company_id` on the row, supervisor/admin only, machine names resolved in a second `company_id`-scoped query and only when there is something to name |
-| Overview banner | `Dashboard.jsx:4681` (state `:2006`, loader `:2618`) — red when something is already expired, amber when only coming due; gated on having something to show, the same way the Compliance sub-tab is gated today |
+| Overview banner | `Dashboard.jsx:4841` (state `:2006`, loader `:2633`) — red when something is already expired, amber when only coming due; gated on having something to show, the same way the Compliance sub-tab is gated today |
 | Weekly report section | `equipmentreports.js:377` (`foldComplianceSnapshot`) + `:593-618` (the company-scoped query, into `report_json.compliance`) → `reportPdfs.js:142-232` (the rendered section). `cron-equipment-reports.js:74` uses the same builder, so the Sunday-night PDF carries it |
 | One definition of the vocabulary | `server-lib/compliance.js` — `EXPIRY_WARNING_DAYS` / `expiryStatus` / `expiryText` and `COMPLIANCE_DOC_TYPES` / `complianceDocLabel` moved out of `Dashboard.jsx` unchanged, now imported by the browser bundle and by both handlers. A second 30-day window on the server would have been this map's own §4 shape, one release later |
 | Tests | `tests/unit/equipment-compliance-expiry.test.js` — the today/yesterday boundary, the 30-day edge, as-of-week-end classification, an unresolvable machine, and that a report written before this renders byte-identical |
@@ -1274,7 +1285,7 @@ approved halves built and merged the same day.
 
 `equipment_compliance` is written and read by `api/companydata.js:902-969` and
 consumed by exactly one screen, Equipment ▸ Compliance
-(`src/Dashboard.jsx:2483,2575,2598` → `:5899-5989`).
+(`src/Dashboard.jsx:2483,2575,2601` → `:6119-6208`).
 
 *Re-check:* `grep -rn "equipment_compliance" api/ src/ server-lib/` → 6 hits in
 `companydata.js`, 3 in `Dashboard.jsx`, nothing anywhere else. Run 2026-09-17.
@@ -1289,10 +1300,10 @@ and not a Brain signal. The truck goes out the gate expired and FORA knew.
 **The comparison that makes this a break rather than a wish.** FORA already
 solved this exact problem for the other expiry date it tracks: worker
 certifications get a dedicated overview banner on every dashboard open
-(`src/Dashboard.jsx:4650-4670`, fed by `certification_summary` in
+(`src/Dashboard.jsx:4809-4823`, fed by `certification_summary` in
 `api/certifications.js:266-300`, with a 30-day `expiring_soon` window at
 `:33-40`). Machine compliance uses the same three-state model
-(`expiryStatus` → expired / due_soon / ok, `src/Dashboard.jsx:5918-5920`) and
+(`expiryStatus` → expired / due_soon / ok, `src/Dashboard.jsx:6138-6140`) and
 gets none of the reach. Two expiry features, one surfaced, one silent.
 
 A machine whose CVIP expired last week inspects, fuels and reports exactly as
@@ -1322,14 +1333,14 @@ and `:186-207` computes a status for every row returned. A retired machine with
 a `pm_interval` and a service baseline keeps its last known reading forever, so
 its `usageSinceService` is frozen at whatever it was — and if that was past the
 interval, it reports `overdue` permanently (`maintenance.js:201-204`). That
-count feeds the Equipment nav badge (`src/Dashboard.jsx:4592-4593`), so the badge shows work outstanding on a
+count feeds the Equipment nav badge (`src/Dashboard.jsx:4711-4712`), so the badge shows work outstanding on a
 machine the company no longer owns, and there is no way to clear it short of
 hard-deleting the row, which destroys the history retirement exists to keep.
 
 Same shape, smaller: a retired machine's compliance rows still count in the
 Expired / Due-in-30 stat strip. The **add** dropdown uses `activeFleet`
-(`src/Dashboard.jsx:5907`) but the list and the counters use the unfiltered
-`compliance` array (`:5918-5920`).
+(`src/Dashboard.jsx:6153`) but the list and the counters use the unfiltered
+`compliance` array (`:6138-6140`).
 
 *Re-check, before the fix:* `grep -n "retired" api/maintenance.js` → four hits,
 all inside `list_records`. `list_status` had none. Run 2026-09-17 against
@@ -1424,8 +1435,8 @@ Two consequences, both silent:
   is filed against whichever truck towed it that day. Towed by three different
   trucks, it never reaches the threshold at all — and each truck accumulates a
   fault it never had.
-- **The per-machine repeat-offender list** (`api/monthly.js:838`
-  `patternsByEquipment` → `src/Dashboard.jsx:3429,6175`) inherits the same
+- **The per-machine repeat-offender list** (`api/monthly.js:860`
+  `patternsByEquipment` → `src/Dashboard.jsx:3483,6395`) inherits the same
   wrong attribution.
 
 **What it looks like to a customer.** A bent set of forks flagged on a
@@ -1517,8 +1528,8 @@ becomes a paid module; Fleet Overview stays in BASE.
 |---|---|
 | Module | `server-lib/pricing.js:98-103` — `compliance`, "Equipment Compliance", $20 basic / $45 advanced, sole `docKeys` entry `equipment_compliance`. Placed next to `certifications` (`:92-97`), the closest analogue: same three-state expiry model, same 30-day window, people instead of machines |
 | Doc key | `api/customforms.js:119` (13th built-in) + label at `:734` — without the label the Admin Panel renders the raw key (`BUILTIN_LABELS[key] \|\| key`, `:321`) |
-| Sub-tab | `src/Dashboard.jsx:2748` (`complianceEnabled`) → `:2825` |
-| Overview banner | `src/Dashboard.jsx:4728` — `complianceEnabled &&` prepended to the existing has-something-to-show test |
+| Sub-tab | `src/Dashboard.jsx:2755` (`complianceEnabled`) → `:2832` |
+| Overview banner | `src/Dashboard.jsx:4841` — `complianceEnabled &&` prepended to the existing has-something-to-show test |
 | Weekly report section | `api/equipmentreports.js:618-625` — `isDocKeyActive` (`:163-171`), query **skipped**, not filtered |
 | Cron | `api/cron-equipment-reports.js:40-48` — its copy of `isDocKeyActive` still defaulted a missing row to active, which would have contradicted `edd7a41`; now matches |
 | Existing companies | `docs/schema/equipment-compliance-module-backfill.sql`, applied — explicit row per company, company 1 (demo, the only one holding compliance rows) true, the other two false |
@@ -1529,8 +1540,8 @@ document uses: equipment_compliance"*), which is the evidence the net from break
 #6 is live rather than decorative.
 
 *Fleet half — decided as BASE, not a gap.* `EQUIPMENT_SUBTABS`
-(`src/Dashboard.jsx:2820`) still carries `{ key: "fleet", on: true }`, and
-`TAB_VISIBLE.equipment` (`:2782`) is still unconditional `true`. The rationale
+(`src/Dashboard.jsx:2827`) still carries `{ key: "fleet", on: true }`, and
+`TAB_VISIBLE.equipment` (`:2789`) is still unconditional `true`. The rationale
 is now a decision rather than only a code comment: the fleet list is reference
 data every other module joins to — `equipment_id` is this map's most
 load-bearing key — the same way Analytics and SOPs are always-on. Its write
@@ -1544,8 +1555,8 @@ intended.
 
 Original finding: `TAB_VISIBLE.equipment` was `equipmentReportsEnabled`
 (`git show c68f57d:src/Dashboard.jsx`, line 2505) and is now unconditionally
-`true` (`src/Dashboard.jsx:2767`). Inside it, `EQUIPMENT_SUBTABS`
-(`src/Dashboard.jsx:2800-2810`) marks Fleet Overview and Compliance `on: true`
+`true` (`git show ea1c9e1:src/Dashboard.jsx`, line 2767). Inside it, `EQUIPMENT_SUBTABS`
+(`git show ea1c9e1:src/Dashboard.jsx`, lines 2800-2810) marks Fleet Overview and Compliance `on: true`
 while the other six are gated on a doc key. Neither has an entry in
 `BUILTIN_DOC_KEYS` (`api/customforms.js:119`) or a module in
 `server-lib/pricing.js:60-117`.
@@ -1557,7 +1568,7 @@ edit/retire/restore, and per-machine CVIP tracking.
 
 **Why this is filed as a decision rather than a defect.** The code states the
 rationale — the fleet is reference data every other module joins to, not a
-document type (`Dashboard.jsx:2762-2767`) — and that is a defensible product
+document type (`Dashboard.jsx:2784-2789`) — and that is a defensible product
 call; Analytics and SOPs are already always-on the same way. But Compliance is
 not reference data, it is a new tracked-record feature with its own table, its
 own CRUD and its own expiry model, and nothing in this repo records a decision
@@ -1638,7 +1649,7 @@ the right direction for billing — but nothing wrote rows for a company that
 does not come through a purchase. A brand-new company the founder created by
 hand got an empty worker menu (`get_worker_documents` returning `builtinActive`
 all false, `customforms.js:381-386`) and a Dashboard with nothing but Overview
-and the Equipment tab's Fleet Overview (`Dashboard.jsx:2782,2820`), with no
+and the Equipment tab's Fleet Overview (`Dashboard.jsx:2789,2827`), with no
 error and nothing on screen saying why. Never reached production: `edd7a41` is
 not an ancestor of `main`.
 
@@ -1714,7 +1725,7 @@ built-in keys. Verified by Dillon against the FORA Supabase project on
 refused by the API rather than shown fewer tabs, which is a materially worse
 failure than the one #20 fixed.
 
-**What did not change:** the browser still fails open (`Dashboard.jsx:2742`).
+**What did not change:** the browser still fails open (`Dashboard.jsx:2749`).
 That is now presentation only and was left alone on purpose — a settings fetch
 that fails should still render the app, and the handler behind each tab now
 refuses on its own.
@@ -1724,7 +1735,7 @@ refuses on its own.
 *Original finding, 2026-09-18, left as written:*
 
 `2560819` gates Equipment Compliance in three places, all of them presentation:
-the sub-tab (`Dashboard.jsx:2825`), the banner (`:4728`) and the weekly PDF's
+the sub-tab (`Dashboard.jsx:2832`), the banner (`:4841`) and the weekly PDF's
 section (`equipmentreports.js:618`). The four handlers that actually hold the
 data — `list_equipment_compliance` (`companydata.js:1025`), `compliance_summary`
 (`:1071`), `upsert_equipment_compliance` (`:1138`), `delete_equipment_compliance`
@@ -1743,7 +1754,7 @@ action is allowed, which is what this break is about.
 So the only server-side enforcement points in the product are
 `api/equipmentreports.js:163` and `api/cron-equipment-reports.js:40`. Everywhere
 else the gate is the browser's, and the browser fails **open** when the settings
-load fails (`Dashboard.jsx:2742`).
+load fails (`Dashboard.jsx:2749`).
 
 **Not a tenancy hole** — every one of those handlers still scopes by
 `company_id`, so this is a company's own supervisor reaching their own data.
@@ -1996,7 +2007,7 @@ to one artifact, disagreeing.
 **The key choice is the part worth keeping.** Weekly Hours gates on
 `inspection` because it is folded from inspection readings (`foldWeeklyUsage`,
 `equipmentreports.js:300`) and its Dashboard sub-tab gates on
-`inspectionsEnabled` (`src/Dashboard.jsx:2824`). Gating the server on
+`inspectionsEnabled` (`src/Dashboard.jsx:2831`). Gating the server on
 `equipment_reports` — the obvious key, given the file it lives in — would have
 locked out a company that bought Equipment Inspections and not the weekly
 report. **The file a handler lives in is not the module it belongs to.**
@@ -2034,7 +2045,7 @@ belonged to**. Check this before assuming a join key works.
 | `site_id` | PR #118, all five field forms | nothing — every list payload SELECTed only the text | #2 (PR #120) |
 | `submitted_by_roster_id` | PR #118, every submit path | **nothing at all**, anywhere | #8 (PR #120) |
 | `daily_reports.equipment_ids` | 2026-09-17 fleet branch, both submit paths | **nothing at all** — still open | #13, caught before merge |
-| `roster.employee_id` | `8916156`, three roster write paths (`companydata.js:409,471,534`) | nothing but its own badge on the roster row (`Dashboard.jsx:6817`) | **deliberately not filed** — unlike every row above it, no consumer exists that *should* be reading it (FORA has no HRIS surface). See §2 |
+| `roster.employee_id` | `8916156`, three roster write paths (`companydata.js:409,471,534`) | nothing but its own badge on the roster row (`Dashboard.jsx:6955`) | **deliberately not filed** — unlike every row above it, no consumer exists that *should* be reading it (FORA has no HRIS surface). See §2 |
 | `create_company`'s `warning` (a response field, not a column) | `c30d995`, `api/admin.js:433` | **nothing**, for exactly one commit — `src/AdminPanel.jsx:624-626` read `data.error` only, on `!res.ok`; `965d812` made it `:634` | #22, **written and read in consecutive commits** — the one instance in this table caught before merge rather than after months |
 
 The pattern: a fix adds a column, validates it on write, backfills it, and
@@ -2192,14 +2203,14 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #122 | Surfaces 19–22 added and the Equipment hub re-mapped: Maintenance and Fuel Logs stopped being top-level tabs, and `TAB_VISIBLE.equipment` went from `equipmentReportsEnabled` to `true`. **Break #19 opened** — Fleet Overview and Compliance are `on: true` with no `BUILTIN_DOC_KEYS` entry and no `server-lib/pricing.js` module, which is break #6's expensive direction: a feature no module sells ships to every company free. Filed as a decision for Dillon, not a defect; the code states a rationale and nothing in the repo records an approval. |
 | 2026-09-17 | PR #122 | Break #7's root cause **half closed**: `activeUnitNumberClash` (`companydata.js:127-145`) enforces unit-number uniqueness among ACTIVE machines on add, edit and un-retire. Blank unit numbers still collide, and a machine still needs only one of make/model/type. Two statements in break #7 corrected — `update_equipment` exists now, and after a rename Weekly Hours shows the old label while Maintenance Records shows the new one. |
 | 2026-09-17 | PR #122 | Not an interaction break, recorded because it was found by the same sweep: `api/login.js`'s roleless roster **ticket** — minted after the company code, before any PIN — was accepted as a full session by every `verifySession` in `api/`, since a ticket has no `userId` and every copy short-circuits on that. The endpoints scoping by company rather than by role answered it for a 7-day TTL. Every verifier now rejects a payload carrying `purpose`. Found by `tenant-scope-reviewer`; the comment in `login.js` asserting this could never happen was the thing that made it invisible. |
-| 2026-09-18 | PR #122 | **#14 built, not closed** — approved by Dillon, both halves: a `compliance_summary` action (`companydata.js:941`) feeding an overview banner (`Dashboard.jsx:4681`), and a compliance section snapshotted into `report_json` at build time (`equipmentreports.js:377,593-618`) and rendered on the weekly equipment report (`reportPdfs.js:142`). The 30-day window and the doc-type names moved out of `Dashboard.jsx` into `server-lib/compliance.js` so the browser, the API and the PDF answer from one definition — copying a threshold onto the server to close a §4 break would have opened the next one. Snapshot-at-build rather than live-at-render is deliberate: the PDF is cached on first view, so "live" would mean "live for whoever opened it first". **Shipping this makes #15 more visible, not less** — a retired machine's expired CVIP now reaches the banner and the weekly PDF, because filtering it here alone would make three surfaces disagree. No migration, no doc key, no pricing module (#19 untouched). Marked closed only when #122 merges. |
+| 2026-09-18 | PR #122 | **#14 built, not closed** — approved by Dillon, both halves: a `compliance_summary` action (`companydata.js:941`) feeding an overview banner (`Dashboard.jsx:4841`), and a compliance section snapshotted into `report_json` at build time (`equipmentreports.js:377,593-618`) and rendered on the weekly equipment report (`reportPdfs.js:142`). The 30-day window and the doc-type names moved out of `Dashboard.jsx` into `server-lib/compliance.js` so the browser, the API and the PDF answer from one definition — copying a threshold onto the server to close a §4 break would have opened the next one. Snapshot-at-build rather than live-at-render is deliberate: the PDF is cached on first view, so "live" would mean "live for whoever opened it first". **Shipping this makes #15 more visible, not less** — a retired machine's expired CVIP now reaches the banner and the weekly PDF, because filtering it here alone would make three surfaces disagree. No migration, no doc key, no pricing module (#19 untouched). Marked closed only when #122 merges. |
 | 2026-09-18 | PR #122 (`d91fcb6`) | **#14 closed on merge.** Nothing further was built — this row records the state change the map had been carrying as "built, not closed" since the row above it. The compliance banner and the weekly report's compliance section are live for every company that tracks an expiry date. |
 | 2026-09-18 | PR #123 | **#15 built, not closed** — approved by Dillon, including the product call the map had left open. Retirement now means *operationally gone, historically present*: `list_status` filters `retired_at`, and the three compliance surfaces (tab list, `compliance_summary` banner, weekly report snapshot) drop a retired machine's rows through **one** shared rule in `server-lib/equipmentScope.js` rather than three copies — the break was that counts and lists must agree, so three separate filters would have been the same bug in a new shape. #14's comment claiming `compliance_summary` deliberately does not filter was stale the moment this landed and was removed, not left. **The three readers that were already correct stayed correct** and now have tests saying so: `list_records`, `companyEquipmentIndex`, and especially `resolveEquipmentId(s)`, where a "consistency" fix would 403 a submit from a worker whose report sat in the offline queue while the machine was retired and wedge their queue forever (§5, break #2's follow-up). No migration, no `src/` change, no new `api/` file, no doc key (#19 untouched). Marked closed only when #123 merges. |
 | 2026-09-18 | `18645f0` | **#15 closed on merge** (PR #123). No further work — this row records the state change the row above carried as "built, not closed". |
 | 2026-09-18 | `8916156` | New join key `roster.employee_id` — the employer's own number for a person, for a future HRIS sync. Unique per company across active AND inactive rows (`companydata.js:275-291`, index in `docs/schema/roster-employee-id-migration.sql:58-60`), which is the **opposite** rule to `equipment.unit_number`: a unit number is reused when a machine is scrapped, an employee number is not reused when somebody leaves. Read by nothing but its own badge — §4b's shape, recorded and deliberately **not** filed as a break, because no consumer exists that should be reading it. |
 | 2026-09-18 | `edd7a41` | **Built-in document keys flipped to deny-by-default.** A missing `company_document_settings` row resolved as ACTIVE (`customforms.js:323,383`); it now resolves OFF. Custom forms keep allow-by-default on purpose (`:341,386`), pinned by `tests/unit/doc-setting-defaults.test.js`. This is break #6's expensive direction removed from the code rather than from a comment, and it was live: all three companies were running document types nobody had decided to give them. Rows backfilled to each company's exact effective state first, so nothing changed on screen. **Map-wide consequence:** every gated surface's reachability now depends on an explicit row existing, so a ✅ in §3 means the join exists in code, not that the company can reach it. |
-| 2026-09-18 | `2560819` | **#19 decided and built.** Compliance half **closed**: new `compliance` module ($20/$45, `pricing.js:98-103`), 13th doc key `equipment_compliance` (`customforms.js:119,734`), and three gates — sub-tab (`Dashboard.jsx:2748,2825`), overview banner (`:4728`) and the weekly report's compliance section, where the query is skipped rather than filtered (`equipmentreports.js:618-625`) because that report is the *Inspections* module's artifact and would otherwise deliver a paid module's output inside another module's document every Monday. `cron-equipment-reports.js:40-48`'s second copy of `isDocKeyActive` still defaulted to active and was brought in step — two copies of one gate disagreeing is how a cron emails a report the dashboard says should not exist. Existing companies backfilled (`docs/schema/equipment-compliance-module-backfill.sql`, applied). Fleet half **decided as BASE**, not a gap — see §5. Doc-key ↔ module invariant re-checked: 13 keys on both sides, in agreement. Closes when PR #124 merges. |
-| 2026-09-18 | `2560819` | **Breaks #20 and #21 opened by this pass, neither worked.** #20 — deny-by-default has no provisioning path for a company created outside checkout: `api/admin.js:384-411` writes no settings rows at all and `onboardingApproval.js:211` skips them when `request.modules` is NULL, so a hand-created company now gets **zero** document types, silently, where it used to get all of them. The comment above that condition still asserts the old everything-on default — a comment describing behaviour that shipped away underneath it, which is why the gap is invisible. #21 — module gating is UI-only: no handler in `api/` consults `company_document_settings` except the two weekly-report builders, and the client's `isDocActive` fails open (`Dashboard.jsx:2742`). Pre-existing and cross-cutting; recorded now because a module is sold on that gate for the first time. |
+| 2026-09-18 | `2560819` | **#19 decided and built.** Compliance half **closed**: new `compliance` module ($20/$45, `pricing.js:98-103`), 13th doc key `equipment_compliance` (`customforms.js:119,734`), and three gates — sub-tab (`Dashboard.jsx:2755,2832`), overview banner (`:4841`) and the weekly report's compliance section, where the query is skipped rather than filtered (`equipmentreports.js:618-625`) because that report is the *Inspections* module's artifact and would otherwise deliver a paid module's output inside another module's document every Monday. `cron-equipment-reports.js:40-48`'s second copy of `isDocKeyActive` still defaulted to active and was brought in step — two copies of one gate disagreeing is how a cron emails a report the dashboard says should not exist. Existing companies backfilled (`docs/schema/equipment-compliance-module-backfill.sql`, applied). Fleet half **decided as BASE**, not a gap — see §5. Doc-key ↔ module invariant re-checked: 13 keys on both sides, in agreement. Closes when PR #124 merges. |
+| 2026-09-18 | `2560819` | **Breaks #20 and #21 opened by this pass, neither worked.** #20 — deny-by-default has no provisioning path for a company created outside checkout: `api/admin.js:384-411` writes no settings rows at all and `onboardingApproval.js:211` skips them when `request.modules` is NULL, so a hand-created company now gets **zero** document types, silently, where it used to get all of them. The comment above that condition still asserts the old everything-on default — a comment describing behaviour that shipped away underneath it, which is why the gap is invisible. #21 — module gating is UI-only: no handler in `api/` consults `company_document_settings` except the two weekly-report builders, and the client's `isDocActive` fails open (`Dashboard.jsx:2749`). Pre-existing and cross-cutting; recorded now because a module is sold on that gate for the first time. |
 | 2026-09-22 | `c30d995` | **#20 built, not closed** — approved by Dillon, who settled the product question the map had left open: a company that did not come through a checkout gets **everything on, explicitly**, not everything off, because that preserves exactly the pre-`edd7a41` outcome while recording the state as real rows instead of inferring it from an empty table. Both non-checkout paths now write: `api/admin.js:405-409,422-424` (`create_company` captures the inserted id and upserts) and `server-lib/onboardingApproval.js` (the `request.modules` non-empty gate replaced by a ternary, so a NULL or empty list writes an all-on set — the ternary is `:239-241` as of `965d812`; see the #20 entry, whose numbers are re-read against the branch head rather than offset). One definition, `allDocumentSettingsOn` (`pricing.js:255-257`), derived from `MODULE_KEYS` rather than a second copy of the key list — break #1's lesson. Four new cases in `tests/unit/doc-setting-defaults.test.js:92,101,118,127`, one of which reads `BUILTIN_DOC_KEYS` out of `api/customforms.js`'s **source** and asserts the on-by-default set is exactly those 13 keys, and one of which pins that a purchased request still gets only what it bought, so this cannot quietly become "everyone gets everything". 333 unit tests pass. Marked closed only when PR #124 merges. |
 | 2026-09-22 | `551fbfd`, `c30d995` | The comment above `onboardingApproval.js`'s settings write has now been rewritten twice — `551fbfd` replaced the text asserting the old everything-on default with a plain statement that the `if` was a gap, and `c30d995` replaced that with a description of the two-branch write. Map entries quoting the old text were stale and are corrected. **A comment is the thing that made #20 invisible in the first place**, which is why its state is tracked here rather than assumed. |
 | 2026-09-22 | `6719415` | Follow-on to #20, recorded so the map is not read as behind the branch: a request with a `stripe_customer_id` and no module list now logs a warning before the all-on fallback runs (`onboardingApproval.js:232-237`, unchanged since). That is a Stripe session made outside `api/checkout.js` — `resolveModules` rejects an empty selection, so the handler cannot produce one — meaning a retired Payment Link or a hand-made Dashboard session, which would otherwise be handed every module free and silently. Logged rather than blocked: refusing to provision a company that has already paid is worse than over-granting it. Observational only, but it moved the settings write down the file — #20's entry carries numbers re-read against the branch head, not offsets. |
@@ -2207,5 +2218,8 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-22 | `965d812` | **#22 built, not closed** — approved and built the same day it was opened, one commit after the warning it reads was written. `src/AdminPanel.jsx:634` reads `data.warning` and puts it through the `setMsg` banner already on that screen, after `await loadAll()` so the reload cannot overwrite it. The detail that makes it land rather than look like a success toast: the banner's error/success colouring is a **regex on the message text** (`:1215`, consumed at `:1280`), and the warning contains "could not", so it renders in the danger colours — verified by running that regex against that exact string. That coupling is recorded in the #22 entry as a thin thread (a reword could silently turn the alert green) but not filed, since the string and the regex are in view of each other. `onboardingApproval.js:245-255` still handles the same failure with `console.error` and no human — same outcome, no response field to drop, left open deliberately. **The one §4b instance in this map written and read in consecutive commits** instead of sitting in the product for months. Closes when PR #124 merges. |
 | 2026-09-22 | `48d5889` | **#21 built, not closed** — approved explicitly by Dillon ("Build #21"), full server-side gating including the worker submit paths. Built in three steps, in the only order that was safe. **(1) The offline queue got a drop path first.** `drainQueue` caught every failure identically (`markAttempt`, `break`) with no drop path, so one permanently-rejected item wedged that worker's whole queue for that form type forever — survivable only while nothing on the server rejected a well-formed submit permanently, which a module 403 does, stably. A 4xx is now dropped and **reported** in the new `dropped` array (`src/offlineQueue.js:194,243,252-263`), following the `pdfUnlinked` precedent; 401/408/425/429, 5xx, network failures and anything with no status keep the stop-and-preserve-order retry. All eleven resubmit functions attach `err.status`, and `WorkerMenu.jsx:386-407` / `GatehouseBooth.jsx:432` tell the worker what went nowhere and why. **There is still no attempt cap and that is deliberate** (`:215-218`): a cap punishes a worker who was offline for a week, so only the server saying "never" drops anything — the map's three claims that `drainQueue` has "no attempt cap and no drop path" are half stale and are corrected in §2, §5 and the PR #118 row above rather than deleted. **(2) One shared gate, with the duplicate removed rather than tripled.** `server-lib/docKeyGate.js` is deny-by-default and derives its key→module map from `MODULES` in `pricing.js` (`:33-35`); **both** previous copies of `isDocKeyActive` are deleted and migrated onto it (`equipmentreports.js:17`, `cron-equipment-reports.js:20`), so break #1's duplicate-helper shape is resolved here instead of made worse — this entry's own "a fix would touch" note had warned about exactly that. A hard no is **403**, a failed lookup is **503** (`:117-120` as shipped; `:126-133` after `89ca755` renumbered the file), because a 403 now means DROP to a queued submit and a database blip must not delete a worker's shift. Admin exempt (`:113`). **(3) 41 guards across eight handler files** (`grep -rn "await requireDocKey(" api/ \| wc -l` → 41), listed with their actions in §2, along with what was deliberately left ungated: the wallet's five self-service actions (the roster is platform base), the two polymorphic corrective-action endpoints (gating on `monthly` would hide incident follow-ups), admin-only actions, and `create_upload_url` (it runs before the record type is known; the submit is gated). `npm run test:unit` → **364 pass**, re-run by this pass. Deny-by-default enforced server-side is only safe given the live data: all three companies carry an explicit row for every one of the 13 built-in keys, none missing, none with zero rows — queried against the FORA Supabase project on 2026-09-22 before the push **by the session that built `48d5889`**, not by Dillon; recorded in §2 with its date and its author so the next session re-runs it rather than assuming. (An earlier version of this row credited Dillon. Who ran a check is part of being able to re-run it.) Closes when PR #124 merges. |
 | 2026-09-22 | `48d5889` | **Breaks #23, #24 and #25 opened by this pass, none worked, none approved.** #23 — the handlers #21's approved scope did not reach are now gated differently from their neighbours: ten time-clock actions and `set_equipment_pm_interval` (`companydata.js:1423-1616,1214`). *(As first written this entry also covered `api/equipmentreports.js`'s four supervisor-callable actions; `89ca755` fixed those the same day and they are now **#26** — see the row below.)* The sharpest instance: the Sunday cron refuses to build a weekly time-clock report for a company without the module (`cron-equipment-reports.js:85`) and `generate_time_report_now` builds the same report on demand with no such check. `api/timeclockreports.js` is **not** a gap — its handler returns 404 unconditionally (`:77-78`); it is a builder module, recorded because it looks like an ungated endpoint in a file listing. #24 — `src/WalletInvite.jsx:262-300` still renders its "Add a ticket" card for a company without Certification Tracking; the server now refuses it and it fails soft, so a new hire fills in four fields and picks a file before being told. #25 — `custom_<id>` keys belong to no module, so the gate (built from `pricing.js`) does not cover them: `get_active_form` and `submit_custom` (`customforms.js:465,491`) check `custom_forms.is_active` and never `company_document_settings`, while the worker menu filters on it (`:386`). Narrow — custom keys are allow-by-default on purpose and `set_document_setting` is admin-only (`:348`) — and a fix cannot reuse `requireDocKey`, which is deny-by-default and would switch off every custom form with no row. |
-| 2026-09-22 | `89ca755` | **#26 built, not closed** — split out of #23 the day both were opened, found by `tenant-scope-reviewer` reviewing `48d5889`. That commit skipped `api/equipmentreports.js` because the file was "already an enforcement point" — true of the compliance section **inside the report body** (`:600`), false of its own four actions. So the cron refused to build a weekly report on Sunday for a company without Equipment Inspections (`cron-equipment-reports.js:66-67`) and that company's supervisor got the same document, PDF and signed URL included, by calling `generate_now` on Monday: two entry points to one artifact disagreeing, **inside the change meant to stop exactly that**. `list_reports`, `get_report` and `generate_now` now gate on `equipment_reports` (`:666,683,714`); `list_weekly_hours` gates on **`inspection`** (`:763`) because it is folded from inspection readings and its sub-tab gates on `inspectionsEnabled` (`Dashboard.jsx:2824`) — the obvious key would have locked out a company that bought Inspections and not the report, which is the one place in this work where the file a handler lives in was not the module it belongs to. Two smaller fixes rode along, both about the offline queue rather than the gate: the cron reported a **failed** settings read as `reason: 'deactivated'`, collapsing "not bought" with "couldn't check" — an outage at 11:59pm Sunday would have cost every company that week's report and blamed the customer in the only trace of it (`readDocKeySetting` is exported now, `:20,66-67,93-94`); and `requireDocKey` answered a non-admin session with no `companyId` with 403, which since `48d5889` means the queue **drops** the submission, so it returns 401 without querying (`docKeyGate.js:112,123`) — not reachable today, a guard against the shape. 368 unit tests pass. Guard count across `api/` is now **45**. Closes when PR #124 merges. |
+| 2026-09-22 | `89ca755` | **#26 built, not closed** — split out of #23 the day both were opened, found by `tenant-scope-reviewer` reviewing `48d5889`. That commit skipped `api/equipmentreports.js` because the file was "already an enforcement point" — true of the compliance section **inside the report body** (`:600`), false of its own four actions. So the cron refused to build a weekly report on Sunday for a company without Equipment Inspections (`cron-equipment-reports.js:66-67`) and that company's supervisor got the same document, PDF and signed URL included, by calling `generate_now` on Monday: two entry points to one artifact disagreeing, **inside the change meant to stop exactly that**. `list_reports`, `get_report` and `generate_now` now gate on `equipment_reports` (`:666,683,714`); `list_weekly_hours` gates on **`inspection`** (`:763`) because it is folded from inspection readings and its sub-tab gates on `inspectionsEnabled` (`Dashboard.jsx:2831`) — the obvious key would have locked out a company that bought Inspections and not the report, which is the one place in this work where the file a handler lives in was not the module it belongs to. Two smaller fixes rode along, both about the offline queue rather than the gate: the cron reported a **failed** settings read as `reason: 'deactivated'`, collapsing "not bought" with "couldn't check" — an outage at 11:59pm Sunday would have cost every company that week's report and blamed the customer in the only trace of it (`readDocKeySetting` is exported now, `:20,66-67,93-94`); and `requireDocKey` answered a non-admin session with no `companyId` with 403, which since `48d5889` means the queue **drops** the submission, so it returns 401 without querying (`docKeyGate.js:112,123`) — not reachable today, a guard against the shape. 368 unit tests pass. Guard count across `api/` is now **45**. Closes when PR #124 merges. |
 | 2026-09-22 | — | **Third instance on this branch of one reasoning error, recorded as the lesson rather than as a break:** "that's already handled", applied at the wrong granularity. #12 — the generator read `linkedPretrip.results_json` and its *caller* passed three scalars. #16 — the form wrote `unit: 'attachment'` and one of two consumers still tested `'trailer'`. #26 — a file was an enforcement point for one thing inside it and not for its own endpoints. Each time the sentence was true of something adjacent to the thing that wasn't. |
+| 2026-09-22 | `82fa4a2` + `34925b0` | **Every `src/Dashboard.jsx` citation in this map re-anchored — 46 of them, 33 distinct line numbers, against a 7138-line file.** PR #126 rebuilt the supervisor dashboard from a Stitch mockup on `main` (`82fa4a2`, ~673 lines of `Dashboard.jsx`, plus `Sidebar.jsx`, `theme.js`, `index.html`), and this branch merged it forward in `34925b0`. **No offset was applied.** Each claim was re-read in the current file and re-cited where the code it describes actually lives — a diff-derived offset is exactly how a confidently wrong `file:line` gets into a document whose entire value is that a later session can re-check it. Some citations had already drifted *before* #126: `:816,957,3166`, `:1626`, `:1905`, `:3429`, `:4329-4330`, `:4650-4670`, `:5509`, `:5710,5745,5749` and `:6175` all landed on `}}>`, `</div>` or unrelated code at `07795a7` — the branch head the previous map pass was written against — so this was two overlapping drifts, not one. Three citations that were **historical** claims (#19's original finding: "is now `true`", "marks Fleet Overview and Compliance `on: true`") are pinned as `git show ea1c9e1:src/Dashboard.jsx` instead of live line numbers, because the second is false of the file today and a live number would keep asserting it. Zero line-numbered citations to `Sidebar.jsx` or `theme.js` exist in this map — confirmed by grep, not assumed. Two `api/monthly.js` numbers riding on the same claims (`:809`, `:819`/`:838`) were corrected to `:850` and `:860` while verifying them. No application code touched. |
+| 2026-09-22 | `34925b0` | **The merge's one conflict was semantic, not structural, and the shape belongs on the map: a rebuild branched before a module existed and silently reverted that module's gate.** #126 was cut from `main` before Equipment Compliance became purchasable, so its version of the compliance alert banner carried **no** `complianceEnabled &&` test and a comment reading *"compliance has no purchasable module (break #19, open)"* — true on the day it was written, and a paid feature given away free on the day it would have merged. Resolved in favour of keeping the gate (`Dashboard.jsx:4841`); the comment now matches the code. **Nothing would have failed.** No test asks "is this banner gated", the stale comment reads as an explanation rather than a contradiction, and the only symptom is a company seeing a module it never bought — break #6's expensive direction arriving through a *merge* instead of through a new feature, which is this map's first instance of it. The check it argues for: when a long-lived UI branch merges, re-verify every module gate inside the files it rewrote, not only the hunks git marked as conflicting. `EQUIPMENT_SUBTABS`' compliance entry was the same risk and did **not** conflict — verified on the merged file as `{ key: "compliance", label: "Compliance", on: complianceEnabled }` (`:2832`), and `isDocActive` still fails open (`:2749`), unchanged and still presentation-only per #21. |
+| 2026-09-22 | `82fa4a2` | **One genuinely new interaction arrived with #126.** Both overview alert banners now render through a shared `alertBanner` helper (`Dashboard.jsx:4540`) instead of two hand-copied blocks, and each gained a click-through: "View Certifications" (`:4823`) into the Certifications tab, "View Compliance" (`:4855`) into Equipment ▸ Compliance. An expiry a supervisor sees on the overview is now one click from the screen that fixes it — an increment on the reach break #14 was opened about, not a new break. Both actions are gated on their target tab's own `TAB_VISIBLE` entry; the compliance one resolves to `true` unconditionally and is safe only because the banner around it is `complianceEnabled`-gated, which is recorded in §1. The shared helper also removes the hand-copy that let the two banners drift — the `pdf-consistency-reviewer` shape, in the dashboard. |
