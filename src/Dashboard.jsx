@@ -2032,6 +2032,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [timeClockPullUntil, setTimeClockPullUntil] = useState("");
   const [requestingTimeClockPull, setRequestingTimeClockPull] = useState(false);
   const [timeClockPullError, setTimeClockPullError] = useState("");
+  // Whether a company WITHOUT Time Clock still has something on the tab to
+  // see: past reports, entries this week, or the viewer's own open shift.
+  // See timeClockReadOnly below.
+  const [timeClockHistory, setTimeClockHistory] = useState(false);
 
   // ── Roster: view the company's roster and reset an individual PIN ─────
   const [rosterList, setRosterList] = useState([]);
@@ -2753,6 +2757,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const fuelEnabled = isDocActive("fuellog");
   const inspectionsEnabled = isDocActive("inspection");
   const complianceEnabled = isDocActive("equipment_compliance");
+  // Break #27. Dropping Time Clock stops new punches and edits (the server
+  // gates them, api/companydata.js) but not the hours already recorded,
+  // which can be payroll records, and not closing a shift that was open.
+  // So the tab stays for a company that has history, read-only: no Clock In,
+  // no add/edit/delete, no generating reports. A company that never used
+  // Time Clock still does not see the tab at all.
+  const timeClockEnabled = isDocActive("timeclock");
+  const timeClockReadOnly = !timeClockEnabled;
   // Each custom form now carries a `category` (safety/operations/workforce,
   // set by the admin when creating it) — a separate "Custom Docs" tab per
   // category, only shown when that company has at least one active custom
@@ -2790,7 +2802,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     customdocs: hasActiveCustomFormIn("operations"),
     safetycustomdocs: hasActiveCustomFormIn("safety"),
     workforcecustomdocs: hasActiveCustomFormIn("workforce"),
-    timeclock: isDocActive("timeclock"),
+    timeclock: timeClockEnabled || timeClockHistory,
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
     safetyanalytics: true,
@@ -3246,6 +3258,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { /* leave list as-is if the request fails */ }
     setLoadingTimeClockReports(false);
   };
+
+  useEffect(() => {
+    if (timeClockEnabled || !selectedCompany) { setTimeClockHistory(false); return; }
+    let cancelled = false;
+    (async () => {
+      const post = (body) => fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, token }),
+      }).then(r => (r.ok ? r.json() : {})).catch(() => ({}));
+      const [reports, entries, mine] = await Promise.all([
+        post({ action: "list_time_reports", companyId: selectedCompany }),
+        post({ action: "list_time_entries", companyId: selectedCompany }),
+        userId ? post({ action: "my_time_status" }) : Promise.resolve({}),
+      ]);
+      if (cancelled) return;
+      setTimeClockHistory((reports.reports || []).length > 0 || (entries.entries || []).length > 0 || !!mine.open);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompany, timeClockEnabled, token, userId]);
 
   useEffect(() => {
     if (activeTab !== "timeclock" || !selectedCompany) return;
@@ -6566,6 +6598,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "timeclock" && TAB_VISIBLE.timeclock && (
           <>
+            {timeClockReadOnly && (
+              <div style={{ ...styles.card, background: C.status.warning.bg, border: `1.5px solid ${C.status.warning.border}` }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.warning.text }}>
+                  Time Clock isn't part of your company's plan anymore.
+                </div>
+                <div style={{ fontSize: 13, color: C.text.body, marginTop: 4 }}>
+                  Hours already recorded stay here to read and download. New punches, edits and new reports are off. Contact FORA to turn it back on.
+                </div>
+              </div>
+            )}
             {userId && (
               <div style={{ ...styles.card, textAlign: "center" }}>
                 <PanelHeader icon={Clock} title="My Time" />
@@ -6589,13 +6631,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     ) : (
                       <div style={{ fontSize: 13, color: C.text.muted, margin: "8px 0 14px" }}>You're not clocked in.</div>
                     )}
-                    <button onClick={toggleMyClock} disabled={myTimeWorking} style={{
-                      padding: "12px 28px", borderRadius: RAD.md, border: "none", cursor: "pointer",
-                      fontWeight: 800, fontSize: 15, color: "#fff",
-                      background: myTimeWorking ? C.text.faint : myTimeStatus?.open ? C.status.danger.solid : C.status.success.solid,
-                    }}>
-                      {myTimeGettingLocation ? "Getting location…" : myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
-                    </button>
+                    {(!timeClockReadOnly || myTimeStatus?.open) && (
+                      <button onClick={toggleMyClock} disabled={myTimeWorking} style={{
+                        padding: "12px 28px", borderRadius: RAD.md, border: "none", cursor: "pointer",
+                        fontWeight: 800, fontSize: 15, color: "#fff",
+                        background: myTimeWorking ? C.text.faint : myTimeStatus?.open ? C.status.danger.solid : C.status.success.solid,
+                      }}>
+                        {myTimeGettingLocation ? "Getting location…" : myTimeWorking ? "Please wait…" : myTimeStatus?.open ? "Clock Out" : "Clock In"}
+                      </button>
+                    )}
                     {myTimeError && <div style={{ marginTop: 10, color: C.status.danger.text, fontSize: 13, fontWeight: 600 }}>{myTimeError}</div>}
                   </>
                 )}
@@ -6654,8 +6698,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <PanelHeader
                 icon={CircleUserRound}
                 title={`${company?.name || ""} — Everyone's Time${timeClockWeekLabel ? ` (${timeClockWeekLabel})` : ""}`}
-                subtitle="Only you can edit or add a punch — workers can't change their own time"
-                actions={<button onClick={() => setAddEntryOpen(o => !o)} style={{
+                subtitle={timeClockReadOnly ? "Read-only: Time Clock isn't on your plan" : "Only you can edit or add a punch — workers can't change their own time"}
+                actions={timeClockReadOnly ? null : <button onClick={() => setAddEntryOpen(o => !o)} style={{
                   display: "flex", alignItems: "center", gap: 6,
                   background: addEntryOpen ? "transparent" : C.orange, color: addEntryOpen ? C.text.muted : C.text.onOrange,
                   border: addEntryOpen ? `1.5px solid ${C.line}` : "none", borderRadius: RAD.sm,
@@ -6663,7 +6707,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 }}>{addEntryOpen ? "Cancel" : "+ Add Entry"}</button>}
               />
 
-              {addEntryOpen && (
+              {addEntryOpen && !timeClockReadOnly && (
                 <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: 10, marginBottom: 14 }}>
                   <select value={addEntryForm.rosterId} onChange={e => setAddEntryForm(f => ({ ...f, rosterId: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box", background: C.panel, color: C.text.body, cursor: "pointer" }}>
                     <option value="">Select person…</option>
@@ -6710,7 +6754,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           <div style={{ color: C.text.faint, padding: "10px 0", fontSize: 13 }}>No entries this week.</div>
                         ) : memberEntries.map((e, i, arr) => (
                           <div key={e.id} style={{ padding: "10px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                            {editingEntryId === e.id ? (
+                            {editingEntryId === e.id && !timeClockReadOnly ? (
                               <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: 10 }}>
                                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                                   <input type="datetime-local" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }}
@@ -6750,8 +6794,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                                   <div style={{ fontWeight: 700, fontSize: 13, color: C.status.info.text }}>
                                     {e.clock_out ? `${((new Date(e.clock_out) - new Date(e.clock_in)) / 3600000).toFixed(2)} hrs` : "—"}
                                   </div>
-                                  <button onClick={() => { setEditingEntryId(e.id); setEditEntryForm({ clockIn: e.clock_in, clockOut: e.clock_out || "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
-                                  <button onClick={() => deleteTimeClockEntry(e.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Delete</button>
+                                  {!timeClockReadOnly && (
+                                    <>
+                                      <button onClick={() => { setEditingEntryId(e.id); setEditEntryForm({ clockIn: e.clock_in, clockOut: e.clock_out || "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Edit</button>
+                                      <button onClick={() => deleteTimeClockEntry(e.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>Delete</button>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -6768,8 +6816,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <PanelHeader
                 icon={FileText}
                 title={`${company?.name || ""} — Weekly Time Clock Reports`}
-                subtitle="A new report is generated automatically every Sunday at 11:59pm for the week just finished — tap any report to view or download"
-                actions={<>
+                subtitle={timeClockReadOnly
+                  ? "No new reports are generated while Time Clock is off. Tap any report to view or download."
+                  : "A new report is generated automatically every Sunday at 11:59pm for the week just finished — tap any report to view or download"}
+                actions={timeClockReadOnly ? null : <>
                   <button onClick={() => { setShowTimeClockManualPull(s => !s); setTimeClockPullError(""); }} style={{
                     display: "flex", alignItems: "center", gap: 6,
                     background: "transparent", color: C.status.info.text, border: `1.5px solid ${C.status.info.border}`, borderRadius: RAD.sm,
@@ -6788,7 +6838,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 { icon: CircleCheckBig, value: timeClockReports.filter(r => r.pdf_url).length, label: "PDF ready", tone: "success" },
               ]} />
 
-              {showTimeClockManualPull && (
+              {showTimeClockManualPull && !timeClockReadOnly && (
                 <div style={{ background: C.panelInset, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, padding: "12px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <div style={{ fontSize: 12, color: C.text.body, fontWeight: 600 }}>Pull this week's data up to:</div>
                   <input
