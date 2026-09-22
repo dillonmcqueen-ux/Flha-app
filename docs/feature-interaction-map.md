@@ -16,16 +16,22 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-2026-09-18 against commit `2560819` on `claude/equipment-tab-fleet-mgmt-9g0xra`
-(Equipment Compliance sold as a module; built-in document keys flipped to
-deny-by-default in `edd7a41`; `roster.employee_id` in `8916156`). Every ❌ and
-⚠️ in "Known breaks" was read in the code, not inferred.
+2026-09-22 against commit `c30d995` on `claude/equipment-tab-fleet-mgmt-9g0xra`
+(break #20's fix built in `c30d995`, closing when PR #124 merges — both
+non-checkout provisioning paths now write explicit all-on rows; Equipment
+Compliance sold as a module in `2560819`; built-in document keys flipped to
+deny-by-default in `edd7a41`; `roster.employee_id` in `8916156`). Every ❌ and ⚠️ in "Known breaks" was read in the code, not
+inferred.
 
 **Read §2's `document_key` section before anything else on this page.** As of
 `edd7a41` a built-in document type is OFF unless a `company_document_settings`
 row says otherwise, so every ✅ in the matrix below that runs through a gated
 surface is conditional on that company having an explicit row. That changed the
 shape of "is this gated like its neighbours" for all 13 built-in keys at once.
+As of `c30d995` every provisioning path **writes** those rows, so the row exists
+for a company created by hand and for an approval with no module list, not only
+for one that came through a checkout (break #20 — built, closes when PR #124
+merges).
 
 ---
 
@@ -430,16 +436,29 @@ gated surface:**
 
 | Writer | Where | Covers |
 |---|---|---|
-| Purchase approval | `onboardingApproval.js:211-216` → `documentSettingsFor` (`pricing.js:233-243`) | every key in `ALL_DOC_KEYS`, true for what was bought — **only when `request.modules` is a non-empty array** |
+| Purchase approval, modules bought | `onboardingApproval.js:214-219` → `documentSettingsFor` (`pricing.js:233-240`) | all 13 keys, true for what was bought, explicitly false for the rest |
+| Approval with **no** module list (`request.modules` NULL or `[]`) | same ternary, `onboardingApproval.js:214-216` → `allDocumentSettingsOn` (`pricing.js:255-257`) | all 13 keys, all **true** — #20's fix (`c30d995`); wrote nothing at all before |
+| Founder creating a company by hand | `api/admin.js:422-424` (`create_company`) → `allDocumentSettingsOn` | all 13 keys, all **true** — #20's fix (`c30d995`); wrote nothing at all before |
 | Admin toggle | `customforms.js:347-357` (`set_document_setting`, admin only) | one key at a time |
 | Custom form creation | `customforms.js:177-180` | that form's `custom_<id>` key |
-| Founder creating a company by hand | `api/admin.js:384-411` (`create_company`) | **nothing — no row is ever written.** Break #20 |
+
+`allDocumentSettingsOn` (`pricing.js:255-257`) is `documentSettingsFor(companyId,
+MODULE_KEYS)` — derived from the module list rather than a second copy of the
+key list, so a module added later is covered without anyone coming back to it.
+Verified 2026-09-22 against `c30d995` by calling it: **13 rows, every one
+`is_active: true`**, matching `ALL_DOC_KEYS` and `BUILTIN_DOC_KEYS` exactly.
 
 Existing companies were backfilled to their exact effective state before the
 default flipped (`docs/schema/equipment-compliance-module-backfill.sql` for the
 new key; the three companies' pre-existing gaps in `edd7a41`'s message), so the
 flip changed nobody's experience — but that was a one-off data fix, not a code
-path. Nothing writes rows for a company created outside checkout.
+path. The code path is now the five writers above.
+
+**Two ways a company can still end up with no row**, both narrower than #20 was:
+an upsert that fails (`admin.js:425-434` returns a warning nobody displays —
+break #22; `onboardingApproval.js:220-230` logs and carries on), and any company
+provisioned between `edd7a41` and `c30d995`, which on this branch is none,
+because `edd7a41` never reached `main`.
 
 **The client's default is still the old one.** `isDocActive`
 (`Dashboard.jsx:2740-2742`) returns `true` when the key is not in the loaded
@@ -523,9 +542,14 @@ corrective actions the fourth writer of that table, alongside
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
 join exists in code; it does not say the company can reach it. A company with no
-`company_document_settings` row for the key on either side now sees neither
-surface, silently (break #20). Before 2026-09-18 that same missing row meant
-both surfaces were *on*.
+`company_document_settings` row for the key on either side sees neither surface,
+silently. Before 2026-09-18 that same missing row meant both surfaces were *on*.
+
+As of `c30d995` every provisioning path writes the rows (break #20 fixed, closes
+when PR #124 merges), so "no row" is no longer the normal state for a company
+created outside checkout — it is now only a failed upsert
+(`admin.js:425-434`, `onboardingApproval.js:220-230`) or a key an admin switched
+off on purpose.
 
 ---
 
@@ -1423,57 +1447,71 @@ system. Fleet Overview still is, deliberately.
 
 ### #20 — A company created outside checkout now gets no document types at all
 
-**Severity: high for a new company, zero for an existing one. Status: OPEN,
-found 2026-09-18 by this pass against `2560819`. Not approved, not being
-worked.**
+**Severity: high for a new company, zero for an existing one. Status: fix built
+and pushed on `claude/equipment-tab-fleet-mgmt-9g0xra` (PR #124, draft). NOT
+closed — it closes when #124 merges.** Found 2026-09-18 by this map's pass
+against `2560819`, approved by Dillon, built 2026-09-22 in `c30d995`.
 
-`edd7a41` flipped a missing `company_document_settings` row from **active** to
-**off** for every built-in key (`customforms.js:323,383`). That is the right
-direction for billing. But nothing writes rows for a company that does not come
-through a purchase:
+**The decision, Dillon's:** a company that did not come through a checkout gets
+**everything on, explicitly**. Not everything off. The reasoning, recorded
+because the opposite was the obvious-looking choice: everything-on preserves
+exactly the pre-`edd7a41` outcome for these companies, while recording that
+state as real rows instead of inferring it from an empty table — which is the
+whole reason deny-by-default is worth having.
 
-- `api/admin.js:384-411` (`create_company`) inserts the company row and writes
-  **no** `company_document_settings` rows at all — the whole handler is name,
-  code, account number, insert, return.
-- `server-lib/onboardingApproval.js:211` writes settings only
-  `if (Array.isArray(request.modules) && request.modules.length > 0)`. A request
-  with `modules` NULL — an admin-created company, or anything predating modular
-  pricing — falls straight past it.
+**What was built** (verified 2026-09-22 against `c30d995`, each line read):
 
-**The comment sitting directly above that condition now describes behaviour
-that no longer exists** (`onboardingApproval.js:200-210`): *"api/customforms.js
-treats a missing company_document_settings row as 'active' … those keep the old
-everything-on default rather than being silently stripped back."* It has not
-since `edd7a41`. That comment is the whole reason the gap is invisible — it
-reads like a deliberate decision to leave rows unwritten, and it was, under the
-old default.
+| Half | Where |
+|---|---|
+| Hand-created company | `api/admin.js:405-409` — the insert now captures the new id (`.select('id').single()`); `:422-424` upserts `allDocumentSettingsOn(created.id)` on `company_id,document_key` |
+| Approval with no module list | `server-lib/onboardingApproval.js:214-216` — the old `if (Array.isArray(request.modules) && request.modules.length > 0)` gate is gone; it is a ternary now, `documentSettingsFor` when modules were bought, `allDocumentSettingsOn` when the list is NULL or empty. Both branches reach the same upsert at `:217-219` |
+| One definition | `server-lib/pricing.js:255-257` — `allDocumentSettingsOn(companyId)` is `documentSettingsFor(companyId, MODULE_KEYS)`, so it is derived from the module table rather than a second copy of the key list. Ran it: 13 rows, all `is_active: true` |
+| Tests | `tests/unit/doc-setting-defaults.test.js:92,101,118,127` — four new cases. `:101` reads `BUILTIN_DOC_KEYS` **out of `api/customforms.js`'s source** and asserts the on-by-default set is exactly those 13 keys, so this cannot drift the way a copied list would; `:127` asserts a purchased request still gets only what it bought, which is the guard against this fix quietly becoming "everyone gets everything". `npm run test:unit` → **333 pass, 0 fail** |
 
-**What the customer gets.** A brand-new company the founder creates by hand:
-every worker's menu is empty (`get_worker_documents` returns `builtinActive`
-all false, `customforms.js:381-386`), and the supervisor Dashboard shows
-Overview plus the Equipment tab containing only Fleet Overview — because those
-two are the only always-on surfaces (`Dashboard.jsx:2782,2820`). No error, no
-log line, nothing on screen saying why. Recoverable: the founder can flip each
-key in the Admin Panel (`customforms.js:347`), which upserts a real row. But
-nobody is told that is now a required step.
+**Deliberate, and worth not undoing:** a failed settings upsert does not roll
+back the company. `admin.js:425-434` keeps the company row and returns
+`{ ok: true, warning: … }`; the comment's reasoning is that deleting a created
+company is a destructive fix for a recoverable problem. Correct as far as the
+handler goes — but **nothing displays that warning**. That is break #22.
 
-Same shape, narrower: `onboardingApproval.js:217-222` treats a failed settings
-upsert as non-fatal on the stated grounds that *"the admin can fix the toggles
-by hand"* and that failing the approval would be "strictly worse". Under the old
-default a failed upsert left a paid company with everything on; now it leaves
-them with **nothing** on, on the day they paid.
+`onboardingApproval.js:220-230` keeps its own non-fatal handling for the same
+reason, and now carries a note that the failure costs more than it used to: a
+failed upsert once left the company with everything on, and now leaves them
+with nothing on, on the day they paid.
 
-*Re-check:* `grep -rn "company_document_settings" api/ server-lib/ src/` → the
-only writers are `customforms.js:177,351`, `onboardingApproval.js:214`, and a
-delete at `admin.js:559`. Cross-check `sed -n '384,411p' api/admin.js` for the
-absence.
+**The comment that hid this is gone twice over.** The version that asserted the
+old everything-on default was rewritten by `551fbfd` (to say plainly that the
+`if` was a gap, not a decision) and rewritten again by `c30d995` (to describe
+the two-branch write that replaced it). Any quote of the old text is stale —
+`onboardingApproval.js:199-213` is the current wording and it matches the code.
 
-**A fix would touch:** `api/admin.js`'s `create_company` (write a full
-`documentSettingsFor(companyId, [])` set, everything explicitly false, so the
-state is recorded rather than inferred) and/or
-`server-lib/onboardingApproval.js:211`'s condition. No migration. Needs a
-decision on what a hand-created company should default to, which is a product
-question, not a mechanical one.
+**Line numbers in this entry are as of `c30d995`, which is where this map was
+updated from.** The branch's remote tip is one commit further on: `6719415`
+inserts an observational `console.warn` above the write for the one case
+`tenant-scope-reviewer` flagged — a request carrying `stripe_customer_id` but
+**no** module list, i.e. a Stripe session made outside `api/checkout.js`, which
+would now be handed every module free. Logged, not blocked, on the stated
+grounds that refusing to provision a company that has already paid is worse
+than over-granting it. No behaviour change, but it shifts everything below
+`onboardingApproval.js:214` down by 25: the ternary is `:239-241`, the upsert
+`:242-244`, the failure branch `:245-255`.
+
+*Re-check:* `grep -rn "company_document_settings" api/ server-lib/ src/` → run
+2026-09-22 against `c30d995`: writers are now `customforms.js:177,351`,
+`onboardingApproval.js:218` **and `admin.js:423`**, plus the delete at
+`admin.js:585` and the readers in `customforms.js:288,366`,
+`equipmentreports.js:165`, `cron-equipment-reports.js:42`. `admin.js` appearing
+as a writer is the fix.
+
+Original finding: `edd7a41` flipped a missing `company_document_settings` row
+from **active** to **off** for every built-in key (`customforms.js:323,383`),
+the right direction for billing — but nothing wrote rows for a company that
+does not come through a purchase. A brand-new company the founder created by
+hand got an empty worker menu (`get_worker_documents` returning `builtinActive`
+all false, `customforms.js:381-386`) and a Dashboard with nothing but Overview
+and the Equipment tab's Fleet Overview (`Dashboard.jsx:2782,2820`), with no
+error and nothing on screen saying why. Never reached production: `edd7a41` is
+not an ancestor of `main`.
 
 ### #21 — Module gating is UI-only; no handler consults the doc key
 
@@ -1492,8 +1530,11 @@ data — `list_equipment_compliance` (`companydata.js:1025`), `compliance_summar
 
 *Re-check:* `grep -rn "company_document_settings" api/` → 5 files
 (`customforms.js`, `equipmentreports.js`, `cron-equipment-reports.js`,
-`admin.js` for a delete, `login.js` in a comment only). Run 2026-09-18 against
-`2560819`.
+`admin.js`, `login.js` in a comment only). Run 2026-09-18 against `2560819`,
+re-run 2026-09-22 against `c30d995`: **still open, unapproved and untouched.**
+The only change is that `admin.js` now writes settings rows as well as deleting
+them (`:423`, break #20's fix) — it still never *reads* one to decide whether an
+action is allowed, which is what this break is about.
 
 So the only server-side enforcement points in the product are
 `api/equipmentreports.js:163` and `api/cron-equipment-reports.js:40`. Everywhere
@@ -1512,6 +1553,41 @@ which is the shape break #1 exists to warn about) and one guard per gated
 action. Decide the policy first: 403, or empty payload? A 403 reaching an
 offline-queued submit is break #2's follow-up all over again.
 
+### #22 — The one warning the Admin Panel can raise is never shown
+
+**Severity: low, but it is the safety net under #20. Status: OPEN, found
+2026-09-22 by this pass against `c30d995`. Not approved, not being worked.**
+
+`create_company` deliberately does not roll back when the document-settings
+upsert fails — the company row is already in, and deleting it would be a
+destructive fix for a recoverable problem. Instead it returns a warning, and
+its own comment says why: *"somebody has to be told they are currently all
+off"* (`api/admin.js:425-434`). Nobody is told.
+
+| Side | Where |
+|---|---|
+| Producer | `api/admin.js:433` — `return res.status(200).json({ ok: true, warning: 'Company created, but its document types could not be switched on…' })` |
+| Consumer | `src/AdminPanel.jsx:624-626` — `const data = await res.json();` then `if (!res.ok) { … return; }` and straight on to `setNewName(""); … setView("home")`. `data.warning` is never read, and the status is 200, so the founder sees the ordinary success path |
+
+**What the customer gets.** In the one case this exists for, the founder
+creates the company, the screen says it worked, and they hand over an account
+whose every document type is off — the exact outcome #20 was fixed to prevent,
+with the one signal that would have caught it thrown away at the boundary.
+
+*Re-check:* `grep -rn "warning:" api/ server-lib/` → a single hit,
+`admin.js:433`. `grep -rn "data.warning" src/` → nothing; the only `warning`
+matches in `src/` are `C.status.warning` colour tokens. Run 2026-09-22.
+
+**This is §4b's shape, one level up from a column** — a field a producer writes
+that no consumer reads, so nothing errors. It is also narrow: it only fires
+when the upsert itself fails, which is why it is low and not high.
+
+**A fix would touch:** `src/AdminPanel.jsx`'s `addCompany` (surface
+`data.warning` through the existing `setMsg`, which already renders on that
+screen) — and, if it is worth doing once rather than twice, the same treatment
+for `onboardingApproval.js:220-230`, which logs its failure server-side and
+tells nobody at all. No migration. No `api/` change for the first half.
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -1525,6 +1601,7 @@ belonged to**. Check this before assuming a join key works.
 | `submitted_by_roster_id` | PR #118, every submit path | **nothing at all**, anywhere | #8 (PR #120) |
 | `daily_reports.equipment_ids` | 2026-09-17 fleet branch, both submit paths | **nothing at all** — still open | #13, caught before merge |
 | `roster.employee_id` | `8916156`, three roster write paths (`companydata.js:409,471,534`) | nothing but its own badge on the roster row (`Dashboard.jsx:6817`) | **deliberately not filed** — unlike every row above it, no consumer exists that *should* be reading it (FORA has no HRIS surface). See §2 |
+| `create_company`'s `warning` (a response field, not a column) | `c30d995`, `api/admin.js:433` | **nothing** — `src/AdminPanel.jsx:624-626` reads `data.error` only, on `!res.ok` | #22, caught before merge |
 
 The pattern: a fix adds a column, validates it on write, backfills it, and
 stops. The read side — the `select(...)` list, the aggregator, the display —
@@ -1671,3 +1748,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-18 | `edd7a41` | **Built-in document keys flipped to deny-by-default.** A missing `company_document_settings` row resolved as ACTIVE (`customforms.js:323,383`); it now resolves OFF. Custom forms keep allow-by-default on purpose (`:341,386`), pinned by `tests/unit/doc-setting-defaults.test.js`. This is break #6's expensive direction removed from the code rather than from a comment, and it was live: all three companies were running document types nobody had decided to give them. Rows backfilled to each company's exact effective state first, so nothing changed on screen. **Map-wide consequence:** every gated surface's reachability now depends on an explicit row existing, so a ✅ in §3 means the join exists in code, not that the company can reach it. |
 | 2026-09-18 | `2560819` | **#19 decided and built.** Compliance half **closed**: new `compliance` module ($20/$45, `pricing.js:98-103`), 13th doc key `equipment_compliance` (`customforms.js:119,734`), and three gates — sub-tab (`Dashboard.jsx:2748,2825`), overview banner (`:4728`) and the weekly report's compliance section, where the query is skipped rather than filtered (`equipmentreports.js:618-625`) because that report is the *Inspections* module's artifact and would otherwise deliver a paid module's output inside another module's document every Monday. `cron-equipment-reports.js:40-48`'s second copy of `isDocKeyActive` still defaulted to active and was brought in step — two copies of one gate disagreeing is how a cron emails a report the dashboard says should not exist. Existing companies backfilled (`docs/schema/equipment-compliance-module-backfill.sql`, applied). Fleet half **decided as BASE**, not a gap — see §5. Doc-key ↔ module invariant re-checked: 13 keys on both sides, in agreement. Closes when PR #124 merges. |
 | 2026-09-18 | `2560819` | **Breaks #20 and #21 opened by this pass, neither worked.** #20 — deny-by-default has no provisioning path for a company created outside checkout: `api/admin.js:384-411` writes no settings rows at all and `onboardingApproval.js:211` skips them when `request.modules` is NULL, so a hand-created company now gets **zero** document types, silently, where it used to get all of them. The comment above that condition still asserts the old everything-on default — a comment describing behaviour that shipped away underneath it, which is why the gap is invisible. #21 — module gating is UI-only: no handler in `api/` consults `company_document_settings` except the two weekly-report builders, and the client's `isDocActive` fails open (`Dashboard.jsx:2742`). Pre-existing and cross-cutting; recorded now because a module is sold on that gate for the first time. |
+| 2026-09-22 | `c30d995` | **#20 built, not closed** — approved by Dillon, who settled the product question the map had left open: a company that did not come through a checkout gets **everything on, explicitly**, not everything off, because that preserves exactly the pre-`edd7a41` outcome while recording the state as real rows instead of inferring it from an empty table. Both non-checkout paths now write: `api/admin.js:405-409,422-424` (`create_company` captures the inserted id and upserts) and `server-lib/onboardingApproval.js:214-216` (the `request.modules` non-empty gate replaced by a ternary, so a NULL or empty list writes an all-on set). One definition, `allDocumentSettingsOn` (`pricing.js:255-257`), derived from `MODULE_KEYS` rather than a second copy of the key list — break #1's lesson. Four new cases in `tests/unit/doc-setting-defaults.test.js:92,101,118,127`, one of which reads `BUILTIN_DOC_KEYS` out of `api/customforms.js`'s **source** and asserts the on-by-default set is exactly those 13 keys, and one of which pins that a purchased request still gets only what it bought, so this cannot quietly become "everyone gets everything". 333 unit tests pass. Marked closed only when PR #124 merges. |
+| 2026-09-22 | `551fbfd`, `c30d995` | The comment above `onboardingApproval.js`'s settings write has now been rewritten twice — `551fbfd` replaced the text asserting the old everything-on default with a plain statement that the `if` was a gap, and `c30d995` replaced that with a description of the two-branch write. Map entries quoting the old text were stale and are corrected. **A comment is the thing that made #20 invisible in the first place**, which is why its state is tracked here rather than assumed. |
+| 2026-09-22 | `c30d995` | **Break #22 opened by this pass, not worked.** `create_company` returns `{ ok: true, warning: … }` when the settings upsert fails (`api/admin.js:433`) and `src/AdminPanel.jsx:624-626` never reads it — the founder sees the ordinary success path and hands over a company with every document type off, which is the one case #20's fix deliberately cannot prevent. §4b's shape applied to a response field instead of a column. #21 re-checked against `c30d995` and **still open, unapproved and untouched**: the only change is that `admin.js` now writes settings rows (`:423`) as well as deleting them; no handler reads one to decide whether an action is allowed. |
+| 2026-09-22 | `6719415` | Follow-on to #20, recorded so the map is not read as behind the branch: a request with a `stripe_customer_id` and no module list now logs a warning before the all-on fallback runs (`onboardingApproval.js:232-237` at that commit). That is a Stripe session made outside `api/checkout.js` — `resolveModules` rejects an empty selection, so the handler cannot produce one — meaning a retired Payment Link or a hand-made Dashboard session, which would otherwise be handed every module free and silently. Logged rather than blocked: refusing to provision a company that has already paid is worse than over-granting it. Observational only; **this map's #20 line numbers are as of `c30d995` and sit 25 lines higher than at this commit.** |
