@@ -16,13 +16,18 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-2026-09-22 against commit `965d812` on `claude/equipment-tab-fleet-mgmt-9g0xra`
-(breaks #20 and #22 both built, closing when PR #124 merges — both non-checkout
-provisioning paths now write explicit all-on rows, and the one warning that
-path can raise now reaches the founder; Equipment Compliance sold as a module
-in `2560819`; built-in document keys flipped to deny-by-default in `edd7a41`;
-`roster.employee_id` in `8916156`). Every ❌ and ⚠️ in "Known breaks" was read in the code, not
-inferred.
+2026-09-22 against commit `48d5889` on `claude/equipment-tab-fleet-mgmt-9g0xra`
+(breaks #20, #21 and #22 all built, closing when PR #124 merges — **module
+gating is now enforced server-side**, both non-checkout provisioning paths
+write explicit all-on rows, and the one warning that path can raise now
+reaches the founder; Equipment Compliance sold as a module in `2560819`;
+built-in document keys flipped to deny-by-default in `edd7a41`;
+`roster.employee_id` in `8916156`). Three breaks opened by this pass and
+awaiting a decision: **#23** (the time-clock and PM-interval handlers #21's
+scope did not reach), **#24** (`WalletInvite.jsx` still offers a ticket upload
+a gated company cannot use) and **#25** (custom documents ignore their own
+`custom_<id>` setting server-side). Every ❌ and ⚠️ in "Known breaks" was read
+in the code, not inferred.
 
 **Read §2's `document_key` section before anything else on this page.** As of
 `edd7a41` a built-in document type is OFF unless a `company_document_settings`
@@ -32,7 +37,12 @@ shape of "is this gated like its neighbours" for all 13 built-in keys at once.
 As of `c30d995` every provisioning path **writes** those rows, so the row exists
 for a company created by hand and for an approval with no module list, not only
 for one that came through a checkout (break #20 — built, closes when PR #124
-merges).
+merges). And as of `48d5889` the rows are **enforced by the server**, not only
+read by the browser: 41 handler actions across eight files call
+`requireDocKey` (`server-lib/docKeyGate.js:111`) before doing anything, so a
+company that never bought a module can no longer reach it through a saved URL,
+a stale tab, or a client whose settings fetch failed (break #21 — built, closes
+when PR #124 merges).
 
 ---
 
@@ -98,6 +108,11 @@ Supporting surfaces: Onboarding → Claim (`Onboarding.jsx` → `ClaimAccount.js
 Admin Panel, SOPs, Sites, Equipment fleet, Roster, Custom Fields, Billing
 (`api/checkout.js` + `api/stripe-webhook.js`).
 
+**Every doc-key column above is now enforced, not just displayed.**
+`server-lib/docKeyGate.js` (`48d5889`) is the one gate every handler asks; see
+§2's `document_key` section for the 41 guards, the four deliberate exemptions,
+and what is still ungated (break #23).
+
 ---
 
 ## 2. The join keys — the spine of the map
@@ -135,10 +150,25 @@ stored, an id arriving from a client is a tenancy question, exactly as
 `server-lib/siteScope.js` and carries the same three-way contract: the
 fleet row's own id when it belongs to the caller, `false` (→ 403) when it
 belongs to another company, and `null` when it simply doesn't exist —
-**never `false` for a missing id**, because both callers are offline-queued
-and `drainQueue` (`src/offlineQueue.js:185-208`) has no attempt cap and no
-drop path, so a permanent 403 wedges a worker's whole queue. Same failure
-mode recorded for `site_id` under break #2's follow-up.
+**never `false` for a missing id**, because both callers are offline-queued.
+Same failure mode recorded for `site_id` under break #2's follow-up.
+
+**What a 403 costs there changed on 2026-09-22 (`48d5889`), and the rule did
+not.** `drainQueue` (`src/offlineQueue.js:235-272`) used to catch every failure
+the same way — `markAttempt`, then `break` — with no attempt cap **and no drop
+path**, so a permanent 403 wedged that worker's whole queue for that form type
+forever. It now **drops** a permanent 4xx and reports it (`:252-263`,
+`isPermanentRejection` at `:194`), so the same 403 would instead delete that
+worker's inspection outright rather than stalling the queue behind it. Losing
+one signed document is better than losing the queue and still not something a
+retired machine should cause, which is why both helpers still return `null`
+— the reasoning is now carried in the code
+(`server-lib/equipmentScope.js:32-39`, `server-lib/siteScope.js:35-38`).
+
+**There is still no attempt cap, deliberately.** A cap counts attempts, and a
+worker offline for a week racks up attempts on submissions that are perfectly
+good; only the server saying "never" drops anything
+(`src/offlineQueue.js:215-218`).
 
 | Caller | Validates `equipment_id` | Since |
 |---|---|---|
@@ -277,8 +307,10 @@ overview banner (`:4728`), and the weekly report's compliance section, where
 the query is **skipped entirely** rather than filtered afterwards
 (`equipmentreports.js:618-625`). The weekly report is the Equipment Inspections
 module's artifact, so ungated it would have delivered a paid module's output
-inside another module's document every Monday. The `api/companydata.js`
-handlers themselves consult no doc key — see break #21.
+inside another module's document every Monday. **As of `48d5889` the four
+`api/companydata.js` handlers consult the doc key too** — `requireDocKey` at
+`:1028`, `:1077`, `:1146`, `:1194`, so the data is refused and not merely
+hidden (break #21, built).
 
 ### `linked_inspection_id` → `inspections.id` (the trip pair)
 Set on a post-trip to point back at its pre-trip (`Inspection.jsx:53`;
@@ -466,13 +498,80 @@ now displays it (break #22, built in `965d812`);
 reaches a server log and no human — deliberately non-fatal, because failing an
 approval would leave a paid customer with no account at all.
 
-**The client's default is still the old one.** `isDocActive`
-(`Dashboard.jsx:2740-2742`) returns `true` when the key is not in the loaded
-payload — *"not loaded yet / unknown key → default to shown"*. Harmless for a
-known key, because `get_document_settings` returns an entry for all 13 built-ins
-whether or not a row exists (`customforms.js:319-324`); it means a failed or
-pending settings load shows every tab. With no server-side enforcement behind
-them (break #21) that is the whole gate, fail-open.
+**The rows exist for every company today, and deny-by-default is only safe
+because they do.** Verified live against the FORA Supabase project on
+2026-09-22 by Dillon before `48d5889` was pushed: **all three companies carry
+an explicit `company_document_settings` row for every one of the 13 built-in
+keys — none missing, none with zero rows.** That check is the precondition for
+the server-side gate below; a company with a gap would now be refused by the
+API, not merely shown fewer tabs. This pass did not re-run the query itself —
+it is recorded as Dillon's verification, with its date, so the next session
+re-runs it rather than assuming it still holds.
+
+**The client's default is still the old one, and it no longer decides
+anything.** `isDocActive` (`Dashboard.jsx:2740-2742`) returns `true` when the
+key is not in the loaded payload — *"not loaded yet / unknown key → default to
+shown"*. Harmless for a known key, because `get_document_settings` returns an
+entry for all 13 built-ins whether or not a row exists
+(`customforms.js:319-324`); it means a failed or pending settings load still
+shows every tab. Until `48d5889` that fail-open browser check **was** the whole
+gate (break #21). It is now presentation only: the handler behind the tab
+refuses independently.
+
+#### Server-side enforcement — `server-lib/docKeyGate.js` (`48d5889`)
+
+One shared, deny-by-default gate, and **both** previous copies of
+`isDocKeyActive` were deleted rather than left beside it — the duplicate-helper
+shape break #1 exists to warn about is resolved here, not made worse.
+`api/equipmentreports.js:17` and `api/cron-equipment-reports.js:20` now import
+it; neither defines its own.
+
+| Piece | Where | Rule |
+|---|---|---|
+| Key → module | `docKeyGate.js:33-35` | `MODULE_BY_DOC_KEY`, derived by flattening `MODULES[k].docKeys` from `pricing.js`, so a module added there is covered without anyone coming back |
+| Customer-facing name | `docKeyGate.js:43-46` | `moduleLabelForDocKey` — the 403 says "Fuel & Consumables", not `fuellog` |
+| The raw read | `docKeyGate.js:66-77` | missing row → off; `is_active: false` → off; read error → off **and** flagged `unavailable` |
+| Report/cron use | `docKeyGate.js:84-87` | `isDocKeyActive` — denies on a read error too; skipping a company's weekly PDF is the cheap failure |
+| The handler guard | `docKeyGate.js:111-124` | `requireDocKey` → `null` to proceed, `{status, error}` to return verbatim |
+
+**403 vs 503 is the load-bearing distinction, and it is why step 1 had to land
+first.** A hard no is `403`; a *failed lookup* is `503`
+(`docKeyGate.js:117-120`). To a queued submit a 403 now means DROP
+(`src/offlineQueue.js:194`), so answering a five-second database blip with 403
+would delete a worker's shift. Pinned by
+`tests/unit/module-gate.test.js:94` and `tests/unit/offline-queue-drain.test.js:126`.
+
+**Admin is exempt** (`docKeyGate.js:113`), on purpose: that session is the
+founder, not a customer — there is no customer admin role — and the Admin Panel
+reads across every company at once. The boundary this closes is the customer's
+own supervisor and worker sessions, which is exactly who break #21 named.
+
+**Where the 41 guards are**, all verified 2026-09-22 against `48d5889`
+(`grep -rn "await requireDocKey(" api/ | wc -l` → 41):
+
+| File | Guards | Doc key | Actions |
+|---|---|---|---|
+| `api/logs.js` | 8 (`:311,340,586,599,624,679,697,713`) | `table.docKey` — `inspection` `:120`, `toolbox` `:126`, `daily` `:132` | `check_equipment`, `submit`, `list`, `delete`, `update`, `list_open_toolbox`, `get_toolbox_detail`, `sign_late_toolbox` |
+| `api/certifications.js` | 6 (`:143,160,197,247,299,351`) | `certifications` | upload url, add, list, `list_employee_directory`, `certification_summary`, delete |
+| `api/flhas.js` | 6 (`:244,273,439,462,523,542`) | `flha` | `resume`, `submit`, `list`, `update`, `delete`, `approve` |
+| `api/monthly.js` | 5 (`:240,283,488,540,587`) | `monthly` | `get_active_form`, `submit_monthly`, `list_records`, `get_record_detail`, `update_record` |
+| `api/reports.js` | 5 (`:208,339,356,398,442`) | `table.docKey` — `incident` `:116`, `nearmiss` `:122` | `submit`, `list`, `review`, `update`, `delete` |
+| `api/companydata.js` | 4 (`:1028,1077,1146,1194`) | `equipment_compliance` | the four compliance actions — the ones #19 gated in the UI only |
+| `api/maintenance.js` | 4 (`:130,247,327,396`) | `maintenance` | `list_status`, `log_field_service`, `log_service`, `list_records` |
+| `api/fuellogs.js` | 3 (`:116,156,240`) | `fuellog` | `check_equipment`, `submit`, `list` — every action in the file |
+
+**Deliberately NOT gated, so a later sweep does not read these as misses:**
+
+| Left open | Where | Why |
+|---|---|---|
+| The five wallet self-service actions | `api/certifications.js:390,400,414,423,434` (`update_own_profile`, `set_own_pin`, `create_photo_upload_url`, `set_profile_photo`, `complete_onboarding`); reasoning at `:382-389` | These are the **roster**, not Certification Tracking — name, PIN, photo, "I'm done". The roster is platform base every company pays for, so gating them would stop a company without cert tracking from onboarding anyone. The cert-upload half of the same screen **is** gated (`:143`) |
+| `list_corrective_actions` / `update_corrective_action` | `api/monthly.js:681,865`; reasoning at `:661-667` (immediately above `list_corrective_actions`) | Polymorphic since break #5 — an action can come from an incident, a near miss or a failed inspection. Gating them on `monthly` would hide a company's incident follow-ups behind a module it may never have bought. Still scoped by company and role |
+| Admin-only actions | `docKeyGate.js:113` | The founder is on the other side of the paid boundary; gating them would break the console that decides what a company is sold |
+| `create_upload_url` | `api/logs.js:288-293`, `api/reports.js:187`, `api/flhas.js:235`, `api/monthly.js:122`, `api/customforms.js:137` | It mints a signed upload slot inside the caller's own company namespace and runs **before the record type is known**, so there is no doc key to check. The submit that would use the file is gated, which is where a company without the module is stopped |
+
+**Still ungated and now inconsistent with their neighbours — that is break
+#23** (time clock, the PM interval, and `api/equipmentreports.js`'s four
+supervisor actions), and `custom_<id>` documents are **#25**.
 
 ### `source_type` → `company_signals` (the Brain's input)
 | Writer | source_type |
@@ -550,6 +649,13 @@ corrective actions the fourth writer of that table, alongside
 join exists in code; it does not say the company can reach it. A company with no
 `company_document_settings` row for the key on either side sees neither surface,
 silently. Before 2026-09-18 that same missing row meant both surfaces were *on*.
+
+**And as of `48d5889` the gate is the server's, not the browser's.** A missing
+or false row no longer just hides a tab — the handler behind it answers 403
+(`server-lib/docKeyGate.js:111-124`), including on the worker submit paths. So
+a ✅ now means: the join exists in code **and** both companies' rows say yes.
+The two surfaces with no doc key at all (Fleet Overview, Corrective Actions)
+are unaffected by design; see §5.
 
 As of `c30d995` every provisioning path writes the rows (break #20 fixed, closes
 when PR #124 merges), so "no row" is no longer the normal state for a company
@@ -1524,9 +1630,82 @@ not an ancestor of `main`.
 
 ### #21 — Module gating is UI-only; no handler consults the doc key
 
-**Severity: low, pre-existing, cross-cutting. Status: OPEN as a decision, not a
-defect. Recorded 2026-09-18 because `2560819` made it a paid boundary for the
-first time on this branch.**
+**Severity: low, pre-existing, cross-cutting. Status: fix built and pushed on
+`claude/equipment-tab-fleet-mgmt-9g0xra` (PR #124 — confirmed open and a draft,
+head `48d5889`). NOT closed — it closes when #124 merges.** Recorded 2026-09-18
+because `2560819` made it a paid boundary for the first time on this branch;
+approved explicitly by Dillon ("Build #21") and built 2026-09-22 in `48d5889`.
+
+**What was built, in the order it had to be built.** Every line below was read
+in the code on 2026-09-22 against `48d5889`, not taken from the commit message.
+
+*Step 1 — the offline queue got a drop path, first, because the gating needed
+it.* `drainQueue` caught every failure the same way (`markAttempt`, then
+`break`) with no drop path, so one permanently-rejected item wedged that
+worker's whole queue **for that form type, forever**. That was survivable only
+while nothing on the server rejected a well-formed submit permanently — and a
+403 from a module gate is exactly that, stably, for as long as the company
+doesn't own the module.
+
+| Piece | Where |
+|---|---|
+| The rule | `src/offlineQueue.js:194-200` — `isPermanentRejection`: a 4xx is permanent, **except** 401 (stale token on a queue draining days later), 408, 425 and 429 (the server asking to be asked again). No status at all → transient, because a resubmit does several round trips and an inner throw carries no status |
+| The drop | `src/offlineQueue.js:252-263` — `removeQueued`, push onto `results.dropped` with `status` and `reason`, then **`continue`** instead of `break`, so everything queued behind it finally sends |
+| Still transient | `:265-267` — network failure, 5xx, no status: `markAttempt` and stop, preserving order |
+| Reported, not lost | `results.dropped` (`:243`) follows the `pdfUnlinked` precedent — lost work comes back to the caller rather than vanishing |
+| The eleven producers | `err.status = res.status` in `src/App.jsx:73`, `CustomForm.jsx:47`, `DailyReport.jsx:63`, `FieldService.jsx:55`, `FuelLog.jsx:46`, `GatehouseBooth.jsx:96`, `Incident.jsx:147`, `Inspection.jsx:97`, `MonthlyInspection.jsx:48`, `NearMiss.jsx:76`, `ToolboxTalk.jsx:58` — §4b's mirror image avoided on purpose: a reader is useless if one producer doesn't write the field |
+| Surfaced to the worker | `src/WorkerMenu.jsx:386-407` — a red panel naming each dropped form, its timestamp and the server's own reason, ending "Tell your supervisor"; `src/GatehouseBooth.jsx:432` — a dropped-count line beside the "saved offline" count |
+| Tests | `tests/unit/offline-queue-drain.test.js` — 10 cases including the wedge itself (`:51`), that the drop is reported (`:71`), that a 401 and a 429 are **not** permanent (`:115,138`), and that a 503 from the gate keeps the submission queued (`:126`) |
+
+**No attempt cap was added, and that is deliberate** (`src/offlineQueue.js:215-218`):
+a cap counts attempts, and a worker offline for a week racks up attempts on
+submissions that are perfectly good. Only the server saying "never" drops
+anything. The map's three previous statements that `drainQueue` "has no attempt
+cap **and no drop path**" were correct when written and are half stale now —
+corrected in §2, §5 and the changelog rather than deleted, because the
+no-attempt-cap half is still true.
+
+*Step 2 — one shared gate, and the duplicate removed rather than tripled.*
+`server-lib/docKeyGate.js` is new; **both** previous copies of `isDocKeyActive`
+are deleted and migrated onto it (`api/equipmentreports.js:17`,
+`api/cron-equipment-reports.js:20`). That matters beyond tidiness: this entry's
+own "a fix would touch" note warned that two copies of a gate is break #1's
+shape, and the fix resolved it instead of adding a third. `403` for a hard no,
+**`503` for a failed lookup** (`docKeyGate.js:117-120`), because to a queued
+submit a 403 now means "drop this" and a database blip must not delete a
+worker's shift. Admin exempt at `:113`. Full table in §2's `document_key`
+section.
+
+*Step 3 — 41 guards across eight handler files*, listed with their actions in
+§2. `grep -rn "await requireDocKey(" api/ | wc -l` → **41**, run 2026-09-22.
+Two more files (`equipmentreports.js`, `cron-equipment-reports.js`) were
+already gated and now share the one helper — ten handlers touched in total.
+**"Already gated" was true of the report body and not of the four actions a
+supervisor can call in `api/equipmentreports.js`** — that is in break #23, and
+a fix for it is in the working tree as this is written.
+
+*Verification:* `npm run test:unit` → **364 pass, 0 fail**, re-run by this pass
+on 2026-09-22 against `48d5889`. `tests/unit/module-gate.test.js` (12 gate
+cases + 7 end-to-end handler cases at `:209-261` + 2 offline-queue integration
+cases at `:299,313`) exercises the real handlers, including that a denied
+worker submit **writes nothing** (`:228`) and that an admin session is not
+gated (`:256`).
+
+**The precondition that makes deny-by-default safe here** is live data, not
+code: all three companies carry an explicit row for every one of the 13
+built-in keys. Verified by Dillon against the FORA Supabase project on
+2026-09-22 before this was pushed — see §2. A company with a gap would now be
+refused by the API rather than shown fewer tabs, which is a materially worse
+failure than the one #20 fixed.
+
+**What did not change:** the browser still fails open (`Dashboard.jsx:2742`).
+That is now presentation only and was left alone on purpose — a settings fetch
+that fails should still render the app, and the handler behind each tab now
+refuses on its own.
+
+---
+
+*Original finding, 2026-09-18, left as written:*
 
 `2560819` gates Equipment Compliance in three places, all of them presentation:
 the sub-tab (`Dashboard.jsx:2825`), the banner (`:4728`) and the weekly PDF's
@@ -1561,6 +1740,12 @@ already two copies, `equipmentreports.js:163` and `cron-equipment-reports.js:40`
 which is the shape break #1 exists to warn about) and one guard per gated
 action. Decide the policy first: 403, or empty payload? A 403 reaching an
 offline-queued submit is break #2's follow-up all over again.
+
+*(That last paragraph predicted the fix exactly, including the trap. `48d5889`
+did all three: one helper, both copies removed, and the offline queue taught to
+drop a 403 before any guard could produce one. The policy chosen was 403 — with
+503 carved out for a failed lookup, which the paragraph did not anticipate and
+which is the part that keeps a database blip from deleting queued work.)*
 
 ### #22 — The one warning the Admin Panel can raise is never shown
 
@@ -1617,6 +1802,151 @@ response field being dropped there, the approval genuinely has nowhere to
 render to — but it is the same customer outcome on the path where a company
 has already paid, and it is the obvious next thing if this class of failure
 ever actually happens.
+
+### #23 — Time Clock, the PM interval and the weekly-report actions are still gated only in the browser
+
+**Severity: low, same class as #21 was. Status: OPEN, awaiting a decision.
+Opened 2026-09-22 by this map's pass against `48d5889`.**
+
+`48d5889` put a server-side gate on 41 actions. These were **outside the scope
+Dillon approved**, so they are filed rather than folded into #21 — #21 is being
+marked built, and a break marked built must not carry open work inside it.
+
+| Ungated action(s) | Where | Doc key it maps to |
+|---|---|---|
+| `clock_in`, `clock_out`, `my_time_status`, `list_time_entries`, `edit_time_entry`, `add_time_entry`, `delete_time_entry`, `list_time_reports`, `get_time_report`, `generate_time_report_now` | `api/companydata.js:1423,1440,1461,1480,1513,1543,1569,1582,1596,1616` | `timeclock` — module "Time Clock + GPS" (`pricing.js:80-84`) |
+| `set_equipment_pm_interval` | `api/companydata.js:1214` | `maintenance` — module "Preventative Maintenance" (`pricing.js:73-77`) |
+| `list_reports`, `get_report`, `generate_now`, `list_weekly_hours` | `api/equipmentreports.js:657,672,701,745` **at `48d5889`** | `equipment_reports` for the first three, `inspection` for Weekly Hours (`Dashboard.jsx:2824`) |
+
+**The `api/equipmentreports.js` row is already being fixed in the working tree
+and is NOT on the branch yet** — recorded so the counts in this map can be
+reconciled rather than looking wrong. `git diff api/equipmentreports.js` on
+2026-09-22 shows four `requireDocKey` calls being added to exactly those
+actions, found by `tenant-scope-reviewer` on the #21 diff: that file was
+skipped because it was *already* an enforcement point for the report **body**
+(`isDocKeyActive` at `:600`), so "this file is gated" was true of the builder
+and false of the four actions a supervisor can call. When that lands, #23 is
+the two `api/companydata.js` rows only.
+
+*Re-check:* `grep -n "requireDocKey" api/companydata.js` → 5 hits, four guards
+plus the import, **all four on `equipment_compliance`** (`:1028,1077,1146,1194`).
+Nothing in the time-clock block and nothing at `:1214`. Run 2026-09-22 against
+`48d5889`.
+
+**The sharpest evidence is inside the product itself: two entry points to the
+same weekly time-clock report, one gated and one not.** Both call
+`buildTimeClockReportForCompanyWeek` (`api/timeclockreports.js:23`). The Sunday
+cron checks the key first — `isDocKeyActive(supabaseAdmin, c.id, 'timeclock')`,
+`api/cron-equipment-reports.js:85`, skipping the company with
+`reason: 'deactivated'`. `generate_time_report_now`
+(`api/companydata.js:1616`) checks role and company and builds the same report
+on demand. So a company without the `timeclock` module gets no report on
+Sunday and can still pull one on Tuesday. That is precisely "a feature gated
+differently from its neighbours".
+
+**`api/timeclockreports.js` itself is not a gap.** Its HTTP handler returns 404
+unconditionally (`:77-78`) — it is a builder module imported by
+`api/companydata.js:11` and `api/cron-equipment-reports.js:19`, with no actions
+to gate. Recorded because it *looks* like an ungated endpoint in a file listing
+and is not.
+
+**What the customer gets that they didn't buy.** A company that never bought
+Time Clock + GPS, or dropped it, keeps clocking in and out and pulling weekly
+hour reports through a saved URL or a stale tab; the Dashboard tab is hidden
+and the data is not. Same for the PM interval: `set_equipment_pm_interval` is
+the write that starts a machine's maintenance clock, and `api/maintenance.js`'s
+four actions — the ones that *read* that clock — are gated as of `48d5889`. So
+a company without the maintenance module can set an interval it cannot then see.
+
+**A fix would touch:** `api/companydata.js` only — eleven `requireDocKey` calls
+using the helper that already exists, ten on `timeclock` and one on
+`maintenance`. No migration, no new file, no client change.
+
+**Checked before writing that, because it is the trap #21's step 1 exists for:
+time-clock punches are NOT offline-queued.** `src/TimeClock.jsx:62-64` posts
+`clock_in`/`clock_out` straight to `/api/companydata` with no `enqueueSubmission`
+anywhere in the file, and `timeclock` is not one of the ten form types in
+`RESUBMIT_HANDLERS` (`src/WorkerMenu.jsx:26-37`). So a 403 here surfaces as an
+on-screen error, not a dropped punch — this guard is safe to write in a way the
+document-submit guards were not.
+
+### #24 — The wallet invite still offers a ticket upload a gated company can't use
+
+**Severity: low, cosmetic-but-confusing. Status: OPEN, awaiting a decision.
+Opened 2026-09-22 by this map's pass against `48d5889`.**
+
+`src/WalletInvite.jsx` is the one-time screen a new hire opens from an invite
+link. It renders an **"Add a ticket"** card unconditionally
+(`src/WalletInvite.jsx:262-300`) — type, name, issue date, expiry date, file
+picker and an "Add ticket" button — with no module check anywhere in the file
+and no settings fetch to check against.
+
+As of `48d5889` the server behind that card is gated:
+`create_certification_upload_url` (`api/certifications.js:143`) and
+`add_certification` (`:160`) both call `requireDocKey(..., 'certifications')`.
+
+**It fails soft in both directions, which is why this is low and not a defect.**
+`loadCerts` ignores a non-OK response and leaves the list empty
+(`src/WalletInvite.jsx:95-103`), and `addCertification` catches the throw and
+shows the server's own message (the upload throw is caught at `:130-132`; a 403
+from `add_certification` itself lands at `:126`), so the invite still completes
+and the new hire still gets a login. `api/certifications.js:387-389` records
+that this was the expected behaviour when the guards were written — "the invite
+still completes with the tickets section simply empty", which is true of the
+list and not of the *offer*.
+
+**What the customer sees.** A new hire at a company without Certification
+Tracking fills in a ticket type, a name, two dates and picks a photo of their
+card, taps "Add ticket", and is told their company's plan doesn't include
+Certification Tracking — *after* doing the work. Nothing is lost and nothing is
+wrong in the data; it is an offer the product cannot honour.
+
+**A fix would touch:** `src/WalletInvite.jsx` only — the invite screen would
+need to know whether the module is on, which it currently has no way to ask
+(it holds an invite token, not a full session, and never calls
+`get_document_settings`). So the cheap version is hiding the card on the first
+403 from `loadCerts`; the honest version is the invite payload carrying the
+flag. Worth a decision on which, not a mechanical patch. No migration.
+
+### #25 — A custom document's own on/off setting is not enforced server-side
+
+**Severity: low, narrow. Status: OPEN, awaiting a decision. Opened 2026-09-22
+by this map's pass against `48d5889`** — found while checking whether #21's
+guards covered every gated surface, not handed to this pass.
+
+`48d5889`'s gate is built on `MODULE_BY_DOC_KEY` (`docKeyGate.js:33-35`), which
+is derived from `pricing.js` and therefore covers **only the 13 built-in keys**.
+A custom form's `custom_<id>` key belongs to no module, so `requireDocKey` was
+not applied to `api/customforms.js` at all.
+
+| Side | Where |
+|---|---|
+| The setting is written | `customforms.js:177-180` on creation (`is_active: true`), `:351-353` by `set_document_setting` |
+| The worker's menu honours it | `customforms.js:386` — `settingsMap['custom_<id>'] !== false` filters the card out |
+| The supervisor's settings screen honours it | `customforms.js:341` |
+| `get_active_form` does **not** | `customforms.js:465-489` — checks `custom_forms.is_active` (`:477`) and the site's company, never `company_document_settings` |
+| `submit_custom` does **not** | `customforms.js:491` — same |
+
+*Re-check:* `grep -n "settingsMap" api/customforms.js` → `:292,323,341,369,383,386`,
+all inside `get_document_settings` and `get_worker_documents`. Neither
+`get_active_form` nor `submit_custom` appears. Run 2026-09-22 against `48d5889`.
+
+**Two things hold the blast radius down, and both are worth stating so this
+isn't over-read.** First, custom keys are **allow**-by-default on purpose
+(`:341,386`, §5) — the divergence only appears when a row explicitly says
+`false`. Second, `set_document_setting` is **admin-only** (`:348`), so a
+customer's own supervisor cannot produce that row at all; they use
+`toggle_form` (`:199`), which writes `custom_forms.is_active`, which *is*
+checked. So the only way to reach the gap today is the founder switching a
+company's custom document off in the Admin Panel — after which the card
+disappears from the worker menu and the form still opens and still accepts
+submissions from a saved URL.
+
+**A fix would touch:** `api/customforms.js:465,491` — a settings lookup for
+`custom_${formId}` with **allow**-by-default semantics. It cannot reuse
+`requireDocKey` as written: that helper is deny-by-default and would switch off
+every custom form that has no row, which is the exact inversion
+`tests/unit/doc-setting-defaults.test.js` exists to prevent. No migration.
 
 ## 4b. The recurring shape: a key written and never read
 
@@ -1702,10 +2032,28 @@ Do **not** flag these. They are decisions, not gaps.
 - **A RETIRED machine's id still resolves on submit.** `resolveEquipmentId(s)`
   (`equipmentScope.js:42,80,119`) deliberately does not filter `retired_at`. A
   worker's report can sit in the offline queue for days; if the machine was
-  retired in the meantime, rejecting the id would 403 the submit, and
-  `drainQueue` (`src/offlineQueue.js:185-208`) has no attempt cap — one 403
-  wedges that worker's entire queue forever. Same reasoning as break #2's
-  follow-up. Do not "fix" this by adding a retired check.
+  retired in the meantime, rejecting the id would 403 the submit. **What that
+  403 costs changed in `48d5889` and the rule did not:** `drainQueue` used to
+  have no drop path, so one 403 wedged that worker's entire queue forever; it
+  now **drops** a permanent 4xx (`src/offlineQueue.js:252-263`), so the same
+  403 would delete that worker's inspection outright instead. Still the wrong
+  outcome for a machine somebody retired, and still `null` — the reasoning
+  lives in the code at `equipmentScope.js:32-39` and `siteScope.js:35-38`.
+  There is still **no attempt cap**, deliberately (`offlineQueue.js:215-218`):
+  a cap punishes a worker who was offline for a week, so only the server
+  saying "never" drops anything. Same reasoning as break #2's follow-up. Do
+  not "fix" this by adding a retired check.
+- **Four groups of actions are ungated on purpose, as of `48d5889`.** The
+  wallet's five self-service actions (`certifications.js:390,400,414,423,434` —
+  the roster is platform base, and gating them would stop a company without
+  cert tracking onboarding anyone), `list_corrective_actions` /
+  `update_corrective_action` (`monthly.js:681,865` — polymorphic since break
+  #5, so gating on `monthly` would hide a company's incident follow-ups),
+  every admin-only action (`docKeyGate.js:113` — the founder is on the other
+  side of the paid boundary), and `create_upload_url` in all five handlers
+  (it runs before the record type is known; the submit that would use the file
+  is gated). Full reasoning in §2's `document_key` section. **Do not file
+  these as #21 leftovers.** #23 and #25 are the real leftovers.
 - **`list_records` and `companyEquipmentIndex` include retired machines on
   purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
   history or a vetting index
@@ -1749,7 +2097,7 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-17 | PR #118 | Break #5 fixed: corrective actions now open from incidents, near misses and Defective inspection items. Two migrations applied. Surfaced a live regression (NOT NULL ahead of its code) and a gap with no home yet (worker-logged routine service, scoped in `docs/scope-equipment-service-log.md`). |
 | 2026-09-17 | PR #118 | Worker-logged equipment service built (`docs/scope-equipment-service-log.md`). Not a break — a gap with no home. |
 | 2026-09-17 | PR #118 | Break #2 fixed: `site_id` on all five field forms, backfilled 89% of history. Two map errors corrected in the process — the forms already had dropdowns, and `delete_site` was failing outright rather than orphaning. |
-| 2026-09-17 | PR #118 | Break #2 follow-up: fixing `delete_site` made a dangling `site_id` reachable, which permanently wedged the offline queue (`drainQueue` breaks on any throw with no attempt cap). A missing site now stores a text-only record. **A fix for one break created a fault in another — exactly what this map exists to catch, introduced while closing a break.** |
+| 2026-09-17 | PR #118 | Break #2 follow-up: fixing `delete_site` made a dangling `site_id` reachable, which permanently wedged the offline queue (`drainQueue` `break`ed on any throw, with no attempt cap **and no drop path** — the drop path arrived on 2026-09-22 in `48d5889`, which changes what a 403 costs there from "wedges the queue" to "deletes that one record"; there is still no attempt cap, deliberately). A missing site now stores a text-only record. **A fix for one break created a fault in another — exactly what this map exists to catch, introduced while closing a break.** |
 | 2026-09-17 | PR #118 | Break #3 fixed: `submitted_by_roster_id` stamped server-side on all nine document tables, with anonymous near misses structurally protected. |
 | 2026-09-17 | — | **PR #118 merged.** Six migrations live. |
 | 2026-09-17 | PR #119 | Break #7 fixed: weekly equipment reports group by fleet id, with free-text rows reconciled by label. No migration. |
@@ -1783,3 +2131,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-22 | `6719415` | Follow-on to #20, recorded so the map is not read as behind the branch: a request with a `stripe_customer_id` and no module list now logs a warning before the all-on fallback runs (`onboardingApproval.js:232-237`, unchanged since). That is a Stripe session made outside `api/checkout.js` — `resolveModules` rejects an empty selection, so the handler cannot produce one — meaning a retired Payment Link or a hand-made Dashboard session, which would otherwise be handed every module free and silently. Logged rather than blocked: refusing to provision a company that has already paid is worse than over-granting it. Observational only, but it moved the settings write down the file — #20's entry carries numbers re-read against the branch head, not offsets. |
 | 2026-09-22 | `c30d995` | **Break #22 opened by this pass.** `create_company` returns `{ ok: true, warning: … }` when the settings upsert fails (`api/admin.js:433`) and `src/AdminPanel.jsx:624-626` never read it — the founder saw the ordinary success path and would hand over a company with every document type off, which is the one case #20's fix deliberately cannot prevent. §4b's shape applied to a response field instead of a column. Approved and built the same day; see below. #21 re-checked against `c30d995` and **still open, unapproved and untouched**: the only change is that `admin.js` now writes settings rows (`:423`) as well as deleting them; no handler reads one to decide whether an action is allowed. |
 | 2026-09-22 | `965d812` | **#22 built, not closed** — approved and built the same day it was opened, one commit after the warning it reads was written. `src/AdminPanel.jsx:634` reads `data.warning` and puts it through the `setMsg` banner already on that screen, after `await loadAll()` so the reload cannot overwrite it. The detail that makes it land rather than look like a success toast: the banner's error/success colouring is a **regex on the message text** (`:1215`, consumed at `:1280`), and the warning contains "could not", so it renders in the danger colours — verified by running that regex against that exact string. That coupling is recorded in the #22 entry as a thin thread (a reword could silently turn the alert green) but not filed, since the string and the regex are in view of each other. `onboardingApproval.js:245-255` still handles the same failure with `console.error` and no human — same outcome, no response field to drop, left open deliberately. **The one §4b instance in this map written and read in consecutive commits** instead of sitting in the product for months. Closes when PR #124 merges. |
+| 2026-09-22 | `48d5889` | **#21 built, not closed** — approved explicitly by Dillon ("Build #21"), full server-side gating including the worker submit paths. Built in three steps, in the only order that was safe. **(1) The offline queue got a drop path first.** `drainQueue` caught every failure identically (`markAttempt`, `break`) with no drop path, so one permanently-rejected item wedged that worker's whole queue for that form type forever — survivable only while nothing on the server rejected a well-formed submit permanently, which a module 403 does, stably. A 4xx is now dropped and **reported** in the new `dropped` array (`src/offlineQueue.js:194,243,252-263`), following the `pdfUnlinked` precedent; 401/408/425/429, 5xx, network failures and anything with no status keep the stop-and-preserve-order retry. All eleven resubmit functions attach `err.status`, and `WorkerMenu.jsx:386-407` / `GatehouseBooth.jsx:432` tell the worker what went nowhere and why. **There is still no attempt cap and that is deliberate** (`:215-218`): a cap punishes a worker who was offline for a week, so only the server saying "never" drops anything — the map's three claims that `drainQueue` has "no attempt cap and no drop path" are half stale and are corrected in §2, §5 and the PR #118 row above rather than deleted. **(2) One shared gate, with the duplicate removed rather than tripled.** `server-lib/docKeyGate.js` is deny-by-default and derives its key→module map from `MODULES` in `pricing.js` (`:33-35`); **both** previous copies of `isDocKeyActive` are deleted and migrated onto it (`equipmentreports.js:17`, `cron-equipment-reports.js:20`), so break #1's duplicate-helper shape is resolved here instead of made worse — this entry's own "a fix would touch" note had warned about exactly that. A hard no is **403**, a failed lookup is **503** (`:117-120`), because a 403 now means DROP to a queued submit and a database blip must not delete a worker's shift. Admin exempt (`:113`). **(3) 41 guards across eight handler files** (`grep -rn "await requireDocKey(" api/ \| wc -l` → 41), listed with their actions in §2, along with what was deliberately left ungated: the wallet's five self-service actions (the roster is platform base), the two polymorphic corrective-action endpoints (gating on `monthly` would hide incident follow-ups), admin-only actions, and `create_upload_url` (it runs before the record type is known; the submit is gated). `npm run test:unit` → **364 pass**, re-run by this pass. Deny-by-default enforced server-side is only safe given the live data: all three companies carry an explicit row for every one of the 13 built-in keys, none missing, none with zero rows — verified by Dillon against the FORA Supabase project on 2026-09-22 before the push, recorded in §2 with its date so the next session re-runs it rather than assuming. Closes when PR #124 merges. |
+| 2026-09-22 | `48d5889` | **Breaks #23, #24 and #25 opened by this pass, none worked, none approved.** #23 — the handlers #21's approved scope did not reach are now gated differently from their neighbours: ten time-clock actions and `set_equipment_pm_interval` (`companydata.js:1423-1616,1214`), plus `api/equipmentreports.js`'s four supervisor-callable actions (`:657,672,701,745`, already being fixed in the working tree by a `tenant-scope-reviewer` finding — that file was skipped because it was already an enforcement point for the report *body*). The sharpest instance: the Sunday cron refuses to build a weekly time-clock report for a company without the module (`cron-equipment-reports.js:85`) and `generate_time_report_now` builds the same report on demand with no such check. `api/timeclockreports.js` is **not** a gap — its handler returns 404 unconditionally (`:77-78`); it is a builder module, recorded because it looks like an ungated endpoint in a file listing. #24 — `src/WalletInvite.jsx:262-300` still renders its "Add a ticket" card for a company without Certification Tracking; the server now refuses it and it fails soft, so a new hire fills in four fields and picks a file before being told. #25 — `custom_<id>` keys belong to no module, so the gate (built from `pricing.js`) does not cover them: `get_active_form` and `submit_custom` (`customforms.js:465,491`) check `custom_forms.is_active` and never `company_document_settings`, while the worker menu filters on it (`:386`). Narrow — custom keys are allow-by-default on purpose and `set_document_setting` is admin-only (`:348`) — and a fix cannot reuse `requireDocKey`, which is deny-by-default and would switch off every custom form with no row. |
