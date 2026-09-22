@@ -1967,30 +1967,39 @@ still posts the punch directly (`:62-64`) and has no `enqueueSubmission`.
 ### #27 — The time-clock carve-outs were open on the server and unreachable in the product
 
 **Severity: low. Status: fix BUILT on `claude/modular-pricing-enforcement-rzdib2`
-(`98f9d70`), UI only. NOT closed — it closes when that branch's PR merges.**
+(`98f9d70`, UI only), plus a week-paging follow-up **uncommitted on `f561f42`**
+(PR #128) that closes the residual limit. NOT closed — it closes when that
+branch's PR merges.**
 Approved by Dillon 2026-09-22 with the answer to the open question below:
 "readable in the app", so both halves were built, not just the worker's.
 Opened 2026-09-22 by this map's pass against `ac80f96` — found while recording
 #23's carve-outs, not handed to this pass.
 
-**What was built** (`98f9d70`, every line re-read 2026-09-22 against the
-branch head; the tables further down are the as-found record at `ac80f96`, and
-their `Dashboard.jsx` line numbers have since moved):
+**What was built** (`98f9d70` plus the uncommitted paging change on `f561f42`;
+every line re-read 2026-09-22 against that working tree; the tables further
+down are the as-found record at `ac80f96`, and their `Dashboard.jsx` line
+numbers have since moved):
 
 | Half | Producer (server, unchanged) | Consumer (UI, now reached) |
 |---|---|---|
 | Worker closes an open shift | `my_time_status` `companydata.js:1476`, `clock_out` `:1455` | `src/WorkerMenu.jsx:137-150` probes `my_time_status` whenever the menu shows and `builtinActive.timeclock === false` (explicit `false` — `customforms.js:383` writes `settingsMap[key] === true`, so a company with no row counts as off too); `:272-273` falls back to the unfiltered `BUILTIN_TYPES` entry when `openShiftWhileOff`, so the card renders (`:476`) with "You're still clocked in. Tap to clock out." (`:494-495`); `:233` passes `clockOutOnly`, and `src/TimeClock.jsx:157` replaces the button with a "can't clock in" note once `clockedIn` is false. The card goes away on the next menu render after clock-out |
-| Supervisor reads recorded hours | `list_time_reports` `:1603`, `get_time_report` `:1617`, `list_time_entries` `:1495`, `my_time_status` `:1476` | `src/Dashboard.jsx:3262-3280` — when `timeClockEnabled` (`:2766`, `isDocActive("timeclock")`) is false, probes all three and sets `timeClockHistory` if any report, any entry this week, or the viewer's own open shift exists; `TAB_VISIBLE.timeclock: timeClockEnabled \|\| timeClockHistory` (`:2805`). A failed probe reads as `{}` → no tab (fails closed) |
-| Read-only, no write reachable | every write gated server-side by #23 (`:1438,1530,1562,1590,1639`) | `timeClockReadOnly = !timeClockEnabled` (`:2767`) — banner (`:6601`); My Time's button only while `myTimeStatus?.open` (`:6634`), so Clock Out and never Clock In; "+ Add Entry" and its form gone (`:6702,6710`); Edit/Delete gone (`:6757,6797`); Manual Pull and "Generate This Week" gone (`:6822`, the button itself at `:6832`) and the manual-pull panel suppressed (`:6841`). Report rows still open and download via `get_time_report` (`:3363`) |
+| Supervisor reads recorded hours | `list_time_reports` `:1603` (now also returns `latestEntryAt`, the newest `time_clock_entries.clock_in` for the resolved company, `:1614-1625`), `get_time_report` `:1628`, `list_time_entries` `:1495` (honours `weekStart`, `:1500-1501`), `my_time_status` `:1476` | `src/Dashboard.jsx:3281-3305` — when `timeClockEnabled` (`:2772`, `isDocActive("timeclock")`) is false, probes `list_time_reports` and `my_time_status` (the old current-week `list_time_entries` probe is gone) and sets `timeClockHistory` if any report, a non-null `latestEntryAt` (any week), or the viewer's own open shift exists (`:3296`); `TAB_VISIBLE.timeclock: timeClockEnabled \|\| timeClockHistory` (`:2811`). A failed probe reads as `{}` → no tab (fails closed) |
+| Supervisor pages past weeks | `list_time_entries` rounds any date to its Monday (`companydata.js:1500-1501`, `mondayOf` `:240`) | `timeClockWeekStart` / `timeClockShownWeek` (`Dashboard.jsx:2023-2024`); the entries fetch sends `weekStart` when set (`:3026`) and re-runs on it (`:3043`); `showTimeClockWeek` / `timeClockAtCurrentWeek` (`:3047-3054`) step by 7 days and snap back to "" (server default = current week) at the present; Previous / This week / Next card at `:6636-6653`, rendered in both modes. Read-only opens on the week of `latestEntryAt` when that is before the current week (`:3298-3301`); the week resets on company or module change (`:3281`) |
+| Read-only, no write reachable | every write gated server-side by #23 (`:1438,1530,1562,1590,1650`) | `timeClockReadOnly = !timeClockEnabled` (`:2773`) — banner (`:6626`); My Time's button only while `myTimeStatus?.open` (`:6677`), so Clock Out and never Clock In; "+ Add Entry" and its form gone (`:6745,6753`); Edit/Delete gone (`:6800,6840`); Manual Pull and "Generate This Week" gone (`:6865`, the button itself at `:6875`) and the manual-pull panel suppressed (`:6884`). Report rows still open and download via `get_time_report` (`:3388`). Paging adds no write path — it only changes the `weekStart` of a read |
 
 *Re-check:* `grep -n "openShiftWhileOff\|clockOutOnly" src/WorkerMenu.jsx src/TimeClock.jsx`
-and `grep -n "timeClockHistory\|timeClockReadOnly\|timeClockEnabled" src/Dashboard.jsx`
-→ the anchors above. `git diff d4b8aa3 98f9d70 --stat` → five files, all under
-`src/` and `tests/`; no `api/`, no migration. Run 2026-09-22.
+and `grep -n "timeClockHistory\|timeClockReadOnly\|timeClockEnabled\|timeClockWeekStart\|showTimeClockWeek\|latestEntryAt" src/Dashboard.jsx`
+plus `grep -n "latestEntryAt" api/companydata.js` → the anchors above.
+`git diff d4b8aa3 98f9d70 --stat` → five files, all under `src/` and `tests/`;
+no `api/`, no migration. The paging follow-up **does** touch `api/` — one
+read added to `list_time_reports`, company-scoped via `resolveCompanyId`
+(`:1605`) and `.eq('company_id', companyId)` (`:1622`); still no migration
+(`git diff --stat` on `f561f42`: `api/companydata.js`, `src/Dashboard.jsx`,
+three test files). Run 2026-09-22.
 
 *Tests:* `tests/time-clock-module-off.spec.js`, 7 Playwright tests (helpers in
 `tests/helpers.js`). `npx playwright test tests/time-clock-module-off.spec.js`
-→ **7 pass** at `98f9d70`; the same spec and helpers copied into a `d4b8aa3`
+→ **7 pass** at `98f9d70` (now 8 — see the paging tests below); the same spec and helpers copied into a `d4b8aa3`
 worktree → **4 fail, 3 pass** — the 4 are the behaviour tests (worker clocked
 in gets a clock-out, card goes away after, supervisor reads hours with no
 write controls, supervisor clocks out and not back in); the 3 that pass are
@@ -2000,7 +2009,35 @@ the negatives (no open shift → no card, never-used company → no tab, module 
 taken from the build report. (The full 44/44 e2e run is the builder's figure;
 this pass ran only the new spec.)
 
-**Known residual limit — recorded, not a numbered break.** The read-only tab
+*Paging tests (uncommitted, on `f561f42`):* `tests/unit/timeclock-gate.test.js:206`
+asserts `latestEntryAt` comes back and that the `time_clock_entries` query is
+filtered to the **caller's** company even when a supervisor sends another
+`companyId`; `tests/time-clock-module-off.spec.js:114` pages a module-off
+company from the week of its last entry (two weeks back, never a report) to
+the week before, forward again, and to This week with Next disabled; the
+spec's mock (`tests/helpers.js:319-331`) does the same Monday rounding as the
+handler. Re-run by this pass: `npm run test:unit` → **388 pass, 0 fail**;
+`npx playwright test tests/time-clock-module-off.spec.js` → **8 pass**. The
+new files copied into a clean `f561f42` worktree → unit **1 fail / 19 pass**
+(the fail is `:206`) and spec **1 fail / 7 pass** (the fail is `:114`) — both
+new tests fail before and pass after. (45/45 across all specs is the builder's
+figure; this pass ran only this spec.)
+
+**Former residual limit — CLOSED by the uncommitted paging change on
+`f561f42`** (Dillon: "let the supervisor page back through past weeks of
+entries in the read-only tab"). Both halves are gone: any week's entries are
+reachable via Previous / Next (`Dashboard.jsx:6636-6653`, `weekStart` at
+`:3026`), and the tab's visibility no longer depends on the current week
+(`latestEntryAt`, `companydata.js:1614-1625` → `Dashboard.jsx:3296`), so the
+sub-week company keeps its tab after the week rolls over. The cron and
+`generate_time_report_now` are still gated, so the final partial week still
+never becomes a *report* — its hours are read as entries, which was the ask.
+One assumption to keep in view: the browser steps weeks in UTC
+(`Dashboard.jsx:3047-3049`) while `mondayOf` (`companydata.js:240-246`) uses
+the server's local time; they agree because Vercel functions run in UTC. The
+original text, as recorded at `98f9d70`:
+
+> The read-only tab
 shows past reports plus the **current week's** entries only: the Dashboard's
 entries fetch sends no `weekStart` (`Dashboard.jsx:3020`), although the handler
 would honour one (`companydata.js:1500`). Once the module is off the Sunday
@@ -2308,20 +2345,26 @@ Do **not** flag these. They are decisions, not gaps.
   (`companydata.js:1455,1476`): a shift open when a company drops Time Clock +
   GPS must always be closable, and the clock-out screen needs `my_time_status`
   to find it. `list_time_entries`, `list_time_reports` and `get_time_report`
-  (`:1495,1603,1617`): recorded hours are payroll records and stay readable
+  (`:1495,1603,1628` as of the uncommitted tree on `f561f42`; `:1617` before it): recorded hours are payroll records and stay readable
   after cancelling. Reasoning in the code at `:1425-1435`, pinned by
   `tests/unit/timeclock-gate.test.js:156,161,170,176`. **Do not file these as
   #23 leftovers** and do not "make them consistent" with `clock_in`. Their
   *UI* reachability once the module is off was #27, built in `98f9d70`: the
   worker's card and the supervisor's tab now call them read-only when the
-  module is off (`WorkerMenu.jsx:137-150,272-273`, `Dashboard.jsx:2805,3262-3280`).
+  module is off (`WorkerMenu.jsx:137-150,272-273`, `Dashboard.jsx:2811,3281-3305`
+  on the uncommitted tree on `f561f42`).
   The answer there was never to gate these, and still is not.
-- **A company without Time Clock sees only the current week's entries on its
-  read-only tab, on purpose as built in `98f9d70`** (`Dashboard.jsx:3020`
-  sends no `weekStart`). The final partial week never becomes a report because
-  the cron and `generate_time_report_now` are both gated. Recorded as #27's
-  residual limit; do not re-file it as a break without a product decision that
-  it is one.
+- **No longer a limit: a company without Time Clock can page back through
+  every past week on its read-only tab** — the current-week-only residual
+  recorded at `98f9d70` is fixed by the uncommitted change on `f561f42`
+  (Dillon approved it): `weekStart` is sent (`Dashboard.jsx:3026`), paging at
+  `:6636-6653`, and visibility keys off `latestEntryAt`
+  (`companydata.js:1614-1625` → `Dashboard.jsx:3296`) rather than this week's
+  entries. **Still deliberate:** the final partial week never becomes a
+  *report* once the module is off, because the cron and
+  `generate_time_report_now` (`companydata.js:1650`) stay gated — its hours
+  are readable as entries, which is what was asked for. Do not file "no final
+  report at switch-off" as a break without a product decision that it is one.
 - **`list_records` and `companyEquipmentIndex` include retired machines on
   purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
   history or a vetting index
