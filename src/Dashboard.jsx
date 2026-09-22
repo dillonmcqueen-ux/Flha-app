@@ -2016,6 +2016,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [timeClockEntries, setTimeClockEntries] = useState([]);
   const [loadingTimeClockEntries, setLoadingTimeClockEntries] = useState(false);
   const [timeClockWeekLabel, setTimeClockWeekLabel] = useState("");
+  // Which week's entries the Time Clock tab shows. "" means the current week
+  // (the server's default); otherwise any date inside the wanted week, which
+  // list_time_entries rounds down to its Monday. timeClockShownWeek is the
+  // Monday the server actually answered for.
+  const [timeClockWeekStart, setTimeClockWeekStart] = useState("");
+  const [timeClockShownWeek, setTimeClockShownWeek] = useState("");
   const [mapFilterPersonId, setMapFilterPersonId] = useState("");
   const [mapFilterDate, setMapFilterDate] = useState("");
   const [editingEntryId, setEditingEntryId] = useState(null);
@@ -3017,13 +3023,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_time_entries", token, companyId: selectedCompany }),
+        body: JSON.stringify({ action: "list_time_entries", token, companyId: selectedCompany, ...(timeClockWeekStart ? { weekStart: timeClockWeekStart } : {}) }),
       });
       const data = await res.json();
       if (res.ok) {
         setTimeClockRoster(data.roster || []);
         setTimeClockEntries(data.entries || []);
         setTimeClockWeekLabel(`${data.weekStart} to ${data.weekEnd}`);
+        setTimeClockShownWeek(data.weekStart || "");
       }
     } catch (e) { /* leave as-is if the request fails */ }
     setLoadingTimeClockEntries(false);
@@ -3033,7 +3040,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     if (activeTab !== "timeclock" || !selectedCompany) return;
     loadTimeClockEntries();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, selectedCompany, token]);
+  }, [activeTab, selectedCompany, token, timeClockWeekStart]);
+
+  // Week paging. Dates are plain YYYY-MM-DD in UTC, the same way the server
+  // computes its Mondays, so stepping by 7 days lands on the next Monday.
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const shiftWeekISO = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+  const timeClockAtCurrentWeek = !timeClockShownWeek || shiftWeekISO(timeClockShownWeek, 7) > todayISO;
+  const showTimeClockWeek = (days) => {
+    if (!timeClockShownWeek) return;
+    const target = shiftWeekISO(timeClockShownWeek, days);
+    setTimeClockWeekStart(shiftWeekISO(target, 7) > todayISO ? "" : target);
+  };
 
   // ── Roster: view the roster and reset an individual PIN ───────────────
   const loadRosterList = async ({ silent = false } = {}) => {
@@ -3260,6 +3278,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   useEffect(() => {
+    setTimeClockWeekStart("");
     if (timeClockEnabled || !selectedCompany) { setTimeClockHistory(false); return; }
     let cancelled = false;
     (async () => {
@@ -3267,13 +3286,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, token }),
       }).then(r => (r.ok ? r.json() : {})).catch(() => ({}));
-      const [reports, entries, mine] = await Promise.all([
+      // latestEntryAt covers every week, including the final part-week the
+      // cron never turns into a report once the module is off.
+      const [reports, mine] = await Promise.all([
         post({ action: "list_time_reports", companyId: selectedCompany }),
-        post({ action: "list_time_entries", companyId: selectedCompany }),
         userId ? post({ action: "my_time_status" }) : Promise.resolve({}),
       ]);
       if (cancelled) return;
-      setTimeClockHistory((reports.reports || []).length > 0 || (entries.entries || []).length > 0 || !!mine.open);
+      setTimeClockHistory((reports.reports || []).length > 0 || !!reports.latestEntryAt || !!mine.open);
+      // Open on the last week anyone actually worked, not an empty current one.
+      if (reports.latestEntryAt) {
+        const latest = reports.latestEntryAt.slice(0, 10);
+        if (shiftWeekISO(latest, 7) <= todayISO) setTimeClockWeekStart(latest);
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6608,6 +6633,24 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 </div>
               </div>
             )}
+            <div style={{ ...styles.card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "10px 14px" }}>
+              <button onClick={() => showTimeClockWeek(-7)} disabled={!timeClockShownWeek} style={{ background: "transparent", color: C.text.body, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "8px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                ‹ Previous week
+              </button>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text.primary }}>
+                {timeClockWeekLabel ? `Week of ${timeClockWeekLabel}` : "Loading…"}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {!timeClockAtCurrentWeek && (
+                  <button onClick={() => setTimeClockWeekStart("")} style={{ background: "transparent", color: C.text.muted, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "8px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                    This week
+                  </button>
+                )}
+                <button onClick={() => showTimeClockWeek(7)} disabled={timeClockAtCurrentWeek} style={{ background: "transparent", color: timeClockAtCurrentWeek ? C.text.faint : C.text.body, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "8px 12px", fontSize: 13, fontWeight: 700, cursor: timeClockAtCurrentWeek ? "default" : "pointer" }}>
+                  Next week ›
+                </button>
+              </div>
+            </div>
             {userId && (
               <div style={{ ...styles.card, textAlign: "center" }}>
                 <PanelHeader icon={Clock} title="My Time" />

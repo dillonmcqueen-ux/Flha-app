@@ -110,4 +110,36 @@ test.describe('Time Clock after the module is dropped: supervisor', () => {
     await expect(page.getByRole('button', { name: /Add Entry/ })).toBeVisible();
     await expect(page.getByText(/isn't part of your company's plan/)).toHaveCount(0);
   });
+
+  test('hours from a week that never became a report can be paged back to', async ({ page }) => {
+    // Dropped the module mid-week: the cron never turned that week into a
+    // report, so the only record is the entries themselves, two weeks back.
+    const monday = new Date();
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) - 14);
+    monday.setUTCHours(15, 0, 0, 0);
+    const older = new Date(monday.getTime() - 7 * 86400000);
+    mockSupervisorApis(page, {
+      documents: [{ key: 'timeclock', label: 'Time Clock', isCustom: false, isActive: false }],
+      timeRoster: [{ id: 'r1', name: 'Rob Operator', role: 'worker', active: true }],
+      timeEntries: [
+        { id: 'e1', roster_id: 'r1', clock_in: older.toISOString(), clock_out: new Date(older.getTime() + 8 * 3600000).toISOString() },
+        { id: 'e2', roster_id: 'r1', clock_in: monday.toISOString(), clock_out: new Date(monday.getTime() + 10 * 3600000).toISOString() },
+      ],
+    });
+    await loginAsSupervisor(page);
+
+    await page.getByRole('button', { name: 'Time Clock', exact: true }).click();
+    // Opens on the last week anyone worked, not the empty current one.
+    await expect(page.getByText(/Rob Operator .* 10\.0 hrs/)).toBeVisible();
+
+    await page.getByRole('button', { name: /Previous week/ }).click();
+    await expect(page.getByText(/Rob Operator .* 8\.0 hrs/)).toBeVisible();
+
+    await page.getByRole('button', { name: /Next week/ }).click();
+    await expect(page.getByText(/Rob Operator .* 10\.0 hrs/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'This week', exact: true }).click();
+    await expect(page.getByText(/Rob Operator .* 0\.0 hrs/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Next week/ })).toBeDisabled();
+  });
 });

@@ -60,7 +60,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const table = url.pathname.replace('/rest/v1/', '');
   const body = await new Promise(r => { let b = ''; req.on('data', c => b += c); req.on('end', () => r(b)); });
-  calls.push({ method: req.method, table });
+  calls.push({ method: req.method, table, query: url.search });
   const send = (code, payload) => {
     res.writeHead(code, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(payload));
@@ -196,4 +196,19 @@ test('set_equipment_pm_interval gates on maintenance, not timeclock', async () =
   const out = await call({ action: 'set_equipment_pm_interval', token: supervisor(9), id: 901, pmInterval: 250 });
   assert.equal(out.statusCode, 403);
   assert.match(out.body.error, /Preventative Maintenance/);
+});
+
+// ── Break #27 follow-up: the read-only tab has to know hours exist in ANY
+// week, not just this one, or a company that dropped the module loses the
+// tab the Monday after its last shift. list_time_reports carries the latest
+// entry's clock_in so the Dashboard can decide without a second action.
+
+test('list_time_reports returns the latest entry, scoped to the caller\'s company', async () => {
+  const before = calls.length;
+  const out = await call({ action: 'list_time_reports', token: supervisor(8), companyId: 7 });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.equal(out.body.latestEntryAt, '2026-09-21T14:00:00.000Z');
+  const entryQuery = calls.slice(before).find(c => c.table === 'time_clock_entries');
+  assert.ok(entryQuery, 'must look up time_clock_entries');
+  assert.match(entryQuery.query, /company_id=eq\.8/, 'a supervisor sending another companyId must still only see their own');
 });

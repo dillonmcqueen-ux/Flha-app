@@ -1611,7 +1611,18 @@ export default async function handler(req, res) {
         .order('week_start', { ascending: false });
       if (error) return res.status(500).json({ error: 'Could not load reports.' });
       const reports = await Promise.all((data || []).map(async r => ({ ...r, pdf_url: await signStoredUrl(r.pdf_url, 'flha-reports') })));
-      return res.status(200).json({ reports });
+      // The most recent punch in any week (break #27). A company without the
+      // Time Clock module keeps a read-only tab only while it has recorded
+      // hours, and a week that never became a report (the cron skips a
+      // company once the module is off) would otherwise be invisible. A
+      // failed lookup just leaves it null; the reports still come back.
+      const { data: latest } = await supabaseAdmin
+        .from('time_clock_entries')
+        .select('clock_in')
+        .eq('company_id', companyId)
+        .order('clock_in', { ascending: false })
+        .limit(1);
+      return res.status(200).json({ reports, latestEntryAt: (latest && latest[0] && latest[0].clock_in) || null });
     }
 
     if (action === 'get_time_report') {

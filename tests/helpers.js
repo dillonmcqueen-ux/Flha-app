@@ -310,13 +310,25 @@ export function mockSupervisorApis(page, {
   });
 
   page.route('**/api/companydata', async route => {
-    const { action } = route.request().postDataJSON();
+    const body = route.request().postDataJSON();
+    const { action } = body;
     state.calls.push(action);
     if (action === 'list_companies_brief') return json(route, { companies: [{ id: companyId, name: companyName, roster_enabled: false }] });
     if (action === 'list_sops') return json(route, { sops: [] });
     if (action === 'list_sites') return json(route, { sites: [] });
-    if (action === 'list_time_entries') return json(route, { roster: timeRoster, entries: timeEntries, weekStart: '2026-01-01', weekEnd: '2026-01-07' });
-    if (action === 'list_time_reports') return json(route, { reports: timeReports });
+    if (action === 'list_time_entries') {
+      // Same week maths as api/companydata.js: round to the Monday (UTC).
+      const d = new Date(body.weekStart ? `${body.weekStart.slice(0, 10)}T00:00:00Z` : Date.now());
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+      d.setUTCHours(0, 0, 0, 0);
+      const next = new Date(d.getTime() + 7 * 86400000);
+      const entries = timeEntries.filter(e => new Date(e.clock_in) >= d && new Date(e.clock_in) < next);
+      return json(route, { roster: timeRoster, entries, weekStart: d.toISOString().slice(0, 10), weekEnd: new Date(next.getTime() - 86400000).toISOString().slice(0, 10) });
+    }
+    if (action === 'list_time_reports') {
+      const latest = timeEntries.map(e => e.clock_in).sort().pop() || null;
+      return json(route, { reports: timeReports, latestEntryAt: latest });
+    }
     if (action === 'my_time_status') return json(route, { open: state.myOpenShift, recent: [] });
     if (action === 'clock_out') { state.myOpenShift = null; return json(route, { ok: true }); }
     if (action === 'list_roster') return json(route, { members: [] });
