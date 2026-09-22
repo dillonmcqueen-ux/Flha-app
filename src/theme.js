@@ -117,11 +117,13 @@ export const colors = {
 // designed for body-copy density, not a 32px hero figure). Loaded via the
 // same Google Fonts <link> as website/*.html (see index.html); falls back
 // to the system stack if the network request fails or hasn't resolved yet,
-// so the app never looks broken offline.
+// so the app never looks broken offline. `mono` is JetBrains Mono, the
+// metadata/label face from the approved supervisor dashboard mockup
+// (docs/design/supervisor-dashboard/): dates, counts, status lines.
 export const font = {
   heading: "'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
   body: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-  mono: "'SFMono-Regular', ui-monospace, Consolas, monospace",
+  mono: "'JetBrains Mono', 'SFMono-Regular', ui-monospace, Consolas, monospace",
 };
 
 // ---------------------------------------------------------------------------
