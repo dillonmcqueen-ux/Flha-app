@@ -34,7 +34,7 @@ import crypto from 'crypto';
 import { parseSiteLines, parseUserLines, randomToken } from './onboardingHelpers.js';
 import { runOnboardingDrafts } from './onboardingDrafting.js';
 import { sendEmail, siteOrigin } from './email.js';
-import { documentSettingsFor } from './pricing.js';
+import { allDocumentSettingsOn, documentSettingsFor } from './pricing.js';
 
 export const CLAIM_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
@@ -200,32 +200,33 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   // Write an explicit row for every key any module can unlock: true for the
   // ones this purchase covers, false for the rest.
   //
-  // Only when the request actually carries a module list. A request with
-  // `modules` NULL predates modular pricing, or came in without a checkout
-  // (e.g. an admin creating a company by hand), and falls straight past this.
+  // A request whose `modules` is NULL or empty had no checkout choose for it
+  // — it predates modular pricing, or an admin created the company by hand.
+  // That is not "switch nothing on": it gets everything, which is what it got
+  // before `edd7a41`. Back then that happened by writing no rows at all,
+  // because a missing row resolved as active. Since `edd7a41` a missing row
+  // resolves OFF, so writing nothing would now leave a brand-new company with
+  // zero document types, an empty worker menu and no error — break #20.
   //
-  // WARNING, and the reason this is not just a style note: until `edd7a41`
-  // a missing company_document_settings row resolved as ACTIVE, so falling
-  // past this left such a company with every built-in document type, which
-  // is what the comment here used to describe as the deliberate intent.
-  // Since `edd7a41` a missing row resolves OFF (`api/customforms.js:323,383`),
-  // so falling past this now leaves a brand-new company with **zero**
-  // document types — an empty worker menu and a Dashboard with nothing but
-  // Overview and Fleet Overview, with no error and nothing on screen saying
-  // why. That is break #20 in docs/feature-interaction-map.md: OPEN, awaiting
-  // a decision on what a company created outside checkout should default to.
-  // Do not read the `if` below as a considered no-op; it is a gap.
-  if (Array.isArray(request.modules) && request.modules.length > 0) {
-    const settings = documentSettingsFor(companyId, request.modules);
-    const { error: settingsErr } = await supabaseAdmin
-      .from('company_document_settings')
-      .upsert(settings, { onConflict: 'company_id,document_key' });
-    if (settingsErr) {
-      // Not fatal: the company exists and the admin can fix the toggles by
-      // hand. Failing the whole approval here would leave a paid customer
-      // with no account at all, which is strictly worse.
-      console.error('Could not apply purchased module settings:', settingsErr.message);
-    }
+  // So both paths write. The outcome is the same as it always was; what
+  // changed is that the company's state is recorded rather than inferred from
+  // an empty table, which is the whole reason deny-by-default is worth having.
+  const settings = Array.isArray(request.modules) && request.modules.length > 0
+    ? documentSettingsFor(companyId, request.modules)
+    : allDocumentSettingsOn(companyId);
+  const { error: settingsErr } = await supabaseAdmin
+    .from('company_document_settings')
+    .upsert(settings, { onConflict: 'company_id,document_key' });
+  if (settingsErr) {
+    // Not fatal: the company exists and the admin can fix the toggles by
+    // hand. Failing the whole approval here would leave a paid customer
+    // with no account at all, which is strictly worse.
+    //
+    // Note this costs more than it used to. A failed upsert once left the
+    // company with everything on; now it leaves them with nothing on, on the
+    // day they paid. Still the better of the two, but it is a louder failure
+    // than the wording above was written for.
+    console.error('Could not apply document settings:', settingsErr.message);
   }
 
   const siteNames = parseSiteLines(request.sites_list);
