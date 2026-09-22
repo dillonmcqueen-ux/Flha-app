@@ -1213,6 +1213,8 @@ export default async function handler(req, res) {
     // api/maintenance.js never has to guess one.
     if (action === 'set_equipment_pm_interval') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'maintenance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, pmInterval, startingReading, readingUnit } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
@@ -1420,8 +1422,21 @@ export default async function handler(req, res) {
     }
 
     // ── Time Clock: self-service (any registered roster user) ───────────
+    //
+    // Module gating here is deliberately partial (break #23). Everything that
+    // creates or changes time-clock data requires the Time Clock + GPS module:
+    // clock_in, edit/add/delete_time_entry and generate_time_report_now. Four
+    // actions stay open on purpose:
+    //   - clock_out and my_time_status, so a shift that was open when the
+    //     company dropped the module can still be found and closed. Gating
+    //     clock_out would leave it open forever.
+    //   - list_time_entries, list_time_reports and get_time_report, so hours
+    //     already recorded (payroll records) stay readable after cancelling.
+    // Pinned by tests/unit/timeclock-gate.test.js.
     if (action === 'clock_in') {
       if (!session.userId) return res.status(403).json({ error: 'Not available for this login.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'timeclock');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { lat, lng, accuracy } = req.body;
       const { error } = await supabaseAdmin.from('time_clock_entries').insert({
         company_id: session.companyId,
@@ -1512,6 +1527,8 @@ export default async function handler(req, res) {
 
     if (action === 'edit_time_entry') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'timeclock');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { entryId, clockIn, clockOut } = req.body;
       if (!entryId || !clockIn) return res.status(400).json({ error: 'Missing entry details.' });
       const { data: rows, error: findErr } = await supabaseAdmin.from('time_clock_entries').select('id, company_id').eq('id', entryId).limit(1);
@@ -1542,6 +1559,8 @@ export default async function handler(req, res) {
 
     if (action === 'add_time_entry') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'timeclock');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       const { rosterId, clockIn, clockOut } = req.body;
       if (!companyId || !rosterId || !clockIn) return res.status(400).json({ error: 'Missing entry details.' });
@@ -1568,6 +1587,8 @@ export default async function handler(req, res) {
 
     if (action === 'delete_time_entry') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'timeclock');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { entryId } = req.body;
       if (!entryId) return res.status(400).json({ error: 'Missing entry id.' });
       const { data: rows, error: findErr } = await supabaseAdmin.from('time_clock_entries').select('id, company_id').eq('id', entryId).limit(1);
@@ -1615,6 +1636,8 @@ export default async function handler(req, res) {
     // once the week actually closes (same company_id+week_start upsert key).
     if (action === 'generate_time_report_now') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'timeclock');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { weekStart, pullUntil } = req.body;
