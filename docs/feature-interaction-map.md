@@ -16,8 +16,9 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-2026-09-22 against commit `ac80f96` on `claude/modular-pricing-enforcement-rzdib2`
-(break #23 built; #27 opened). Before that, against `48d5889` on
+2026-09-22 against commit `98f9d70` on `claude/modular-pricing-enforcement-rzdib2`
+(break #27 built, UI only; `main` is at `d4b8aa3`, the squash of PR #127, which
+carries #23). Before that, against `ac80f96` (break #23 built; #27 opened); before that, against `48d5889` on
 `claude/equipment-tab-fleet-mgmt-9g0xra` (breaks #20, #21 and #22 all built, closing when PR #124 merges — **module
 gating is now enforced server-side**, both non-checkout provisioning paths
 write explicit all-on rows, and the one warning that path can raise now
@@ -29,10 +30,11 @@ handlers #21's scope did not reach) is **built, not closed** as of `ac80f96` on
 `my_time_status` and the three time-clock reads left open by Dillon's decision
 (§5). Two breaks still awaiting a decision: **#24** (`WalletInvite.jsx` still
 offers a ticket upload a gated company cannot use) and **#25** (custom
-documents ignore their own `custom_<id>` setting server-side). **#27**, opened
-by the `ac80f96` pass: those #23 carve-outs are open on the server and
-unreachable from the product, because both screens that call them hide once
-the module is off. **#26** was split out of #23 the same day
+documents ignore their own `custom_<id>` setting server-side). **#27** (those
+#23 carve-outs were open on the server and unreachable from the product) is
+**built, not closed** as of `98f9d70` — approved by Dillon ("readable in the
+app"); the worker's card and the supervisor's tab now reach them read-only.
+**#26** was split out of #23 the same day
 and is built, not open: `api/equipmentreports.js`'s own four actions were
 ungated until `89ca755`. Every ❌ and ⚠️ in "Known breaks" was read in the
 code, not inferred.
@@ -475,7 +477,7 @@ load-bearing change on this page.** A built-in key with no
 | Built-in, worker's menu | `customforms.js:383` | `settingsMap[key] === true` |
 | Custom form, both handlers | `customforms.js:341,386` | `settingsMap[...] !== false` — still **allow**-by-default |
 | Weekly equipment report builder | `equipmentreports.js:163-171` | `!!(rows[0].is_active)` |
-| Sunday-night cron | `cron-equipment-reports.js:40-48` | same, used at `:76` (`equipment_reports`) and `:99` (`timeclock`) |
+| Sunday-night cron | `readDocKeySetting`, `server-lib/docKeyGate.js:66-75` (imported `cron-equipment-reports.js:20`) | same, used at `cron-equipment-reports.js:66` (`equipment_reports`) and `:93` (`timeclock`) — re-anchored 2026-09-22; the cron's own resolver at `:40-48` is gone since `89ca755` |
 
 The two defaults are opposite **on purpose** and
 `tests/unit/doc-setting-defaults.test.js` (9 cases, all passing 2026-09-18)
@@ -594,8 +596,8 @@ same count via `git grep` at `57efbeb` → **45**):
 | `list_corrective_actions` / `update_corrective_action` | `api/monthly.js:681,865`; reasoning at `:661-667` (immediately above `list_corrective_actions`) | Polymorphic since break #5 — an action can come from an incident, a near miss or a failed inspection. Gating them on `monthly` would hide a company's incident follow-ups behind a module it may never have bought. Still scoped by company and role |
 | Admin-only actions | `docKeyGate.js:113` | The founder is on the other side of the paid boundary; gating them would break the console that decides what a company is sold |
 | `create_upload_url` | `api/logs.js:288-293`, `api/reports.js:187`, `api/flhas.js:235`, `api/monthly.js:122`, `api/customforms.js:137` | It mints a signed upload slot inside the caller's own company namespace and runs **before the record type is known**, so there is no doc key to check. The submit that would use the file is gated, which is where a company without the module is stopped |
-| `clock_out`, `my_time_status` | `api/companydata.js:1455,1476`; reasoning at `:1425-1435` | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *(Whether a worker can actually reach that screen once the module is off is #27.)* |
-| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1495,1603,1617`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`. *(Reachability from the Dashboard once the module is off is #27.)* |
+| `clock_out`, `my_time_status` | `api/companydata.js:1455,1476`; reasoning at `:1425-1435` | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *Reached from the UI as of `98f9d70` (#27, built): the worker's Time Clock card stays while `my_time_status` reports an open shift (`src/WorkerMenu.jsx:137-150,272-273`) and opens a clock-out-only screen (`src/TimeClock.jsx:157`); a supervisor's own open shift keeps its Clock Out button on the read-only tab (`src/Dashboard.jsx:6634`).* |
+| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1495,1603,1617`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`. *Reached from the UI as of `98f9d70` (#27, built): the Time Clock tab stays, read-only, for a company without the module that has reports, entries this week or the viewer's own open shift (`src/Dashboard.jsx:2805,3262-3280`). The UI reads only the current week's entries (`:3020`, no `weekStart`), so the last partial week is readable in-app only until it ends — see #27's residual.* |
 
 **`custom_<id>` documents are still ungated — that is #25.** The time-clock and
 PM-interval half (#23) is built as of `ac80f96`; see the table above for the
@@ -1888,9 +1890,11 @@ positive cases, which is what they should do on the pre-fix file.
 not taken from the build report.
 
 **What the fix does not reach — filed as #27, not folded in here:** the
-carve-outs are open on the server, but both screens that call them hide when
-the module is off, so "can always be closed" and "stays readable" hold at the
-API and not in the product.
+carve-outs are open on the server, but both screens that call them hid when
+the module was off, so "can always be closed" and "stays readable" held at the
+API and not in the product. **The UI now reaches them as of `98f9d70` (#27,
+built, closes when its PR merges)** — see #27 for the anchors and the one
+residual limit.
 
 *As found at `48d5889`:*
 
@@ -1949,11 +1953,60 @@ on-screen error, not a dropped punch — this guard is safe to write in a way th
 document-submit guards were not. Re-checked at `ac80f96`: `src/TimeClock.jsx`
 still posts the punch directly (`:62-64`) and has no `enqueueSubmission`.
 
-### #27 — The time-clock carve-outs are open on the server and unreachable in the product
+### #27 — The time-clock carve-outs were open on the server and unreachable in the product
 
-**Severity: low. Status: OPEN, awaiting a decision. Opened 2026-09-22 by this
-map's pass against `ac80f96`** — found while recording #23's carve-outs, not
-handed to this pass.
+**Severity: low. Status: fix BUILT on `claude/modular-pricing-enforcement-rzdib2`
+(`98f9d70`), UI only. NOT closed — it closes when that branch's PR merges.**
+Approved by Dillon 2026-09-22 with the answer to the open question below:
+"readable in the app", so both halves were built, not just the worker's.
+Opened 2026-09-22 by this map's pass against `ac80f96` — found while recording
+#23's carve-outs, not handed to this pass.
+
+**What was built** (`98f9d70`, every line re-read 2026-09-22 against the
+branch head; the tables further down are the as-found record at `ac80f96`, and
+their `Dashboard.jsx` line numbers have since moved):
+
+| Half | Producer (server, unchanged) | Consumer (UI, now reached) |
+|---|---|---|
+| Worker closes an open shift | `my_time_status` `companydata.js:1476`, `clock_out` `:1455` | `src/WorkerMenu.jsx:137-150` probes `my_time_status` whenever the menu shows and `builtinActive.timeclock === false` (explicit `false` — `customforms.js:383` writes `settingsMap[key] === true`, so a company with no row counts as off too); `:272-273` falls back to the unfiltered `BUILTIN_TYPES` entry when `openShiftWhileOff`, so the card renders (`:476`) with "You're still clocked in. Tap to clock out." (`:494-495`); `:233` passes `clockOutOnly`, and `src/TimeClock.jsx:157` replaces the button with a "can't clock in" note once `clockedIn` is false. The card goes away on the next menu render after clock-out |
+| Supervisor reads recorded hours | `list_time_reports` `:1603`, `get_time_report` `:1617`, `list_time_entries` `:1495`, `my_time_status` `:1476` | `src/Dashboard.jsx:3262-3280` — when `timeClockEnabled` (`:2766`, `isDocActive("timeclock")`) is false, probes all three and sets `timeClockHistory` if any report, any entry this week, or the viewer's own open shift exists; `TAB_VISIBLE.timeclock: timeClockEnabled \|\| timeClockHistory` (`:2805`). A failed probe reads as `{}` → no tab (fails closed) |
+| Read-only, no write reachable | every write gated server-side by #23 (`:1438,1530,1562,1590,1639`) | `timeClockReadOnly = !timeClockEnabled` (`:2767`) — banner (`:6601`); My Time's button only while `myTimeStatus?.open` (`:6634`), so Clock Out and never Clock In; "+ Add Entry" and its form gone (`:6702,6710`); Edit/Delete gone (`:6757,6797`); Manual Pull and "Generate This Week" gone (`:6822`, the button itself at `:6832`) and the manual-pull panel suppressed (`:6841`). Report rows still open and download via `get_time_report` (`:3363`) |
+
+*Re-check:* `grep -n "openShiftWhileOff\|clockOutOnly" src/WorkerMenu.jsx src/TimeClock.jsx`
+and `grep -n "timeClockHistory\|timeClockReadOnly\|timeClockEnabled" src/Dashboard.jsx`
+→ the anchors above. `git diff d4b8aa3 98f9d70 --stat` → five files, all under
+`src/` and `tests/`; no `api/`, no migration. Run 2026-09-22.
+
+*Tests:* `tests/time-clock-module-off.spec.js`, 7 Playwright tests (helpers in
+`tests/helpers.js`). `npx playwright test tests/time-clock-module-off.spec.js`
+→ **7 pass** at `98f9d70`; the same spec and helpers copied into a `d4b8aa3`
+worktree → **4 fail, 3 pass** — the 4 are the behaviour tests (worker clocked
+in gets a clock-out, card goes away after, supervisor reads hours with no
+write controls, supervisor clocks out and not back in); the 3 that pass are
+the negatives (no open shift → no card, never-used company → no tab, module on
+→ every control), which is what they should do on the pre-fix code.
+`npm run test:unit` → **387 pass, 0 fail**. All re-run by this map's pass, not
+taken from the build report. (The full 44/44 e2e run is the builder's figure;
+this pass ran only the new spec.)
+
+**Known residual limit — recorded, not a numbered break.** The read-only tab
+shows past reports plus the **current week's** entries only: the Dashboard's
+entries fetch sends no `weekStart` (`Dashboard.jsx:3020`), although the handler
+would honour one (`companydata.js:1500`). Once the module is off the Sunday
+cron skips the company (`cron-equipment-reports.js:93-94`, `reason:
+'deactivated'`) and `generate_time_report_now` is gated (`companydata.js:1639`),
+so the final partial week never becomes a report: its hours are readable in the
+app until that week ends, then only from `time_clock_entries`. The data is
+retained. The same boundary means a company that used Time Clock for less than
+a week, dropped it, and has no report is shown no tab after that week rolls
+over (the probe at `Dashboard.jsx:3271-3273` sees no report and no current-week
+entry). Not filed because Dillon's decision was about hours already recorded
+staying readable, and whether "recorded" includes a week no report was ever
+built for is a product call, not a verified gap against it. If it is ever
+wanted, the likely shapes are a final report at switch-off or a week picker on
+the read-only tab — neither is scoped.
+
+*As found at `ac80f96`:*
 
 Dillon's decisions on #23 were that a shift open when Time Clock + GPS is
 dropped can **always** be closed, and that time reports stay **readable** after
@@ -1983,7 +2036,8 @@ Only a screen already open when the module was switched off still works — the
 scope; the UI was never in it. This is the gap between the decision's intent
 and its reach, which is a product call rather than a mechanical patch.
 
-**A fix would touch:** `src/WorkerMenu.jsx` (show the Time Clock card, clock-out
+**A fix would touch** (as proposed before approval — built as predicted in
+`98f9d70`, plus a `clockOutOnly` prop on `src/TimeClock.jsx`): `src/WorkerMenu.jsx` (show the Time Clock card, clock-out
 only, when the module is off *and* `my_time_status` reports an open shift) and
 `src/Dashboard.jsx` (a read-only Time Clock tab, or its report list, when the
 module is off). No server change, no migration. Worth deciding whether
@@ -2247,8 +2301,16 @@ Do **not** flag these. They are decisions, not gaps.
   after cancelling. Reasoning in the code at `:1425-1435`, pinned by
   `tests/unit/timeclock-gate.test.js:156,161,170,176`. **Do not file these as
   #23 leftovers** and do not "make them consistent" with `clock_in`. Their
-  *UI* reachability once the module is off is a separate open question — #27 —
-  and the answer there is never to gate these.
+  *UI* reachability once the module is off was #27, built in `98f9d70`: the
+  worker's card and the supervisor's tab now call them read-only when the
+  module is off (`WorkerMenu.jsx:137-150,272-273`, `Dashboard.jsx:2805,3262-3280`).
+  The answer there was never to gate these, and still is not.
+- **A company without Time Clock sees only the current week's entries on its
+  read-only tab, on purpose as built in `98f9d70`** (`Dashboard.jsx:3020`
+  sends no `weekStart`). The final partial week never becomes a report because
+  the cron and `generate_time_report_now` are both gated. Recorded as #27's
+  residual limit; do not re-file it as a break without a product decision that
+  it is one.
 - **`list_records` and `companyEquipmentIndex` include retired machines on
   purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
   history or a vetting index
@@ -2335,3 +2397,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-22 | `82fa4a2` | **One genuinely new interaction arrived with #126.** Both overview alert banners now render through a shared `alertBanner` helper (`Dashboard.jsx:4540`) instead of two hand-copied blocks, and each gained a click-through: "View Certifications" (`:4823`) into the Certifications tab, "View Compliance" (`:4855`) into Equipment ▸ Compliance. An expiry a supervisor sees on the overview is now one click from the screen that fixes it — an increment on the reach break #14 was opened about, not a new break. Both actions are gated on their target tab's own `TAB_VISIBLE` entry; the compliance one resolves to `true` unconditionally and is safe only because the banner around it is `complianceEnabled`-gated, which is recorded in §1. The shared helper also removes the hand-copy that let the two banners drift — the `pdf-consistency-reviewer` shape, in the dashboard. |
 | 2026-09-22 | `ac80f96` | **#23 built, not closed** — approved by Dillon, on `claude/modular-pricing-enforcement-rzdib2`. Six new guards in `api/companydata.js`: `set_equipment_pm_interval` on `maintenance` (`:1216`), and `clock_in`, `edit_time_entry`, `add_time_entry`, `delete_time_entry`, `generate_time_report_now` on `timeclock` (`:1438,1530,1562,1590,1639`). The sharpest instance is gone: `generate_time_report_now` now agrees with the Sunday cron (`cron-equipment-reports.js:93`) on who gets a time-clock report. **Two product decisions, recorded in §2's exemption table and §5 so they are never re-filed:** `clock_out`/`my_time_status` stay open so a shift open when the module is dropped can be closed, and `list_time_entries`/`list_time_reports`/`get_time_report` stay open so recorded hours remain readable after cancelling (`:1455,1476,1495,1603,1617`; reasoning `:1425-1435`). Guard count across `api/` **45 → 51** (`grep -rn "await requireDocKey(" api/ \| wc -l`, re-run by this pass; 45 via `git grep` at `57efbeb`). `tests/unit/timeclock-gate.test.js` — 19 pass at `ac80f96`; against a `57efbeb` worktree, **12 fail / 7 pass**, the 12 being exactly the gating cases. `npm run test:unit` → 387 pass. All re-run by this pass. Time-clock punches are still not offline-queued (`TimeClock.jsx:62-64`), so these 403s show on screen rather than dropping a punch. Closes when the branch's PR merges. |
 | 2026-09-22 | `ac80f96` | **#27 opened by this pass, not worked, not approved.** #23's two carve-outs are open on the server and unreachable in the product: the worker's Time Clock card is filtered out when the module is off (`WorkerMenu.jsx:247,250`) and the supervisor's Time Clock tab — entries, report list and all — is hidden by `TAB_VISIBLE.timeclock` (`Dashboard.jsx:2793,6567`). So a worker clocked in when the module is dropped has no screen to clock out from, and a cancelled company has no screen to read its hours from; the API would answer both. Not a defect in `ac80f96`, which built exactly the approved server scope — a gap between a decision's intent and its reach. The fix is UI-only and must never be "gate the carve-outs"; see §5. |
+| 2026-09-22 | `98f9d70` | **#27 built, not closed** — approved by Dillon ("readable in the app"), UI only, on `claude/modular-pricing-enforcement-rzdib2` (`main` is at `d4b8aa3`, the squash of PR #127, which already carries #23). Worker: with the module off and an open shift, `src/WorkerMenu.jsx:137-150` finds it via `my_time_status` and `:272-273` keeps the Time Clock card, which opens a clock-out-only screen (`TimeClock.jsx:157`) and goes away after. Supervisor: `Dashboard.jsx:3262-3280` probes `list_time_reports` / `list_time_entries` / `my_time_status`, and `TAB_VISIBLE.timeclock` is `timeClockEnabled \|\| timeClockHistory` (`:2805`); every write control is hidden under `timeClockReadOnly` (`:2767,6634,6702,6710,6757,6797,6822,6841`). A company that never used Time Clock gets no tab. No `api/` change, no migration (`git diff d4b8aa3 98f9d70 --stat`). Re-run by this pass: new spec **7/7** at `98f9d70`, **4 fail / 3 pass** against `d4b8aa3` (the 4 behaviour tests); `npm run test:unit` **387 pass**. **Residual limit recorded, not numbered:** the read-only tab shows past reports plus the current week only (`:3020`, no `weekStart`), and the cron (`cron-equipment-reports.js:93-94`) and `generate_time_report_now` (`companydata.js:1639`) are gated, so the last partial week is readable in-app only until it ends; data retained. Also re-anchored §2's stale Sunday-cron row (`cron-equipment-reports.js:40-48,76,99` → `readDocKeySetting` `docKeyGate.js:66-75`, used at `cron-equipment-reports.js:66,93`). Closes when the branch's PR merges. |
