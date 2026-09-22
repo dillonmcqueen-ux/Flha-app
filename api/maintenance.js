@@ -9,6 +9,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -126,6 +127,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: computed maintenance status per tracked equipment ──
     if (action === 'list_status') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'maintenance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
@@ -241,6 +244,8 @@ export default async function handler(req, res) {
     // scheduled service tells a supervisor, who logs it through
     // log_service above. That asymmetry is the whole point, not a gap.
     if (action === 'log_field_service') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'maintenance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       // Every other worker-callable write in the codebase blocks a suspended
       // tenant (api/fuellogs.js:131 is the closest sibling). Without this, a
       // company whose subscription lapsed would find its fuel logs 403ing
@@ -319,6 +324,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: log a completed service ─────────────────
     if (action === 'log_service') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'maintenance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { equipmentId, serviceDate, serviceReading, readingUnit, performedBy, notes } = req.body;
       if (!equipmentId) return res.status(400).json({ error: 'Missing equipment.' });
       if (!(performedBy || '').trim()) return res.status(400).json({ error: 'Enter who performed the service.' });
@@ -386,6 +393,8 @@ export default async function handler(req, res) {
     // history.
     if (action === 'list_records') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'maintenance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 

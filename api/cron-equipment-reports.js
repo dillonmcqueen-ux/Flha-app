@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { buildReportForCompanyWeek, mondayOf, toISODate } from './equipmentreports.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
+import { isDocKeyActive } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -30,21 +31,6 @@ function safeEqual(a, b) {
   const ah = crypto.createHash('sha256').update(String(a)).digest();
   const bh = crypto.createHash('sha256').update(String(b)).digest();
   return crypto.timingSafeEqual(ah, bh);
-}
-
-// Deny-by-default, matching api/customforms.js and the identical copy in
-// api/equipmentreports.js. This used to return true for a missing row, which
-// is the direction that hands a company a module it never bought — and here
-// it would do it on a schedule, generating and emailing a weekly report for
-// a company whose dashboard says that document type is off.
-async function isDocKeyActive(companyId, documentKey) {
-  const { data: settingRows } = await supabaseAdmin
-    .from('company_document_settings')
-    .select('is_active')
-    .eq('company_id', companyId)
-    .eq('document_key', documentKey)
-    .limit(1);
-  return !!(settingRows && settingRows.length > 0 && settingRows[0].is_active);
 }
 
 export default async function handler(req, res) {
@@ -73,7 +59,7 @@ export default async function handler(req, res) {
     for (const c of companies || []) {
       // ── Weekly equipment usage report ──────────────────────────────
       try {
-        const isActive = await isDocKeyActive(c.id, 'equipment_reports');
+        const isActive = await isDocKeyActive(supabaseAdmin, c.id, 'equipment_reports');
         if (!isActive) { equipmentResults.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); }
         else {
           const reportJson = await buildReportForCompanyWeek(c.id, currentMonday.toISOString(), weekEndExclusiveISO);
@@ -96,7 +82,7 @@ export default async function handler(req, res) {
       // ── Weekly time clock report (roster companies only) ────────────
       try {
         if (!c.roster_enabled) { timeClockResults.push({ companyId: c.id, skipped: true, reason: 'no_roster' }); continue; }
-        const isActive = await isDocKeyActive(c.id, 'timeclock');
+        const isActive = await isDocKeyActive(supabaseAdmin, c.id, 'timeclock');
         if (!isActive) { timeClockResults.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); continue; }
 
         const reportJson = await buildTimeClockReportForCompanyWeek(c.id, currentMonday.toISOString(), weekEndExclusiveISO);

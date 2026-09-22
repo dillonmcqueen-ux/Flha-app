@@ -9,9 +9,10 @@
 // What these cases exist to stop coming back:
 //   * a cross-tenant id being accepted, or silently nulled instead of 403'd
 //     (the 403 is the tripwire for a real client bug or a probe);
-//   * a MISSING id being 403'd, which permanently wedges an offline queue —
-//     drainQueue has no attempt cap and no drop path, so a submission that
-//     can never succeed blocks every later one of its form type;
+//   * a MISSING id being 403'd, which costs an offline-queued worker their
+//     submission — drainQueue used to wedge on it (every later submission of
+//     that form type stuck behind one that could never succeed) and now
+//     drops it instead, which loses the record rather than the queue;
 //   * a database error being read as "wrong company";
 //   * the caller's value being echoed back instead of the row's own id;
 //   * an unreadable fleet collapsing into an empty one, which would strip

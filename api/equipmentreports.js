@@ -14,6 +14,7 @@ import { companyEquipmentIndex, withoutRetiredEquipment } from '../server-lib/eq
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 import { inspectionAttachments, attachmentForItem } from '../server-lib/inspectionAttachments.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, complianceDocLabel } from '../server-lib/compliance.js';
+import { isDocKeyActive } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -149,25 +150,6 @@ function mondayOf(d) {
   date.setDate(date.getDate() + diff);
   date.setHours(0, 0, 0, 0);
   return date;
-}
-
-// Whether a company has a document type switched on.
-//
-// Deny-by-default, matching api/customforms.js: a missing row means nobody
-// decided to give this company the feature, and for a key that a module
-// sells that means it was not bought. api/cron-equipment-reports.js carries
-// an identical copy for the same reason, and the two have to stay in step --
-// they gate the same weekly report from two entry points, and a cron that
-// disagrees with the builder would produce a document the dashboard says
-// should not exist.
-async function isDocKeyActive(companyId, documentKey) {
-  const { data: rows } = await supabaseAdmin
-    .from('company_document_settings')
-    .select('is_active')
-    .eq('company_id', companyId)
-    .eq('document_key', documentKey)
-    .limit(1);
-  return !!(rows && rows.length > 0 && rows[0].is_active);
 }
 
 function toISODate(d) {
@@ -615,7 +597,7 @@ async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   // a paid module's output inside another module's document every Monday.
   // Skipping the query entirely rather than filtering afterwards: the point
   // is not to read a feature's data for a company that did not buy it.
-  const complianceActive = await isDocKeyActive(companyId, 'equipment_compliance');
+  const complianceActive = await isDocKeyActive(supabaseAdmin, companyId, 'equipment_compliance');
   const { data: complianceRows, error: complianceErr } = complianceActive
     ? await supabaseAdmin
         .from('equipment_compliance')

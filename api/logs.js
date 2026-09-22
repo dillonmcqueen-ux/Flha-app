@@ -11,6 +11,7 @@ import { openCorrectiveActions, correctiveActionsFromInspection, resolvedItemsFr
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -116,16 +117,19 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
 const TABLES = {
   inspection: {
     name: 'inspections',
+    docKey: 'inspection',
     jsonColumn: 'results_json',
     listColumns: 'id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes',
   },
   toolbox: {
     name: 'toolbox_talks',
+    docKey: 'toolbox',
     jsonColumn: 'talking_points_json',
     listColumns: 'id, presenter_name, meeting_type, site, site_id, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at, submitted_by_roster_id',
   },
   daily: {
     name: 'daily_reports',
+    docKey: 'daily',
     jsonColumn: 'report_json',
     listColumns: 'id, reporter_name, site, site_id, report_date, weather, temperature, crew, equipment, equipment_ids, visitors, report_json, company_id, pdf_url, created_at, submitted_by_roster_id',
   },
@@ -282,6 +286,11 @@ export default async function handler(req, res) {
   try {
     // ── Generated PDF uploads for inspections, toolbox talks, daily reports ─
     if (action === 'create_upload_url') {
+      // Deliberately ungated: this mints a signed upload slot inside the
+      // caller's own company namespace and is reached before the record
+      // type is known, so there is no doc key to check. The submit that
+      // would use the uploaded file IS gated, which is where a company
+      // without the module is stopped.
       const result = await createUploadUrl(supabaseAdmin, 'flha-reports', req.body.filename, session.companyId);
       if (result.error) return res.status(500).json({ error: result.error });
       return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken, receipt: result.receipt });
@@ -299,6 +308,8 @@ export default async function handler(req, res) {
     if (action === 'check_equipment') {
       if (type !== 'inspection') return res.status(400).json({ error: 'Not applicable for this record type.' });
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { equipmentLabel } = req.body;
       if (!equipmentLabel) return res.status(400).json({ error: 'Missing equipment.' });
 
@@ -326,6 +337,8 @@ export default async function handler(req, res) {
     // ── Worker: submit a new record ─────────────────────────────────
     if (action === 'submit') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -570,6 +583,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: load records for the dashboard ──────────
     if (action === 'list') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin.from(table.name).select(table.listColumns).order('created_at', { ascending: false });
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
       const { data, error } = await query;
@@ -581,6 +596,8 @@ export default async function handler(req, res) {
     // ── Supervisor / Admin: delete a record ──────────────────────────
     if (action === 'delete') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
@@ -604,6 +621,8 @@ export default async function handler(req, res) {
     // `delete`/`sign_late_toolbox`.
     if (action === 'update') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, fields, pdfUrl } = req.body;
       if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
 
@@ -657,6 +676,8 @@ export default async function handler(req, res) {
     // individually-identified companies alike.
     if (action === 'list_open_toolbox') {
       if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabaseAdmin
         .from('toolbox_talks')
@@ -673,6 +694,8 @@ export default async function handler(req, res) {
     // ── Toolbox Talk: full detail for the sign-later confirm screen ─
     if (action === 'get_toolbox_detail') {
       if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
       const { data, error } = await supabaseAdmin.from('toolbox_talks').select('*').eq('id', id).limit(1);
@@ -687,6 +710,8 @@ export default async function handler(req, res) {
     // ── Toolbox Talk: add a late signature to an existing talk ──────
     if (action === 'sign_late_toolbox') {
       if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, name, signature, pdfUrl } = req.body;
       if (!id || !name || !signature) return res.status(400).json({ error: 'Missing details.' });
 

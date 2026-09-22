@@ -175,13 +175,63 @@ export async function totalPhotoBytes() {
   return items.reduce((sum, p) => sum + (p.blob?.size || 0), 0);
 }
 
+// Whether a failed resubmit can NEVER succeed on a retry.
+//
+// The resubmit functions attach `status` (the HTTP status) alongside the
+// `isServerError` / `isNetworkFailure` flags they already carried. A 4xx is
+// the server saying the submission itself is unacceptable, and it will keep
+// saying it — so retrying is not resilience, it is a wedge (see drainQueue
+// below). Everything else is retried, including anything with no status at
+// all: a resubmit does more than one round trip (PDF generation, a
+// signed-upload step), and a throw from an inner step carries no status.
+// Guessing "permanent" there would delete a worker's real work.
+//
+// Four 4xx codes are deliberately NOT permanent:
+//   * 401 — the token is stale, the payload is fine. Queued items can drain
+//     days later, so meeting an expired session on the way out is normal;
+//     dropping there would cost a shift's work over a re-login.
+//   * 408 / 425 / 429 — the server is explicitly asking to be asked again.
+export function isPermanentRejection(error) {
+  if (!error || error.isNetworkFailure) return false;
+  const status = Number(error.status);
+  if (!Number.isFinite(status) || status < 400 || status >= 500) return false;
+  if (status === 401 || status === 408 || status === 425 || status === 429) return false;
+  return true;
+}
+
 // Drains every queued item for `formType`, calling `resubmit(payload)` for
 // each. `resubmit` must return a truthy result on success (falls through
-// to removing the item) or throw on failure (item stays queued, attempt
-// count bumps, and draining stops for this formType — items are drained
-// in order, so a stuck first item shouldn't cause later ones to be
-// retried out of order). Safe to call opportunistically (on the `online`
-// event, on mount) — a no-op when the queue is empty.
+// to removing the item) or throw on failure.
+//
+// A failure is one of two things, and they are handled differently:
+//
+//   * TRANSIENT (network failure, 5xx, no status) — the item stays queued,
+//     its attempt count bumps, and draining stops for this formType. Items
+//     drain in order, so a stuck first item must not let later ones be
+//     retried out of order.
+//   * PERMANENT (see isPermanentRejection) — the item is REMOVED and
+//     reported in `dropped`, and the drain carries on with the rest.
+//
+// The drop path is why there is still no attempt cap, and that is
+// deliberate: a cap counts attempts, and a worker offline for a week racks
+// up attempts on submissions that are perfectly good. Only the server
+// saying "never" drops anything.
+//
+// Without the drop path, one permanently-rejected item wedged that worker's
+// entire queue for that form type forever — every later submission of the
+// same form sat behind it, unsent, with nothing shown anywhere. That was
+// only survivable while nothing on the server rejected a well-formed submit
+// permanently; server-side module gating (break #21) makes 403 a stable
+// answer, so this had to land first.
+//
+// A dropped item is still lost work, so it comes back to the caller in
+// `dropped` rather than disappearing — same reason `pdfUnlinked` is
+// reported instead of being left to a server log nobody reads. Each entry
+// is the queued item itself plus `status` and `reason`, so the caller can
+// tell the worker which form went nowhere and why.
+//
+// Safe to call opportunistically (on the `online` event, on mount) — a
+// no-op when the queue is empty.
 export async function drainQueue(formType, resubmit) {
   const items = await listQueued(formType);
   // `pdfUnlinked` counts drained submissions the server saved but couldn't
@@ -190,7 +240,7 @@ export async function drainQueue(formType, resubmit) {
   // fires is SESSION_SECRET being rotated in between — the record is safe,
   // its PDF link isn't, and without this it would only ever show up in a
   // server log. See receiptWasDropped() in server-lib/uploadUrls.js.
-  const results = { succeeded: 0, remaining: items.length, lastError: null, pdfUnlinked: 0 };
+  const results = { succeeded: 0, remaining: items.length, lastError: null, pdfUnlinked: 0, dropped: [] };
   for (const item of items) {
     try {
       const response = await resubmit(item.payload, item.clientSubmissionId);
@@ -199,6 +249,19 @@ export async function drainQueue(formType, resubmit) {
       results.succeeded += 1;
       results.remaining -= 1;
     } catch (e) {
+      if (isPermanentRejection(e)) {
+        // Rejected for good. Removing it is the only way the items behind
+        // it ever send, but it is reported so it is not lost silently.
+        await removeQueued(item.id);
+        results.remaining -= 1;
+        results.dropped.push({
+          ...item,
+          attempts: (item.attempts || 0) + 1,
+          status: Number(e.status),
+          reason: String(e.message || e),
+        });
+        continue;
+      }
       await markAttempt(item.id, e);
       results.lastError = e;
       break; // stop draining this formType — keep order, don't hammer a dead connection

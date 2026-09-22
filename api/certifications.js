@@ -8,6 +8,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -139,6 +140,8 @@ export default async function handler(req, res) {
   try {
     // ── Step 1: request a signed upload slot for one cert file ──────────
     if (action === 'create_certification_upload_url') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'certifications');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { companyId: requestedCompanyId, rosterId, filename } = req.body;
       const companyId = resolveCompanyId(session, requestedCompanyId);
       if (!(await canActOnRosterId(session, companyId, rosterId))) {
@@ -154,6 +157,8 @@ export default async function handler(req, res) {
 
     // ── Step 2: record the cert once the file itself has been uploaded ──
     if (action === 'add_certification') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'certifications');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { companyId: requestedCompanyId, rosterId, certType, certName, issueDate, expiryDate, filePath } = req.body;
       const companyId = resolveCompanyId(session, requestedCompanyId);
       if (!(await canActOnRosterId(session, companyId, rosterId))) {
@@ -189,6 +194,8 @@ export default async function handler(req, res) {
     // ── List certs: a worker sees their own; a supervisor/admin sees the
     // whole company, or one roster member's if rosterId is passed ───────
     if (action === 'list_certifications') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'certifications');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { companyId: requestedCompanyId, rosterId, withFiles } = req.body;
       const companyId = resolveCompanyId(session, requestedCompanyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company.' });
@@ -237,6 +244,8 @@ export default async function handler(req, res) {
     // call — backs the Dashboard's "Certifications" tab ──────────────────
     if (action === 'list_employee_directory') {
       if (session.role === 'worker') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'certifications');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company.' });
 
@@ -287,6 +296,8 @@ export default async function handler(req, res) {
     // data behind the Supervisor Dashboard alert, the Analytics rollup,
     // and the worker-profile notification ────────────────────────────────
     if (action === 'certification_summary') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'certifications');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { companyId: requestedCompanyId } = req.body;
       const companyId = resolveCompanyId(session, requestedCompanyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company.' });
@@ -337,6 +348,8 @@ export default async function handler(req, res) {
     // ── Delete a cert: worker may remove their own; supervisor/admin may
     // remove any within their company ────────────────────────────────────
     if (action === 'delete_certification') {
+      const denied = await requireDocKey(supabaseAdmin, session, 'certifications');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const { companyId: requestedCompanyId, certId } = req.body;
       const companyId = resolveCompanyId(session, requestedCompanyId);
       if (!companyId || !certId) return res.status(400).json({ error: 'Missing details.' });
@@ -365,6 +378,15 @@ export default async function handler(req, res) {
     // for a supervisor/admin session, since these are self-service edits
     // the new hire makes about themselves during their one-time invite
     // visit ─────────────────────────────────────────────────────────────
+    //
+    // Deliberately NOT gated on the `certifications` doc key, unlike every
+    // action above. These five are the roster itself — name, PIN, photo,
+    // "I'm done" — which belong to the platform base every company pays
+    // for, not to Certification Tracking. Gating them would mean a company
+    // that never bought cert tracking could not onboard a new hire at all.
+    // The cert-upload half of that same invite screen IS gated, and
+    // src/WalletInvite.jsx's loadCerts already fails soft, so the invite
+    // still completes with the tickets section simply empty.
     if (action === 'update_own_profile') {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const name = (req.body.name || '').trim();

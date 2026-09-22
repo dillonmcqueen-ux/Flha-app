@@ -13,6 +13,7 @@ import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
+import { requireDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -1024,6 +1025,8 @@ export default async function handler(req, res) {
 
     if (action === 'list_equipment_compliance') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_compliance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { data, error } = await supabaseAdmin
@@ -1065,11 +1068,14 @@ export default async function handler(req, res) {
     //
     // Gated exactly like list_equipment_compliance above (supervisor or
     // admin, company-scoped): this surfaces data that was already readable
-    // by the same callers, it does not widen who can see it. Compliance
-    // still has no doc key and no pricing module — that is break #19, filed
-    // and not approved — so nothing here consults docSettings.
+    // by the same callers, it does not widen who can see it. Since break
+    // #19 gave compliance its own doc key and pricing module, and break #21
+    // made the gate server-side, all four compliance actions also check
+    // that the company actually has the module — see requireDocKey.
     if (action === 'compliance_summary') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_compliance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
@@ -1137,6 +1143,8 @@ export default async function handler(req, res) {
 
     if (action === 'upsert_equipment_compliance') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_compliance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { id, equipmentId, expiryDate } = req.body;
@@ -1183,6 +1191,8 @@ export default async function handler(req, res) {
 
     if (action === 'delete_equipment_compliance') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'equipment_compliance');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { id } = req.body;
