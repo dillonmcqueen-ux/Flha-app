@@ -1882,7 +1882,13 @@ cancelling. The reasoning is in the code at `:1425-1435`.
 `maintenance` (`:1216`) and five `timeclock` (`:1438,1530,1562,1590,1639`).
 Nothing between `:1455` and `:1528` and nothing between `:1603` and `:1637`.
 Across `api/`: `grep -rn "await requireDocKey(" api/ | wc -l` → **51** (was 45
-at `57efbeb`). Run 2026-09-22.
+at `57efbeb`). Run 2026-09-22. *Re-anchor, uncommitted tree on `f561f42`:*
+#27's `latestEntryAt` lookup adds 11 lines inside `list_time_reports`
+(`:1614-1625`), so `get_time_report` is now `:1628` and
+`generate_time_report_now` `:1648` with its guard at `:1650`; the other hits
+are unchanged and there is still nothing between `:1603` and `:1648`. (The
+grep actually returns **12** lines, at `ac80f96` too — the eleven above plus a
+comment at `:1074`. The guard count is unaffected: 51 across `api/`, re-run.)
 
 *Tests:* `tests/unit/timeclock-gate.test.js`, 19 tests, drives the real
 handler. `node --test tests/unit/timeclock-gate.test.js` → 19 pass at
@@ -1897,8 +1903,9 @@ not taken from the build report.
 carve-outs are open on the server, but both screens that call them hid when
 the module was off, so "can always be closed" and "stays readable" held at the
 API and not in the product. **The UI now reaches them as of `98f9d70` (#27,
-built, closes when its PR merges)** — see #27 for the anchors and the one
-residual limit.
+built, closes when its PR merges)** — see #27 for the anchors. Its one
+residual limit (current week only) is closed by the uncommitted week-paging
+change on `f561f42`.
 
 *As found at `48d5889`:*
 
