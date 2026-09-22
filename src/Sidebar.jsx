@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, LayoutDashboard } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutGrid, Crosshair } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, sidebar as SB } from "./theme";
 
 // Persistent left nav rail, replacing the old two-row (category pills, then
@@ -15,9 +15,15 @@ import { colors as C, font as FONT, radius as RAD, sidebar as SB } from "./theme
 // the caller to categories that have at least one visible tab.
 // `tabVisible`/`tabCounts`: { [tabKey]: bool } / { [tabKey]: number }.
 // `tabIcon`/`tabLabel`: { [tabKey]: LucideIcon } / { [tabKey]: string }.
+// `tabDots`: { [tabKey]: color } for a status pip with no number (e.g. an
+// expired certification), matching the supervisor dashboard mockup.
+// `brand`: { roleLabel } renders the FORA mark at the top of the rail, for
+// screens (Dashboard) that no longer carry it in a top header on desktop.
+// `topOffset`: px the rail sits below, i.e. the height of any sticky header
+// above it (0 when there isn't one).
 export default function Sidebar({
-  categories, categoryIcon, tabIcon, tabLabel, tabVisible, tabCounts = {},
-  activeTab, onSelectTab, mobileOpen = false, onMobileClose,
+  categories, categoryIcon, tabIcon, tabLabel, tabVisible, tabCounts = {}, tabDots = {},
+  activeTab, onSelectTab, mobileOpen = false, onMobileClose, brand = null, topOffset = 57,
 }) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -67,13 +73,38 @@ export default function Sidebar({
       <div
         className={`fora-sidebar${mobileOpen ? " fora-sidebar-open" : ""}`}
         style={{
-          width: effectiveCollapsed ? 60 : 224, flexShrink: 0, transition: "width 160ms ease",
+          width: effectiveCollapsed ? 60 : 240, flexShrink: 0, transition: "width 160ms ease",
           background: SB.bg, borderRight: `1px solid ${SB.border}`,
           display: "flex", flexDirection: "column",
-          position: "sticky", top: 57, alignSelf: "flex-start",
-          height: "calc(100vh - 57px)", overflowY: "auto", overflowX: "hidden",
+          position: "sticky", top: topOffset, alignSelf: "flex-start",
+          height: `calc(100vh - ${topOffset}px)`, overflowY: "auto", overflowX: "hidden",
         }}>
-        <div style={{ flex: 1, padding: effectiveCollapsed ? "10px 6px" : "14px 10px" }}>
+        {brand && (
+          <div className="fora-sidebar-brand" style={{
+            display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+            justifyContent: effectiveCollapsed ? "center" : "flex-start",
+            padding: effectiveCollapsed ? "16px 6px" : "16px 16px", borderBottom: `1px solid ${SB.border}`,
+          }}>
+            <span style={{
+              width: 30, height: 30, borderRadius: RAD.sm, flexShrink: 0,
+              background: `linear-gradient(135deg, ${SB.accent} 0%, #B34700 100%)`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 0 18px -4px rgba(249,115,22,0.6)",
+            }}><Crosshair size={16} color="#FFFFFF" strokeWidth={2.5} /></span>
+            {!effectiveCollapsed && (
+              <>
+                <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, letterSpacing: "0.04em" }}>FORA</span>
+                <span style={{
+                  fontFamily: FONT.mono, fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase",
+                  color: SB.accent, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.3)",
+                  borderRadius: 4, padding: "2px 6px",
+                }}>{brand.roleLabel}</span>
+                <span title="Live" style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: C.status.success.solid, boxShadow: "0 0 8px rgba(34,197,94,0.6)" }} />
+              </>
+            )}
+          </div>
+        )}
+        <div style={{ flex: 1, padding: effectiveCollapsed ? "12px 6px" : "14px 12px" }}>
 
           {/* Overview — the landing page every supervisor sees on login. Its
               own top-level link (not inside a category) since it's the "go
@@ -85,13 +116,14 @@ export default function Sidebar({
               display: "flex", alignItems: "center", gap: 9,
               justifyContent: effectiveCollapsed ? "center" : "flex-start",
               width: "100%", padding: effectiveCollapsed ? "9px 0" : "9px 10px",
-              borderRadius: RAD.md, border: "none", cursor: "pointer", marginBottom: 16,
+              borderRadius: RAD.sm, cursor: "pointer", marginBottom: 20,
+              border: `1px solid ${overviewActive ? "rgba(249,115,22,0.35)" : "transparent"}`,
               background: overviewActive ? SB.bgActive : "transparent",
-              color: overviewActive ? SB.itemTextActive : C.text.primary,
-              fontWeight: 700, fontSize: 13.5, textAlign: "left",
+              color: overviewActive ? SB.accent : C.text.primary,
+              fontFamily: FONT.heading, fontWeight: 600, fontSize: 14, letterSpacing: "0.02em", textAlign: "left",
             }}
           >
-            <LayoutDashboard size={16} strokeWidth={2.25} style={{ flexShrink: 0 }} />
+            <LayoutGrid size={16} strokeWidth={2.25} style={{ flexShrink: 0 }} />
             {!effectiveCollapsed && <span>Overview</span>}
           </button>
 
@@ -103,12 +135,11 @@ export default function Sidebar({
               <div key={cat.key} style={{ marginBottom: 20 }}>
                 {!effectiveCollapsed && (
                   <div style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "0 8px 8px",
-                    marginBottom: 4, borderBottom: `1px solid ${SB.border}`,
-                    fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em",
-                    color: C.text.body,
+                    display: "flex", alignItems: "center", gap: 8, padding: "0 10px 6px",
+                    fontFamily: FONT.mono, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em",
+                    color: C.text.muted,
                   }}>
-                    {CatIcon && <CatIcon size={16} strokeWidth={2.5} color={SB.accent} />}
+                    {CatIcon && <CatIcon size={14} strokeWidth={2.25} color={SB.accent} />}
                     {cat.label}
                   </div>
                 )}
@@ -117,6 +148,7 @@ export default function Sidebar({
                     const Icon = tabIcon[tabKey];
                     const active = activeTab === tabKey;
                     const count = tabCounts[tabKey] || 0;
+                    const dot = tabDots[tabKey];
                     return (
                       <button
                         key={tabKey}
@@ -126,15 +158,15 @@ export default function Sidebar({
                           display: "flex", alignItems: "center", gap: 9,
                           justifyContent: effectiveCollapsed ? "center" : "flex-start",
                           width: "100%", padding: effectiveCollapsed ? "9px 0" : "8px 10px",
-                          borderRadius: RAD.md, border: "none", cursor: "pointer",
+                          borderRadius: RAD.sm, border: "none", cursor: "pointer",
                           background: active ? SB.bgActive : "transparent",
                           color: active ? SB.itemTextActive : SB.itemText,
-                          fontWeight: 600, fontSize: 13, textAlign: "left",
+                          fontWeight: 500, fontSize: 13.5, textAlign: "left",
                         }}
-                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = SB.itemTextHover; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = SB.itemText; }}
+                        onMouseEnter={(e) => { if (!active) { e.currentTarget.style.color = SB.itemTextHover; e.currentTarget.style.background = C.panelRaised; } }}
+                        onMouseLeave={(e) => { if (!active) { e.currentTarget.style.color = SB.itemText; e.currentTarget.style.background = "transparent"; } }}
                       >
-                        {Icon && <Icon size={15} strokeWidth={2.25} style={{ flexShrink: 0 }} />}
+                        {Icon && <Icon size={16} strokeWidth={2} color={dot && !active ? dot : undefined} style={{ flexShrink: 0, opacity: active || dot ? 1 : 0.8 }} />}
                         {!effectiveCollapsed && (
                           <>
                             <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -142,9 +174,12 @@ export default function Sidebar({
                             </span>
                             {count > 0 && (
                               <span style={{
-                                flexShrink: 0, fontSize: 10.5, fontWeight: 800, borderRadius: RAD.pill,
-                                padding: "1px 6px", background: SB.badgeBg, color: SB.badgeText,
+                                flexShrink: 0, fontFamily: FONT.mono, fontSize: 10.5, fontWeight: 700, borderRadius: 4,
+                                padding: "1px 6px", background: C.panelInset, color: C.text.body,
                               }}>{count}</span>
+                            )}
+                            {count === 0 && dot && (
+                              <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: "50%", background: dot }} />
                             )}
                           </>
                         )}
@@ -168,7 +203,8 @@ export default function Sidebar({
               display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: 8,
               padding: "12px 14px", borderTop: `1px solid ${SB.border}`, border: "none", borderTopWidth: 1,
               borderTopStyle: "solid", borderTopColor: SB.border,
-              background: "transparent", color: SB.groupLabel, cursor: "pointer", fontSize: 12, fontWeight: 700,
+              background: "transparent", color: C.text.muted, cursor: "pointer",
+              fontFamily: FONT.mono, fontSize: 12, fontWeight: 500,
             }}
           >
             {collapsed ? <ChevronRight size={14} /> : <><ChevronLeft size={14} /> Collapse</>}
