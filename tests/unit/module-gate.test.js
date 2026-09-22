@@ -22,6 +22,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 // ── the gate on its own ──────────────────────────────────────────────────
 
@@ -315,4 +316,74 @@ test("the same queue at a company WITH the module drains normally", async () => 
   const result = await drainQueue('fuellog', resubmitThroughHandler(mintToken({ role: 'worker', companyId: 7 })));
   assert.deepEqual(result.dropped, [], 'a company that bought the module loses nothing');
   assert.equal(result.succeeded, 1);
+});
+
+// ── The gap the first pass left, found by tenant-scope-reviewer ──────────
+//
+// break #21 gated ten handlers and skipped api/equipmentreports.js, on the
+// reasoning that it was "already an enforcement point". It was — for the
+// compliance SECTION inside the report body — but its own four actions
+// answered anyone. So api/cron-equipment-reports.js refused to build a
+// weekly report on Sunday for a company without Equipment Inspections, and
+// on Monday that company's supervisor could call generate_now and get the
+// same document. Two entry points to one artifact disagreeing.
+
+const REPORTS_SRC = readFileSync(new URL('../../api/equipmentreports.js', import.meta.url), 'utf8');
+
+test('every weekly-report action gates before it touches the database', () => {
+  // Read the source rather than standing up a handler that pulls in jsPDF:
+  // what matters is that the guard is present AND ahead of the first query,
+  // which is exactly what a later edit would silently get wrong.
+  for (const [action, key] of [
+    ['list_reports', 'equipment_reports'],
+    ['get_report', 'equipment_reports'],
+    ['generate_now', 'equipment_reports'],
+    ['list_weekly_hours', 'inspection'],
+  ]) {
+    const start = REPORTS_SRC.indexOf(`if (action === '${action}')`);
+    assert.ok(start > 0, `${action} not found`);
+    const body = REPORTS_SRC.slice(start, start + 1400);
+
+    const guard = body.indexOf('requireDocKey(supabaseAdmin, session, ');
+    assert.ok(guard > 0, `${action} has no requireDocKey guard`);
+    assert.ok(
+      body.slice(guard, guard + 120).includes(`'${key}'`),
+      `${action} must gate on ${key}`,
+    );
+
+    const firstQuery = body.indexOf('supabaseAdmin\n      .from(');
+    if (firstQuery > 0) {
+      assert.ok(guard < firstQuery, `${action} queries before it gates`);
+    }
+  }
+});
+
+test('Weekly Hours gates on inspection, not equipment_reports', () => {
+  // It is folded from inspection readings and the Dashboard sub-tab gates it
+  // on inspectionsEnabled. Gating the server on equipment_reports instead
+  // would lock out a company that bought Inspections but not the report.
+  const start = REPORTS_SRC.indexOf("if (action === 'list_weekly_hours')");
+  const body = REPORTS_SRC.slice(start, start + 800);
+  assert.ok(body.includes("requireDocKey(supabaseAdmin, session, 'inspection')"));
+  assert.ok(!body.includes("requireDocKey(supabaseAdmin, session, 'equipment_reports')"));
+});
+
+test('a broken session is 401, never 403 — 403 deletes queued work', async () => {
+  // A non-admin session with no company is an auth failure, not a billing
+  // one. isPermanentRejection drops a 403 for good, so getting this wrong
+  // would bin a worker's queued shift over a session glitch.
+  const db = stubClient({ data: [], error: null });
+  const denied = await requireDocKey(db, { role: 'worker', companyId: null }, 'fuellog');
+  assert.equal(denied.status, 401);
+  assert.equal(db.calls.length, 0, 'it should not even ask the database');
+});
+
+test('the cron can tell "not bought" apart from "could not check"', async () => {
+  // Both deny, but only one is the customer's doing. Reporting a failed read
+  // as "deactivated" blamed the customer for an outage and hid the real one.
+  const { readDocKeySetting } = await import('../../server-lib/docKeyGate.js');
+  const off = await readDocKeySetting(stubClient({ data: [{ is_active: false }], error: null }), 7, 'timeclock');
+  assert.deepEqual(off, { active: false, unavailable: false });
+  const broken = await readDocKeySetting(stubClient({ data: null, error: { message: 'boom' } }), 7, 'timeclock');
+  assert.deepEqual(broken, { active: false, unavailable: true });
 });

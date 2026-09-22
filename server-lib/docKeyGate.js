@@ -63,7 +63,7 @@ export function moduleLabelForDocKey(documentKey) {
  * database blip with 403 would therefore delete a worker's queued shift
  * over a five-second outage, so requireDocKey answers that with a 503.
  */
-async function readDocKeySetting(supabase, companyId, documentKey) {
+export async function readDocKeySetting(supabase, companyId, documentKey) {
   if (!companyId || !documentKey) return { active: false, unavailable: false };
   const { data: rows, error } = await supabase
     .from('company_document_settings')
@@ -111,6 +111,16 @@ export async function isDocKeyActive(supabase, companyId, documentKey) {
 export async function requireDocKey(supabase, session, documentKey) {
   if (!session) return { status: 401, error: 'Not logged in. Please log in again.' };
   if (session.role === 'admin') return null;
+  // A non-admin session carrying no company is an auth problem, not a
+  // billing one, and the difference is now expensive: 403 tells the offline
+  // queue to DROP the submission for good (src/offlineQueue.js's
+  // isPermanentRejection), so answering a broken session with "your plan
+  // doesn't include this" would destroy a worker's queued shift instead of
+  // sending them to log in again. Not reachable today -- every worker and
+  // supervisor token carries companyId and verifySession re-checks it
+  // against the roster row -- so this is a guard against the shape, not a
+  // fix for a live path.
+  if (!session.companyId) return { status: 401, error: 'Not logged in. Please log in again.' };
   const { active, unavailable } = await readDocKeySetting(supabase, session.companyId, documentKey);
   if (active) return null;
   // Still denied, but retryable, and it has to SAY so: 503 keeps an

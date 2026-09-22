@@ -17,7 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { buildReportForCompanyWeek, mondayOf, toISODate } from './equipmentreports.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
-import { isDocKeyActive } from '../server-lib/docKeyGate.js';
+import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -59,8 +59,12 @@ export default async function handler(req, res) {
     for (const c of companies || []) {
       // ── Weekly equipment usage report ──────────────────────────────
       try {
-        const isActive = await isDocKeyActive(supabaseAdmin, c.id, 'equipment_reports');
-        if (!isActive) { equipmentResults.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); }
+        // 'deactivated' must mean the customer does not have this module, not
+        // that the settings read failed. Collapsing the two meant a transient
+        // outage at 11:59pm Sunday cost every company that week's report and
+        // left the only trace blaming the customer for switching it off.
+        const { active, unavailable } = await readDocKeySetting(supabaseAdmin, c.id, 'equipment_reports');
+        if (!active) { equipmentResults.push({ companyId: c.id, skipped: true, reason: unavailable ? 'settings_unavailable' : 'deactivated' }); }
         else {
           const reportJson = await buildReportForCompanyWeek(c.id, currentMonday.toISOString(), weekEndExclusiveISO);
           if (!reportJson.equipment || reportJson.equipment.length === 0) {
@@ -82,8 +86,12 @@ export default async function handler(req, res) {
       // ── Weekly time clock report (roster companies only) ────────────
       try {
         if (!c.roster_enabled) { timeClockResults.push({ companyId: c.id, skipped: true, reason: 'no_roster' }); continue; }
-        const isActive = await isDocKeyActive(supabaseAdmin, c.id, 'timeclock');
-        if (!isActive) { timeClockResults.push({ companyId: c.id, skipped: true, reason: 'deactivated' }); continue; }
+        // 'deactivated' must mean the customer does not have this module, not
+        // that the settings read failed. Collapsing the two meant a transient
+        // outage at 11:59pm Sunday cost every company that week's report and
+        // left the only trace blaming the customer for switching it off.
+        const { active, unavailable } = await readDocKeySetting(supabaseAdmin, c.id, 'timeclock');
+        if (!active) { timeClockResults.push({ companyId: c.id, skipped: true, reason: unavailable ? 'settings_unavailable' : 'deactivated' }); continue; }
 
         const reportJson = await buildTimeClockReportForCompanyWeek(c.id, currentMonday.toISOString(), weekEndExclusiveISO);
         if (!reportJson.entries || reportJson.entries.length === 0) {
