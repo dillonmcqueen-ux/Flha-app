@@ -21,19 +21,27 @@ component voice), applied to FORA's existing dark, industrial-adjacent brand.
   `legal-revision-date-updater` agent on substantive changes).
 
 ## Theme
-Kept FORA's existing near-black + orange brand (this is a real, established
-brand mark, not a catalog pick) but re-expressed in OKLCH and given a second
-semantic accent for status/proof content:
+Re-based on the Stitch project "Afield Solutions Redesign" (design system
+"Field Operations Automation", 2026-09-22): obsidian slate surfaces, 1px
+technical borders, safety amber reserved for action and status, green/amber/red
+status LEDs and tags. Tokens live in `style.css` `:root`:
 
-- `--color-paper`     oklch(9% 0 0)         /* near-black ground */
-- `--color-paper-2`    oklch(12% 0 0)        /* panel surface */
-- `--color-paper-3`    oklch(13.5% 0 0)      /* hover/raised surface */
-- `--color-ink`        oklch(96% 0.003 90)   /* primary text */
-- `--color-ink-2`      oklch(66% 0.01 260)   /* muted text */
-- `--color-rule`       oklch(24% 0 0)        /* hairlines/borders */
-- `--color-accent`     oklch(70% 0.19 42)    /* FORA orange */
-- `--color-accent-ink` oklch(9% 0 0)         /* text on accent */
-- `--color-focus`      oklch(70% 0.19 42)
+- `--black` #0B0F15 (canvas) · `--panel` #111827 (cards) · `--panel-2` #182234 (overlays)
+- `--line` #263345 (borders) · `--line-soft` #1E293B (inner dividers)
+- `--orange` #FF6B00 · `--orange-dim` / `--orange-tint` / `--orange-tint-2` (amber alphas)
+- `--text` #F8FAFC · `--muted` #94A3B8
+- `--ok` #10B981 · `--warn` #F59E0B · `--alert` #EF4444
+
+Geometry follows Stitch's "soft industrial" rule: 4px on controls and tags,
+8px on cards and panels, no pill shapes (progress bars excepted).
+
+## Visual blocks over prose
+Long paragraphs are replaced by blocks, each with a short headline and at most
+one or two lines of copy: `.stat` metric tiles with `.led`, `.modtile` module
+tiles with `.tag-s` status tags, `.point` tiles, `.trust-kpi` + `.layer`
+security board, `.spotlight` for a new module, `.pipeline` + `.rule-card`
+for the Brain, `.device` for the live FLHA preview, `.quote-card` for the
+founder. New sections should reach for one of these before writing a paragraph.
 
 ## Typography
 - Display: Space Grotesk, weight 700, normal
