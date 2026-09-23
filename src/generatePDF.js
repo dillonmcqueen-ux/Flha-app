@@ -429,12 +429,12 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.line(margin, H - 12, W - margin, H - 12);
     if (foraLogo) {
       try {
-        doc.addImage(foraLogo, "PNG", margin, H - 10, 16, 6.55);
+        doc.addImage(foraLogo, "PNG", margin, H - 10.5, 14, 6.74);
       } catch (e) {}
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
       doc.setTextColor(148, 163, 184);
-      doc.text("AI-generated field safety documentation", margin + 19, H - 6.5);
+      doc.text("AI-generated field safety documentation", margin + 17, H - 6.5);
     } else {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7);

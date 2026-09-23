@@ -355,8 +355,8 @@ export default function Login() {
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <img
             src="/fora-logo.png"
-            alt="FORA"
-            style={{ maxWidth: 180, maxHeight: 90, objectFit: "contain", marginBottom: 8 }}
+            alt="FORA Field Solutions"
+            style={{ maxWidth: 220, maxHeight: 110, objectFit: "contain", marginBottom: 8 }}
           />
           <div style={{ fontSize: 13, color: C.text.muted }}>AI-powered field documentation portal</div>
         </div>

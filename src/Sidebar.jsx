@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, LayoutGrid, Crosshair } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, sidebar as SB } from "./theme";
 
 // Persistent left nav rail, replacing the old two-row (category pills, then
@@ -85,15 +85,13 @@ export default function Sidebar({
             justifyContent: effectiveCollapsed ? "center" : "flex-start",
             padding: effectiveCollapsed ? "16px 6px" : "16px 16px", borderBottom: `1px solid ${SB.border}`,
           }}>
-            <span style={{
-              width: 30, height: 30, borderRadius: RAD.sm, flexShrink: 0,
-              background: `linear-gradient(135deg, ${SB.accent} 0%, #B34700 100%)`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: "0 0 18px -4px rgba(249,115,22,0.6)",
-            }}><Crosshair size={16} color="#FFFFFF" strokeWidth={2.5} /></span>
+            <img
+              src={effectiveCollapsed ? "/fora-mark.png" : "/fora-logo.png"}
+              alt="FORA Field Solutions"
+              style={{ height: effectiveCollapsed ? 18 : 34, width: "auto", flexShrink: 0, display: "block" }}
+            />
             {!effectiveCollapsed && (
               <>
-                <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, letterSpacing: "0.04em" }}>FORA</span>
                 <span style={{
                   fontFamily: FONT.mono, fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase",
                   color: SB.accent, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.3)",

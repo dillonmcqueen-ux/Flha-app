@@ -110,8 +110,7 @@ function Header() {
       borderBottom: `1px solid ${C.line}`, padding: "14px 20px",
       display: "flex", alignItems: "center", gap: 10,
     }}>
-      <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.orange, boxShadow: "0 0 14px 2px rgba(249,115,22,0.7)" }} />
-      <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 18, color: C.text.primary, letterSpacing: "-0.01em" }}>FORA</span>
+      <img src="/fora-logo.png" alt="FORA Field Solutions" style={{ height: 32, width: "auto", display: "block" }} />
       <span style={{
         marginLeft: 2, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
         color: C.text.muted, border: `1px solid ${C.line}`, borderRadius: RAD.pill, padding: "3px 10px",

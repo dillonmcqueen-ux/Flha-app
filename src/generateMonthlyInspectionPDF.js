@@ -93,9 +93,9 @@ export async function generateAndUploadMonthlyInspection({
     doc.setPage(p);
     doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2); doc.line(margin, H - 12, W - margin, H - 12);
     if (foraLogo) {
-      try { doc.addImage(foraLogo, "PNG", margin, H - 10, 16, 6.55); } catch (e) {}
+      try { doc.addImage(foraLogo, "PNG", margin, H - 10.5, 14, 6.74); } catch (e) {}
       doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(148, 163, 184);
-      doc.text("AI-powered field safety documentation", margin + 19, H - 7);
+      doc.text("AI-powered field safety documentation", margin + 17, H - 7);
     } else {
       doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(67, 56, 202);
       doc.text("FORA", margin, H - 7);

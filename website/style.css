@@ -51,7 +51,7 @@ nav{
   padding:18px 24px;
 }
 .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:20px; justify-self:start; }
-.logo .dot{ width:9px; height:9px; border-radius:50%; background:var(--orange); box-shadow:0 0 14px 2px var(--orange); }
+.logo img{ height:44px; width:auto; display:block; }
 .navlinks{ display:flex; gap:28px; font-size:14px; color:var(--muted); justify-self:center; }
 nav > .cta-btn{ justify-self:end; }
 .navlinks a{ transition:color .2s ease; white-space:nowrap; }

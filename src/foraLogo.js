@@ -1,5 +1,5 @@
 // src/foraLogo.js
-// The FORA brand mark used in PDF footers (public/fora-logo.png), fetched
+// The FORA brand mark used in PDF footers (public/fora-logo-dark.png, the dark-text variant for white pages), fetched
 // once per page load and cached as a data URL so jsPDF's addImage() can
 // embed it without re-fetching for every generated document.
 let cached;
@@ -7,7 +7,8 @@ let cached;
 export async function getForaLogoDataUrl() {
   if (cached !== undefined) return cached;
   try {
-    const resp = await fetch("/fora-logo.png");
+    const resp = await fetch("/fora-logo-dark.png");
+    if (!resp.ok) throw new Error(`logo fetch ${resp.status}`);
     const blob = await resp.blob();
     cached = await new Promise((resolve, reject) => {
       const r = new FileReader();
