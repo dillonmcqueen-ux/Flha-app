@@ -23,7 +23,8 @@ commits on top of `main` `363da23`): **#13, #17, #18, #24 and #25 are
 built, not closed** — each closes when that branch's PR merges. #18 was
 **rescoped by Dillon** before it was built (non-trailer attachments get no PM
 clock at all, by design — see §5). This pass also opened **#28, #29 and #30**,
-three verified residuals of that work, none approved, and marked **#15, #16,
+three verified residuals of that work (**#28 since approved and built in
+`1301c76`**, closes when PR #129 merges; #29 and #30 still open), and marked **#15, #16,
 #19–#23, #26 and #27 CLOSED** — their PRs are all merged into `main`
 (`d91fcb6`, `18645f0`, `57efbeb`, `d4b8aa3`, `363da23`); the history below
 saying "closes when … merges" is the record of the time. Every live
@@ -179,7 +180,7 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Equipment Compliance | ✅ `companydata.js:1027` (`upsert_equipment_compliance`) | ✅ `companydata.js:914`, `:960` (`compliance_summary`), `equipmentreports.js:595` — **#14** closed in PR #122; all three now drop retired machines (**#15**, PR #123) |
 | Daily Report | ✅ array form `equipment_ids` (`DailyReport.jsx:44,297`) | — |
 | Fleet Overview — last on site | — | ✅ *(#13, built `42ed3c7`)* `daily_reports.equipment_ids` → `companydata.js:864` (`fleet_activity`) → `lastOnSiteByEquipment` (`fleetActivity.js:36`) → `Dashboard.jsx:6057-6068` |
-| Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) — except the two attachment cards added by #18, which key on the fleet id (`attachmentStats`, `fleetActivity.js:113`, rendered `Analytics.jsx:362-370`) |
+| Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) — except the two attachment cards added by #18, which key on the fleet id (`attachmentStats`, `fleetActivity.js:126`, rendered `Analytics.jsx:362-370`) |
 
 **Consequence:** anything that groups by `equipment_label` silently splits
 one machine into several when the label is typed differently, and can't
@@ -259,9 +260,9 @@ Items carry the routing tag: `unit: 'truck'` for the machine itself,
 | Inspection PDF — checklist + deficiency banners | `generateInspectionPDF.js:69,141` | ✅ *(was **#16**, fixed on this branch)* — groups by `unitKey()` (`:16`), which keys on `attachmentId` and falls back to `unitLabel`. Keying on `unit` alone printed an attachment's defect under a "TRUCK / TOW VEHICLE" banner and merged two attachments into one group named after whichever came first |
 | Corrective actions | `correctiveActions.js:419,449` (`itemAttachment`, `:471`) → `groupFindingsByMachine` (`:489`) | ✅ *(#17, built `bb13340`)* — opened, resolved and repair-logged per machine (`logs.js:517-527,543-579`); id first (`item.attachmentId`), then `attachmentForItem` |
 | Brain signal (`inspectionFindingSignal`) | `logs.js:179-217` — item names only, machine = host `equipment_label` (`:214-215`) | ❌ **#30** — an attachment's defect reaches the Brain under the carrier's name |
-| Preventative Maintenance — towed distance | `maintenance.js:163` selects `linked_inspection_id, results_json` → `towedDistanceSince` (`fleetActivity.js:86`) | ✅ *(#18 as rescoped, built `42ed3c7`)* — **trailers only**; a non-trailer attachment has no clock by design (§5). Gaps: **#28** (a trailer not flagged `is_attachment`), **#29** (towed by a free-text machine) |
+| Preventative Maintenance — towed distance | `maintenance.js:163` selects `linked_inspection_id, results_json` → `towedDistanceSince` (`fleetActivity.js:99`) | ✅ *(#18 as rescoped, built `42ed3c7`)* — **trailers only**; a non-trailer attachment has no clock by design (§5). Gaps: **#28** built `1301c76`, closes with PR #129 (a trailer not flagged `is_attachment` is now towed by type, `fleetActivity.js:79-82`), **#29** (towed by a free-text machine) |
 | Fleet Overview — last mounted on | `mountedOnByAttachment` (`fleetActivity.js:56`), pre-trips only; ids not in the company's fleet dropped at `companydata.js:877-880` (`afc4b93`) | ✅ *(#18, built `42ed3c7`)* — `Dashboard.jsx:6060-6062` |
-| Equipment Analytics — most used attachment | `attachmentStats` (`fleetActivity.js:113`), pre-trips only | ✅ *(#18, built `42ed3c7`)* — `Analytics.jsx:365` |
+| Equipment Analytics — most used attachment | `attachmentStats` (`fleetActivity.js:126`), pre-trips only | ✅ *(#18, built `42ed3c7`)* — `Analytics.jsx:365` |
 
 ### `equipment.is_attachment` (is this thing hooked onto something else?)
 A fact about the machine, replacing `isTrailerTemplate`'s guess from the
@@ -273,8 +274,8 @@ silently failed for a bucket, a hammer, a mulcher or a plate tamper.
 | Inspection — no-readings path, attachment picker | `Inspection.jsx:275,283,291` |
 | Daily Report picker label | `DailyReport.jsx:403` |
 | Fleet Overview / Admin Panel badges | `Dashboard.jsx:6007,6042,6046`, `AdminPanel.jsx:1962` |
-| Preventative Maintenance | ✅ *(#18, built `42ed3c7`)* — `pmAllowedFor` (`fleetActivity.js:75`): an attachment may carry a PM clock only if `isTrailerTemplate` says it is a trailer. Read by `maintenance.js:216-217` (status) and `companydata.js:1273` (refuses an interval), plus `:1276` (a flagged trailer's interval must be KM). ⚠️ **#28** — PM asks `is_attachment && trailer`, the inspection asks `is_attachment \|\| trailer` (`Inspection.jsx:277,284-287`) |
-| Analytics — attachment cards | ✅ *(#18)* `attachmentStats` filters the fleet on it (`fleetActivity.js:114`) |
+| Preventative Maintenance | ✅ *(#18, built `42ed3c7`)* — `pmAllowedFor` (`fleetActivity.js:88`): an attachment may carry a PM clock only if `isTrailerTemplate` says it is a trailer. Read by `maintenance.js:216-219` (status) and `companydata.js:1273` (refuses an interval), plus `:1277` (a trailer's interval must be KM). **#28** built `1301c76` (closes with PR #129) — "towed" is now `isTowedUnit` (`fleetActivity.js:79-82`), by type alone, matching the inspection's `is_attachment \|\| trailer` (`Inspection.jsx:277,284-287`); was `is_attachment && trailer` |
+| Analytics — attachment cards | ✅ *(#18)* `attachmentStats` filters the fleet on it (`fleetActivity.js:129`) |
 | Fuel Log picker | ❌ nothing — an attachment with no tank is still offered (`FuelLog.jsx:84`). Cosmetic, not filed. |
 
 ### `equipment.retired_at` (out of the fleet, still in the history)
@@ -291,7 +292,7 @@ which is right for some and wrong for one:
 | Direct reader | Includes retired? | Correct? |
 |---|---|---|
 | `maintenance.js:148-153` (`list_status`) | **no** — `.is('retired_at', null)` | ✅ **#15** fixed, PR #123 (draft) |
-| `maintenance.js:376-379` (`list_records`) | yes | ✅ deliberate; a history that drops the machines you no longer own is not a history |
+| `maintenance.js:384-387` (`list_records`) | yes | ✅ deliberate; a history that drops the machines you no longer own is not a history |
 | `equipmentScope.js:80-88` (`companyEquipmentIndex`) | yes | ✅ historical ids must still vet |
 | `equipmentScope.js:42,119` (`resolveEquipmentId(s)`) | yes | ✅ deliberate — see §5 |
 | `companydata.js:1063-1094` (compliance list) | **no** — `withoutRetiredEquipment` (`:1092-1093`) | ✅ **#15** fixed, PR #123, merged `18645f0`; same for `compliance_summary` (`:1133-1134`) and the weekly report's snapshot (`equipmentreports.js:645,657`) |
@@ -393,7 +394,7 @@ post-trip carrying this id.
 | Weekly Equipment Report — towed distance | `equipmentreports.js:331` |
 | `api/logs.js` open-pretrip list | `logs.js:223` |
 | Dashboard inspection detail | `src/Dashboard.jsx:3989` |
-| PM towed distance *(#18, `42ed3c7`)* | `fleetActivity.js:98-99` — pairs each post-trip with its pre-trip by this id, inside a company-scoped set (`maintenance.js:161-166`) |
+| PM towed distance *(#18, `42ed3c7`)* | `fleetActivity.js:111-112` — pairs each post-trip with its pre-trip by this id, inside a company-scoped set (`maintenance.js:161-166`) |
 
 **Weak link, recorded 2026-09-17, not being worked.** This is the last
 client-supplied foreign id in `SUBMITTABLE_FIELDS.inspection`
@@ -467,7 +468,7 @@ Hours or kilometres on a machine. Written by inspections
 | `api/fuellogs.js` `get_last_reading` | ✅ `:106` | ✅ `:99` |
 | `api/fuellogs.js` consumption calc | ✅ `:211` | ✅ `:229` |
 | `api/maintenance.js` PM status | ✅ `:129` | ✅ *(#1, PR #118)* |
-| `api/maintenance.js` PM status — **a flagged trailer** *(#18, `42ed3c7`)* | ✅ towed distance: the tow unit's completed-trip deltas, KM only (`maintenance.js:221-233` → `towedDistanceSince`, `fleetActivity.js:86-106`) | — *(a trailer has no tank; deliberate)* |
+| `api/maintenance.js` PM status — **a trailer** (by type since #28, `1301c76`) *(#18, `42ed3c7`)* | ✅ towed distance: the tow unit's completed-trip deltas, KM only (`maintenance.js:223-242` → `towedDistanceSince`, `fleetActivity.js:99-119`) | — *(a trailer has no tank; deliberate)* |
 | `api/equipmentreports.js` weekly — ending reading | ✅ | ✅ *(#1, PR #120)* |
 | `api/equipmentreports.js` weekly — "Used" | ✅ | — *(by definition; see #1)* |
 
@@ -481,7 +482,7 @@ because a trailer has no odometer for a reading *point* to be on
 (`fleetActivity.js:12-16`). It is the same arithmetic as `foldWeeklyUsage`
 (`equipmentreports.js:302`) — post-trip end minus its own start, credited to
 every attachment on the linked pre-trip — with two filters Weekly Hours does
-not have: distance units only (`fleetActivity.js:95`) and, through the
+not have: distance units only (`fleetActivity.js:108`) and, through the
 `list_status` query, a tow unit with a fleet id (`maintenance.js:166`). The
 first is by design; the second is **#29**.
 
@@ -658,8 +659,8 @@ same count via `git grep` at `57efbeb` → **45**):
 | `list_corrective_actions` / `update_corrective_action` | `api/monthly.js:681,865`; reasoning at `:661-667` (immediately above `list_corrective_actions`) | Polymorphic since break #5 — an action can come from an incident, a near miss or a failed inspection. Gating them on `monthly` would hide a company's incident follow-ups behind a module it may never have bought. Still scoped by company and role |
 | Admin-only actions | `docKeyGate.js:113` | The founder is on the other side of the paid boundary; gating them would break the console that decides what a company is sold |
 | `create_upload_url` | `api/logs.js:288-293`, `api/reports.js:187`, `api/flhas.js:235`, `api/monthly.js:122`, `api/customforms.js:138` | It mints a signed upload slot inside the caller's own company namespace and runs **before the record type is known**, so there is no doc key to check. The submit that would use the file is gated, which is where a company without the module is stopped |
-| `clock_out`, `my_time_status` | `api/companydata.js:1503,1524`; reasoning at `:1473-1483` (re-anchored at `42ed3c7`) | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *Reached from the UI as of `98f9d70` (#27, built): the worker's Time Clock card stays while `my_time_status` reports an open shift (`src/WorkerMenu.jsx:137-150,272-273`) and opens a clock-out-only screen (`src/TimeClock.jsx:157`); a supervisor's own open shift keeps its Clock Out button on the read-only tab (`src/Dashboard.jsx:6720`, re-anchored at `42ed3c7`).* |
-| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1543,1651,1676`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`; `list_time_reports` now also returns `latestEntryAt`, the newest `time_clock_entries.clock_in` for the resolved company (`companydata.js:1662-1673`), pinned company-scoped by `:206`. *Reached from the UI as of `98f9d70` (#27, built): the Time Clock tab stays, read-only, for a company without the module that has any report, any recorded entry in any week (`latestEntryAt`), or the viewer's own open shift (`src/Dashboard.jsx:2830,3299-3324`). Since `b0411b1` the tab pages through past weeks — `list_time_entries` sends `weekStart` (`:3045`), Previous / Next / This week at `:6679-6696` — so a week that never became a report stays readable; the current-week-only residual is closed. See #27.* |
+| `clock_out`, `my_time_status` | `api/companydata.js:1504,1525`; reasoning at `:1474-1484` (re-anchored at `1301c76`) | **Dillon's decision on #23 (2026-09-22, `ac80f96`).** A shift that was open when the company dropped Time Clock + GPS must always be closable, and the clock-out screen needs `my_time_status` to find the open shift. Gating `clock_out` would leave that entry open forever. Pinned by `tests/unit/timeclock-gate.test.js:156,161`. *Reached from the UI as of `98f9d70` (#27, built): the worker's Time Clock card stays while `my_time_status` reports an open shift (`src/WorkerMenu.jsx:137-150,272-273`) and opens a clock-out-only screen (`src/TimeClock.jsx:157`); a supervisor's own open shift keeps its Clock Out button on the read-only tab (`src/Dashboard.jsx:6720`, re-anchored at `42ed3c7`).* |
+| `list_time_entries`, `list_time_reports`, `get_time_report` | `api/companydata.js:1544,1652,1677`; same reasoning block | **Dillon's decision on #23.** Recorded hours are payroll records and stay readable after a company cancels the module. Reads only — every write and `generate_time_report_now` are gated. Pinned by `tests/unit/timeclock-gate.test.js:170,176`; `list_time_reports` now also returns `latestEntryAt`, the newest `time_clock_entries.clock_in` for the resolved company (`companydata.js:1662-1673`), pinned company-scoped by `:206`. *Reached from the UI as of `98f9d70` (#27, built): the Time Clock tab stays, read-only, for a company without the module that has any report, any recorded entry in any week (`latestEntryAt`), or the viewer's own open shift (`src/Dashboard.jsx:2830,3299-3324`). Since `b0411b1` the tab pages through past weeks — `list_time_entries` sends `weekStart` (`:3045`), Previous / Next / This week at `:6679-6696` — so a week that never became a report stays readable; the current-week-only residual is closed. See #27.* |
 
 **`custom_<id>` documents are gated as of `f955ad9` — #25, built, not closed.**
 Two `requireCustomDocKey` calls (`customforms.js:483,525`), **not** counted in
@@ -716,7 +717,7 @@ Since PR #121 the relationship also runs the other way: a post-trip can
 `field_service` row to `equipment_maintenance_log` (`api/logs.js:513`) —
 never `pm_service`, which would reset the machine's PM clock. That made
 corrective actions the fourth writer of that table, alongside
-`api/maintenance.js:262` (`log_field_service`), `api/maintenance.js:325`
+`api/maintenance.js:270` (`log_field_service`), `api/maintenance.js:333`
 (`log_service`) and `api/companydata.js:748`. **This was break #11 below.**
 
 ---
@@ -744,7 +745,7 @@ corrective actions the fourth writer of that table, alongside
 | Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | ✅ *(#11, PR #121)* | — |
 | Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
-| Attachments (`is_attachment`) | ✅ **trailers only**, towed KM *(#18 as rescoped, built `42ed3c7`: `maintenance.js:221-233`)*; non-trailers `—` by design (§5); ⚠️ **#28**, **#29** | — | ✅ `equipmentreports.js:345,552` | ❌ **#30** (host label, `logs.js:214-215`) | ✅ *(#18: most used / most repaired, fleet-id keyed, `Analytics.jsx:362-370`)* | ✅ *(#17, built `bb13340`: `logs.js:517-527`)* | — |
+| Attachments (`is_attachment`) | ✅ **trailers only**, towed KM *(#18 as rescoped, built `42ed3c7`: `maintenance.js:223-242`)*; non-trailers `—` by design (§5); **#28** built `1301c76` (closes with PR #129); ⚠️ **#29** | — | ✅ `equipmentreports.js:345,552` | ❌ **#30** (host label, `logs.js:214-215`) | ✅ *(#18: most used / most repaired, fleet-id keyed, `Analytics.jsx:362-370`)* | ✅ *(#17, built `bb13340`: `logs.js:517-527`)* | — |
 | Equipment Compliance | ❌ #14 | — | ✅ *(#14, PR #122: `reportPdfs.js:142`)*, gated on its own doc key since `2560819` (`equipmentreports.js:618`) | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4885`; the overview banner it now matches is `Dashboard.jsx:4917`, and both are now gated the same way — cert on `isDocActive("certifications")`, compliance on `complianceEnabled`)* |
 | Fleet retirement (`retired_at`) | ✅ *(#15, PR #123 merged `18645f0`: no PM clock)* | ✅ picker filtered | ✅ *(#15: off the weekly report)* | — | — | — | — |
 
@@ -758,11 +759,11 @@ supervisor/admin, company-scoped action (`api/companydata.js:857-883`,
 |---|---|---|---|
 | Daily Report | `daily_reports.equipment_ids` → `equipment.id` (`companydata.js:864` → `fleetActivity.js:36`) | "Last on site DATE at SITE" (`Dashboard.jsx:6063-6065`) | ✅ *(#13, built)*; site is the free-text column, not `site_id` — weak link in §2 |
 | Equipment Inspection (pre-trip) | `results_json.attachments[].id` → `equipment.id` (`companydata.js:865` → `fleetActivity.js:56`, then **filtered to this company's fleet ids** at `companydata.js:877-880`, `afc4b93`) | "Last mounted on HOST (DATE)" (`Dashboard.jsx:6060-6062`) | ✅ *(#18, built)*. The ids are client jsonb and unvetted on write, so the read drops any id not in the fleet the same query loaded (`:863`) |
-| Equipment Inspection + maintenance log | pre-trip attachment ids + `equipment_maintenance_log.equipment_id` (`companydata.js:865-866` → `fleetActivity.js:113`) | Analytics "Most Used / Most Repaired Attachments" (`Dashboard.jsx:5963` → `Analytics.jsx:362-370`) | ✅ *(#18, built)* — "repaired" counts every log entry, `pm_service` included; the card subtitle says so (`Analytics.jsx:367`) |
+| Equipment Inspection + maintenance log | pre-trip attachment ids + `equipment_maintenance_log.equipment_id` (`companydata.js:865-866` → `fleetActivity.js:126`) | Analytics "Most Used / Most Repaired Attachments" (`Dashboard.jsx:5963` → `Analytics.jsx:362-370`) | ✅ *(#18, built)* — "repaired" counts every log entry, `pm_service` included; the card subtitle says so (`Analytics.jsx:367`) |
 
 And one new join into PM: **Equipment Inspection → PM for a trailer**, via
 `linked_inspection_id` and the pre-trip's attachment list
-(`maintenance.js:163` → `fleetActivity.js:86-106`). See §2's reading table.
+(`maintenance.js:163` → `fleetActivity.js:99-119`). See §2's reading table.
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
 join exists in code; it does not say the company can reach it. A company with no
@@ -1101,7 +1102,7 @@ clash check treats blank as "no asset ID" and skips it (`companydata.js:110`).
 rows key on `eq:<id>` either way — but not for the *display*: `foldWeeklyUsage`
 labels a machine from whichever record it meets first, ascending by date
 (`equipmentreports.js:312-320`), while `list_records` resolves the label from
-the fleet table (`maintenance.js:363-367`). So after a rename, Equipment ▸
+the fleet table (`maintenance.js:371-375`). So after a rename, Equipment ▸
 Weekly Hours shows the old name and Equipment ▸ Maintenance Records shows the
 new one, for the same machine, one sub-tab apart. Cosmetic, recorded rather
 than filed.
@@ -1640,12 +1641,12 @@ original "fix would touch" below proposed. It is:
 
 | Piece | Where |
 |---|---|
-| Who may have a clock | `pmAllowedFor` (`server-lib/fleetActivity.js:75-78`) — every machine, except an `is_attachment` machine that `isTrailerTemplate` (`src/equipmentInspectionTemplates.js:794`) does not call a trailer |
-| PM status | `api/maintenance.js:216-220` — a non-trailer attachment reads `not_tracked`, **even with a legacy interval**, rather than a clock that never moves; `:221-233` — a trailer's usage is the KM towed since its last service (`towedDistanceSince`, `fleetActivity.js:86-106`), where it used to sit at `ok` forever |
-| Setting an interval | `api/companydata.js:1273-1275` refuses one on a non-trailer attachment; `:1276-1278` refuses a flagged trailer's interval in anything but KM. Clearing an interval is always allowed, so a legacy one on a set of forks can be removed |
+| Who may have a clock | `pmAllowedFor` (`server-lib/fleetActivity.js:88-91`) — every machine, except an `is_attachment` machine that `isTrailerTemplate` (`src/equipmentInspectionTemplates.js:794`) does not call a trailer. Since #28 (`1301c76`) "is it towed" is `isTowedUnit` (`fleetActivity.js:79-82`), by type alone |
+| PM status | `api/maintenance.js:216-222` — a non-trailer attachment reads `not_tracked`, **even with a legacy interval**, rather than a clock that never moves; `:223-242` — a trailer's usage is the KM towed since its last service (`towedDistanceSince`, `fleetActivity.js:99-119`), where it used to sit at `ok` forever |
+| Setting an interval | `api/companydata.js:1273-1275` refuses one on a non-trailer attachment; `:1276-1279` refuses a trailer (by type since #28)'s interval in anything but KM. Clearing an interval is always allowed, so a legacy one on a set of forks can be removed |
 | Maintenance screen | `src/Dashboard.jsx:6446-6447` (towed line), `:6543` (unit locked), `:6548-6552` (no starting-reading box for a trailer), `:6559-6561` ("Attachments don't get a maintenance schedule unless they're a trailer.") |
 | Mounted on | `mountedOnByAttachment` (`fleetActivity.js:56-69`), filtered to the company's fleet ids in `fleet_activity` (`api/companydata.js:877-880`, added in `afc4b93` from the tenant-scope review — attachment ids are client jsonb) → `Dashboard.jsx:6060-6062` — from the most recent **pre-trip** only; a post-trip only carries items forward |
-| Most used / most repaired | `attachmentStats` (`fleetActivity.js:113-133`) → `Dashboard.jsx:5963` → `Analytics.jsx:362-370`. "Used" = pre-trips it was recorded on; "repaired" = every `equipment_maintenance_log` row against it, `pm_service` included |
+| Most used / most repaired | `attachmentStats` (`fleetActivity.js:126-148`) → `Dashboard.jsx:5963` → `Analytics.jsx:362-370`. "Used" = pre-trips it was recorded on; "repaired" = every `equipment_maintenance_log` row against it, `pm_service` included |
 | Tests | `tests/unit/fleet-activity.test.js:66,79,84,93`; `tests/unit/timeclock-gate.test.js` cases 21 and 23 (the interval refusals, against the real handler); `tests/fleet-activity.spec.js:27,45` |
 
 *Evidence, re-run by this pass:* `node --test tests/unit/timeclock-gate.test.js`
@@ -1653,7 +1654,7 @@ original "fix would touch" below proposed. It is:
 21 pass**, the two being "a set of forks cannot be given a PM interval" and "a
 trailer can be given an interval in KM, and not in hours". The Playwright spec
 fails 3/3 before and passes 3/3 after (see #13). **One gap in the evidence:**
-`list_status`'s towed branch (`maintenance.js:221-233`) is pinned only through
+`list_status`'s towed branch (`maintenance.js:223-242`) is pinned only through
 the pure `towedDistanceSince` and a mocked API in the spec — no test runs the
 real handler's towed path. `npm run test:unit` → 415 pass.
 
@@ -2160,9 +2161,9 @@ numbers are left as found):
 
 | Half | Producer (server, unchanged) | Consumer (UI, now reached) |
 |---|---|---|
-| Worker closes an open shift | `my_time_status` `companydata.js:1524`, `clock_out` `:1503` | `src/WorkerMenu.jsx:137-150` probes `my_time_status` whenever the menu shows and `builtinActive.timeclock === false` (explicit `false` — `customforms.js:384` writes `settingsMap[key] === true`, so a company with no row counts as off too); `:272-273` falls back to the unfiltered `BUILTIN_TYPES` entry when `openShiftWhileOff`, so the card renders (`:476`) with "You're still clocked in. Tap to clock out." (`:494-495`); `:233` passes `clockOutOnly`, and `src/TimeClock.jsx:157` replaces the button with a "can't clock in" note once `clockedIn` is false. The card goes away on the next menu render after clock-out |
+| Worker closes an open shift | `my_time_status` `companydata.js:1525`, `clock_out` `:1504` | `src/WorkerMenu.jsx:137-150` probes `my_time_status` whenever the menu shows and `builtinActive.timeclock === false` (explicit `false` — `customforms.js:384` writes `settingsMap[key] === true`, so a company with no row counts as off too); `:272-273` falls back to the unfiltered `BUILTIN_TYPES` entry when `openShiftWhileOff`, so the card renders (`:476`) with "You're still clocked in. Tap to clock out." (`:494-495`); `:233` passes `clockOutOnly`, and `src/TimeClock.jsx:157` replaces the button with a "can't clock in" note once `clockedIn` is false. The card goes away on the next menu render after clock-out |
 | Supervisor reads recorded hours | `list_time_reports` `:1651` (now also returns `latestEntryAt`, the newest `time_clock_entries.clock_in` for the resolved company, `:1662-1673`), `get_time_report` `:1676`, `list_time_entries` `:1543` (honours `weekStart`, `:1548-1549`), `my_time_status` `:1524` | `src/Dashboard.jsx:3299-3324` — when `timeClockEnabled` (`:2791`, `isDocActive("timeclock")`) is false, probes `list_time_reports` and `my_time_status` (the old current-week `list_time_entries` probe is gone) and sets `timeClockHistory` if any report, a non-null `latestEntryAt` (any week), or the viewer's own open shift exists (`:3315`); `TAB_VISIBLE.timeclock: timeClockEnabled \|\| timeClockHistory` (`:2830`). A failed probe reads as `{}` → no tab (fails closed) |
-| Supervisor pages past weeks | `list_time_entries` rounds any date to its Monday (`companydata.js:1548-1549`, `mondayOf` `:241`) | `timeClockWeekStart` / `timeClockShownWeek` (`Dashboard.jsx:2026-2027`); the entries fetch sends `weekStart` when set (`:3045`) and re-runs on it (`:3062`); `showTimeClockWeek` / `timeClockAtCurrentWeek` (`:3066-3073`) step by 7 days and snap back to "" (server default = current week) at the present; Previous / This week / Next card at `:6679-6696`, rendered in both modes. Read-only opens on the week of `latestEntryAt` when that is before the current week (`:3317-3320`); the week resets on company or module change (`:3300`) |
+| Supervisor pages past weeks | `list_time_entries` rounds any date to its Monday (`companydata.js:1549-1550`, `mondayOf` `:241`) | `timeClockWeekStart` / `timeClockShownWeek` (`Dashboard.jsx:2026-2027`); the entries fetch sends `weekStart` when set (`:3045`) and re-runs on it (`:3062`); `showTimeClockWeek` / `timeClockAtCurrentWeek` (`:3066-3073`) step by 7 days and snap back to "" (server default = current week) at the present; Previous / This week / Next card at `:6679-6696`, rendered in both modes. Read-only opens on the week of `latestEntryAt` when that is before the current week (`:3317-3320`); the week resets on company or module change (`:3300`) |
 | Read-only, no write reachable | every write gated server-side by #23 (`:1486,1578,1610,1638,1698`) | `timeClockReadOnly = !timeClockEnabled` (`:2792`) — banner (`:6669`); My Time's button only while `myTimeStatus?.open` (`:6720`), so Clock Out and never Clock In; "+ Add Entry" and its form gone (`:6788,6796`); Edit/Delete gone (`:6843,6883`); Manual Pull and "Generate This Week" gone (`:6908`, the button itself at `:6914`) and the manual-pull panel suppressed (`:6927`). Report rows still open and download via `get_time_report` (`:3407`). Paging adds no write path — it only changes the `weekStart` of a read |
 
 *Re-check:* `grep -n "openShiftWhileOff\|clockOutOnly" src/WorkerMenu.jsx src/TimeClock.jsx`
@@ -2206,7 +2207,7 @@ figure; this pass ran only this spec.)
 entries in the read-only tab"). Both halves are gone: any week's entries are
 reachable via Previous / Next (`Dashboard.jsx:6679-6696`, `weekStart` at
 `:3045`), and the tab's visibility no longer depends on the current week
-(`latestEntryAt`, `companydata.js:1662-1673` → `Dashboard.jsx:3315`), so the
+(`latestEntryAt`, `companydata.js:1663-1674` → `Dashboard.jsx:3315`), so the
 sub-week company keeps its tab after the week rolls over. The cron and
 `generate_time_report_now` are still gated, so the final partial week still
 never becomes a *report* — its hours are read as entries, which was the ask.
@@ -2462,9 +2463,42 @@ true of something adjacent to the thing that wasn't.
 
 ### #28 — A trailer the fleet row doesn't flag still gets the old `ok`-forever PM clock
 
-**Severity: medium. Status: OPEN, awaiting a decision. Opened 2026-09-23 by
-this map's pass against `42ed3c7`** — a residual of #18's build, found while
-verifying it, not handed to this pass.
+**Severity: medium. Status: BUILT in `1301c76`, not closed — closes when PR
+#129 merges. Approved by Dillon 2026-09-23 ("Complete 28, then merge").
+Opened 2026-09-23 by this map's pass against `42ed3c7`** — a residual of
+#18's build, found while verifying it, not handed to this pass.
+
+*As built (`1301c76`, anchors re-read at that commit):*
+
+| Who asks | Test now | Where |
+|---|---|---|
+| "Is it towed?" | `isTowedUnit(eq)` — `isTrailerTemplate(type, make, model)`, **no flag required**, the inspection's own keyword test | `server-lib/fleetActivity.js:79-82` (reason in the doc comment `:71-78`) |
+| May it carry a PM clock? | `pmAllowedFor` — any unflagged machine yes; a flagged attachment only if `isTowedUnit` | `server-lib/fleetActivity.js:88-91` |
+| PM status — towed clock | `isTowed = isTowedUnit(eq)` (was `!!eq.is_attachment && pmAllowed`) → towed branch `:223-242`, `towedDistanceSince` `:237` | `api/maintenance.js:219` |
+| PM status — trailer already set up in Hours | new `unit_mismatch` return rather than comparing KM towed to an hours interval; rendered by the existing status pill (`src/Dashboard.jsx:6430`) | `api/maintenance.js:231-236` |
+| PM interval — must it be KM? | `isTowedUnit(eqRows[0]) && readingUnit !== 'KM'` → 400 | `api/companydata.js:1276-1279` (select now carries `type, make, model`, `:1258`) |
+| Most used / most repaired | `e.is_attachment \|\| isTowedUnit(e)` — the same set the inspection offers as attachments | `server-lib/fleetActivity.js:127-129` |
+
+*Evidence:* 4 new tests — `tests/unit/fleet-activity.test.js:120,126,132`
+(unflagged trailer is towed and PM-able; ordinary machine not towed, flagged
+forks neither; unflagged trailer counted in attachment stats) and
+`tests/unit/timeclock-gate.test.js:242` (an unflagged trailer's interval must
+be KM, through the real `companydata.js` handler). Those two files copied into
+a `427895e` worktree → **4 fail / 31 pass**, exactly the four new tests; at
+`1301c76` → 35/35. `npm run test:unit` → **419/419**. Run 2026-09-23.
+**Gap in the evidence:** no test runs `list_status` itself, so the
+`maintenance.js:219` switch and the new `unit_mismatch` return at `:234-235`
+are verified by reading only — the same gap #18 recorded for the towed branch.
+Whether any live company actually has an unflagged trailer was still not
+queried.
+
+*Re-check (post-build):* `grep -n "isTowedUnit" api/maintenance.js api/companydata.js server-lib/fleetActivity.js`
+→ 7 hits: the two imports (`maintenance.js:13`, `companydata.js:17`),
+`maintenance.js:219`, `companydata.js:1277`, `fleetActivity.js:79,90,129`.
+If any of the three call sites drops out, #28 has regressed. Run 2026-09-23
+against `1301c76`.
+
+*As found at `42ed3c7` (numbers as of that commit):*
 
 The product has two definitions of "this machine is a trailer", and #18's fix
 used the narrower one.
@@ -2497,7 +2531,7 @@ Run 2026-09-23 against `42ed3c7`.
 
 **Not checked:** whether any live company has such a row. That is a data
 question this pass did not query; the code path is verified, the population
-is not.
+is not. *(Still true after the build.)*
 
 **What the customer sees.** A supervisor sets a 5,000 km bearing interval on a
 flatdeck that was registered before the attachment checkbox existed, logs its
@@ -2520,7 +2554,7 @@ map's pass against `42ed3c7`** — a residual of #18's build.
 (`api/maintenance.js:161-166`), which was right when the only question was a
 fleet machine's own readings. #18 reuses that same set for towed distance:
 `towedDistanceSince` pairs each post-trip with its pre-trip **only inside
-that set** (`server-lib/fleetActivity.js:88-99`). A trip whose tow unit was
+that set** (`server-lib/fleetActivity.js:101-112`). A trip whose tow unit was
 typed in free text (a rental truck, a sub's pickup) has `equipment_id` null on
 both halves, so it is never seen, and a **registered** trailer it towed gets
 no kilometres for it.
@@ -2536,7 +2570,7 @@ filter; `grep -n "equipment_id" api/equipmentreports.js` around `:775` → none 
 the Weekly Hours query. Run 2026-09-23 against `42ed3c7`.
 
 **Deliberately not part of this break:** PM also ignores an **hour-metered**
-tow unit's trips (`fleetActivity.js:95`, pinned by
+tow unit's trips (`fleetActivity.js:108`, pinned by
 `tests/unit/fleet-activity.test.js:79`) — hours are not distance. Weekly Hours
 does credit those hours to the trailer; that is a Weekly Hours oddity, not a
 PM gap, and not filed.
@@ -2700,14 +2734,14 @@ Do **not** flag these. They are decisions, not gaps.
   recorded at `98f9d70` is fixed by `b0411b1`, merged in `363da23`
   (Dillon approved it): `weekStart` is sent (`Dashboard.jsx:3045`), paging at
   `:6679-6696`, and visibility keys off `latestEntryAt`
-  (`companydata.js:1662-1673` → `Dashboard.jsx:3315`) rather than this week's
+  (`companydata.js:1663-1674` → `Dashboard.jsx:3315`) rather than this week's
   entries. **Still deliberate:** the final partial week never becomes a
   *report* once the module is off, because the cron and
-  `generate_time_report_now` (`companydata.js:1698`) stay gated — its hours
+  `generate_time_report_now` (`companydata.js:1699`) stay gated — its hours
   are readable as entries, which is what was asked for. Do not file "no final
   report at switch-off" as a break without a product decision that it is one.
 - **`list_records` and `companyEquipmentIndex` include retired machines on
-  purpose** (`maintenance.js:365-369`, `equipmentScope.js:80-88`). A service
+  purpose** (`maintenance.js:373-377`, `equipmentScope.js:80-88`). A service
   history or a vetting index
   that drops the machines you no longer own is not a history or an index.
   Break #15 is about `list_status` and the three compliance surfaces only, and
@@ -2727,17 +2761,17 @@ Do **not** flag these. They are decisions, not gaps.
   maintenance log, unless it's a trailer. Things like loader forks don't require
   preventative maintenance."* Forks, buckets, hammers and the like are
   inspected, not serviced on a clock: `pmAllowedFor`
-  (`server-lib/fleetActivity.js:75-78`) says no, `list_status` reports
-  `not_tracked` even over a legacy interval (`api/maintenance.js:216-220`),
+  (`server-lib/fleetActivity.js:88-91`) says no, `list_status` reports
+  `not_tracked` even over a legacy interval (`api/maintenance.js:216-222`),
   `set_equipment_pm_interval` refuses a new one (`api/companydata.js:1273-1275`,
   clearing is always allowed), and the Maintenance screen says so instead of
   offering set-up (`src/Dashboard.jsx:6559-6561`). Their defects still open
   corrective actions against the attachment (#17) and their repairs still land
   in its maintenance log. **Do not file "attachments never come due" as a
-  break.** The one real gap near this line is #28 — a *trailer* the fleet row
-  doesn't flag, which is the opposite case.
+  break.** The one real gap near this line was #28 — a *trailer* the fleet row
+  doesn't flag, which is the opposite case; built `1301c76`, closes with PR #129.
 - **A trailer's PM clock ignores trips towed on an hour meter.** Hours are not
-  distance (`fleetActivity.js:95`, pinned by
+  distance (`fleetActivity.js:108`, pinned by
   `tests/unit/fleet-activity.test.js:79`). Weekly Hours does credit those hours
   to the trailer; that is Weekly Hours' own quirk, not a PM gap. (A trip towed
   by a **free-text** machine is different and is #29.)
@@ -2842,3 +2876,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-23 | `42ed3c7` | **#28, #29 and #30 opened by this pass, none approved, none worked** — all three are residuals of the day's builds, each read in the code. #28: PM decides "towed trailer" with `is_attachment && isTrailerTemplate` while the inspection uses `is_attachment \|\| isTrailerTemplate` (`Inspection.jsx:276-287`), and `is_attachment` was never backfilled (`default false`, migration `:70`) — so a template-matched trailer without the flag takes the metered branch and reads **`ok` forever** once serviced (`maintenance.js:242`), #18's original symptom. Whether any live row is in that state was not queried. #29: `list_status`'s inspections read keeps `.not('equipment_id', 'is', null)` (`maintenance.js:166`), so a trip towed by a free-text machine credits Weekly Hours and not the trailer's PM clock. #30: `inspectionFindingSignal` still names the carrier for an attachment's defect (`logs.js:214-215`) — the Brain half of the Attachments row #17 used to cover. |
 | 2026-09-23 | `42ed3c7` | **Line-number refresh, as Dillon asked.** Every live `src/Dashboard.jsx` citation in §1–§5 re-read against the 7274-line file at `42ed3c7` and re-cited where the code actually is — no offsets applied. The previous pass had flagged these as already stale at `f561f42` (e.g. `complianceEnabled` cited `:2755`, the Compliance sub-tab `:2832`, Fleet Overview `:5913`); at `42ed3c7` they are `:2784`, `:2869` and `:5990`. Also re-anchored, because #13/#18's `companydata.js` insertions moved them by 34–48 lines: the `companydata.js` guard, carve-out and time-clock anchors in §2, §5 and #27's built table; and the `customforms.js` anchors in §2/§5 (one line down since #25's import). Left as found on purpose: the changelog, the "as found at `ac80f96`" tables, the text quoted from `98f9d70`, and the `git show`-pinned historical claims in §1 and #19. Other `api/` anchors in older break entries were not swept and may be stale. No application code touched. |
 | 2026-09-23 | `afc4b93`, `e7bd475` | **Re-anchored after two follow-up commits on the branch; no break status changed.** `afc4b93` (tenant-scope review): `fleet_activity`'s `mountedOn` is now filtered to the company's own fleet ids (`api/companydata.js:877-880`), since attachment ids come from client jsonb; and `resolveCorrectiveActionsForItems`' update carries `.eq('company_id', companyId)` next to `.in('id', ids)` (`server-lib/correctiveActions.js:345`). Both recorded in #13/#18/§3 and #17. `e7bd475` moved the `fleet_activity` block above `list_equipment`'s comment, which fixes the misplacement the previous row's report noted: the block is `:857-883` (was `:865-891`), its no-gate comment `:849-856`, queries `:863-866`, and the retired-machines comment is back directly over `list_equipment` at `:885-892`. Re-read against HEAD: everything in `companydata.js` from `list_equipment` (`:893`) down is **unchanged** — `set_equipment_pm_interval` `:1251` (guard `:1253`, refusals `:1273,1276`), the compliance guards `:1065,1114,1183,1231`, the time-clock guards `:1486,1578,1610,1638,1698`, carve-outs `:1503,1524,1543,1651,1676`, reasoning `:1473-1483`, `latestEntryAt` `:1662-1673` — so none of those needed to move. `correctiveActions.js` anchors cited by the #17 build (`:419,449,471-478,489-504,495`) re-read and still correct; three older §2 anchors (`:272-352`, `:298`, `:327`) re-anchored to `:273-356` and `:328`. #28, #29, #30 still OPEN. |
+| 2026-09-23 | `1301c76` | **#28 BUILT, not closed — closes when PR #129 merges.** Dillon approved it ("Complete 28, then merge"). "Is it towed?" is now `isTowedUnit` (`server-lib/fleetActivity.js:79-82`), by type alone — the inspection's own test — and `pmAllowedFor` (`:88-91`) delegates to it. `list_status` sets `isTowed = isTowedUnit(eq)` (`api/maintenance.js:219`), so an unflagged trailer runs the towed-KM clock (`:223-242`) instead of reading `ok` forever; a trailer already set up in **Hours** now returns `unit_mismatch` (`:231-236`, rendered by `src/Dashboard.jsx:6430`) rather than comparing KM to hours. `set_equipment_pm_interval` requires KM for any towed unit (`api/companydata.js:1276-1279`), and `attachmentStats` counts unflagged trailers (`fleetActivity.js:127-129`). Evidence: 4 new tests (`tests/unit/fleet-activity.test.js:120,126,132`, `tests/unit/timeclock-gate.test.js:242`) fail 4/35 with those files dropped into a `427895e` worktree and pass 35/35 at `1301c76`; `npm run test:unit` 419/419. Gap: no test runs `list_status` itself, so `maintenance.js:219` and the new `unit_mismatch` return are verified by reading. **Re-anchored** everything the commit shifted: `fleetActivity.js` +13 from `pmAllowedFor` down (`:75→88`, `towedDistanceSince` `:86→99`, `:95→108`, `attachmentStats` `:113→126`, filter `:114→129`); `maintenance.js` +2 from `:217` and +8 from `:229` (towed branch `:221-233→223-242`, `list_records`-area and `log_field_service` anchors); `companydata.js` +1 from `:1276` (time-clock `:1503,1524,1543,1651,1676,1698` → `:1504,1525,1544,1652,1677,1699`, reasoning `:1474-1484`, `latestEntryAt` `:1663-1674`). Changelog rows and "as found" blocks keep their original numbers. **#29 and #30 still OPEN.** |
