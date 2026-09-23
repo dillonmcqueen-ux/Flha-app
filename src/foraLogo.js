@@ -8,6 +8,7 @@ export async function getForaLogoDataUrl() {
   if (cached !== undefined) return cached;
   try {
     const resp = await fetch("/fora-logo-dark.png");
+    if (!resp.ok) throw new Error(`logo fetch ${resp.status}`);
     const blob = await resp.blob();
     cached = await new Promise((resolve, reject) => {
       const r = new FileReader();
