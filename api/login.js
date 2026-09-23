@@ -20,6 +20,7 @@ import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
+import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -545,7 +546,15 @@ export default async function handler(req, res) {
       issuedAt: Date.now(),
     };
     const token = signSession(payload);
-    return res.status(200).json({ session: payload, token, email: member.email || '' });
+    // Break #24: the invite screen holds an invite token, not a full
+    // session, and has no other way to know whether the company has
+    // Certification Tracking. Without this it offered a ticket upload the
+    // server then refused. null (not false) when the lookup fails, so the
+    // screen falls back to showing the card; the upload itself is still
+    // gated by requireDocKey either way.
+    const certs = await readDocKeySetting(supabaseAdmin, company.id, 'certifications');
+    const certificationsEnabled = certs.unavailable ? null : certs.active;
+    return res.status(200).json({ session: payload, token, email: member.email || '', certificationsEnabled });
   }
 
   // ── Master code, step 2: pick a company + role ──────────────────────────
