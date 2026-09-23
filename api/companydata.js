@@ -846,14 +846,6 @@ export default async function handler(req, res) {
 
     // ══ EQUIPMENT ════════════════════════════════════════════════════
 
-    // Retired machines are hidden unless the caller asks for them, so every
-    // worker-facing picker (Inspection, DailyReport, FuelLog, FieldService)
-    // drops a sold or scrapped unit the moment a supervisor retires it, with
-    // no change needed on their side. Only the supervisor fleet editor and
-    // the Admin Panel pass includeRetired — a retired machine keeps every
-    // inspection, fuel log and service entry hanging off its id, which is
-    // the entire reason retiring exists next to delete_equipment rather
-    // than instead of it.
     // ── Fleet activity (breaks #13 and #18) ───────────────────────────────
     //
     // Last day on site from daily reports, what each attachment was last
@@ -890,6 +882,14 @@ export default async function handler(req, res) {
       });
     }
 
+    // Retired machines are hidden unless the caller asks for them, so every
+    // worker-facing picker (Inspection, DailyReport, FuelLog, FieldService)
+    // drops a sold or scrapped unit the moment a supervisor retires it, with
+    // no change needed on their side. Only the supervisor fleet editor and
+    // the Admin Panel pass includeRetired — a retired machine keeps every
+    // inspection, fuel log and service entry hanging off its id, which is
+    // the entire reason retiring exists next to delete_equipment rather
+    // than instead of it.
     if (action === 'list_equipment') {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
