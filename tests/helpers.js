@@ -294,6 +294,7 @@ export async function signCanvas(page) {
 export function mockSupervisorApis(page, {
   companyId = 'test-company-id', companyName = 'Test Co', userId = null,
   documents = [], timeReports = [], timeEntries = [], timeRoster = [], myOpenShift = null,
+  equipment = [], fleetActivity = null, maintenanceStatus = [],
 } = {}) {
   const state = { flhas: [], companyId, companyName, calls: [], myOpenShift };
 
@@ -332,6 +333,8 @@ export function mockSupervisorApis(page, {
     if (action === 'my_time_status') return json(route, { open: state.myOpenShift, recent: [] });
     if (action === 'clock_out') { state.myOpenShift = null; return json(route, { ok: true }); }
     if (action === 'list_roster') return json(route, { members: [] });
+    if (action === 'list_equipment') return json(route, { equipment });
+    if (action === 'fleet_activity') return json(route, fleetActivity || { lastOnSite: {}, mountedOn: {}, attachments: { mostUsed: [], mostRepaired: [] } });
     return json(route, {});
   });
 
@@ -350,7 +353,7 @@ export function mockSupervisorApis(page, {
     if (action === 'list_employee_directory') return json(route, { employees: [] });
     return json(route, { expiredCount: 0, expiringSoonCount: 0, expired: [], expiringSoon: [] });
   });
-  page.route('**/api/maintenance', async route => json(route, { equipment: [] }));
+  page.route('**/api/maintenance', async route => json(route, { equipment: maintenanceStatus, records: [] }));
   page.route('**/api/fuellogs', async route => json(route, { records: [] }));
   page.route('**/api/equipmentreports', async route => json(route, { reports: [] }));
 

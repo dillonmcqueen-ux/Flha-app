@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
+import { pmAllowedFor, towedDistanceSince } from '../server-lib/fleetActivity.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -150,7 +151,7 @@ export default async function handler(req, res) {
       // Overview still shows it behind "Show retired machines".
       const { data: fleet, error: eqErr } = await supabaseAdmin
         .from('equipment')
-        .select('id, year, make, model, type, unit_number, pm_interval')
+        .select('id, year, make, model, type, unit_number, pm_interval, is_attachment')
         .eq('company_id', companyId)
         .is('retired_at', null)
         .order('id');
@@ -159,7 +160,7 @@ export default async function handler(req, res) {
 
       const { data: inspections, error: inspErr } = await supabaseAdmin
         .from('inspections')
-        .select('id, equipment_id, trip_type, start_reading, end_reading, reading_unit, created_at')
+        .select('id, equipment_id, trip_type, start_reading, end_reading, reading_unit, created_at, linked_inspection_id, results_json')
         .eq('company_id', companyId)
         .not('equipment_id', 'is', null);
       if (inspErr) return res.status(500).json({ error: 'Could not load inspection history.' });
@@ -208,14 +209,34 @@ export default async function handler(req, res) {
         const current = currentReadings[eq.id] || null;
         const baseline = lastServices[eq.id] || null;
 
-        if (eq.pm_interval == null) {
-          return { id: eq.id, label, pmInterval: null, current, lastService: null, usageSinceService: null, status: 'not_tracked', fieldService: fieldByEquipment[eq.id] || [] };
+        // Break #18 (Dillon, 2026-09-23): an attachment gets no PM schedule
+        // unless it is a trailer. Forks and buckets are inspected, not
+        // serviced on a clock. A legacy interval on one reads as not tracked
+        // rather than as a clock that never moves.
+        const pmAllowed = pmAllowedFor(eq);
+        const isTowed = !!eq.is_attachment && pmAllowed;
+        if (eq.pm_interval == null || !pmAllowed) {
+          return { id: eq.id, label, pmInterval: null, current, lastService: null, usageSinceService: null, status: 'not_tracked', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
+        }
+        if (isTowed) {
+          // A trailer has no meter, so it never has a `current` reading and
+          // used to sit at 'ok' forever. Its clock is the distance it was
+          // towed since its last service, the same credit the weekly report
+          // gives it.
+          if (!baseline) {
+            return { id: eq.id, label, pmInterval: eq.pm_interval, current: null, lastService: null, usageSinceService: null, status: 'not_started', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
+          }
+          const towed = towedDistanceSince(inspections || [], eq.id, baseline.service_date);
+          let status = 'ok';
+          if (towed.distance >= eq.pm_interval) status = 'overdue';
+          else if (towed.distance >= eq.pm_interval * 0.85) status = 'due_soon';
+          return { id: eq.id, label, pmInterval: eq.pm_interval, current: null, lastService: baseline, usageSinceService: towed.distance, towedTrips: towed.trips, status, pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
         }
         if (!baseline) {
-          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: null, usageSinceService: null, status: 'not_started', fieldService: fieldByEquipment[eq.id] || [] };
+          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: null, usageSinceService: null, status: 'not_started', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
         }
         if (current && current.readingUnit && current.readingUnit !== baseline.reading_unit) {
-          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService: null, status: 'unit_mismatch', fieldService: fieldByEquipment[eq.id] || [] };
+          return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService: null, status: 'unit_mismatch', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
         }
 
         const usageSinceService = current ? Math.max(0, current.reading - baseline.service_reading) : 0;
@@ -223,7 +244,7 @@ export default async function handler(req, res) {
         if (usageSinceService >= eq.pm_interval) status = 'overdue';
         else if (usageSinceService >= eq.pm_interval * 0.85) status = 'due_soon';
 
-        return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService, status, fieldService: fieldByEquipment[eq.id] || [] };
+        return { id: eq.id, label, pmInterval: eq.pm_interval, current, lastService: baseline, usageSinceService, status, pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
       });
 
       return res.status(200).json({ equipment: equipmentStatus });

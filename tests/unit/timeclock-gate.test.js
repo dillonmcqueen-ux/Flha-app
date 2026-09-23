@@ -87,7 +87,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (table === 'equipment') {
     const id = Number(eq('id'));
-    return send(200, [{ id, company_id: Math.floor(id / 100) }]);
+    // 702 is a set of forks and 703 a dump trailer, both company 7's
+    // attachments (break #18). Everything else is an ordinary machine.
+    const kind = { 702: { is_attachment: true, type: 'Pallet Forks' }, 703: { is_attachment: true, type: 'Dump Trailer' } }[id] || {};
+    return send(200, [{ id, company_id: Math.floor(id / 100), ...kind }]);
   }
   if (req.method === 'POST') return send(201, []);
   return send(200, []);
@@ -211,4 +214,27 @@ test('list_time_reports returns the latest entry, scoped to the caller\'s compan
   const entryQuery = calls.slice(before).find(c => c.table === 'time_clock_entries');
   assert.ok(entryQuery, 'must look up time_clock_entries');
   assert.match(entryQuery.query, /company_id=eq\.8/, 'a supervisor sending another companyId must still only see their own');
+});
+
+// ── Break #18: only trailers get a PM schedule among attachments ──────────
+// Dillon, 2026-09-23: "Attachments won't get a preventative maintenance log,
+// unless it's a trailer. Things like loader forks don't require preventative
+// maintenance." A trailer has no meter, so its interval is KM towed.
+
+test('a set of forks cannot be given a PM interval', async () => {
+  const out = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 702, pmInterval: 250, startingReading: 0, readingUnit: 'Hours' });
+  assert.equal(out.statusCode, 400, JSON.stringify(out.body));
+  assert.match(out.body.error, /trailer/);
+});
+
+test('a legacy interval on a set of forks can still be turned off', async () => {
+  const out = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 702, pmInterval: null });
+  assert.notEqual(out.statusCode, 400, JSON.stringify(out.body));
+});
+
+test('a trailer can be given an interval in KM, and not in hours', async () => {
+  const km = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 703, pmInterval: 5000, startingReading: 0, readingUnit: 'KM' });
+  assert.notEqual(km.statusCode, 400, JSON.stringify(km.body));
+  const hours = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 703, pmInterval: 500, startingReading: 0, readingUnit: 'Hours' });
+  assert.equal(hours.statusCode, 400, JSON.stringify(hours.body));
 });
