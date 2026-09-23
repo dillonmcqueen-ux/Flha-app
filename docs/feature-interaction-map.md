@@ -94,7 +94,7 @@ when PR #124 merges).
 | 16 | Company Brain | `AdminPanel.jsx` Brain tab | `api/cron-company-brain-summary.js` | *(none — always on)* |
 | 17 | Analytics | `src/Analytics.jsx` | `api/companydata.js` | *(none — tier-gated)* |
 | 18 | Gatehouse | `src/GatehouseBooth.jsx` | `api/gatehouse.js` | *(none — `app_type`)* |
-| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5990`) | `api/companydata.js:941` update, `:990` retire/restore; `:865` `fleet_activity` (read-only, #13/#18) | *(none — BASE by decision, see #19)* |
+| 19 | Fleet Management | Equipment ▸ Fleet Overview (`Dashboard.jsx:5990`) | `api/companydata.js:941` update, `:990` retire/restore; `:857` `fleet_activity` (read-only, #13/#18) | *(none — BASE by decision, see #19)* |
 | 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:6208`) | `api/companydata.js:1063-1241` | `equipment_compliance` — module `compliance` (`pricing.js:98-103`), added `2560819` |
 | 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:6147`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:302`) | `inspection` |
 | 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6089`) | `api/maintenance.js:415` | `maintenance` |
@@ -176,7 +176,7 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Corrective Actions | ✅ *(#11, PR #121)* host machine; ✅ *(#17, built `bb13340`)* an attachment's own id for its own items — `logs.js:512-527` via `groupFindingsByMachine` (`correctiveActions.js:489`) | ✅ `recurrence.js:51`, `correctiveActions.js:298` |
 | Equipment Compliance | ✅ `companydata.js:1027` (`upsert_equipment_compliance`) | ✅ `companydata.js:914`, `:960` (`compliance_summary`), `equipmentreports.js:595` — **#14** closed in PR #122; all three now drop retired machines (**#15**, PR #123) |
 | Daily Report | ✅ array form `equipment_ids` (`DailyReport.jsx:44,297`) | — |
-| Fleet Overview — last on site | — | ✅ *(#13, built `42ed3c7`)* `daily_reports.equipment_ids` → `companydata.js:872` (`fleet_activity`) → `lastOnSiteByEquipment` (`fleetActivity.js:36`) → `Dashboard.jsx:6057-6068` |
+| Fleet Overview — last on site | — | ✅ *(#13, built `42ed3c7`)* `daily_reports.equipment_ids` → `companydata.js:864` (`fleet_activity`) → `lastOnSiteByEquipment` (`fleetActivity.js:36`) → `Dashboard.jsx:6057-6068` |
 | Analytics | — | ⚠️ groups by `equipment_label` (`analyticsUtils.js:68,217`) — except the two attachment cards added by #18, which key on the fleet id (`attachmentStats`, `fleetActivity.js:113`, rendered `Analytics.jsx:362-370`) |
 
 **Consequence:** anything that groups by `equipment_label` silently splits
@@ -306,16 +306,16 @@ Fleet Overview's "last on site" line, Dillon's pick of the three candidates:
 
 | Step | Where |
 |---|---|
-| Query | `api/companydata.js:872` (`fleet_activity`, `:865`) — `daily_reports.equipment_ids, site, report_date, created_at`, `.eq('company_id')`, rows with no ids skipped in SQL |
+| Query | `api/companydata.js:864` (`fleet_activity`, `:857`) — `daily_reports.equipment_ids, site, report_date, created_at`, `.eq('company_id')`, rows with no ids skipped in SQL |
 | Fold | `lastOnSiteByEquipment` (`server-lib/fleetActivity.js:36-49`) — latest `report_date` (else `created_at` day) per id, with that report's site |
 | Screen | `src/Dashboard.jsx:2470-2478` loads it with the fleet (`:2463`); `:6057-6068` renders "Last on site YYYY-MM-DD at …" on each Fleet Overview row |
 
 *Re-check:* `grep -rn "equipment_ids\|equipmentIds" api/ src/ server-lib/` →
 the old producer/allowlist/validator/payload hits (`logs.js:134,161,164,399-402,656`,
-`DailyReport.jsx:25,44,213,297`) **plus** `companydata.js:872` and
+`DailyReport.jsx:25,44,213,297`) **plus** `companydata.js:864` and
 `fleetActivity.js:4,39,42`. Run 2026-09-23 against `42ed3c7`.
 
-**Not module-gated, on purpose** (`companydata.js:857-864`): Fleet Overview is
+**Not module-gated, on purpose** (`companydata.js:849-856`): Fleet Overview is
 BASE (#19), and a company without Daily Reports simply has no last-on-site
 lines rather than being refused the screen. The ids themselves were vetted on
 write, so this read needs no second vet.
@@ -749,14 +749,14 @@ corrective actions the fourth writer of that table, alongside
 **Fleet Overview as a consumer — new joins as of `42ed3c7` (#13, #18).**
 Fleet Overview has no column above because until now it consumed nothing but
 the `equipment` table. It now reads two producers, both through one read-only,
-supervisor/admin, company-scoped action (`api/companydata.js:865-891`,
-`fleet_activity`), deliberately **not** module-gated (`:857-864`, #19 — BASE):
+supervisor/admin, company-scoped action (`api/companydata.js:857-883`,
+`fleet_activity`), deliberately **not** module-gated (`:849-856`, #19 — BASE):
 
 | From ↓ | Join | Shown as | State |
 |---|---|---|---|
-| Daily Report | `daily_reports.equipment_ids` → `equipment.id` (`companydata.js:872` → `fleetActivity.js:36`) | "Last on site DATE at SITE" (`Dashboard.jsx:6063-6065`) | ✅ *(#13, built)*; site is the free-text column, not `site_id` — weak link in §2 |
-| Equipment Inspection (pre-trip) | `results_json.attachments[].id` → `equipment.id` (`companydata.js:873` → `fleetActivity.js:56`) | "Last mounted on HOST (DATE)" (`Dashboard.jsx:6060-6062`) | ✅ *(#18, built)* |
-| Equipment Inspection + maintenance log | pre-trip attachment ids + `equipment_maintenance_log.equipment_id` (`companydata.js:873-874` → `fleetActivity.js:113`) | Analytics "Most Used / Most Repaired Attachments" (`Dashboard.jsx:5963` → `Analytics.jsx:362-370`) | ✅ *(#18, built)* — "repaired" counts every log entry, `pm_service` included; the card subtitle says so (`Analytics.jsx:367`) |
+| Daily Report | `daily_reports.equipment_ids` → `equipment.id` (`companydata.js:864` → `fleetActivity.js:36`) | "Last on site DATE at SITE" (`Dashboard.jsx:6063-6065`) | ✅ *(#13, built)*; site is the free-text column, not `site_id` — weak link in §2 |
+| Equipment Inspection (pre-trip) | `results_json.attachments[].id` → `equipment.id` (`companydata.js:865` → `fleetActivity.js:56`) | "Last mounted on HOST (DATE)" (`Dashboard.jsx:6060-6062`) | ✅ *(#18, built)* |
+| Equipment Inspection + maintenance log | pre-trip attachment ids + `equipment_maintenance_log.equipment_id` (`companydata.js:865-866` → `fleetActivity.js:113`) | Analytics "Most Used / Most Repaired Attachments" (`Dashboard.jsx:5963` → `Analytics.jsx:362-370`) | ✅ *(#18, built)* — "repaired" counts every log entry, `pm_service` included; the card subtitle says so (`Analytics.jsx:367`) |
 
 And one new join into PM: **Equipment Inspection → PM for a trailer**, via
 `linked_inspection_id` and the pre-trip's attachment list
@@ -1313,7 +1313,7 @@ who picked the first consumer: **Fleet Overview, "last on site"**.
 
 | Piece | Where |
 |---|---|
-| Read | `api/companydata.js:865-891` (`fleet_activity`) — supervisor/admin only (`:866`), `resolveCompanyId` (`:867`), every query `.eq('company_id', companyId)` (`:871-874`); `daily_reports` read at `:872` |
+| Read | `api/companydata.js:857-883` (`fleet_activity`) — supervisor/admin only (`:858`), `resolveCompanyId` (`:859`), every query `.eq('company_id', companyId)` (`:863-866`); `daily_reports` read at `:864` |
 | Fold | `lastOnSiteByEquipment`, `server-lib/fleetActivity.js:36-49` — pure; latest `report_date` (falls back to the `created_at` day) per id, with that report's `site` |
 | Screen | `src/Dashboard.jsx:2470-2478` (`loadFleetActivity`, called from `loadFleet` at `:2463`, so every fleet refresh refreshes it); `:6057-6068` renders the line on each Fleet Overview row |
 | Tests | `tests/unit/fleet-activity.test.js:25,34` (the fold); `tests/fleet-activity.spec.js:11` (Playwright: the line appears on the row) |
@@ -2741,8 +2741,8 @@ Do **not** flag these. They are decisions, not gaps.
 - **`fleet_activity` is not module-gated.** Fleet Overview is BASE (#19), and
   every source it reads is the company's own record, so a company without Daily
   Reports gets no last-on-site lines rather than a refused screen
-  (`api/companydata.js:857-864`). Supervisor/admin only (`:866`),
-  company-scoped (`:867,871-874`). Do not file it as a #21 leftover.
+  (`api/companydata.js:849-856`). Supervisor/admin only (`:858`),
+  company-scoped (`:859,863-866`). Do not file it as a #21 leftover.
 - **Fleet Overview is BASE and has no module.** Dillon's call, 2026-09-18
   (`2560819`): the fleet list is reference data every other module joins to,
   like Analytics and SOPs, not a document type a company buys. Its write actions
