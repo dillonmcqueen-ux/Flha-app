@@ -26,6 +26,7 @@ import Stripe from 'stripe';
 import {
   isTier, resolveModules, quote, buildCheckoutLineItems,
 } from '../server-lib/pricing.js';
+import { checkIpThrottle as sharedCheckIpThrottle } from '../server-lib/ipThrottle.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -59,23 +60,8 @@ function clientIp(req) {
   return req.socket?.remoteAddress || 'unknown';
 }
 
-async function checkIpThrottle(key, maxAttempts, windowMs) {
-  const now = Date.now();
-  const { data: rows } = await supabaseAdmin
-    .from('master_code_ip_limits')
-    .select('window_start, count')
-    .eq('ip', key)
-    .limit(1);
-  const row = rows && rows[0];
-  if (!row || now - new Date(row.window_start).getTime() > windowMs) {
-    await supabaseAdmin
-      .from('master_code_ip_limits')
-      .upsert({ ip: key, window_start: new Date(now).toISOString(), count: 1 });
-    return true;
-  }
-  if (row.count >= maxAttempts) return false;
-  await supabaseAdmin.from('master_code_ip_limits').update({ count: row.count + 1 }).eq('ip', key);
-  return true;
+function checkIpThrottle(key, maxAttempts, windowMs) {
+  return sharedCheckIpThrottle(supabaseAdmin, key, maxAttempts, windowMs);
 }
 
 // Where Stripe sends the buyer afterwards.
