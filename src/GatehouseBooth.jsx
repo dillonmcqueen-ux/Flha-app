@@ -56,19 +56,17 @@ function cartLabel(cart) {
 // this only runs once there's a connection, since drainQueue only fires
 // on mount / the browser's `online` event.
 export async function resubmitGatehouseTransaction(payload, clientSubmissionId, token) {
-  let chequePhotoPath = payload.chequePhotoPath || null;
-  if (payload.paymentMethod === "cheque" && !chequePhotoPath && payload.chequePhotoDataUrl) {
+  let chequePhotoReceipt = null;
+  if (payload.paymentMethod === "cheque" && payload.chequePhotoDataUrl) {
     const blob = dataUrlToBlob(payload.chequePhotoDataUrl);
     const filename = `cheque_${clientSubmissionId}.jpg`;
     const uploaded = await uploadViaSignedUrl({
       endpoint: "/api/gatehouse", action: "create_cheque_upload_url", token,
       bucket: "gatehouse-uploads", filename, file: blob, contentType: blob.type,
     });
-    // Store the "public"-shaped URL, not the raw storage path — that's the
-    // form api/gatehouse.js's signStoredUrl/pathFromStoredUrl (matching
-    // api/companydata.js's existing convention for private buckets) expect
-    // to find in cheque_photo_url later when re-signing it for viewing.
-    chequePhotoPath = uploaded.publicUrl;
+    // Send the server's signed receipt, not a path: api/gatehouse.js turns
+    // it back into the stored URL and rejects anything it didn't issue.
+    chequePhotoReceipt = uploaded.receipt || null;
   }
 
   let res;
@@ -81,7 +79,7 @@ export async function resubmitGatehouseTransaction(payload, clientSubmissionId, 
         stationId: payload.stationId, businessDate: payload.businessDate,
         items: payload.items || [], redirected: payload.redirected,
         plate: payload.plate, vehicleEmail: payload.vehicleEmail,
-        paymentMethod: payload.paymentMethod, chequePhotoPath,
+        paymentMethod: payload.paymentMethod, chequePhotoReceipt,
         operatorName: payload.operatorName,
       }),
     });
@@ -323,7 +321,7 @@ export default function GatehouseBooth({ companyId, companyName, userName, onLog
       items, redirected: redirecting,
       plate: plate.trim().toUpperCase() || null, vehicleEmail: email.trim() || null,
       paymentMethod: redirecting ? null : paymentMethod,
-      chequePhotoDataUrl, chequePhotoPath: null,
+      chequePhotoDataUrl,
       operatorName: operatorName.trim() || null,
       // Client-side display only — snapshotted here since `cart` resets
       // after this submission, before a queued item ever gets re-rendered.

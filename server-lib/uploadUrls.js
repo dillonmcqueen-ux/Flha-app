@@ -228,8 +228,8 @@ export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId
   const { data, error } = await supabaseAdmin.storage
     .from(bucket).createSignedUploadUrl(withUnguessableSegment(clean));
   if (error) return { error: error.message || 'Could not prepare the upload.' };
-  // `receipt` is returned for every bucket so any flow can adopt it; only
-  // the flha-reports write paths verify one today (see the module comment).
+  // `receipt` is returned for every bucket so any flow can adopt it; the
+  // flha-reports write paths and gatehouse cheque photos verify one today.
   return {
     path: data.path,
     uploadToken: data.token,

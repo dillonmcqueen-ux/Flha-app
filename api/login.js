@@ -15,6 +15,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { checkIpThrottle as sharedCheckIpThrottle } from '../server-lib/ipThrottle.js';
 import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
@@ -70,28 +71,10 @@ function clientIp(req) {
 // and `pin:<ip>` for PIN guesses. `ip` is the table's primary key, so the
 // prefixes can never collide with a bare address.
 //
-// Still a non-atomic read-then-write, so a burst of simultaneous requests
-// can slip a few attempts past the cap. That is acceptable here (these are
-// coarse ceilings measured in dozens, not a precise lockout) and is not
-// the same problem as the PIN lockout race, where the counter never
-// advanced at all — that one is now atomic, see record_failed_pin_attempt.
-async function checkIpThrottle(key, maxAttempts, windowMs) {
-  const now = Date.now();
-  const { data: rows } = await supabaseAdmin
-    .from('master_code_ip_limits')
-    .select('window_start, count')
-    .eq('ip', key)
-    .limit(1);
-  const row = rows && rows[0];
-  if (!row || now - new Date(row.window_start).getTime() > windowMs) {
-    await supabaseAdmin
-      .from('master_code_ip_limits')
-      .upsert({ ip: key, window_start: new Date(now).toISOString(), count: 1 });
-    return true;
-  }
-  if (row.count >= maxAttempts) return false;
-  await supabaseAdmin.from('master_code_ip_limits').update({ count: row.count + 1 }).eq('ip', key);
-  return true;
+// The counter itself lives in server-lib/ipThrottle.js and is bumped
+// atomically, so a burst of simultaneous requests counts every request.
+function checkIpThrottle(key, maxAttempts, windowMs) {
+  return sharedCheckIpThrottle(supabaseAdmin, key, maxAttempts, windowMs);
 }
 
 async function checkMasterCodeThrottle(ip) {
@@ -438,22 +421,38 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
     }
 
+    // Claim this attempt BEFORE checking the PIN. The lockout check above
+    // reads a snapshot taken before any guess in flight has been counted,
+    // so N simultaneous requests all see "not locked", all reach verifyPin,
+    // and the lock only lands after every one of them has had its guess.
+    // claim_pin_attempt counts the attempt and refuses it in one UPDATE
+    // that takes the row lock; a concurrent caller waits, re-reads the row
+    // and sees the lock the previous one set. So a burst gets exactly
+    // PIN_LOCKOUT_AFTER_ATTEMPTS guesses, not one guess per request.
+    // A correct PIN resets the counter below, so a claimed-then-successful
+    // attempt costs nothing.
+    const { data: claimRows, error: claimErr } = await supabaseAdmin.rpc('claim_pin_attempt', {
+      p_roster_id: member.id,
+      p_lockout_after: PIN_LOCKOUT_AFTER_ATTEMPTS,
+      p_lockout_seconds: Math.round(PIN_LOCKOUT_MS / 1000),
+    });
+    if (claimErr) {
+      // Deploy landed before docs/schema/pin-attempt-claim-migration.sql was
+      // applied: keep the old count-after-failure path below rather than
+      // locking everyone out.
+      console.error('claim_pin_attempt RPC unavailable, counting after verification instead:', claimErr.message);
+    } else if (!claimRows || claimRows.length === 0) {
+      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in a few minutes.' });
+    }
+
     if (!verifyPin(pin, member.pin_salt, member.pin_hash)) {
-      // Increment atomically in the database. The old read-then-write used
-      // the `member` row fetched above, so N concurrent guesses all read
-      // the same starting count and all wrote back count+1 — the lockout
-      // never tripped and a 4-digit PIN space could be exhausted in a
-      // single parallel burst. The UPDATE inside this function takes a row
-      // lock, so concurrent attempts serialize and the threshold holds.
-      const { data: lockRows, error: lockErr } = await supabaseAdmin.rpc('record_failed_pin_attempt', {
+      if (!claimErr) return res.status(401).json({ error: 'Incorrect PIN.' });
+      const { error: lockErr } = await supabaseAdmin.rpc('record_failed_pin_attempt', {
         p_roster_id: member.id,
         p_lockout_after: PIN_LOCKOUT_AFTER_ATTEMPTS,
         p_lockout_seconds: Math.round(PIN_LOCKOUT_MS / 1000),
       });
       if (lockErr) {
-        // Fallback to the legacy non-atomic path so that a deploy landing
-        // before docs/schema/pin-lockout-atomic-migration.sql is applied
-        // degrades to the old behavior instead of locking everyone out.
         console.error('record_failed_pin_attempt RPC unavailable, using non-atomic fallback:', lockErr.message);
         const attempts = (member.failed_pin_attempts || 0) + 1;
         const updates = { failed_pin_attempts: attempts };
@@ -462,7 +461,6 @@ export default async function handler(req, res) {
         }
         await supabaseAdmin.from('roster').update(updates).eq('id', member.id);
       }
-      void lockRows;
       return res.status(401).json({ error: 'Incorrect PIN.' });
     }
 

@@ -203,3 +203,11 @@ commit;
 -- already-deployed writer touches: either ship the code first, or land the
 -- compatibility path in the same migration. Do not rely on noticing it
 -- afterwards.
+
+-- 2026-09-23 security sweep, rls-coverage-auditor: the corrective_actions BEFORE INSERT
+-- trigger function was executable by anon/authenticated through PostgREST
+-- (advisor: *_security_definer_function_executable). Triggers do not check
+-- the inserting role's EXECUTE privilege, so revoking it changes nothing
+-- for the trigger itself. APPLIED live 2026-09-23 as migration
+-- "revoke_corrective_actions_fill_source_execute"; the advisor WARN cleared.
+revoke execute on function public.corrective_actions_fill_source() from public, anon, authenticated;

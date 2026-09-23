@@ -7,7 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { createUploadUrl } from '../server-lib/uploadUrls.js';
+import { createUploadUrl, storedUrlFromClientReceipt } from '../server-lib/uploadUrls.js';
 import { sendEmail } from '../server-lib/email.js';
 import { renderGatehouseDailyReportPdf, gatehouseReportFilename } from '../server-lib/gatehousePdf.js';
 
@@ -297,9 +297,9 @@ export default async function handler(req, res) {
   // pattern as every other upload flow in this app. ─────────────────────
   if (action === 'create_cheque_upload_url') {
     const { filename } = req.body;
-    const result = await createUploadUrl(supabaseAdmin, UPLOAD_BUCKET, filename);
+    const result = await createUploadUrl(supabaseAdmin, UPLOAD_BUCKET, filename, companyId);
     if (result.error) return res.status(500).json({ error: result.error });
-    return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken, receipt: result.receipt });
   }
 
   // ── Log a transaction: a priced load, or a redirect ──────────────────
@@ -310,8 +310,14 @@ export default async function handler(req, res) {
   if (action === 'log_transaction') {
     const {
       stationId, businessDate, items, redirected, plate, vehicleEmail,
-      paymentMethod, chequePhotoPath, clientSubmissionId, operatorName,
+      paymentMethod, chequePhotoReceipt, clientSubmissionId, operatorName,
     } = req.body;
+    // The cheque photo arrives as the upload receipt create_cheque_upload_url
+    // signed for this company, never as a path the caller names. Taking a
+    // raw path meant a caller could store any object in gatehouse-uploads,
+    // including another company's cheque, and have it signed back to them
+    // on read (list/detail below re-sign cheque_photo_url).
+    const chequePhotoPath = storedUrlFromClientReceipt(chequePhotoReceipt, companyId, UPLOAD_BUCKET);
 
     if (!stationId || !businessDate || !clientSubmissionId) {
       return res.status(400).json({ error: 'Missing required fields.' });

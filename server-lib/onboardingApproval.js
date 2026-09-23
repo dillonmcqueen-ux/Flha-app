@@ -174,7 +174,10 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
     ...(['basic', 'advanced'].includes(request.plan_tier) ? { plan_tier: request.plan_tier } : {}),
     stripe_customer_id: request.stripe_customer_id || null,
   }).select('id').limit(1);
-  if (coErr) return { error: "Couldn't create company: " + coErr.message };
+  if (coErr) {
+    console.error('provisionCompanyFromRequest: company insert failed:', coErr.message);
+    return { error: "Couldn't create company. Please try again or contact support." };
+  }
   const companyId = companyRows[0].id;
 
   // Best-effort: this request came from a paid checkout, so pick up the
