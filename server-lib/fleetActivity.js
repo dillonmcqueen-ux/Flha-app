@@ -69,12 +69,25 @@ export function mountedOnByAttachment(inspections) {
 }
 
 /**
+ * Whether a machine is towed: a trailer, by the same keyword test the
+ * inspection uses. Break #28: the flag is not required. A fleet that
+ * predates the attachment checkbox has trailers with is_attachment false
+ * (never backfilled), and src/Inspection.jsx already treats those as
+ * trailers (is_attachment || isTrailerTemplate). PM has to agree, or an
+ * unflagged trailer reads 'ok' forever, which is #18's original symptom.
+ */
+export function isTowedUnit(eq) {
+  if (!eq) return false;
+  return isTrailerTemplate(eq.type || '', eq.make || '', eq.model || '');
+}
+
+/**
  * Whether a machine may carry a PM schedule. Every machine may, except an
  * attachment that is not a trailer.
  */
 export function pmAllowedFor(eq) {
   if (!eq || !eq.is_attachment) return true;
-  return isTrailerTemplate(eq.type || '', eq.make || '', eq.model || '');
+  return isTowedUnit(eq);
 }
 
 /**
@@ -111,7 +124,9 @@ export function towedDistanceSince(inspections, attachmentId, sinceDate) {
  * `fleet` rows need { id, is_attachment, label }.
  */
 export function attachmentStats(fleet, inspections, maintenanceLogs, limit = 5) {
-  const attachments = (fleet || []).filter(e => e && e.is_attachment);
+  // Flagged attachments plus unflagged trailers (#28), the same set the
+  // inspection offers as attachments.
+  const attachments = (fleet || []).filter(e => e && (e.is_attachment || isTowedUnit(e)));
   const ids = new Set(attachments.map(e => String(e.id)));
   const trips = Object.create(null), repairs = Object.create(null);
 

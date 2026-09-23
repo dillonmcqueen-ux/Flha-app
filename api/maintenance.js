@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } from '../server-lib/readings.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
-import { pmAllowedFor, towedDistanceSince } from '../server-lib/fleetActivity.js';
+import { pmAllowedFor, isTowedUnit, towedDistanceSince } from '../server-lib/fleetActivity.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -214,7 +214,9 @@ export default async function handler(req, res) {
         // serviced on a clock. A legacy interval on one reads as not tracked
         // rather than as a clock that never moves.
         const pmAllowed = pmAllowedFor(eq);
-        const isTowed = !!eq.is_attachment && pmAllowed;
+        // Towed by type, not by the flag (#28): an unflagged trailer has no
+        // meter either.
+        const isTowed = isTowedUnit(eq);
         if (eq.pm_interval == null || !pmAllowed) {
           return { id: eq.id, label, pmInterval: null, current, lastService: null, usageSinceService: null, status: 'not_tracked', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
         }
@@ -225,6 +227,12 @@ export default async function handler(req, res) {
           // gives it.
           if (!baseline) {
             return { id: eq.id, label, pmInterval: eq.pm_interval, current: null, lastService: null, usageSinceService: null, status: 'not_started', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
+          }
+          // A trailer set up in Hours before #28 treated it as towed: KM
+          // towed cannot be measured against an hours interval, so say so
+          // rather than compare two different units.
+          if (baseline.reading_unit && baseline.reading_unit !== 'KM') {
+            return { id: eq.id, label, pmInterval: eq.pm_interval, current: null, lastService: baseline, usageSinceService: null, status: 'unit_mismatch', pmAllowed, isTowed, fieldService: fieldByEquipment[eq.id] || [] };
           }
           const towed = towedDistanceSince(inspections || [], eq.id, baseline.service_date);
           let status = 'ok';

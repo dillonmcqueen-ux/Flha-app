@@ -18,6 +18,7 @@ const {
   attachmentStats,
   towedDistanceSince,
   pmAllowedFor,
+  isTowedUnit,
 } = await import('../../server-lib/fleetActivity.js');
 
 // ── #13: last on site ─────────────────────────────────────────────────────
@@ -109,4 +110,28 @@ test('attachment stats count trips and repairs, attachments only, busiest first'
   const out = attachmentStats(fleet, inspections, logs);
   assert.deepEqual(out.mostUsed.map(a => [a.equipmentId, a.trips]), [[12, 2], [13, 1]]);
   assert.deepEqual(out.mostRepaired.map(a => [a.equipmentId, a.repairs]), [[13, 2], [12, 1]]);
+});
+
+// ── #28: a trailer never ticked as an attachment is still a trailer ──────
+// The inspection already treats it as one (is_attachment || isTrailerTemplate,
+// src/Inspection.jsx); PM and analytics have to agree, or an older trailer
+// reads 'ok' forever exactly as #18 described.
+
+test('an unflagged trailer is towed and may carry a PM schedule', () => {
+  const eq = { is_attachment: false, type: 'Dump Trailer' };
+  assert.equal(isTowedUnit(eq), true);
+  assert.equal(pmAllowedFor(eq), true);
+});
+
+test('an ordinary machine is not towed; flagged forks are neither towed nor PM-able', () => {
+  assert.equal(isTowedUnit({ is_attachment: false, type: 'Excavator' }), false);
+  assert.equal(isTowedUnit({ is_attachment: true, type: 'Pallet Forks' }), false);
+  assert.equal(pmAllowedFor({ is_attachment: true, type: 'Pallet Forks' }), false);
+});
+
+test('an unflagged trailer counts in the attachment stats', () => {
+  const fleet = [{ id: 40, is_attachment: false, type: 'Dump Trailer', label: 'Dump Trailer 40' }];
+  const inspections = [pretrip({ id: 1, equipment_id: 8, created_at: '2026-09-10T13:00:00Z', results_json: { attachments: [{ id: 40, label: 'Dump Trailer 40' }] } })];
+  const out = attachmentStats(fleet, inspections, []);
+  assert.deepEqual(out.mostUsed.map(a => [a.equipmentId, a.trips]), [[40, 1]]);
 });

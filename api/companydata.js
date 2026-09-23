@@ -14,7 +14,7 @@ import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
-import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor } from '../server-lib/fleetActivity.js';
+import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -1273,7 +1273,8 @@ export default async function handler(req, res) {
       if (interval != null && !pmAllowedFor(eqRows[0])) {
         return res.status(400).json({ error: "Attachments don't get a maintenance schedule unless they're a trailer." });
       }
-      if (interval != null && eqRows[0].is_attachment && readingUnit !== 'KM') {
+      // By type, not the flag (#28): an unflagged trailer has no meter either.
+      if (interval != null && isTowedUnit(eqRows[0]) && readingUnit !== 'KM') {
         return res.status(400).json({ error: 'A trailer has no meter; set its interval in KM towed.' });
       }
 

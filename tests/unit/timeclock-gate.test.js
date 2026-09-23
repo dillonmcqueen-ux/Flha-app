@@ -89,7 +89,7 @@ const server = http.createServer(async (req, res) => {
     const id = Number(eq('id'));
     // 702 is a set of forks and 703 a dump trailer, both company 7's
     // attachments (break #18). Everything else is an ordinary machine.
-    const kind = { 702: { is_attachment: true, type: 'Pallet Forks' }, 703: { is_attachment: true, type: 'Dump Trailer' } }[id] || {};
+    const kind = { 702: { is_attachment: true, type: 'Pallet Forks' }, 703: { is_attachment: true, type: 'Dump Trailer' }, 704: { is_attachment: false, type: 'Dump Trailer' } }[id] || {};
     return send(200, [{ id, company_id: Math.floor(id / 100), ...kind }]);
   }
   if (req.method === 'POST') return send(201, []);
@@ -236,5 +236,10 @@ test('a trailer can be given an interval in KM, and not in hours', async () => {
   const km = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 703, pmInterval: 5000, startingReading: 0, readingUnit: 'KM' });
   assert.notEqual(km.statusCode, 400, JSON.stringify(km.body));
   const hours = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 703, pmInterval: 500, startingReading: 0, readingUnit: 'Hours' });
+  assert.equal(hours.statusCode, 400, JSON.stringify(hours.body));
+});
+
+test('#28: a trailer never ticked as an attachment still needs its interval in KM', async () => {
+  const hours = await call({ action: 'set_equipment_pm_interval', token: supervisor(7), id: 704, pmInterval: 500, startingReading: 0, readingUnit: 'Hours' });
   assert.equal(hours.statusCode, 400, JSON.stringify(hours.body));
 });
