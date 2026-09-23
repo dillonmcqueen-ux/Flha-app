@@ -16,8 +16,10 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-**2026-09-23 against `42ed3c7`** on `claude/modular-pricing-enforcement-rzdib2`
-(four commits on top of `main` `363da23`): **#13, #17, #18, #24 and #25 are
+**2026-09-23 against `42ed3c7`**, re-anchored the same day against **`e7bd475`**
+(`afc4b93` tightened two company scopes; `e7bd475` moved `fleet_activity` in
+`api/companydata.js`), on `claude/modular-pricing-enforcement-rzdib2` (six
+commits on top of `main` `363da23`): **#13, #17, #18, #24 and #25 are
 built, not closed** — each closes when that branch's PR merges. #18 was
 **rescoped by Dillon** before it was built (non-trailer attachments get no PM
 clock at all, by design — see §5). This pass also opened **#28, #29 and #30**,
@@ -173,7 +175,7 @@ type a free-text label (`Inspection.jsx:380`, `FuelLog.jsx:158`).
 | Weekly Equipment Report | — | ✅ *(#7, PR #119)* `equipmentreports.js:190-213,247` |
 | Weekly Hours | — | ✅ `equipmentreports.js:300` (`foldWeeklyUsage`) |
 | Maintenance Records | — | ✅ `maintenance.js:376-390` |
-| Corrective Actions | ✅ *(#11, PR #121)* host machine; ✅ *(#17, built `bb13340`)* an attachment's own id for its own items — `logs.js:512-527` via `groupFindingsByMachine` (`correctiveActions.js:489`) | ✅ `recurrence.js:51`, `correctiveActions.js:298` |
+| Corrective Actions | ✅ *(#11, PR #121)* host machine; ✅ *(#17, built `bb13340`)* an attachment's own id for its own items — `logs.js:512-527` via `groupFindingsByMachine` (`correctiveActions.js:489`) | ✅ `recurrence.js:51`, `correctiveActions.js:328` |
 | Equipment Compliance | ✅ `companydata.js:1027` (`upsert_equipment_compliance`) | ✅ `companydata.js:914`, `:960` (`compliance_summary`), `equipmentreports.js:595` — **#14** closed in PR #122; all three now drop retired machines (**#15**, PR #123) |
 | Daily Report | ✅ array form `equipment_ids` (`DailyReport.jsx:44,297`) | — |
 | Fleet Overview — last on site | — | ✅ *(#13, built `42ed3c7`)* `daily_reports.equipment_ids` → `companydata.js:864` (`fleet_activity`) → `lastOnSiteByEquipment` (`fleetActivity.js:36`) → `Dashboard.jsx:6057-6068` |
@@ -258,7 +260,7 @@ Items carry the routing tag: `unit: 'truck'` for the machine itself,
 | Corrective actions | `correctiveActions.js:419,449` (`itemAttachment`, `:471`) → `groupFindingsByMachine` (`:489`) | ✅ *(#17, built `bb13340`)* — opened, resolved and repair-logged per machine (`logs.js:517-527,543-579`); id first (`item.attachmentId`), then `attachmentForItem` |
 | Brain signal (`inspectionFindingSignal`) | `logs.js:179-217` — item names only, machine = host `equipment_label` (`:214-215`) | ❌ **#30** — an attachment's defect reaches the Brain under the carrier's name |
 | Preventative Maintenance — towed distance | `maintenance.js:163` selects `linked_inspection_id, results_json` → `towedDistanceSince` (`fleetActivity.js:86`) | ✅ *(#18 as rescoped, built `42ed3c7`)* — **trailers only**; a non-trailer attachment has no clock by design (§5). Gaps: **#28** (a trailer not flagged `is_attachment`), **#29** (towed by a free-text machine) |
-| Fleet Overview — last mounted on | `mountedOnByAttachment` (`fleetActivity.js:56`), pre-trips only | ✅ *(#18, built `42ed3c7`)* — `Dashboard.jsx:6060-6062` |
+| Fleet Overview — last mounted on | `mountedOnByAttachment` (`fleetActivity.js:56`), pre-trips only; ids not in the company's fleet dropped at `companydata.js:877-880` (`afc4b93`) | ✅ *(#18, built `42ed3c7`)* — `Dashboard.jsx:6060-6062` |
 | Equipment Analytics — most used attachment | `attachmentStats` (`fleetActivity.js:113`), pre-trips only | ✅ *(#18, built `42ed3c7`)* — `Analytics.jsx:365` |
 
 ### `equipment.is_attachment` (is this thing hooked onto something else?)
@@ -278,7 +280,7 @@ silently failed for a bucket, a hammer, a mulcher or a plate tamper.
 ### `equipment.retired_at` (out of the fleet, still in the history)
 Set by `retire_equipment` (`companydata.js:990-1021`). `list_equipment` filters
 `retired_at is null` unless `includeRetired: true` is passed
-(`companydata.js:897`), so every worker-facing picker drops the machine with
+(`companydata.js:897`; the reasoning is the comment directly above `list_equipment`, `:885-892`, back in place since `e7bd475`), so every worker-facing picker drops the machine with
 no change on its side — `Inspection.jsx:169`, `DailyReport.jsx:130`,
 `FuelLog.jsx:84`, `FieldService.jsx:86`. Only `Dashboard.jsx:2457` and
 `AdminPanel.jsx:675,1007` ask for retired rows.
@@ -435,7 +437,7 @@ therefore differs on every report of the same fault.
 |---|---|
 | Recurrence count on each action | `api/monthly.js:850` (`annotateRecurrence`) |
 | Per-machine repeat-offender list | `api/monthly.js:860` (`patternsByEquipment`) → `src/Dashboard.jsx:2381,3559,6486` |
-| Post-trip resolution | `server-lib/correctiveActions.js:327` |
+| Post-trip resolution | `server-lib/correctiveActions.js:328` (`machineKey` match; read `:314-319`, update `:336-346`) |
 | Open-defect dedupe on submit | `server-lib/correctiveActions.js:153-199` |
 
 **Two things about this key are load-bearing and easy to get wrong.**
@@ -710,7 +712,7 @@ below.**
 
 Since PR #121 the relationship also runs the other way: a post-trip can
 **close** an action and record the repair
-(`api/logs.js:493`, `server-lib/correctiveActions.js:272-352`), writing a
+(`api/logs.js:493`, `server-lib/correctiveActions.js:273-356` as of `afc4b93`), writing a
 `field_service` row to `equipment_maintenance_log` (`api/logs.js:513`) —
 never `pm_service`, which would reset the machine's PM clock. That made
 corrective actions the fourth writer of that table, alongside
@@ -755,7 +757,7 @@ supervisor/admin, company-scoped action (`api/companydata.js:857-883`,
 | From ↓ | Join | Shown as | State |
 |---|---|---|---|
 | Daily Report | `daily_reports.equipment_ids` → `equipment.id` (`companydata.js:864` → `fleetActivity.js:36`) | "Last on site DATE at SITE" (`Dashboard.jsx:6063-6065`) | ✅ *(#13, built)*; site is the free-text column, not `site_id` — weak link in §2 |
-| Equipment Inspection (pre-trip) | `results_json.attachments[].id` → `equipment.id` (`companydata.js:865` → `fleetActivity.js:56`) | "Last mounted on HOST (DATE)" (`Dashboard.jsx:6060-6062`) | ✅ *(#18, built)* |
+| Equipment Inspection (pre-trip) | `results_json.attachments[].id` → `equipment.id` (`companydata.js:865` → `fleetActivity.js:56`, then **filtered to this company's fleet ids** at `companydata.js:877-880`, `afc4b93`) | "Last mounted on HOST (DATE)" (`Dashboard.jsx:6060-6062`) | ✅ *(#18, built)*. The ids are client jsonb and unvetted on write, so the read drops any id not in the fleet the same query loaded (`:863`) |
 | Equipment Inspection + maintenance log | pre-trip attachment ids + `equipment_maintenance_log.equipment_id` (`companydata.js:865-866` → `fleetActivity.js:113`) | Analytics "Most Used / Most Repaired Attachments" (`Dashboard.jsx:5963` → `Analytics.jsx:362-370`) | ✅ *(#18, built)* — "repaired" counts every log entry, `pm_service` included; the card subtitle says so (`Analytics.jsx:367`) |
 
 And one new join into PM: **Equipment Inspection → PM for a trailer**, via
@@ -1313,7 +1315,7 @@ who picked the first consumer: **Fleet Overview, "last on site"**.
 
 | Piece | Where |
 |---|---|
-| Read | `api/companydata.js:857-883` (`fleet_activity`) — supervisor/admin only (`:858`), `resolveCompanyId` (`:859`), every query `.eq('company_id', companyId)` (`:863-866`); `daily_reports` read at `:864` |
+| Read | `api/companydata.js:857-883` (`fleet_activity`) — supervisor/admin only (`:858`), `resolveCompanyId` (`:859`), every query `.eq('company_id', companyId)` (`:863-866`); `daily_reports` read at `:864`; `mountedOn` filtered to the company's fleet ids (`:877-880`, `afc4b93`) |
 | Fold | `lastOnSiteByEquipment`, `server-lib/fleetActivity.js:36-49` — pure; latest `report_date` (falls back to the `created_at` day) per id, with that report's `site` |
 | Screen | `src/Dashboard.jsx:2470-2478` (`loadFleetActivity`, called from `loadFleet` at `:2463`, so every fleet refresh refreshes it); `:6057-6068` renders the line on each Fleet Overview row |
 | Tests | `tests/unit/fleet-activity.test.js:25,34` (the fold); `tests/fleet-activity.spec.js:11` (Playwright: the line appears on the row) |
@@ -1551,6 +1553,7 @@ kind of attachment; approved by Dillon and built 2026-09-23.
 | Split per machine | `groupFindingsByMachine` (`correctiveActions.js:489-504`) — host id/label for the carrier's items, the attachment's for its own |
 | Vetted before it is stored | `api/logs.js:513-515` — attachment ids from `results_json` (client jsonb) go through `resolveEquipmentIds`; an id not in the vetted set is dropped to label-only (`correctiveActions.js:495`), never stored |
 | Open, close and log per machine | `api/logs.js:517-527` (open), `:543-563` (post-trip resolve), `:575-581` (the `field_service` repair line lands on the **attachment's** id) |
+| Resolve is company-filtered on the write too | `resolveCorrectiveActionsForItems`' update now carries `.eq('company_id', companyId)` (`server-lib/correctiveActions.js:345`) beside `.in('id', ids)`, added in `afc4b93` from the tenant-scope review. The ids already came from a company-filtered read (`:314-319`); the filter keeps the write safe if that read ever changes |
 | Tests | `tests/unit/attachment-defect-routing.test.js` — 6 cases |
 
 *Evidence, re-run by this pass:* `node --test tests/unit/attachment-defect-routing.test.js`
@@ -1641,7 +1644,7 @@ original "fix would touch" below proposed. It is:
 | PM status | `api/maintenance.js:216-220` — a non-trailer attachment reads `not_tracked`, **even with a legacy interval**, rather than a clock that never moves; `:221-233` — a trailer's usage is the KM towed since its last service (`towedDistanceSince`, `fleetActivity.js:86-106`), where it used to sit at `ok` forever |
 | Setting an interval | `api/companydata.js:1273-1275` refuses one on a non-trailer attachment; `:1276-1278` refuses a flagged trailer's interval in anything but KM. Clearing an interval is always allowed, so a legacy one on a set of forks can be removed |
 | Maintenance screen | `src/Dashboard.jsx:6446-6447` (towed line), `:6543` (unit locked), `:6548-6552` (no starting-reading box for a trailer), `:6559-6561` ("Attachments don't get a maintenance schedule unless they're a trailer.") |
-| Mounted on | `mountedOnByAttachment` (`fleetActivity.js:56-69`) → `Dashboard.jsx:6060-6062` — from the most recent **pre-trip** only; a post-trip only carries items forward |
+| Mounted on | `mountedOnByAttachment` (`fleetActivity.js:56-69`), filtered to the company's fleet ids in `fleet_activity` (`api/companydata.js:877-880`, added in `afc4b93` from the tenant-scope review — attachment ids are client jsonb) → `Dashboard.jsx:6060-6062` — from the most recent **pre-trip** only; a post-trip only carries items forward |
 | Most used / most repaired | `attachmentStats` (`fleetActivity.js:113-133`) → `Dashboard.jsx:5963` → `Analytics.jsx:362-370`. "Used" = pre-trips it was recorded on; "repaired" = every `equipment_maintenance_log` row against it, `pm_service` included |
 | Tests | `tests/unit/fleet-activity.test.js:66,79,84,93`; `tests/unit/timeclock-gate.test.js` cases 21 and 23 (the interval refusals, against the real handler); `tests/fleet-activity.spec.js:27,45` |
 
@@ -2838,3 +2841,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-23 | `42ed3c7` | **#13 and #18 built, not closed.** #13: `daily_reports.equipment_ids` finally has a consumer — Fleet Overview's "last on site" line (Dillon's pick), via a new read-only, supervisor/admin, company-scoped `fleet_activity` action (`companydata.js:865-891`) and `lastOnSiteByEquipment` (`fleetActivity.js:36-49`) → `Dashboard.jsx:6057-6068`. §4b's `equipment_ids` row is no longer "nothing at all". **#18 was rescoped by Dillon before it was built:** "Attachments won't get a preventative maintenance log, unless it's a trailer. Things like loader forks don't require preventative maintenance", plus what an attachment is mounted on and the most used / most repaired attachment in analytics. So: `pmAllowedFor` (`fleetActivity.js:75-78`); a trailer's PM usage is KM towed since its last service (`maintenance.js:221-233` → `towedDistanceSince`, `fleetActivity.js:86-106`), where it read `ok` forever; a non-trailer attachment reads `not_tracked` and `set_equipment_pm_interval` refuses one (`companydata.js:1273-1278`). **New deliberate non-connection in §5: non-trailer attachments have no PM clock by design.** **New joins on the map:** Daily Report → Fleet Overview (`equipment_ids`), Inspection pre-trip → Fleet Overview (attachment ids, "last mounted on"), Inspection + maintenance log → Analytics (most used / most repaired, fleet-id keyed — the first equipment analytics that does not key on the label), and Inspection → PM for a trailer via `linked_inspection_id` + the pre-trip's attachments — a new table under §3 and a new row in §2's reading table. The towed sum lives in `fleetActivity.js`, not `readings.js` as #18's old entry proposed — recorded in §2 with why. Evidence re-run: `tests/fleet-activity.spec.js` 3/3 at `42ed3c7`, **3/3 fail** against `363da23`; `timeclock-gate.test.js` 23/23, **2 fail** (the two interval refusals) against `363da23`; `fleet-activity.test.js` 8/8 (pure module, no "before"). No test runs the real `list_status` towed branch — recorded in #18. `npm run test:unit` → **415 pass, 0 fail**. Both close when the branch's PR merges. |
 | 2026-09-23 | `42ed3c7` | **#28, #29 and #30 opened by this pass, none approved, none worked** — all three are residuals of the day's builds, each read in the code. #28: PM decides "towed trailer" with `is_attachment && isTrailerTemplate` while the inspection uses `is_attachment \|\| isTrailerTemplate` (`Inspection.jsx:276-287`), and `is_attachment` was never backfilled (`default false`, migration `:70`) — so a template-matched trailer without the flag takes the metered branch and reads **`ok` forever** once serviced (`maintenance.js:242`), #18's original symptom. Whether any live row is in that state was not queried. #29: `list_status`'s inspections read keeps `.not('equipment_id', 'is', null)` (`maintenance.js:166`), so a trip towed by a free-text machine credits Weekly Hours and not the trailer's PM clock. #30: `inspectionFindingSignal` still names the carrier for an attachment's defect (`logs.js:214-215`) — the Brain half of the Attachments row #17 used to cover. |
 | 2026-09-23 | `42ed3c7` | **Line-number refresh, as Dillon asked.** Every live `src/Dashboard.jsx` citation in §1–§5 re-read against the 7274-line file at `42ed3c7` and re-cited where the code actually is — no offsets applied. The previous pass had flagged these as already stale at `f561f42` (e.g. `complianceEnabled` cited `:2755`, the Compliance sub-tab `:2832`, Fleet Overview `:5913`); at `42ed3c7` they are `:2784`, `:2869` and `:5990`. Also re-anchored, because #13/#18's `companydata.js` insertions moved them by 34–48 lines: the `companydata.js` guard, carve-out and time-clock anchors in §2, §5 and #27's built table; and the `customforms.js` anchors in §2/§5 (one line down since #25's import). Left as found on purpose: the changelog, the "as found at `ac80f96`" tables, the text quoted from `98f9d70`, and the `git show`-pinned historical claims in §1 and #19. Other `api/` anchors in older break entries were not swept and may be stale. No application code touched. |
+| 2026-09-23 | `afc4b93`, `e7bd475` | **Re-anchored after two follow-up commits on the branch; no break status changed.** `afc4b93` (tenant-scope review): `fleet_activity`'s `mountedOn` is now filtered to the company's own fleet ids (`api/companydata.js:877-880`), since attachment ids come from client jsonb; and `resolveCorrectiveActionsForItems`' update carries `.eq('company_id', companyId)` next to `.in('id', ids)` (`server-lib/correctiveActions.js:345`). Both recorded in #13/#18/§3 and #17. `e7bd475` moved the `fleet_activity` block above `list_equipment`'s comment, which fixes the misplacement the previous row's report noted: the block is `:857-883` (was `:865-891`), its no-gate comment `:849-856`, queries `:863-866`, and the retired-machines comment is back directly over `list_equipment` at `:885-892`. Re-read against HEAD: everything in `companydata.js` from `list_equipment` (`:893`) down is **unchanged** — `set_equipment_pm_interval` `:1251` (guard `:1253`, refusals `:1273,1276`), the compliance guards `:1065,1114,1183,1231`, the time-clock guards `:1486,1578,1610,1638,1698`, carve-outs `:1503,1524,1543,1651,1676`, reasoning `:1473-1483`, `latestEntryAt` `:1662-1673` — so none of those needed to move. `correctiveActions.js` anchors cited by the #17 build (`:419,449,471-478,489-504,495`) re-read and still correct; three older §2 anchors (`:272-352`, `:298`, `:327`) re-anchored to `:273-356` and `:328`. #28, #29, #30 still OPEN. |
