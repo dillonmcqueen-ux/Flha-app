@@ -14,6 +14,7 @@ import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
+import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -845,6 +846,42 @@ export default async function handler(req, res) {
 
     // ══ EQUIPMENT ════════════════════════════════════════════════════
 
+    // ── Fleet activity (breaks #13 and #18) ───────────────────────────────
+    //
+    // Last day on site from daily reports, what each attachment was last
+    // mounted on from pre-trips, and the most used / most repaired
+    // attachments. Read-only and supervisor/admin only. Not module-gated:
+    // Fleet Overview is BASE, and every source here is the company's own
+    // records, so a company without Daily Reports simply has no last-on-site
+    // lines rather than being refused the screen.
+    if (action === 'fleet_activity') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const [fleetRes, dailyRes, inspRes, logRes] = await Promise.all([
+        supabaseAdmin.from('equipment').select(EQUIPMENT_COLUMNS).eq('company_id', companyId),
+        supabaseAdmin.from('daily_reports').select('equipment_ids, site, report_date, created_at').eq('company_id', companyId).not('equipment_ids', 'is', null),
+        supabaseAdmin.from('inspections').select('equipment_id, equipment_label, trip_type, results_json, created_at').eq('company_id', companyId),
+        supabaseAdmin.from('equipment_maintenance_log').select('equipment_id, entry_type').eq('company_id', companyId),
+      ]);
+      if (fleetRes.error || dailyRes.error || inspRes.error || logRes.error) {
+        return res.status(500).json({ error: 'Could not load fleet activity.' });
+      }
+      const fleet = (fleetRes.data || []).map(eq => ({
+        ...eq,
+        label: [eq.year, eq.make, eq.model, eq.type].filter(Boolean).join(' ') + (eq.unit_number ? ` (Unit ${eq.unit_number})` : ''),
+      }));
+      return res.status(200).json({
+        lastOnSite: lastOnSiteByEquipment(dailyRes.data || []),
+        // results_json is client jsonb, so only report attachments that
+        // are actually in this company's fleet.
+        mountedOn: Object.fromEntries(Object.entries(mountedOnByAttachment(inspRes.data || []))
+          .filter(([id]) => fleet.some(eq => String(eq.id) === id))),
+        attachments: attachmentStats(fleet, inspRes.data || [], logRes.data || []),
+      });
+    }
+
     // Retired machines are hidden unless the caller asks for them, so every
     // worker-facing picker (Inspection, DailyReport, FuelLog, FieldService)
     // drops a sold or scrapped unit the moment a supervisor retires it, with
@@ -1218,7 +1255,7 @@ export default async function handler(req, res) {
       const { id, pmInterval, startingReading, readingUnit } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: eqRows, error: eqErr } = await supabaseAdmin.from('equipment').select('id, company_id').eq('id', id).limit(1);
+      const { data: eqRows, error: eqErr } = await supabaseAdmin.from('equipment').select('id, company_id, is_attachment, type, make, model').eq('id', id).limit(1);
       if (eqErr || !eqRows || eqRows.length === 0) return res.status(404).json({ error: 'Equipment not found.' });
       if (session.role === 'supervisor' && eqRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed to change this equipment.' });
@@ -1227,6 +1264,18 @@ export default async function handler(req, res) {
       const interval = pmInterval != null && pmInterval !== '' ? parseFloat(pmInterval) : null;
       if (interval != null && (Number.isNaN(interval) || interval <= 0)) {
         return res.status(400).json({ error: 'Enter a valid maintenance interval.' });
+      }
+      // Break #18 (Dillon, 2026-09-23): attachments get no PM schedule
+      // unless they are a trailer, and a trailer's clock runs on towed
+      // distance (api/maintenance.js), so its interval has to be in KM.
+      // Turning tracking OFF (interval null) is always allowed, so a legacy
+      // interval on a set of forks can still be cleared.
+      if (interval != null && !pmAllowedFor(eqRows[0])) {
+        return res.status(400).json({ error: "Attachments don't get a maintenance schedule unless they're a trailer." });
+      }
+      // By type, not the flag (#28): an unflagged trailer has no meter either.
+      if (interval != null && isTowedUnit(eqRows[0]) && readingUnit !== 'KM') {
+        return res.status(400).json({ error: 'A trailer has no meter; set its interval in KM towed.' });
       }
 
       if (interval != null) {

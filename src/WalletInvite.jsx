@@ -69,6 +69,10 @@ export default function WalletInvite() {
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState("");
   const [done, setDone] = useState(false);
+  // From redeem_wallet_invite (break #24). Only an explicit false hides the
+  // ticket card; null means the server couldn't check, and it still refuses
+  // an upload the company hasn't bought.
+  const [certificationsEnabled, setCertificationsEnabled] = useState(null);
 
   useEffect(() => {
     if (!inviteToken) { setError("Missing invite link."); setLoading(false); return; }
@@ -83,7 +87,8 @@ export default function WalletInvite() {
         setSession(data.session);
         setToken(data.token);
         setProfile({ name: data.session.userName || "", email: data.email || "" });
-        await loadCerts(data.token, data.session);
+        setCertificationsEnabled(data.certificationsEnabled ?? null);
+        if (data.certificationsEnabled !== false) await loadCerts(data.token, data.session);
       } catch (e) {
         setError("Couldn't load your invite. Please try again.");
       }
@@ -259,6 +264,7 @@ export default function WalletInvite() {
           </div>
         </div>
 
+        {certificationsEnabled !== false && (
         <div style={styles.card}>
           <div style={styles.h2}>Add a ticket</div>
           <div style={styles.disclaimer}>Tickets you upload here are marked "Unverified" until your supervisor has had a chance to look them over.</div>
@@ -320,6 +326,7 @@ export default function WalletInvite() {
             </div>
           )}
         </div>
+        )}
 
         <div style={styles.card}>
           <div style={styles.h2}>Choose your PIN</div>
@@ -328,7 +335,7 @@ export default function WalletInvite() {
             placeholder="1234" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} />
         </div>
 
-        <div style={{ ...styles.hint, textAlign: "center" }}>No tickets yet? No problem — you can finish now and add them anytime from "My Certifications" once you're logged in.</div>
+        {certificationsEnabled !== false && <div style={{ ...styles.hint, textAlign: "center" }}>No tickets yet? No problem — you can finish now and add them anytime from "My Certifications" once you're logged in.</div>}
         {finishError && <div style={{ fontSize: 13, color: "#F87171", marginBottom: 10 }}>{finishError}</div>}
         <button style={{ ...styles.primaryBtn, width: "100%", padding: "14px 16px", fontSize: 15, opacity: finishing ? 0.6 : 1 }} onClick={finishSetup} disabled={finishing}>
           {finishing ? "Finishing…" : "Finish Setup"}

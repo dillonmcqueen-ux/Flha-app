@@ -1910,6 +1910,8 @@ function TimeClockReportCard({ data, onClose, error }) {
   );
 }
 
+const EMPTY_FLEET_ACTIVITY = { lastOnSite: {}, mountedOn: {}, attachments: { mostUsed: [], mostRepaired: [] } };
+
 export default function Dashboard({ forcedCompanyId = null, isAdmin = false, viewerRole = "supervisor", onLogout = null, backLabel = "Exit", suspended = false, userName = "", userId = null, token = null }) {
   const [companies, setCompanies] = useState([]);
   const [flhas, setFlhas] = useState([]);
@@ -1947,6 +1949,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // absorbing them changed where they are, not who can see them.
   const [equipmentSubTab, setEquipmentSubTab] = useState("fleet");
   const [fleet, setFleet] = useState([]);
+  const [fleetActivity, setFleetActivity] = useState(EMPTY_FLEET_ACTIVITY);
   const [loadingFleet, setLoadingFleet] = useState(false);
   const [fleetError, setFleetError] = useState("");
   const [fleetSearch, setFleetSearch] = useState("");
@@ -2446,7 +2449,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // that flag and therefore only ever sees live machines — see the note on
   // list_equipment in api/companydata.js.
   const loadFleet = async ({ silent = false } = {}) => {
-    if (!selectedCompany) { setFleet([]); return; }
+    if (!selectedCompany) { setFleet([]); setFleetActivity(EMPTY_FLEET_ACTIVITY); return; }
     if (!silent) setLoadingFleet(true);
     try {
       const res = await fetch("/api/companydata", {
@@ -2457,6 +2460,22 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       if (res.ok) setFleet(data.equipment || []);
     } catch (e) { /* leave the list as-is if the request fails */ }
     setLoadingFleet(false);
+    loadFleetActivity();
+  };
+
+  // Breaks #13 and #18: last day on site (from daily reports), what each
+  // attachment was last mounted on (from pre-trips), and the most used /
+  // most repaired attachments for Equipment Analytics. Loaded alongside the
+  // fleet so every path that refreshes the fleet refreshes this too.
+  const loadFleetActivity = async () => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "fleet_activity", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setFleetActivity({ lastOnSite: data.lastOnSite || {}, mountedOn: data.mountedOn || {}, attachments: data.attachments || EMPTY_FLEET_ACTIVITY.attachments });
+    } catch (e) { /* leave as-is if the request fails */ }
   };
 
   const loadMaintenanceRecords = async () => {
@@ -5941,6 +5960,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             </div>
 
             <EquipmentAnalyticsPanel
+              attachments={fleetActivity.attachments}
               tier={company?.plan_tier || "basic"}
               companyName={company?.name}
               inspections={companyInspections}
@@ -6034,6 +6054,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           eq.retired_at ? `Retired ${new Date(eq.retired_at).toLocaleDateString("en-CA")}${eq.retired_by ? ` by ${eq.retired_by}` : ""}` : null,
                         ].filter(Boolean).join(" · ")}
                       </div>
+                      {(fleetActivity.lastOnSite[eq.id] || fleetActivity.mountedOn[eq.id]) && (
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 3 }}>
+                          {[
+                            fleetActivity.mountedOn[eq.id]
+                              ? `Last mounted on ${fleetActivity.mountedOn[eq.id].hostLabel || "another machine"} (${new Date(fleetActivity.mountedOn[eq.id].at).toLocaleDateString("en-CA")})`
+                              : null,
+                            fleetActivity.lastOnSite[eq.id]
+                              ? `Last on site ${fleetActivity.lastOnSite[eq.id].date}${fleetActivity.lastOnSite[eq.id].site ? ` at ${fleetActivity.lastOnSite[eq.id].site}` : ""}`
+                              : null,
+                          ].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
                       {(eq.notes || "").trim() && <div style={{ fontSize: 12, color: C.text.faint, marginTop: 3 }}>{eq.notes}</div>}
                     </div>
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -6411,7 +6443,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{eq.label}</div>
                           {eq.status !== "not_tracked" && (
                             <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
-                              {eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}${eq.current.readingSource === "fuel_log" ? " (from a fuel-up)" : ""}` : "No readings recorded yet"}
+                              {eq.isTowed
+                                ? (eq.usageSinceService != null ? `Towed ${eq.usageSinceService} KM on ${eq.towedTrips || 0} trip${eq.towedTrips === 1 ? "" : "s"} since last service` : "No meter: counts KM towed since its last service")
+                                : eq.current ? `Latest reading: ${eq.current.reading} ${eq.current.readingUnit || ""}${eq.current.readingSource === "fuel_log" ? " (from a fuel-up)" : ""}` : "No readings recorded yet"}
                               {eq.lastService && ` · Last serviced ${new Date(eq.lastService.service_date).toLocaleDateString("en-CA")}`}
                             </div>
                           )}
@@ -6506,19 +6540,28 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           <div style={{ marginTop: 10, background: C.panelInset, borderRadius: RAD.md, padding: 10 }}>
                             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                               <input type="number" placeholder="Interval (e.g. 250)" style={{ flex: 1, padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", background: C.panel, color: C.text.primary }} value={pmSetupForm.interval} onChange={e => setPmSetupForm(p => ({ ...p, interval: e.target.value }))} />
-                              <select style={{ padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", width: 90, background: C.panel, color: C.text.body, cursor: "pointer" }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
+                              <select disabled={eq.isTowed} style={{ padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", width: 90, background: C.panel, color: C.text.body, cursor: eq.isTowed ? "default" : "pointer" }} value={pmSetupForm.unit} onChange={e => setPmSetupForm(p => ({ ...p, unit: e.target.value }))}>
                                 <option value="Hours">Hours</option>
                                 <option value="KM">KM</option>
                               </select>
                             </div>
-                            <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box", background: C.panel, color: C.text.primary }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
+                            {eq.isTowed ? (
+                              <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 8 }}>A trailer has no meter. Its clock counts the KM it's towed from today.</div>
+                            ) : (
+                              <input type="number" placeholder="Current reading (starting point)" style={{ width: "100%", padding: "8px 10px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box", background: C.panel, color: C.text.primary }} value={pmSetupForm.startingReading} onChange={e => setPmSetupForm(p => ({ ...p, startingReading: e.target.value }))} />
+                            )}
                             <div style={{ display: "flex", gap: 8 }}>
                               <button onClick={() => savePmSetup(eq)} disabled={savingPmSetup} style={{ flex: 1, background: C.status.success.solid, color: "#fff", border: "none", borderRadius: RAD.sm, padding: "9px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{savingPmSetup ? "Saving…" : "Start Tracking"}</button>
                               <button onClick={() => { setPmSetupFor(null); setPmSetupForm({ interval: "", unit: "Hours", startingReading: "" }); }} style={{ background: C.panel, color: C.text.body, border: `1.5px solid ${C.line}`, borderRadius: RAD.sm, padding: "9px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                             </div>
                           </div>
                         ) : (
-                          <button onClick={() => { setPmSetupFor(eq.id); setPmSetupForm({ interval: "", unit: eq.current?.readingUnit || "Hours", startingReading: "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", marginTop: 8, padding: 0 }}>+ Set Up Tracking</button>
+                          eq.pmAllowed === false ? (
+                            // Break #18: forks, buckets and hammers are inspected, not serviced on a clock.
+                            <div style={{ fontSize: 12, color: C.text.faint, marginTop: 8 }}>Attachments don't get a maintenance schedule unless they're a trailer.</div>
+                          ) : (
+                            <button onClick={() => { setPmSetupFor(eq.id); setPmSetupForm({ interval: "", unit: eq.isTowed ? "KM" : (eq.current?.readingUnit || "Hours"), startingReading: eq.isTowed ? "0" : "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", marginTop: 8, padding: 0 }}>+ Set Up Tracking</button>
+                          )
                         )
                       ) : logServiceFor === eq.id ? (
                         <div style={{ marginTop: 10, background: C.panelInset, borderRadius: RAD.md, padding: 10 }}>
@@ -6539,7 +6582,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
-                          <button onClick={() => { setLogServiceFor(eq.id); setLogServiceForm({ serviceDate: new Date().toISOString().slice(0, 10), serviceReading: "", readingUnit: eq.current?.readingUnit || "Hours", performedBy: "", notes: "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Log Service</button>
+                          <button onClick={() => { setLogServiceFor(eq.id); setLogServiceForm({ serviceDate: new Date().toISOString().slice(0, 10), serviceReading: eq.isTowed ? "0" : "", readingUnit: eq.isTowed ? "KM" : (eq.current?.readingUnit || "Hours"), performedBy: "", notes: "" }); }} style={{ background: "transparent", border: "none", color: C.status.info.text, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>+ Log Service</button>
                           <button onClick={() => disablePmTracking(eq)} style={{ background: "transparent", border: "none", color: C.text.faint, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Turn off tracking</button>
                         </div>
                       )}

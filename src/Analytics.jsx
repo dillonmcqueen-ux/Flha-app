@@ -328,7 +328,7 @@ function SafetyAdvancedSections({ nearMisses, incidents, fieldSites, monthlyReco
 // ── Equipment Analytics — pretrip/posttrip inspection issues and
 // preventative maintenance. Mirrors the Operations menu group and
 // generateEquipmentAnalyticsPDF.js's section split.
-export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [], customDocs = [], fuelLogs = [], siteNames = {} }) {
+export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], daily = [], maintenanceStatus = [], customDocs = [], fuelLogs = [], siteNames = {}, attachments = null }) {
   const isAdvanced = tier === "advanced";
 
   const equipStats = equipmentIssueStats(inspections);
@@ -355,6 +355,20 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
       <SectionCard title="Top Equipment Issues" subtitle="Pre-trip and post-trip inspections flagged Defective or Monitor">
         <RankedBarList items={topEquipment} emptyLabel="No equipment issues flagged yet." barColor={C.status.warning.solid} />
       </SectionCard>
+
+      {/* Break #18: api/companydata.js fleet_activity. Most used counts the
+          pre-trips an attachment was recorded on; most repaired counts every
+          service or repair logged against it. */}
+      {attachments && (attachments.mostUsed.length > 0 || attachments.mostRepaired.length > 0) && (
+        <>
+          <SectionCard title="Most Used Attachments" subtitle="Pre-trips each attachment was recorded on">
+            <RankedBarList items={attachments.mostUsed.map(a => ({ label: a.label, count: a.trips }))} emptyLabel="No attachments recorded on a pre-trip yet." barColor={C.status.info.solid} />
+          </SectionCard>
+          <SectionCard title="Most Repaired Attachments" subtitle="Services and repairs logged against each attachment">
+            <RankedBarList items={attachments.mostRepaired.map(a => ({ label: a.label, count: a.repairs }))} emptyLabel="No repairs logged against an attachment yet." barColor={C.status.warning.solid} />
+          </SectionCard>
+        </>
+      )}
 
       {isAdvanced && (
         <>
