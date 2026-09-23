@@ -16,7 +16,7 @@
 // failing naturally when they can't. A service worker that tried to cache
 // or short-circuit an API response would silently break all of that.
 
-const CACHE_VERSION = "fora-shell-v1";
+const CACHE_VERSION = "fora-shell-v2"; // bumped for the 2026-09 logo swap: logo/icons are cache-first and not content-hashed
 
 // A page isn't controlled by its own service worker until *after* that
 // worker has installed, activated, and (via clients.claim() below) taken

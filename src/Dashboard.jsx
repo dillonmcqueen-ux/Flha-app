@@ -4751,7 +4751,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             color: C.text.body, cursor: "pointer", marginRight: 2,
           }}
         ><Menu size={16} /></button>
-        <span style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, letterSpacing: "0.04em" }}>FORA</span>
+        <img src="/fora-logo.png" alt="FORA Field Solutions" style={{ height: 30, width: "auto", display: "block" }} />
         <span style={{
           fontFamily: FONT.mono, fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase",
           color: C.orange, background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.3)", borderRadius: 4, padding: "2px 6px",
