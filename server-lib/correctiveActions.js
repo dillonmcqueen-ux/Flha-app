@@ -340,6 +340,9 @@ export async function resolveCorrectiveActionsForItems(supabaseAdmin, {
         resolved_by: cleanLabel(resolvedBy),
         resolution_source: resolutionSource,
       })
+      // The ids already came from a company-filtered read above; the
+      // filter here keeps that true if the read ever changes.
+      .eq('company_id', companyId)
       .in('id', ids);
     if (updateErr) {
       console.error('resolveCorrectiveActionsForItems: update failed', updateErr.message);

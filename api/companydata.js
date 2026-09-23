@@ -882,7 +882,10 @@ export default async function handler(req, res) {
       }));
       return res.status(200).json({
         lastOnSite: lastOnSiteByEquipment(dailyRes.data || []),
-        mountedOn: mountedOnByAttachment(inspRes.data || []),
+        // results_json is client jsonb, so only report attachments that
+        // are actually in this company's fleet.
+        mountedOn: Object.fromEntries(Object.entries(mountedOnByAttachment(inspRes.data || []))
+          .filter(([id]) => fleet.some(eq => String(eq.id) === id))),
         attachments: attachmentStats(fleet, inspRes.data || [], logRes.data || []),
       });
     }
