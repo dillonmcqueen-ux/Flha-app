@@ -8,6 +8,7 @@ import { authorRosterId } from '../server-lib/authorStamp.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
+import { requireCustomDocKey } from '../server-lib/docKeyGate.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -477,6 +478,10 @@ export default async function handler(req, res) {
       if (!form || form.company_id !== session.companyId || !form.is_active) {
         return res.status(404).json({ error: 'This document is not available.' });
       }
+      // Break #25: the worker menu already hides a form whose custom_<id>
+      // setting is off; a saved URL must not open it either.
+      const denied = await requireCustomDocKey(supabaseAdmin, session, form.id);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
 
       const { data: questions, error: qErr } = await supabaseAdmin
         .from('custom_form_questions')
@@ -507,10 +512,18 @@ export default async function handler(req, res) {
       if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed for this site.' });
       }
-      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('id, company_id').eq('id', formId).limit(1);
+      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('id, company_id, is_active').eq('id', formId).limit(1);
       if (!formRows || formRows.length === 0 || formRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed for this form.' });
       }
+      // Break #25: switched off either way (the supervisor's toggle_form or
+      // the Admin Panel's custom_<id> setting) means no new submissions,
+      // including queued offline ones, which the worker is then told about.
+      if (!formRows[0].is_active) {
+        return res.status(403).json({ error: 'This document has been switched off for your company.' });
+      }
+      const deniedCustom = await requireCustomDocKey(supabaseAdmin, session, formRows[0].id);
+      if (deniedCustom) return res.status(deniedCustom.status).json({ error: deniedCustom.error });
 
       // Idempotency (docs/scope-offline-capability.md Phase 1) — same
       // reasoning as api/monthly.js's submit_monthly: this is a multi-step

@@ -133,3 +133,35 @@ export async function requireDocKey(supabase, session, documentKey) {
     error: `Your company's plan doesn't include ${moduleLabelForDocKey(documentKey)}. Contact FORA to add it.`,
   };
 }
+
+/**
+ * The guard for a company's OWN custom document (`custom_<formId>`), break #25.
+ *
+ * ALLOW-BY-DEFAULT, the deliberate opposite of requireDocKey above. A custom
+ * form is something this company's admin built for itself, so a missing row
+ * means "made it, never switched it off", not "never bought it"
+ * (api/customforms.js get_worker_documents, pinned by
+ * tests/unit/doc-setting-defaults.test.js). requireDocKey cannot be reused
+ * here: it would switch off every custom form that has no row.
+ *
+ * Only an explicit `is_active: false` refuses, with 403, which tells an
+ * offline-queued submission to drop and show the worker why. A FAILED
+ * lookup refuses with 503 so the queue keeps the entry, same reasoning as
+ * requireDocKey. Admin is exempt for the same reason too.
+ */
+export async function requireCustomDocKey(supabase, session, formId) {
+  if (!session) return { status: 401, error: 'Not logged in. Please log in again.' };
+  if (session.role === 'admin') return null;
+  if (!session.companyId) return { status: 401, error: 'Not logged in. Please log in again.' };
+  const { data: rows, error } = await supabase
+    .from('company_document_settings')
+    .select('is_active')
+    .eq('company_id', session.companyId)
+    .eq('document_key', `custom_${formId}`)
+    .limit(1);
+  if (error) return { status: 503, error: "Couldn't check whether this document is available. Please try again." };
+  if (rows && rows.length > 0 && rows[0].is_active === false) {
+    return { status: 403, error: 'This document has been switched off for your company.' };
+  }
+  return null;
+}
