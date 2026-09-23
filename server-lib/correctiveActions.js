@@ -41,6 +41,7 @@
 // degrades to "we don't know" is the same choice site_id and
 // submitted_by_roster_id made for the same reason.
 
+import { inspectionAttachments, attachmentForItem } from './inspectionAttachments.js';
 import { normalizeItemKey, machineKey } from './recurrence.js';
 
 // Mirrors the corrective_actions_source_type_check constraint. Adding a
@@ -389,6 +390,7 @@ export function correctiveActionsFromInspection(resultsJson, equipmentLabel) {
   if (!results) return [];
   const items = Array.isArray(results.items) ? results.items : [];
   const machine = cleanLabel(equipmentLabel);
+  const attachments = inspectionAttachments(results);
 
   return items
     .filter((i) => i && i.condition === 'Defective' && typeof i.item === 'string' && i.item.trim())
@@ -411,9 +413,13 @@ export function correctiveActionsFromInspection(resultsJson, equipmentLabel) {
       const where = i.unitLabel && typeof i.unitLabel === 'string' && i.unitLabel.trim()
         ? `${i.unitLabel.trim().slice(0, 120)}: `
         : (machine ? `${machine}: ` : '');
+      const attachment = itemAttachment(i, attachments);
       return {
         description: cleanDescription(`${where}${i.item.trim()}${note}`),
         itemKey: normalizeItemKey(i.item),
+        // Only on an attachment's own item, so a carrier-only finding keeps
+        // exactly the shape every existing caller and test already reads.
+        ...(attachment ? { attachment } : {}),
       };
     })
     .filter((f) => f.description);
@@ -433,12 +439,63 @@ export function resolvedItemsFromPosttrip(resultsJson) {
   const results = resultsJson && typeof resultsJson === 'object' ? resultsJson : null;
   if (!results) return [];
   const items = Array.isArray(results.items) ? results.items : [];
+  const attachments = inspectionAttachments(results);
   return items
     .filter((i) => i && i.carriedFrom && i.resolution === 'fixed' && typeof i.item === 'string' && i.item.trim())
-    .map((i) => ({
-      itemKey: normalizeItemKey(i.item),
-      item: i.item.trim(),
-      note: typeof i.resolutionNote === 'string' ? i.resolutionNote.trim() : '',
-    }))
+    .map((i) => {
+      const attachment = itemAttachment(i, attachments);
+      return {
+        itemKey: normalizeItemKey(i.item),
+        item: i.item.trim(),
+        note: typeof i.resolutionNote === 'string' ? i.resolutionNote.trim() : '',
+        ...(attachment ? { attachment } : {}),
+      };
+    })
     .filter((r) => r.itemKey);
+}
+
+// ── Which machine a checklist item belongs to (break #17) ─────────────────
+//
+// An attachment's item is the attachment's defect, not the carrier's. The
+// id comes from the item itself first (buildPosttripItems carries it forward
+// even when the post-trip record has no attachments list), then from
+// attachmentForItem, the same reader the weekly report routes by. Returns
+// null for the carrier's own items.
+//
+// The id here is whatever the client wrote into results_json. It is NOT
+// safe to store until groupFindingsByMachine has checked it against the
+// company's fleet.
+function itemAttachment(item, attachments) {
+  if (!item || (item.unit !== 'attachment' && item.unit !== 'trailer')) return null;
+  const matched = attachmentForItem(item, attachments);
+  const rawId = item.attachmentId ?? (matched ? matched.id : null);
+  const label = cleanLabel(item.unitLabel) || (matched ? cleanLabel(matched.label) : null);
+  if (rawId == null && !label) return null;
+  return { id: rawId ?? null, label };
+}
+
+/**
+ * Splits one inspection's findings (or post-trip resolutions) by the machine
+ * each belongs to: the host record's machine, or an attachment on it.
+ *
+ * `vettedIds` is the set of attachment ids (as strings) that
+ * resolveEquipmentIds confirmed belong to this company. An attachment id not
+ * in it is dropped to null and the finding keys on its label instead, the
+ * same graceful degradation a free-text machine gets everywhere else.
+ */
+export function groupFindingsByMachine(findings, host, vettedIds) {
+  const groups = new Map();
+  for (const f of Array.isArray(findings) ? findings : []) {
+    let equipmentId = host?.equipmentId ?? null;
+    let equipmentLabel = host?.equipmentLabel ?? null;
+    if (f && f.attachment) {
+      const id = f.attachment.id != null && vettedIds && vettedIds.has(String(f.attachment.id)) ? Number(f.attachment.id) : null;
+      equipmentId = id;
+      equipmentLabel = f.attachment.label || null;
+    }
+    const key = equipmentId != null ? `id:${equipmentId}` : `label:${(equipmentLabel || '').toLowerCase()}`;
+    if (!groups.has(key)) groups.set(key, { equipmentId, equipmentLabel, findings: [] });
+    groups.get(key).findings.push(f);
+  }
+  return [...groups.values()];
 }

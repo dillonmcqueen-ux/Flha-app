@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { resolveEquipmentId, resolveEquipmentIds } from '../server-lib/equipmentScope.js';
-import { openCorrectiveActions, correctiveActionsFromInspection, resolvedItemsFromPosttrip, resolveCorrectiveActionsForItems } from '../server-lib/correctiveActions.js';
+import { openCorrectiveActions, correctiveActionsFromInspection, resolvedItemsFromPosttrip, resolveCorrectiveActionsForItems, groupFindingsByMachine } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -496,19 +496,34 @@ export default async function handler(req, res) {
       // Best-effort, same as the signal writer above: the inspection is
       // already saved, and failures are logged inside the helper.
       if (newId && type === 'inspection') {
-        await openCorrectiveActions(supabaseAdmin, {
-          companyId: session.companyId,
-          sourceType: 'equipment_inspection',
-          sourceId: newId,
-          descriptions: correctiveActionsFromInspection(record.results_json, record.equipment_label),
-          // recordToInsert.equipment_id is the VETTED id — resolveEquipmentId
-          // above already rejected another company's machine and nulled a
-          // non-existent one. Reading record.equipment_id here instead would
-          // put a client-supplied id straight into the column that decides
-          // which machine a pattern belongs to.
-          equipmentId: recordToInsert.equipment_id ?? null,
-          equipmentLabel: recordToInsert.equipment_label ?? null,
-        });
+        // recordToInsert.equipment_id is the VETTED id — resolveEquipmentId
+        // above already rejected another company's machine and nulled a
+        // non-existent one. Reading record.equipment_id here instead would
+        // put a client-supplied id straight into the column that decides
+        // which machine a pattern belongs to.
+        const host = { equipmentId: recordToInsert.equipment_id ?? null, equipmentLabel: recordToInsert.equipment_label ?? null };
+        const findings = correctiveActionsFromInspection(record.results_json, record.equipment_label);
+        const fixed = recordToInsert.trip_type === 'posttrip' ? resolvedItemsFromPosttrip(record.results_json) : [];
+
+        // Break #17: an attachment's defect belongs to the attachment. Its
+        // id comes from results_json, which is client jsonb, so it is vetted
+        // against this company's fleet the same way daily reports vet theirs.
+        // A foreign or unknown id is dropped to null (label only), never
+        // stored; a failed lookup does the same rather than failing a submit.
+        const attachmentIds = [...findings, ...fixed].map(f => f.attachment?.id).filter(id => id != null);
+        const vetted = attachmentIds.length > 0 ? await resolveEquipmentIds(supabaseAdmin, session.companyId, attachmentIds) : null;
+        const vettedIds = new Set(Array.isArray(vetted) ? vetted.map(String) : []);
+
+        for (const group of groupFindingsByMachine(findings, host, vettedIds)) {
+          await openCorrectiveActions(supabaseAdmin, {
+            companyId: session.companyId,
+            sourceType: 'equipment_inspection',
+            sourceId: newId,
+            descriptions: group.findings,
+            equipmentId: group.equipmentId,
+            equipmentLabel: group.equipmentLabel,
+          });
+        }
 
         // ── The other half of the loop: a post-trip that clears a defect ──
         //
@@ -522,23 +537,25 @@ export default async function handler(req, res) {
         // repair log fails we would rather have a closed action with no
         // service line than an open action the worker was told they had
         // closed.
-        if (recordToInsert.trip_type === 'posttrip') {
-          const fixed = resolvedItemsFromPosttrip(record.results_json);
-          if (fixed.length > 0) {
+        // Resolved per machine, for the same reason actions are opened per
+        // machine: the forks' fixed tine closes the forks' action and logs
+        // the repair on the forks, not on the loader that carried them.
+        for (const { equipmentId: machineId, equipmentLabel: machineLabel, findings: fixedHere } of groupFindingsByMachine(fixed, host, vettedIds)) {
+          if (fixedHere.length > 0) {
             // session.name / session.userName, never a name from the body.
             // Who repaired a machine is attribution, and attribution a
             // caller can choose is a suggestion — the same rule break #3
             // settled for document authorship.
             const who = (session.name || session.userName || '').trim() || 'Worker';
-            const noteText = fixed
+            const noteText = fixedHere
               .map((f) => (f.note ? `${f.item} — ${f.note}` : f.item))
               .join('; ');
 
             const closed = await resolveCorrectiveActionsForItems(supabaseAdmin, {
               companyId: session.companyId,
-              equipmentId: recordToInsert.equipment_id ?? null,
-              equipmentLabel: recordToInsert.equipment_label ?? null,
-              itemKeys: fixed.map((f) => f.itemKey),
+              equipmentId: machineId,
+              equipmentLabel: machineLabel,
+              itemKeys: fixedHere.map((f) => f.itemKey),
               resolvedBy: who,
               note: noteText,
               resolutionSource: 'posttrip',
@@ -555,10 +572,10 @@ export default async function handler(req, res) {
             // preventative-maintenance clock — see
             // docs/scope-equipment-service-log.md for why that would be
             // strictly worse than not logging it at all.
-            if (closed.length > 0 && recordToInsert.equipment_id != null) {
+            if (closed.length > 0 && machineId != null) {
               const { error: repairErr } = await supabaseAdmin.from('equipment_maintenance_log').insert({
                 company_id: session.companyId,
-                equipment_id: recordToInsert.equipment_id,
+                equipment_id: machineId,
                 entry_type: 'field_service',
                 service_date: new Date().toISOString().slice(0, 10),
                 // Deliberately no reading. The post-trip's end_reading is a
