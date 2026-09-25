@@ -226,13 +226,27 @@ export default async function handler(req, res) {
     if (action === 'enroll_mfa_start') {
       const { data: existing, error: readErr } = await supabaseAdmin.from('app_settings').select('totp_enabled').eq('id', 1).limit(1);
       if (readErr) return res.status(500).json({ error: 'Could not check current MFA status.' });
-      if (existing && existing[0] && existing[0].totp_enabled) {
+      if (!existing || existing.length === 0) {
+        // app_settings is a singleton row that set_master_code creates —
+        // master_code_hash/master_code_salt are NOT NULL with no default,
+        // so nothing here can create the row from scratch. In practice
+        // this only happens on a deployment where a master code has never
+        // been set.
+        return res.status(400).json({ error: 'Set a master login code first, then enable MFA.' });
+      }
+      if (existing[0].totp_enabled) {
         return res.status(400).json({ error: 'MFA is already enabled. Disable it first to re-enroll.' });
       }
       const secret = generateTotpSecret();
+      // update(), not upsert() — the row already exists (checked above),
+      // and upsert's INSERT-attempt path validates the NOT NULL columns
+      // it wasn't given (master_code_hash/master_code_salt) even when the
+      // row will actually be reached via the UPDATE branch, so it fails
+      // every time with a 500 that never reaches this comment's fix.
       const { error } = await supabaseAdmin
         .from('app_settings')
-        .upsert({ id: 1, totp_secret: secret, updated_at: new Date().toISOString() });
+        .update({ totp_secret: secret, updated_at: new Date().toISOString() })
+        .eq('id', 1);
       if (error) return res.status(500).json({ error: "Couldn't start MFA enrollment." });
       const otpauthUri = totpEnrollmentUri(secret);
       const qrDataUrl = await QRCode.toDataURL(otpauthUri);
