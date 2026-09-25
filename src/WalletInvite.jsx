@@ -160,7 +160,7 @@ export default function WalletInvite() {
     const name = profile.name.trim();
     const email = profile.email.trim();
     if (!name) { setFinishError("Enter your name."); return; }
-    if (!/^\d{4}$/.test(pin)) { setFinishError("Choose a 4-digit PIN — you'll use this to log in next time."); return; }
+    if (!/^\d{6}$/.test(pin)) { setFinishError("Choose a 6-digit PIN — you'll use this to log in next time."); return; }
     setFinishing(true);
     try {
       const profileRes = await fetch("/api/certifications", {
@@ -330,9 +330,9 @@ export default function WalletInvite() {
 
         <div style={styles.card}>
           <div style={styles.h2}>Choose your PIN</div>
-          <div style={styles.hint}>You'll use your name and this 4-digit PIN to log in from now on — write it down.</div>
-          <input style={{ ...styles.input, maxWidth: 140, fontFamily: "monospace", fontSize: 18, letterSpacing: 2 }} inputMode="numeric" maxLength={4}
-            placeholder="1234" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} />
+          <div style={styles.hint}>You'll use your name and this 6-digit PIN to log in from now on — write it down.</div>
+          <input style={{ ...styles.input, maxWidth: 160, fontFamily: "monospace", fontSize: 18, letterSpacing: 2 }} inputMode="numeric" maxLength={6}
+            placeholder="123456" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))} />
         </div>
 
         {certificationsEnabled !== false && <div style={{ ...styles.hint, textAlign: "center" }}>No tickets yet? No problem — you can finish now and add them anytime from "My Certifications" once you're logged in.</div>}

@@ -224,10 +224,12 @@ function hashPin(pin, salt) {
 
 // No cross-member uniqueness check — login always resolves a specific
 // roster row by name before the PIN is ever checked, so two people sharing
-// a 4-digit PIN has no security impact, and skipping the check keeps this
+// a 6-digit PIN has no security impact, and skipping the check keeps this
 // O(1) instead of re-hashing against every existing member on the roster.
+// 6 digits, not 4, as of 2026-09-25 — see docs/security/soc2-readiness-gaps.md
+// item 8.
 function genPin() {
-  return String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+  return String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
 }
 
 // ── Time Clock helpers ────────────────────────────────────────────────

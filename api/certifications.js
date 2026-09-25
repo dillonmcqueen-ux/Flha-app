@@ -400,7 +400,7 @@ export default async function handler(req, res) {
     if (action === 'set_own_pin') {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const { pin } = req.body;
-      if (!/^\d{4}$/.test(String(pin || ''))) return res.status(400).json({ error: 'Enter a 4-digit PIN.' });
+      if (!/^\d{6}$/.test(String(pin || ''))) return res.status(400).json({ error: 'Enter a 6-digit PIN.' });
       const salt = genSalt();
       const { error } = await supabaseAdmin
         .from('roster')

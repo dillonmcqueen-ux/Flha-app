@@ -220,10 +220,13 @@ function verifyTicket(ticket) {
 }
 
 // scrypt (Node builtin, no new dependency) + a per-user random salt. A
-// 4-digit PIN is inherently low-entropy against a full database compromise,
-// but scrypt raises that cost significantly — the actual defense against
-// realistic online guessing is the per-account lockout below, which must
-// hold regardless of hash strength.
+// PIN (6 digits since 2026-09-25, was 4 — see
+// docs/security/soc2-readiness-gaps.md item 8; existing shorter PINs still
+// verify fine, login compares against the stored hash, not a fixed length)
+// is inherently low-entropy against a full database compromise, but scrypt
+// raises that cost significantly — the actual defense against realistic
+// online guessing is the per-account lockout below, which must hold
+// regardless of hash strength.
 function hashPin(pin, salt) {
   return crypto.scryptSync(String(pin), salt, 64).toString('hex');
 }
@@ -901,8 +904,8 @@ export default async function handler(req, res) {
     const { claimToken, rosterId, pin } = req.body;
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
-    if (!rosterId || !/^\d{4}$/.test(String(pin || ''))) {
-      return res.status(400).json({ error: 'Enter a 4-digit PIN.' });
+    if (!rosterId || !/^\d{6}$/.test(String(pin || ''))) {
+      return res.status(400).json({ error: 'Enter a 6-digit PIN.' });
     }
 
     // Ownership check — this rosterId must actually belong to the company

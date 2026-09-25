@@ -268,10 +268,18 @@ export default function Login() {
     setChecking(false);
   };
 
+  // PINs moved from 4 to 6 digits (see docs/security/soc2-readiness-gaps.md
+  // item 8) for anything newly set — but existing roster members keep
+  // whatever length PIN they already have until it's reset, and login only
+  // ever compares against the stored hash, never a fixed length. So this
+  // auto-submits at the new 6-digit length (the common case going forward)
+  // but never blocks someone with an older, shorter PIN from finishing:
+  // Enter, or the "Log in" button below once 4+ digits are in, submits
+  // whatever's typed so far.
   const onPinChange = (val) => {
-    const digits = val.replace(/\D/g, "").slice(0, 4);
+    const digits = val.replace(/\D/g, "").slice(0, 6);
     setPin(digits);
-    if (digits.length === 4) submitPin(digits);
+    if (digits.length === 6) submitPin(digits);
   };
 
   const logout = () => {
@@ -535,27 +543,34 @@ export default function Login() {
           // ── Step 3: PIN ──────────────────────────────────────────────
           <>
             <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>{selectedRoster.name}</div>
-            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 8 }}>Enter your 4-digit PIN</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 8 }}>Enter your PIN</div>
 
             <input
               style={{ ...styles.input, textAlign: "center", fontSize: 28, letterSpacing: 12, marginBottom: 0 }}
               type="tel"
               inputMode="numeric"
               pattern="[0-9]*"
-              maxLength={4}
+              maxLength={6}
               value={pin}
               onChange={e => onPinChange(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && pin.length >= 4 && !checking) submitPin(pin); }}
               autoFocus
               disabled={checking}
             />
             <div style={styles.pinDots}>
-              {[0, 1, 2, 3].map(i => <div key={i} style={styles.pinDot(i < pin.length)} />)}
+              {[0, 1, 2, 3, 4, 5].map(i => <div key={i} style={styles.pinDot(i < pin.length)} />)}
             </div>
 
             {error && (
               <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
                 <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
               </div>
+            )}
+
+            {pin.length >= 4 && pin.length < 6 && (
+              <button style={{ ...styles.primaryBtn, marginBottom: 10 }} disabled={checking} onClick={() => submitPin(pin)}>
+                {checking ? "Checking…" : "Log in"}
+              </button>
             )}
 
             <button style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); }}>

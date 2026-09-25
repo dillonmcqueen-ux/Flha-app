@@ -389,7 +389,7 @@ export default async function handler(req, res) {
     // ── Onboarding intake — approve: create the company from the
     // submission in one click. Sites (one per line) are created outright
     // since they're a single plain field. Users are parsed as "Name —
-    // role" / "Name - role" and get a random 4-digit PIN each — but unlike
+    // role" / "Name - role" and get a random 6-digit PIN each — but unlike
     // before, those PINs are never returned here or emailed anywhere: the
     // contact assigns their own real PINs on the claim-link page (see
     // claim_set_roster_pin in api/login.js), so this handler doesn't even

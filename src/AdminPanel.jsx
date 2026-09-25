@@ -2396,7 +2396,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add to the roster</div>
-              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Each person gets their own name and a 4-digit PIN, generated automatically and shown once.</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Each person gets their own name and a 6-digit PIN, generated automatically and shown once.</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="Full name" value={newRosterName}
                   onChange={e => setNewRosterName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addRosterMember(); }} />

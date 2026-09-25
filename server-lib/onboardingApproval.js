@@ -66,8 +66,11 @@ function codePrefix(name) {
   if (words.length === 1) return words[0].slice(0, 3);
   return words.map(w => w[0]).join('').slice(0, 3);
 }
+// 6 digits (1,000,000 possible values), not 4 — see PIN_LOCKOUT_AFTER_ATTEMPTS
+// in api/login.js and docs/security/soc2-readiness-gaps.md item 8. Bumped
+// 2026-09-25 as part of SOC 2 readiness remediation.
 function genPin() {
-  return String(Math.floor(1000 + Math.random() * 9000));
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 // Looks up the given Stripe customer's most recent subscription the same
