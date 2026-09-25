@@ -40,6 +40,22 @@ step is new work, not pure reuse.
 
 **Scale:** large — 100+ staff, multi-site.
 
+**Not in scope:** equipment inspections. GFL would not use FORA's equipment
+inspection feature, so it's excluded from every option below and from any
+tenant setup.
+
+**Document format is non-negotiable:** GFL's EHS managers have to approve
+every safety document template before it can be used. That approval is on
+the exact paper form as it exists today, not on whatever a generic digital
+form would produce. This means the PDF a submission generates has to be
+built to look exactly like their existing document, not just capture the
+same fields. Dillon can share the client's real documents directly so each
+PDF is built to match, field for field and layout for layout, rather than
+being redesigned or standardized. As long as the output format matches what
+EHS already approved, the actual submission and signature capture can
+happen digitally, it lands as a completed submission in the supervisor's
+dashboard queue for manual upload to Enablon.
+
 **Enablon access:** unconfirmed as of this writing. Nobody has verified
 whether the client's Enablon plan includes API/integration access. Dillon
 does not currently have a direct contact on the client's side who manages
@@ -51,8 +67,10 @@ quote.
 ## What FORA infrastructure is directly reusable
 
 - Multi-tenant auth/session model and role-based access (worker/supervisor
-  pattern already exists, though a portal for GFL would be a separate,
-  standalone deployment, not a FORA tenant).
+  pattern already exists). Under Option A this is used directly, GFL becomes
+  a tenant. Under Options B/C, a standalone portal would still borrow this
+  pattern rather than building auth from scratch, but as a separate
+  deployment, not a FORA tenant.
 - The custom form builder (`custom_forms`/`custom_fields`) — the right tool
   for these checklist-style forms.
 - E-signature capture flow from the FLHA submission pipeline (needs
@@ -66,51 +84,107 @@ quote.
   scheduled batch-push mechanism if Enablon integration turns out to be
   batch-based rather than real-time.
 
-## Two proposed options
+## Three proposed options
 
-### Option 1 — Digital Portal only (no Enablon integration)
+### Option A — Onboard GFL as a FORA tenant, custom documents built to match their exact templates
+
+Instead of a standalone build, GFL becomes a FORA customer. Their forms are
+built out using FORA's existing custom form builder (`custom_forms`/
+`custom_fields`), and each one's generated PDF is built pixel-for-pixel to
+match GFL's real, EHS-approved document, since that approval only covers
+the document as it already exists. Equipment inspections excluded, since
+GFL doesn't use that feature. Employees fill the form and sign digitally, a
+supervisor countersigns, and it lands in the supervisor's dashboard as a
+completed submission ready for manual upload to Enablon.
+
+- Fastest, cheapest path to get GFL off paper. Almost all of the underlying
+  platform (auth, roster, company setup, the form builder, hosting) already
+  exists and is already live for other customers, so this is mostly
+  configuration and PDF-template matching, not new engineering.
+- Changes the business model: this becomes a recurring FORA subscription
+  (per-seat/per-company, like every other FORA customer) instead of a
+  one-time custom-build project fee. Cheaper for GFL, but revenue shape for
+  Dillon shifts from a project payout to SaaS revenue, worth deciding
+  deliberately rather than defaulting into it.
+- Still does not solve direct Enablon upload. Whether GFL is a FORA tenant
+  or a standalone portal, nobody has built an Enablon API push yet; that's
+  identical additional work layered on top of either path (see Option C).
+- Still needs the dual-signature (employee + supervisor countersign)
+  workflow, which FORA doesn't have today either. Same work required
+  regardless of which option this rides on.
+- GFL logs into the shared FORA app (with their own logo/branding via the
+  existing company-branding support) rather than a fully separate portal on
+  its own subdomain, which is a tradeoff against the original "hosted on
+  your domain like FORA" framing, worth flagging to the client directly.
+- Because the PDF must match GFL's existing approved templates exactly,
+  this still requires the client's real documents up front, same as Options
+  B and C, the pixel-matching requirement doesn't go away just because it's
+  built on FORA's platform.
+- Rough price: subscription-based (FORA's existing pricing), plus a smaller
+  one-time setup/template-matching fee rather than a full project fee.
+  Needs its own pricing pass once FORA's standard tenant pricing is applied
+  here, not estimated yet.
+- Timeline: likely the fastest of the three, since it's template-building on
+  top of a live platform rather than building a platform. Rough estimate
+  2–4 weeks for form/PDF template matching plus the dual-signature addition,
+  pending real documents in hand.
+
+### Option B — Standalone Digital Portal only (no Enablon integration)
 
 Employees log in, pick a form, fill it out, sign it, a supervisor
 countersigns, and it lands in a dashboard for the safety clerk to review and
 manually upload to Enablon — same manual upload step as today, but starting
-from a clean, fully-signed digital submission instead of paper/email.
+from a clean, fully-signed digital submission instead of paper/email. Built
+as its own standalone application on its own subdomain, not a FORA tenant.
 
 - Eliminates: printing, handwritten forms, scanning/emailing, lost or
   illegible submissions, chasing missing signatures, and the clerk manually
   re-typing data from a PDF into Enablon.
 - Does not eliminate: the clerk's final upload step into Enablon.
+- Same pixel-matching requirement as Option A applies here: PDFs must be
+  built to match GFL's EHS-approved templates exactly, not a redesigned or
+  standardized version.
 - Timeline: 6–8 weeks.
 - Rough price: $12,000–$18,000.
-- Lower risk, faster, and this is the recommended starting point regardless
-  of whether Option 2 is ever pursued.
+- Slower and pricier than Option A since it's a new standalone build rather
+  than configuration on an existing platform, but gives GFL a fully separate
+  product with its own subdomain and no shared-platform dependency.
 
-### Option 2 — Digital Portal + direct Enablon integration
+### Option C — Standalone Digital Portal + direct Enablon integration
 
-Everything in Option 1, plus an automatic push into Enablon on submission
+Everything in Option B, plus an automatic push into Enablon on submission
 (or on a scheduled batch), removing the clerk's manual step entirely.
 
 - Entirely dependent on confirming real API/integration access on the
   client's Enablon plan. Must open with a short, separately-priced discovery
   phase before the full integration price is locked in.
 - If the API path turns out not to exist, this option collapses back to
-  Option 1 plus, at most, an auto-formatted "ready to upload" export.
+  Option B plus, at most, an auto-formatted "ready to upload" export.
 - Discovery phase: 1–2 weeks, ~$1,500–$2,500.
-- Timeline if confirmed: 3–4 months total (Option 1's build plus 5–9
+- Timeline if confirmed: 3–4 months total (Option B's build plus 5–9
   additional weeks for API mapping, the push mechanism, and testing against
   a real Enablon environment).
 - Rough price if confirmed: $30,000–$48,000 total.
 - Field-by-field mapping is expected to be the slow part, since the six form
   types likely mean six different mappings into whatever schema Enablon's
   API expects, not one generic mapping.
+- This same integration work could equally be layered onto Option A instead
+  of a standalone portal; the Enablon API problem is identical either way.
 
-### Recommendation given to the client
+### Recommendation given to the client (as of the original proposal, before Option A existed)
 
-Start with Option 1. Layer Option 2 on afterward as a second phase, once a
-discovery pass confirms what's actually possible on their Enablon account.
-This was framed honestly against the alternative of buying an off-the-shelf
-digital-forms tool: cheaper/lower-risk on paper, but unlikely to solve the
-Enablon-specific upload problem at all, since most off-the-shelf tools don't
-integrate with Enablon out of the box.
+Start with Option B (the standalone portal, previously "Option 1"). Layer
+Option C on afterward as a second phase, once a discovery pass confirms
+what's actually possible on their Enablon account. This was framed honestly
+against the alternative of buying an off-the-shelf digital-forms tool:
+cheaper/lower-risk on paper, but unlikely to solve the Enablon-specific
+upload problem at all, since most off-the-shelf tools don't integrate with
+Enablon out of the box. **This recommendation predates Option A and should
+be revisited**: given GFL doesn't need equipment inspections and every
+option requires pixel-matched PDFs regardless of platform, Option A is
+worth presenting first now, since it likely gets GFL off paper fastest and
+cheapest, with Option C's Enablon integration still available as a later
+phase on top of it.
 
 ## Security considerations flagged
 
@@ -154,14 +228,14 @@ different sites use different versions of these forms.
 routing to the clerk vs. Enablon directly, or would rather everything pass
 through the clerk for a final human check, at least initially.
 
-## Process/roadmap if Option 1 is greenlit
+## Process/roadmap if Option B is greenlit
 
 Full "how a custom build actually runs" writeup, given to the client when
 they asked what the end-to-end process looks like:
 
 1. **Contract and deposit.** SOW covering scope (six forms, dual-signature,
    clerk dashboard), explicit out-of-scope items (Enablon auto-upload is
-   Option 2), price, payment schedule, IP ownership (client owns the
+   Option C), price, payment schedule, IP ownership (client owns the
    finished product; FORA/Dillon owns the underlying reusable platform), and
    a change-order clause. Deposit of 30–50% to start, remainder tied to
    milestones/delivery, not a flat 50/50 split.
@@ -208,11 +282,16 @@ most likely place for scope drift to appear once real development starts.
 
 - Enablon API/integration access on the client's actual plan — unconfirmed.
 - No direct contact yet with whoever manages the client's Enablon account.
-- Actual form documents (the real Google Docs) not yet in hand — only
-  descriptions so far.
-- Client's decision on Option 1 vs. Option 2 not yet made.
+- Actual form documents (the real Google Docs/originals) not yet in hand —
+  needed for pixel-matching under any option, not just descriptions.
+- Client's decision between Option A, B, and C not yet made.
+- Option A's actual pricing not yet worked out — needs FORA's standard
+  tenant/subscription pricing applied plus a one-time setup fee estimate.
 - Budget range not yet given by the client.
 - Firm deadline/trigger for this project not yet given by the client.
+- Whether GFL would accept being on a shared multi-tenant platform (Option
+  A) versus wanting a fully separate, dedicated portal (Options B/C) has not
+  been asked directly.
 
 ## Deliverables produced so far
 
