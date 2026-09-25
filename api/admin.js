@@ -25,6 +25,7 @@ import {
   generateBackupCodes,
   consumeBackupCode,
 } from '../server-lib/totp.js';
+import { logAuditEvent } from '../server-lib/auditLog.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -137,6 +138,7 @@ export default async function handler(req, res) {
       }
       const { error } = await supabaseAdmin.from('companies').update({ plan_tier: tier }).eq('id', companyId);
       if (error) return res.status(500).json({ error: "Couldn't update plan tier." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'set_plan_tier', companyId, targetType: 'company', targetId: companyId, details: { tier } });
       return res.status(200).json({ ok: true });
     }
 
@@ -162,6 +164,7 @@ export default async function handler(req, res) {
         .from('app_settings')
         .upsert({ id: 1, master_code_hash: hash, master_code_salt: salt, updated_at: new Date().toISOString() });
       if (error) return res.status(500).json({ error: "Couldn't update the master code." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'set_master_code' });
       return res.status(200).json({ ok: true });
     }
 
@@ -180,6 +183,25 @@ export default async function handler(req, res) {
       const nameById = {}; (companies || []).forEach(c => { nameById[c.id] = c.name; });
 
       const enriched = (logs || []).map(l => ({ ...l, company_name: nameById[l.company_id] || 'Unknown company' }));
+      return res.status(200).json({ logs: enriched });
+    }
+
+    // ── Administrative audit log — who changed what config/access, when.
+    // See docs/schema/audit-log-migration.sql and server-lib/auditLog.js
+    // for scope (config/access changes, not every read or form submission).
+    if (action === 'list_audit_log') {
+      const { data: logs, error: logErr } = await supabaseAdmin
+        .from('audit_log')
+        .select('id, created_at, actor_role, action, company_id, target_type, target_id, details')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (logErr) return res.status(500).json({ error: 'Could not load the audit log.' });
+
+      const companyIds = [...new Set((logs || []).map(l => l.company_id).filter(Boolean))];
+      const { data: companies } = await supabaseAdmin.from('companies').select('id, name').in('id', companyIds.length ? companyIds : [0]);
+      const nameById = {}; (companies || []).forEach(c => { nameById[c.id] = c.name; });
+
+      const enriched = (logs || []).map(l => ({ ...l, company_name: l.company_id ? (nameById[l.company_id] || 'Unknown company') : null }));
       return res.status(200).json({ logs: enriched });
     }
 
@@ -233,6 +255,7 @@ export default async function handler(req, res) {
         .update({ totp_enabled: true, backup_codes: hashed, updated_at: new Date().toISOString() })
         .eq('id', 1);
       if (updErr) return res.status(500).json({ error: "Couldn't enable MFA." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'enroll_mfa_confirm' });
       return res.status(200).json({ ok: true, backupCodes: plain });
     }
 
@@ -253,6 +276,7 @@ export default async function handler(req, res) {
         .update({ totp_enabled: false, totp_secret: null, backup_codes: [], updated_at: new Date().toISOString() })
         .eq('id', 1);
       if (updErr) return res.status(500).json({ error: "Couldn't disable MFA." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'disable_mfa' });
       return res.status(200).json({ ok: true });
     }
 
@@ -349,6 +373,7 @@ export default async function handler(req, res) {
       }
       const { error } = await supabaseAdmin.from('onboarding_requests').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't delete this request." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'delete_onboarding_request', targetType: 'onboarding_request', targetId: id });
       return res.status(200).json({ ok: true });
     }
 
@@ -426,6 +451,7 @@ export default async function handler(req, res) {
       const result = await provisionCompanyFromRequest(supabaseAdmin, stripe, req, request, { autoApproved: false });
       if (result.error) return res.status(500).json({ error: result.error });
 
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'approve_onboarding_request', companyId: result.companyId || null, targetType: 'onboarding_request', targetId: id });
       return res.status(200).json({ ok: true, ...result });
     }
 
@@ -514,6 +540,7 @@ export default async function handler(req, res) {
           warning: 'Company created, but its document types could not be switched on. Set them from the document toggles before anyone logs in.',
         });
       }
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'create_company', companyId: created.id, targetType: 'company', targetId: created.id, details: { name: name.trim() } });
       return res.status(200).json({ ok: true });
     }
 
@@ -568,6 +595,7 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('companies').update(updates).eq('id', companyId);
       if (error) { console.error("update codes failed:", error.message); return res.status(500).json({ error: "Couldn't update codes. Try again." }); }
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'update_company_codes', companyId, targetType: 'company', targetId: companyId });
       return res.status(200).json({ ok: true });
     }
 
@@ -593,6 +621,7 @@ export default async function handler(req, res) {
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { error } = await supabaseAdmin.from('companies').update({ suspended: !!suspended }).eq('id', companyId);
       if (error) { console.error("company update failed:", error.message); return res.status(500).json({ error: "Couldn't update. Try again." }); }
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'toggle_suspend', companyId, targetType: 'company', targetId: companyId, details: { suspended: !!suspended } });
       return res.status(200).json({ ok: true });
     }
 
@@ -675,8 +704,13 @@ export default async function handler(req, res) {
         const { error: stepError } = await step();
         if (stepError) { console.error("company delete cleanup step failed:", stepError.message); return res.status(500).json({ error: "Couldn't delete. Try again." }); }
       }
+      const { data: companyRow } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
       const { error } = await supabaseAdmin.from('companies').delete().eq('id', companyId);
       if (error) { console.error("company delete failed:", error.message); return res.status(500).json({ error: "Couldn't delete. Try again." }); }
+      // The company's name is captured in details rather than looked up
+      // later by companyId, since the row itself is gone by the time
+      // anyone reads this log entry.
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'delete_company', targetType: 'company', targetId: companyId, details: { name: companyRow?.[0]?.name || null } });
       return res.status(200).json({ ok: true });
     }
 

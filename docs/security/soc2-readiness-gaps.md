@@ -16,7 +16,7 @@ artifact is the point-in-time report.
 | 7 | Storage objects not namespaced by company (flat shared buckets) | Technical | **Done** — `createUploadUrl` (`server-lib/uploadUrls.js`) prefixes new paths with `<companyId>/`; no migration needed for existing rows (see `TODO.md`) |
 | 8 | 4-digit PIN as the only per-person credential | Technical | **Done** — PINs are 6 digits (1,000,000 combinations, was 10,000) for anything newly set; existing shorter PINs keep working (login compares against the stored hash, not a fixed length) until reset |
 | 9 | No formal data retention/deletion policy | Policy/documentation | **Done** — `docs/security/data-retention-policy.md` |
-| 10 | No application-level audit log beyond auth events | Technical | **Open** |
+| 10 | No application-level audit log beyond auth events | Technical | **Done** — `audit_log` table + `server-lib/auditLog.js`, instrumented on `api/admin.js`'s config/access mutations (plan tier, master code, MFA, company create/suspend/delete/codes, onboarding approval/deletion); viewable from the Admin Panel's Codes tab |
 
 **Lower-urgency item from the report's "do when there's room" list:** drop
 the remaining public INSERT policy on the `company-logos` Supabase Storage
@@ -25,9 +25,11 @@ toggle per the recurring security-audit rules in `CLAUDE.md` (only
 tightens access, easily reversible, nothing depends on it being
 writable).
 
-## Next up
+## Status
 
-Items 7 (storage namespacing), 8 (PIN strength), and 10 (audit log)
-remain. Each is a real engineering change and will be sequenced as its
-own commit/PR rather than bundled together, per Dillon's direction. MFA
-(item 1) shipped first since it was the report's top-priority finding.
+All 10 gaps from the 2026-09-25 SOC 2 Security Posture Report are closed
+as of this writing. Each technical item shipped as its own commit on
+`claude/fora-soc2-report-issues-oc54j3` (PR #135): MFA first (the
+report's top-priority finding), then storage namespacing, PIN strength,
+and the audit log. A fresh SOC 2 report should be generated once this
+PR merges to confirm the posture holds against the live deployment.

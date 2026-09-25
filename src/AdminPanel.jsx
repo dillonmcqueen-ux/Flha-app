@@ -381,6 +381,36 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [masterLoginLogs, setMasterLoginLogs] = useState([]);
   const [logsShown, setLogsShown] = useState(10);
 
+  // ── Administrative audit log — config/access changes, not every read or
+  // form submission. See docs/schema/audit-log-migration.sql. ────────────
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogsShown, setAuditLogsShown] = useState(10);
+
+  const loadAuditLog = async () => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_audit_log", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setAuditLogs(data.logs || []);
+      setAuditLogsShown(10);
+    } catch (e) { /* leave list as-is if the request fails */ }
+  };
+
+  const AUDIT_ACTION_LABELS = {
+    set_plan_tier: "Changed plan tier",
+    set_master_code: "Changed master code",
+    enroll_mfa_confirm: "Enabled MFA",
+    disable_mfa: "Disabled MFA",
+    create_company: "Created company",
+    update_company_codes: "Changed company codes",
+    toggle_suspend: "Changed suspension",
+    delete_company: "Deleted company",
+    approve_onboarding_request: "Approved onboarding request",
+    delete_onboarding_request: "Deleted onboarding request",
+  };
+
   // ── MFA (TOTP) — gates the admin role and master-code login paths once
   // enrolled. See api/admin.js's enroll_mfa_start/confirm/disable_mfa and
   // docs/schema/mfa-totp-migration.sql. ─────────────────────────────────
@@ -472,6 +502,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       setLogsShown(10);
     } catch (e) { /* leave list as-is if the request fails */ }
     loadMfaStatus();
+    loadAuditLog();
   };
 
   // ── Onboarding Requests: submissions from the public /onboarding form ──
@@ -1527,6 +1558,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       {masterLoginLogs.length > logsShown && (
                         <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
                           Show more ({masterLoginLogs.length - logsShown} more)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <div style={{ ...st.card, marginTop: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Audit log</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10 }}>
+                    Who changed plan tiers, codes, MFA, or company records — not every read or form submission (those already self-document).
+                  </div>
+                  {auditLogs.length === 0 ? (
+                    <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No audit log entries yet.</div>
+                  ) : (
+                    <>
+                      {auditLogs.slice(0, auditLogsShown).map((l, i, arr) => (
+                        <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13, gap: 8 }}>
+                          <span style={{ color: C.ink, fontWeight: 600 }}>
+                            {AUDIT_ACTION_LABELS[l.action] || l.action}
+                            {l.company_name && <span style={{ color: C.muted, fontWeight: 400 }}> · {l.company_name}</span>}
+                          </span>
+                          <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{new Date(l.created_at).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {auditLogs.length > auditLogsShown && (
+                        <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setAuditLogsShown(n => n + 10)}>
+                          Show more ({auditLogs.length - auditLogsShown} more)
                         </button>
                       )}
                     </>
