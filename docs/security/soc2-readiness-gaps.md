@@ -13,7 +13,7 @@ artifact is the point-in-time report.
 | 4 | No formal access review process | Policy/documentation | **Done** — `docs/security/access-review-process.md` |
 | 5 | No formal vendor risk management process | Policy/documentation | **Done** — `docs/security/vendor-risk-management.md` |
 | 6 | Encryption at rest is entirely vendor-inherited, undocumented | Documentation | **Done** — documented in `docs/security/vendor-risk-management.md` ("Encryption — vendor-inherited control"); vendor SOC 2 report requests still outstanding, tracked there |
-| 7 | Storage objects not namespaced by company (flat shared buckets) | Technical | **Open** |
+| 7 | Storage objects not namespaced by company (flat shared buckets) | Technical | **Done** — `createUploadUrl` (`server-lib/uploadUrls.js`) prefixes new paths with `<companyId>/`; no migration needed for existing rows (see `TODO.md`) |
 | 8 | 4-digit PIN as the only per-person credential | Technical | **Open** |
 | 9 | No formal data retention/deletion policy | Policy/documentation | **Done** — `docs/security/data-retention-policy.md` |
 | 10 | No application-level audit log beyond auth events | Technical | **Open** |

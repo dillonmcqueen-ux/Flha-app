@@ -213,10 +213,30 @@ const ALLOWED_EXTENSIONS = {
   'worker-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
 };
 
-// `companyId` binds the issued receipt to the caller's tenant. Callers that
-// have a session should always pass it; the pre-auth onboarding upload in
-// api/login.js is the one that legitimately can't (it has its own,
-// older pathToken mechanism instead).
+// `companyId` binds the issued receipt to the caller's tenant, and (new,
+// 2026-09-25) also namespaces the issued path under `<companyId>/` — see
+// docs/schema and TODO.md's "Namespace Supabase Storage objects by company".
+// The unguessable random segment already made a path infeasible to guess
+// (128 bits) and the receipt system (above) already stops a client from
+// attaching another company's path to their own row, so this isn't closing
+// a live exploit — it's what makes "delete everything under this company's
+// prefix" (docs/security/data-retention-policy.md's contract-termination
+// purge) and "list this company's files" actually possible, which a flat
+// shared bucket never supported.
+//
+// Callers that have a session should always pass companyId; the ones that
+// legitimately can't (the pre-auth onboarding upload in api/login.js, and
+// api/admin.js's company-logo upload, which isn't read server-side and
+// isn't scoped to any one company's storage budget) get the old unprefixed
+// path, unchanged. api/certifications.js builds its own
+// `${companyId}/${rosterId}/...` prefix and deliberately omits this
+// parameter, so it's unaffected either way — no double-prefixing risk.
+//
+// Existing rows written before this change keep their old flat paths
+// forever and need no migration: every reader (pathFromStoredUrl in
+// server-lib/signedUrls.js) signs whatever path is actually stored, not a
+// path it reconstructs, so an old flat path and a new namespaced one
+// resolve exactly the same way.
 export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId = null) {
   const clean = sanitizeFilename(filename);
   if (!clean) return { error: 'Invalid filename.' };
@@ -225,8 +245,10 @@ export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId
   if (allowed && !allowed.includes(ext)) {
     return { error: `Unsupported file type for this upload (.${ext || 'none'}).` };
   }
+  const segmented = withUnguessableSegment(clean);
+  const path = (companyId !== null && companyId !== undefined) ? `${companyId}/${segmented}` : segmented;
   const { data, error } = await supabaseAdmin.storage
-    .from(bucket).createSignedUploadUrl(withUnguessableSegment(clean));
+    .from(bucket).createSignedUploadUrl(path);
   if (error) return { error: error.message || 'Could not prepare the upload.' };
   // `receipt` is returned for every bucket so any flow can adopt it; the
   // flha-reports write paths and gatehouse cheque photos verify one today.
