@@ -70,7 +70,7 @@
 <main>
   <div class="kicker">Legal</div>
   <h1>Privacy Policy</h1>
-  <p class="updated">Effective date: July 27, 2026 &nbsp;·&nbsp; Last updated: August 25, 2026</p>
+  <p class="updated">Effective date: July 27, 2026 &nbsp;·&nbsp; Last updated: September 25, 2026</p>
 
   <h2>1. Who this policy covers</h2>
   <p>
@@ -91,7 +91,7 @@
   <h3>2.1 Account &amp; roster information</h3>
   <ul>
     <li>Company name, contact name, email address, phone number, and business address, collected during onboarding.</li>
-    <li>Company login code(s), or (for companies using individual roster login) each worker's and supervisor's name and 4-digit PIN.</li>
+    <li>Company login code(s), or (for companies using individual roster login) each worker's and supervisor's name and 6-digit PIN.</li>
     <li>Role (worker or supervisor) and plan tier (Basic or Advanced).</li>
   </ul>
   <h3>2.2 Content you submit</h3>
@@ -157,7 +157,9 @@
     <li>Every request to our serverless functions is checked against a signed, server-verified session before it can touch any data.</li>
     <li>Row Level Security is enabled on every database table as a deny-by-default backstop. There are no bypass policies, so direct access with a public key is refused.</li>
     <li>Login codes and PINs are used to authenticate Users; Customers are responsible for managing their own roster and code confidentiality, and can request that FORA deactivate a person's access immediately.</li>
-    <li>Master-code logins (used for account support) are logged and auditable.</li>
+    <li>FORA's own privileged support access (used for account support) requires two-factor authentication in addition to a long, separately-secured code, and every use of it is logged and auditable.</li>
+    <li>Privileged actions taken on a Customer's account (such as changes to plan tier, login codes, or company records) are recorded in an internal audit log.</li>
+    <li>Files a Customer uploads or a User submits (such as attachments and generated documents) are stored separated by company in our file storage.</li>
   </ul>
   <p>
     No method of transmission or storage is 100% secure. We work to protect information using the measures
@@ -174,11 +176,19 @@
 
   <h2>7. Data retention</h2>
   <p>
-    We retain Customer and User data for as long as a Customer's account is active, and for a reasonable period
-    afterward to allow for account recovery, comply with legal or safety record-keeping obligations, resolve
-    disputes, and enforce agreements. A Customer may request deletion of its account data by contacting us; some
-    information may be retained where required by law or legitimate business record-keeping needs (for example,
-    incident and near-miss records that a Customer is independently obligated to retain).
+    We retain Customer and User data for as long as a Customer's account is active. After a Customer's
+    subscription ends:
+  </p>
+  <ul>
+    <li>Safety documentation (FLHAs, toolbox talks, equipment inspections, near miss and incident reports, daily reports, monthly site inspections, custom documents), equipment records, and time clock reports are retained for <strong>3 years</strong>, so they remain available if needed for a post-termination safety inquiry, audit, or a Customer's own longer regulatory record-keeping obligation.</li>
+    <li>Roster/personnel data and company configuration (SOPs, sites, custom fields and forms) are deleted within <strong>90 days</strong>.</li>
+    <li>Where a Customer's own applicable occupational health and safety regulation requires longer retention of any of the above, we will retain that Customer's data for the longer period on request made before its subscription ends.</li>
+  </ul>
+  <p>
+    A Customer may request earlier deletion of its roster or configuration data at any time; safety
+    documentation subject to the retention period above is not deleted early on request, since that would
+    undermine the recordkeeping purpose it exists for. Some information may still be retained beyond these
+    periods where required by law or to resolve a dispute already in progress.
   </p>
 
   <h2>8. Your rights</h2>
