@@ -125,7 +125,7 @@ const TABLES = {
     name: 'toolbox_talks',
     docKey: 'toolbox',
     jsonColumn: 'talking_points_json',
-    listColumns: 'id, presenter_name, meeting_type, site, site_id, topic, talking_points_json, attendees_json, company_id, pdf_url, created_at, submitted_by_roster_id',
+    listColumns: 'id, presenter_name, meeting_type, site, site_id, topic, talking_points_json, attendees_json, supervisor_notes_json, company_id, pdf_url, created_at, submitted_by_roster_id',
   },
   daily: {
     name: 'daily_reports',
@@ -643,6 +643,18 @@ export default async function handler(req, res) {
       const { id, fields, pdfUrl } = req.body;
       if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
 
+      // A company supervisor can no longer correct the generated document
+      // itself on a toolbox talk — only add a note (see `add_toolbox_note`
+      // below). The presenter already gets a real edit pass before
+      // submitting (src/ToolboxTalk.jsx's review step), so a supervisor
+      // silently rewriting the talk afterward would make the submitted
+      // record no longer the one the crew actually signed. The founder-only
+      // admin role (session.role === 'admin') is unaffected — it keeps the
+      // same "fix a mistake" edit every other document type has.
+      if (type === 'toolbox' && session.role === 'supervisor') {
+        return res.status(403).json({ error: 'Supervisors can add a note to a toolbox talk but can\'t edit the generated document. Use "Add Note" instead.' });
+      }
+
       if (session.role === 'supervisor') {
         const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
@@ -722,6 +734,43 @@ export default async function handler(req, res) {
       record.pdf_url = await signStoredUrl(record.pdf_url, 'flha-reports');
       const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, logo_url').eq('id', record.company_id).limit(1);
       return res.status(200).json({ record, company: coRows && coRows[0] });
+    }
+
+    // ── Toolbox Talk: supervisor/admin adds a note (never edits the talk) ──
+    // Deliberately separate from `update` above: a note is always additive
+    // and never touches talking_points_json, presenter_name, site, etc. —
+    // the generated (and presenter-edited-before-submit) document stays
+    // exactly what was submitted. Both roles can add one; only `update`
+    // distinguishes admin from supervisor.
+    if (action === 'add_toolbox_note') {
+      if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { id, note } = req.body;
+      if (!id || typeof note !== 'string' || !note.trim()) return res.status(400).json({ error: 'Missing note.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('toolbox_talks').select('id, company_id, supervisor_notes_json').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
+      const existing = rows[0];
+      // Admin sessions carry companyId: null (api/login.js) — same reason
+      // `delete`/`update` above only re-check company_id for `supervisor`.
+      if (session.role === 'supervisor' && existing.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+
+      const notes = [...(existing.supervisor_notes_json || []), {
+        // session.name rides along for individually-identified roster
+        // sessions (see verifySession above) — never trust a name from the
+        // request body for who wrote the note.
+        author: (session.name || '').trim() || (session.role === 'admin' ? 'Admin' : 'Supervisor'),
+        role: session.role,
+        note: note.trim().slice(0, 2000),
+        at: new Date().toISOString(),
+      }];
+      const { error } = await supabaseAdmin.from('toolbox_talks').update({ supervisor_notes_json: notes }).eq('id', id);
+      if (error) return res.status(500).json({ error: 'Could not save note.' });
+      return res.status(200).json({ ok: true, notes });
     }
 
     // ── Toolbox Talk: add a late signature to an existing talk ──────

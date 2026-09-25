@@ -90,6 +90,16 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
     y += 4;
   }
 
+  // presenter notes
+  if (points?.presenterNotes) {
+    if (y > 250) { doc.addPage(); y = 20; }
+    doc.setFillColor(249, 250, 251); doc.roundedRect(margin, y, contentW, 6, 2, 2, "F");
+    doc.setTextColor(30, 41, 59); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+    doc.text("PRESENTER NOTES", margin + 3, y + 4.2); y += 10;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(51, 65, 85);
+    y = wrap(doc, points.presenterNotes, margin, y, contentW, 5); y += 4;
+  }
+
   // attendees & signatures
   if (y > 240) { doc.addPage(); y = 20; }
   doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(margin, y, W - margin, y); y += 8;

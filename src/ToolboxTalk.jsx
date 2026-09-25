@@ -459,35 +459,87 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         </div>
       )}
 
-      {/* REVIEW */}
+      {/* REVIEW — the generated talk is editable here, before it's ever
+          submitted. Once submitted, it's the record of what was presented;
+          a supervisor can add a note afterward but can't change this. */}
       {step === "review" && points && (
         <>
           <div style={s.card}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>{meetingType} Toolbox Talk</div>
-            <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary, marginTop: 2 }}>{points.summary}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>{meetingType} Toolbox Talk</div>
+            <label style={s.label}>Summary</label>
+            <textarea style={{ ...s.input, minHeight: 56, resize: "vertical" }} value={points.summary || ""} onChange={e => setPoints(p => ({ ...p, summary: e.target.value }))} />
             <div style={{ fontSize: 12, color: C.text.muted, marginTop: 4 }}>Presenter: {presenter} · {site}</div>
           </div>
 
           {(points.sections || []).map((sec, i) => (
             <div key={i} style={s.card}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: accent, marginBottom: 8 }}>{sec.heading}</div>
+              <input
+                style={{ ...s.input, fontWeight: 800, fontSize: 15, color: accent, marginBottom: 8 }}
+                value={sec.heading || ""}
+                onChange={e => {
+                  const heading = e.target.value;
+                  setPoints(p => {
+                    const sections = [...(p.sections || [])];
+                    sections[i] = { ...sections[i], heading };
+                    return { ...p, sections };
+                  });
+                }}
+              />
               {(sec.bullets || []).map((b, j) => (
-                <div key={j} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                  <span style={{ color: accent, fontWeight: 800 }}>•</span>
-                  <span style={{ fontSize: 14, color: C.text.body, lineHeight: 1.5 }}>{b}</span>
+                <div key={j} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "flex-start" }}>
+                  <span style={{ color: accent, fontWeight: 800, marginTop: 10 }}>•</span>
+                  <textarea
+                    style={{ ...s.input, flex: 1, minHeight: 40, resize: "vertical", fontSize: 14 }}
+                    value={b}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setPoints(p => {
+                        const sections = [...(p.sections || [])];
+                        const bullets = [...(sections[i].bullets || [])];
+                        bullets[j] = val;
+                        sections[i] = { ...sections[i], bullets };
+                        return { ...p, sections };
+                      });
+                    }}
+                  />
                 </div>
               ))}
             </div>
           ))}
 
-          {points.discussion?.length > 0 && (
+          {(points.discussion || []).length > 0 && (
             <div style={{ ...s.card, background: C.orangeSoft, border: `1.5px solid ${C.orangeDim}` }}>
               <div style={{ fontWeight: 800, fontSize: 15, color: accent, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}><MessageCircle size={16} strokeWidth={2.25} /> Discussion — ask the crew</div>
               {points.discussion.map((d, i) => (
-                <div key={i} style={{ fontSize: 14, color: C.text.body, marginBottom: 6, lineHeight: 1.5 }}>{i + 1}. {d}</div>
+                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 14, color: C.text.body, marginTop: 10 }}>{i + 1}.</span>
+                  <textarea
+                    style={{ ...s.input, flex: 1, minHeight: 36, resize: "vertical", fontSize: 14 }}
+                    value={d}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setPoints(p => {
+                        const discussion = [...(p.discussion || [])];
+                        discussion[i] = val;
+                        return { ...p, discussion };
+                      });
+                    }}
+                  />
+                </div>
               ))}
             </div>
           )}
+
+          <div style={s.card}>
+            <label style={s.label}>Presenter notes (optional)</label>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 6 }}>Anything you want kept with this record — not part of the talking points read aloud.</div>
+            <textarea
+              style={{ ...s.input, minHeight: 70, resize: "vertical" }}
+              placeholder="e.g. Two crew members arrived late, caught them up 1-on-1"
+              value={points.presenterNotes || ""}
+              onChange={e => setPoints(p => ({ ...p, presenterNotes: e.target.value }))}
+            />
+          </div>
 
           <button style={s.btn(accent)} onClick={() => setStep("signoff")}>Continue to Sign-Off →</button>
           <button style={s.ghost} onClick={() => setStep("topic")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
