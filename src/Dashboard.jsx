@@ -915,7 +915,7 @@ function ToolboxCard({ talk, onClose, onDelete, onSave, onAddNote }) {
             {attendees.map((a, i) => (
               <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 8 }}>
                 {a.signature && <img src={a.signature} alt="" style={{ width: "100%", height: 40, objectFit: "contain" }} />}
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#D4D4D8", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#D4D4D8", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}{a.guest ? " (Guest)" : ""}</div>
               </div>
             ))}
           </div>

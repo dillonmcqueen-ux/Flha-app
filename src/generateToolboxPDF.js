@@ -114,7 +114,7 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
     if (a.signature) { try { doc.addImage(a.signature, "PNG", x, y, 45, 14); } catch (e) {} }
     doc.setDrawColor(150, 150, 150); doc.line(x, y + 15, x + 50, y + 15);
     doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
-    doc.text(a.name + (a.presenter ? "  (Presenter)" : "") + (a.signedLate ? "  (signed late)" : ""), x, y + 19, { maxWidth: colW - 6 });
+    doc.text(a.name + (a.presenter ? "  (Presenter)" : "") + (a.guest ? "  (Guest)" : "") + (a.signedLate ? "  (signed late)" : ""), x, y + 19, { maxWidth: colW - 6 });
     if (a.signedAt) {
       doc.setTextColor(148, 163, 184); doc.setFont("helvetica", "normal"); doc.setFontSize(7);
       doc.text(`Signed ${new Date(a.signedAt).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" })}`, x, y + 23);

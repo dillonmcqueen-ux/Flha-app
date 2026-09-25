@@ -450,6 +450,18 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
         return;
       }
 
+      // Roster — for picking a traceable crew signer below (unlike toolbox
+      // talk attendees, FLHA crew is roster-only, no guest fallback).
+      try {
+        const rosterRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_roster_names", token, companyId: forcedCompanyId }),
+        });
+        const rosterData = await rosterRes.json();
+        if (rosterRes.ok) setRosterMembers(rosterData.members || []);
+      } catch (e) { /* leave roster empty if the request fails — treated as "not set up" below */ }
+      setRosterLoaded(true);
+
       setSopsLoading(false);
     }
     loadSops();
@@ -459,6 +471,8 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const [workerName, setWorkerName] = useState(loginUserName);
   const [jobSite, setJobSite] = useState("");
   const [sites, setSites] = useState([]);
+  const [rosterMembers, setRosterMembers] = useState([]);
+  const [rosterLoaded, setRosterLoaded] = useState(false);
   const [customFields, setCustomFields] = useState([]);
   const [customValues, setCustomValues] = useState({});
   const [siteMode, setSiteMode] = useState("list"); // "list" | "other"
@@ -486,8 +500,11 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const drawingRef = useRef(false);
 
   // ── crew (multi-signature) ────────────────────────────────
+  // Roster-only, deliberately no guest option (unlike ToolboxTalk.jsx's
+  // attendees) — an additional crew member acknowledging the same FLHA is
+  // always an actual employee, never a visitor.
   const [crew, setCrew] = useState([]);
-  const [crewName, setCrewName] = useState("");
+  const [crewSelection, setCrewSelection] = useState(""); // roster id (string)
   const [crewHasSig, setCrewHasSig] = useState(false);
   const crewCanvasRef = useRef(null);
   const crewDrawingRef = useRef(false);
@@ -500,11 +517,17 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const crewDraw = (e) => { if (!crewDrawingRef.current) return; e.preventDefault(); const ctx = crewCanvasRef.current.getContext("2d"); const { x, y } = getCrewPos(e); ctx.lineTo(x, y); ctx.strokeStyle = "#1E293B"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.stroke(); setCrewHasSig(true); };
   const endCrewDraw = () => { crewDrawingRef.current = false; };
   const clearCrewSig = () => { const c = crewCanvasRef.current; if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height); setCrewHasSig(false); };
+  // Roster members not already on this FLHA as crew or as the primary signer.
+  const availableCrewRoster = rosterMembers.filter(m =>
+    !crew.some(c => c.rosterId === m.id) && m.name !== workerName
+  );
   const addCrewMember = () => {
-    if (!crewName.trim() || !crewHasSig) return;
+    if (!crewSelection || !crewHasSig) return;
+    const member = rosterMembers.find(m => String(m.id) === crewSelection);
+    if (!member) return;
     const sig = crewCanvasRef.current.toDataURL("image/png");
-    setCrew(prev => [...prev, { name: crewName.trim(), signature: sig, signedAt: new Date().toISOString() }]);
-    setCrewName("");
+    setCrew(prev => [...prev, { name: member.name, rosterId: member.id, signature: sig, signedAt: new Date().toISOString() }]);
+    setCrewSelection("");
     clearCrewSig();
   };
   const removeCrewMember = (i) => setCrew(prev => prev.filter((_, idx) => idx !== i));
@@ -1469,21 +1492,33 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               </div>
             )}
 
-            <label style={styles.label}>Crew member name</label>
-            <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Full name" value={crewName} onChange={e => setCrewName(e.target.value)} />
-            <label style={styles.label}>Signature</label>
-            <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
-            <div style={{ position: "relative", marginBottom: 6 }}>
-              <canvas ref={crewCanvasRef} width={600} height={160}
-                style={{ width: "100%", height: 130, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, background: "#fff", touchAction: "none", display: "block" }}
-                onMouseDown={startCrewDraw} onMouseMove={crewDraw} onMouseUp={endCrewDraw} onMouseLeave={endCrewDraw}
-                onTouchStart={startCrewDraw} onTouchMove={crewDraw} onTouchEnd={endCrewDraw} />
-              {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
-            </div>
-            <div style={{ textAlign: "right", marginBottom: 10 }}>
-              <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0", minHeight: 32 }}>Clear</button>
-            </div>
-            <button style={styles.btn((crewName.trim() && crewHasSig) ? C.orange : C.panelInset, (crewName.trim() && crewHasSig) ? C.text.onOrange : C.text.faint)} disabled={!crewName.trim() || !crewHasSig} onClick={addCrewMember}><Plus size={15} /> Add This Crew Member</button>
+            {rosterLoaded && rosterMembers.length === 0 ? (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.sm, padding: 12, fontSize: 13, color: C.status.warning.text }}>
+                <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Your company hasn't set up its worker roster yet, so crew signatures can't be tied to a real person. Ask a supervisor or admin to add workers to the roster first.</span>
+              </div>
+            ) : (
+              <>
+                <label style={styles.label}>Crew member</label>
+                <select style={{ ...styles.input, marginBottom: 8 }} value={crewSelection} onChange={e => setCrewSelection(e.target.value)}>
+                  <option value="">Select from roster…</option>
+                  {availableCrewRoster.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <label style={styles.label}>Signature</label>
+                <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+                <div style={{ position: "relative", marginBottom: 6 }}>
+                  <canvas ref={crewCanvasRef} width={600} height={160}
+                    style={{ width: "100%", height: 130, border: `1.5px solid ${C.line}`, borderRadius: RAD.md, background: "#fff", touchAction: "none", display: "block" }}
+                    onMouseDown={startCrewDraw} onMouseMove={crewDraw} onMouseUp={endCrewDraw} onMouseLeave={endCrewDraw}
+                    onTouchStart={startCrewDraw} onTouchMove={crewDraw} onTouchEnd={endCrewDraw} />
+                  {!crewHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+                </div>
+                <div style={{ textAlign: "right", marginBottom: 10 }}>
+                  <button onClick={clearCrewSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0", minHeight: 32 }}>Clear</button>
+                </div>
+                <button style={styles.btn((crewSelection && crewHasSig) ? C.orange : C.panelInset, (crewSelection && crewHasSig) ? C.text.onOrange : C.text.faint)} disabled={!crewSelection || !crewHasSig} onClick={addCrewMember}><Plus size={15} /> Add This Crew Member</button>
+              </>
+            )}
           </div>
 
           {saveError && (

@@ -85,9 +85,14 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
   const [companyProfile, setCompanyProfile] = useState(null);
   const cf = useCustomFields(companyId, "toolbox", token);
 
-  // Attendees
-  const [attendees, setAttendees] = useState([]); // {name, signature}
-  const [attName, setAttName] = useState("");
+  // Attendees — signed by picking a real roster member (traceable to a
+  // roster_id) or, deliberately unlike FLHA crew, a free-text "guest" for
+  // someone genuinely not on the roster (a visiting sub, an inspector).
+  const [attendees, setAttendees] = useState([]); // {name, rosterId, guest, signature, signedAt}
+  const [rosterMembers, setRosterMembers] = useState([]);
+  const [rosterLoaded, setRosterLoaded] = useState(false);
+  const [attSelection, setAttSelection] = useState(""); // roster id (string) or "__guest__"
+  const [attGuestName, setAttGuestName] = useState("");
   const [attHasSig, setAttHasSig] = useState(false);
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
@@ -134,6 +139,17 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
 
       // Company profile (docs/scope-company-brain.md Phase 5) — best-effort.
       setCompanyProfile(await fetchCompanyProfile(token, companyId));
+
+      // Roster — for picking a traceable attendee signer (see attendees state above).
+      try {
+        const rosterRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_roster_names", token, companyId }),
+        });
+        const rosterData = await rosterRes.json();
+        if (rosterRes.ok) setRosterMembers(rosterData.members || []);
+      } catch (e) { /* leave roster empty if the request fails — treated as "not set up" below */ }
+      setRosterLoaded(true);
     }
     load();
   }, [companyId, token]);
@@ -242,11 +258,30 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setStep("signoff");
   };
 
+  // Roster members not already signed on — presenter included, since they
+  // sign separately above and shouldn't also appear in this list.
+  const availableRosterMembers = rosterMembers.filter(m =>
+    !attendees.some(a => a.rosterId === m.id) && m.name !== presenter
+  );
+  const canAddAttendee = attHasSig && (
+    (attSelection && attSelection !== "__guest__") ||
+    (attSelection === "__guest__" && attGuestName.trim())
+  );
+
   const addAttendee = () => {
-    if (!attName.trim() || !attHasSig) return;
+    if (!canAddAttendee) return;
     const sig = canvasRef.current.toDataURL("image/png");
-    setAttendees(prev => [...prev, { name: attName.trim(), signature: sig, signedAt: new Date().toISOString() }]);
-    setAttName("");
+    let entry;
+    if (attSelection === "__guest__") {
+      entry = { name: attGuestName.trim(), rosterId: null, guest: true };
+    } else {
+      const member = rosterMembers.find(m => String(m.id) === attSelection);
+      if (!member) return;
+      entry = { name: member.name, rosterId: member.id, guest: false };
+    }
+    setAttendees(prev => [...prev, { ...entry, signature: sig, signedAt: new Date().toISOString() }]);
+    setAttSelection("");
+    setAttGuestName("");
     clearSig();
   };
   const removeAttendee = (i) => setAttendees(prev => prev.filter((_, idx) => idx !== i));
@@ -566,7 +601,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               )}
               {attendees.map((a, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < attendees.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><HardHat size={14} strokeWidth={2.25} /> {a.name}</span>
+                  <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><HardHat size={14} strokeWidth={2.25} /> {a.name}{a.guest && <span style={{ fontSize: 11, color: C.text.faint, fontWeight: 600 }}>GUEST</span>}</span>
                   <button onClick={() => removeAttendee(i)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
                 </div>
               ))}
@@ -574,33 +609,59 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           )}
 
           {/* Signature capture */}
-          <div style={s.card}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>{!presenterSigned ? "Presenter signature" : "Add attendee"}</div>
-            <label style={s.label}>Name</label>
-            <input style={s.input} placeholder={!presenterSigned ? presenter : "Attendee full name"} value={!presenterSigned ? presenter : attName} onChange={e => setAttName(e.target.value)} disabled={!presenterSigned} />
-            <label style={s.label}>Signature</label>
-            <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
-            <div style={{ position: "relative", marginBottom: 6 }}>
-              <canvas ref={canvasRef} width={600} height={160}
-                style={{ ...signatureCanvasStyle(C, RAD), height: 130 }}
-                onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
-                onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
-              {!attHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+          {presenterSigned && rosterLoaded && rosterMembers.length === 0 ? (
+            <div style={s.card}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>Add attendee</div>
+              <div style={bannerStyle(C, RAD, "warning")}>
+                <AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Your company hasn't set up its worker roster yet, so attendee signatures can't be tied to a real person. Ask a supervisor or admin to add workers to the roster first — you can still finish and save this talk with just your own signature.</span>
+              </div>
             </div>
-            <div style={{ textAlign: "right", marginBottom: 10 }}>
-              <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+          ) : (
+            <div style={s.card}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>{!presenterSigned ? "Presenter signature" : "Add attendee"}</div>
+              {!presenterSigned ? (
+                <>
+                  <label style={s.label}>Name</label>
+                  <input style={s.input} value={presenter} disabled />
+                </>
+              ) : (
+                <>
+                  <label style={s.label}>Attendee</label>
+                  <select style={s.input} value={attSelection} onChange={e => { setAttSelection(e.target.value); setAttGuestName(""); }}>
+                    <option value="">Select from roster…</option>
+                    {availableRosterMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    <option value="__guest__">＋ Guest (not on roster)</option>
+                  </select>
+                  {attSelection === "__guest__" && (
+                    <input style={{ ...s.input, marginTop: 8 }} placeholder="Guest full name" value={attGuestName} onChange={e => setAttGuestName(e.target.value)} />
+                  )}
+                </>
+              )}
+              <label style={s.label}>Signature</label>
+              <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
+              <div style={{ position: "relative", marginBottom: 6 }}>
+                <canvas ref={canvasRef} width={600} height={160}
+                  style={{ ...signatureCanvasStyle(C, RAD), height: 130 }}
+                  onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                  onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
+                {!attHasSig && <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", textAlign: "center", color: "#94A3B8", fontSize: 14, pointerEvents: "none" }}>Sign here</div>}
+              </div>
+              <div style={{ textAlign: "right", marginBottom: 10 }}>
+                <button onClick={clearSig} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+              </div>
+              {!presenterSigned ? (
+                <button style={s.btn(attHasSig ? accent : disabledBg(C))} disabled={!attHasSig} onClick={() => {
+                  const sig = canvasRef.current.toDataURL("image/png");
+                  setAttendees([{ name: presenter, signature: sig, presenter: true, signedAt: new Date().toISOString() }]);
+                  setPresenterSigned(true);
+                  clearSig();
+                }}><Check size={16} strokeWidth={2.5} /> Presenter Sign</button>
+              ) : (
+                <button style={s.btn(canAddAttendee ? accent : disabledBg(C))} disabled={!canAddAttendee} onClick={addAttendee}><Plus size={16} strokeWidth={2.5} /> Add This Attendee</button>
+              )}
             </div>
-            {!presenterSigned ? (
-              <button style={s.btn(attHasSig ? accent : disabledBg(C))} disabled={!attHasSig} onClick={() => {
-                const sig = canvasRef.current.toDataURL("image/png");
-                setAttendees([{ name: presenter, signature: sig, presenter: true, signedAt: new Date().toISOString() }]);
-                setPresenterSigned(true);
-                clearSig();
-              }}><Check size={16} strokeWidth={2.5} /> Presenter Sign</button>
-            ) : (
-              <button style={s.btn((attName.trim() && attHasSig) ? accent : disabledBg(C))} disabled={!attName.trim() || !attHasSig} onClick={addAttendee}><Plus size={16} strokeWidth={2.5} /> Add This Attendee</button>
-            )}
-          </div>
+          )}
 
           {saveError && (
             <div style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 1 }} />
