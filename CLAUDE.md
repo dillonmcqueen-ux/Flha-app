@@ -192,11 +192,13 @@ at all — the exact opposite of what `server-lib/uploadUrls.js` documented.
 Four are dropped (`signatures`, `incident-photos`, `onboarding-uploads`,
 `flha-reports`); `src/generatePDF.js`, the last caller depending on one, was
 migrated onto signed upload tokens first and verified with a real FLHA
-submit. **Known and deliberately still open:** Supabase Storage objects
-are not namespaced by company, which is the root of the upload-path and
-signed-URL findings; and `company-logos` still carries a PUBLIC INSERT
-policy (nothing depends on it — it was left out of scope by explicit
-decision, not oversight). Both tracked in `TODO.md`. **Found and
+submit. **Update, 2026-09-25:** the `company-logos` PUBLIC INSERT policy
+described below as deliberately left out of scope has since been dropped
+too, as part of SOC 2 readiness remediation (see
+`docs/security/soc2-readiness-gaps.md`) — `storage.objects` now carries
+zero policies across all 8 buckets. **Known and deliberately still open:**
+Supabase Storage objects are not namespaced by company, which is the root
+of the upload-path and signed-URL findings. Tracked in `TODO.md`. **Found and
 fixed as of this writing:** Vercel preview-deployment protection was off
 on `flha-app`, meaning every PR's preview URL — posted openly in GitHub
 comments — was publicly reachable running the live app; enabled
