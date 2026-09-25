@@ -7,7 +7,7 @@ artifact is the point-in-time report.
 
 | # | Gap | Fix type | Status |
 |---|---|---|---|
-| 1 | No MFA anywhere, including the master code | Technical | **Open** — design proposal in progress |
+| 1 | No MFA anywhere, including the master code | Technical | **Done** — TOTP + backup codes added to the admin role and master code login paths (`api/login.js`, `api/admin.js`, `server-lib/totp.js`); enrollment from the Admin Panel's Codes tab |
 | 2 | No written information security policy | Policy/documentation | **Done** — `docs/security/information-security-policy.md` |
 | 3 | No documented incident response plan | Policy/documentation | **Done** — `docs/security/incident-response-plan.md` |
 | 4 | No formal access review process | Policy/documentation | **Done** — `docs/security/access-review-process.md` |
@@ -27,9 +27,7 @@ writable).
 
 ## Next up
 
-Items 1 (MFA), 7 (storage namespacing), 8 (PIN strength), and 10 (audit
-log) are real engineering changes, sequenced one at a time as separate
-branches/PRs rather than bundled together, per Dillon's direction. MFA is
-first: a design proposal (method, scope, UX) is being written up before
-any code is changed, since it touches the login path for every
-admin/master-code use.
+Items 7 (storage namespacing), 8 (PIN strength), and 10 (audit log)
+remain. Each is a real engineering change and will be sequenced as its
+own commit/PR rather than bundled together, per Dillon's direction. MFA
+(item 1) shipped first since it was the report's top-priority finding.

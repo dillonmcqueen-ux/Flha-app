@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import Stripe from 'stripe';
+import QRCode from 'qrcode';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { parseSiteLines, parseUserLines, planSeatCap, randomToken } from '../server-lib/onboardingHelpers.js';
 import { allDocumentSettingsOn } from '../server-lib/pricing.js';
@@ -17,6 +18,13 @@ import {
   hashPin,
   provisionCompanyFromRequest,
 } from '../server-lib/onboardingApproval.js';
+import {
+  generateTotpSecret,
+  totpEnrollmentUri,
+  verifyTotpCode,
+  generateBackupCodes,
+  consumeBackupCode,
+} from '../server-lib/totp.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -173,6 +181,79 @@ export default async function handler(req, res) {
 
       const enriched = (logs || []).map(l => ({ ...l, company_name: nameById[l.company_id] || 'Unknown company' }));
       return res.status(200).json({ logs: enriched });
+    }
+
+    // ── MFA (TOTP) — gates the admin role and master code login paths in
+    // api/login.js once enrolled. See docs/schema/mfa-totp-migration.sql.
+    if (action === 'get_mfa_status') {
+      const { data, error } = await supabaseAdmin.from('app_settings').select('totp_enabled').eq('id', 1).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load MFA status.' });
+      return res.status(200).json({ enabled: !!(data && data[0] && data[0].totp_enabled) });
+    }
+
+    // Generates a new secret and QR code but does NOT enable MFA yet —
+    // enroll_mfa_confirm below does that, only after proving the admin can
+    // actually generate a valid code from it. Re-calling this before
+    // confirming overwrites any in-progress (unconfirmed) secret, which is
+    // fine — nothing depends on it until it's confirmed.
+    //
+    // Blocked while MFA is already enabled: overwriting totp_secret here
+    // would start failing every login immediately (checkMfa reads it live),
+    // before the new secret is ever confirmed — disable_mfa first, then
+    // re-enroll.
+    if (action === 'enroll_mfa_start') {
+      const { data: existing, error: readErr } = await supabaseAdmin.from('app_settings').select('totp_enabled').eq('id', 1).limit(1);
+      if (readErr) return res.status(500).json({ error: 'Could not check current MFA status.' });
+      if (existing && existing[0] && existing[0].totp_enabled) {
+        return res.status(400).json({ error: 'MFA is already enabled. Disable it first to re-enroll.' });
+      }
+      const secret = generateTotpSecret();
+      const { error } = await supabaseAdmin
+        .from('app_settings')
+        .upsert({ id: 1, totp_secret: secret, updated_at: new Date().toISOString() });
+      if (error) return res.status(500).json({ error: "Couldn't start MFA enrollment." });
+      const otpauthUri = totpEnrollmentUri(secret);
+      const qrDataUrl = await QRCode.toDataURL(otpauthUri);
+      return res.status(200).json({ ok: true, secret, otpauthUri, qrDataUrl });
+    }
+
+    // Proves the QR code was scanned correctly, then turns MFA on and
+    // issues backup codes — shown to the admin exactly once, here.
+    if (action === 'enroll_mfa_confirm') {
+      const { code } = req.body;
+      const { data, error } = await supabaseAdmin.from('app_settings').select('totp_secret').eq('id', 1).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load MFA settings.' });
+      const secret = data && data[0] && data[0].totp_secret;
+      if (!secret) return res.status(400).json({ error: 'Start enrollment first.' });
+      if (!verifyTotpCode(secret, code)) return res.status(400).json({ error: 'Incorrect code. Try again.' });
+
+      const { plain, hashed } = generateBackupCodes();
+      const { error: updErr } = await supabaseAdmin
+        .from('app_settings')
+        .update({ totp_enabled: true, backup_codes: hashed, updated_at: new Date().toISOString() })
+        .eq('id', 1);
+      if (updErr) return res.status(500).json({ error: "Couldn't enable MFA." });
+      return res.status(200).json({ ok: true, backupCodes: plain });
+    }
+
+    // Requires a current valid code (or backup code) rather than just the
+    // admin session, since disabling MFA is a security-lowering action and
+    // the session that reaches this action could itself be stale/shared.
+    if (action === 'disable_mfa') {
+      const { code } = req.body;
+      const { data, error } = await supabaseAdmin.from('app_settings').select('totp_secret, backup_codes').eq('id', 1).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load MFA settings.' });
+      const row = data && data[0];
+      const validTotp = row && row.totp_secret && verifyTotpCode(row.totp_secret, code);
+      const validBackup = row && consumeBackupCode(code, row.backup_codes).matched;
+      if (!validTotp && !validBackup) return res.status(400).json({ error: 'Incorrect code.' });
+
+      const { error: updErr } = await supabaseAdmin
+        .from('app_settings')
+        .update({ totp_enabled: false, totp_secret: null, backup_codes: [], updated_at: new Date().toISOString() })
+        .eq('id', 1);
+      if (updErr) return res.status(500).json({ error: "Couldn't disable MFA." });
+      return res.status(200).json({ ok: true });
     }
 
     // ── Onboarding intake — submissions from the public /onboarding form,

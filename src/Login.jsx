@@ -79,6 +79,12 @@ export default function Login() {
   const [masterTicket, setMasterTicket] = useState(null);
   const [masterCompanies, setMasterCompanies] = useState([]);
   const [companyFilter, setCompanyFilter] = useState("");
+  const [pendingMasterCompanyId, setPendingMasterCompanyId] = useState(null);
+
+  // MFA (TOTP) — required on the admin role and master-code paths once
+  // enrolled from the Admin Panel. See api/login.js's checkMfa.
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
 
   // Restore session on load
   useEffect(() => {
@@ -99,6 +105,9 @@ export default function Login() {
     setMasterTicket(null);
     setMasterCompanies([]);
     setCompanyFilter("");
+    setPendingMasterCompanyId(null);
+    setTotpRequired(false);
+    setTotpCode("");
   };
 
   const handleSubmit = async () => {
@@ -116,7 +125,7 @@ export default function Login() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, code: entered }),
+        body: JSON.stringify({ role, code: entered, ...(totpRequired ? { totp: totpCode } : {}) }),
       });
       const data = await res.json();
 
@@ -126,9 +135,22 @@ export default function Login() {
         return;
       }
 
+      if (totpRequired && data.stage === "need_totp") {
+        setError("Incorrect code. Try again.");
+        setTotpCode("");
+        setChecking(false);
+        return;
+      }
+
       if (data.stage === "pick_company") {
         setMasterTicket(data.masterTicket);
         setMasterCompanies(data.companies || []);
+        setChecking(false);
+        return;
+      }
+
+      if (data.stage === "need_totp") {
+        setTotpRequired(true);
         setChecking(false);
         return;
       }
@@ -178,15 +200,28 @@ export default function Login() {
   const pickMasterCompany = async (companyId) => {
     setError("");
     setChecking(true);
+    setPendingMasterCompanyId(companyId);
     try {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "master_login", masterTicket, companyId, role }),
+        body: JSON.stringify({
+          action: "master_login", masterTicket, companyId, role,
+          ...(totpRequired ? { totp: totpCode } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Something went wrong. Please try again.");
+        setChecking(false);
+        return;
+      }
+      if (data.stage === "need_totp") {
+        if (totpRequired) {
+          setError("Incorrect code. Try again.");
+          setTotpCode("");
+        }
+        setTotpRequired(true);
         setChecking(false);
         return;
       }
@@ -197,6 +232,14 @@ export default function Login() {
       setError("Connection error. Please try again.");
     }
     setChecking(false);
+  };
+
+  const submitTotp = () => {
+    if (pendingMasterCompanyId) {
+      pickMasterCompany(pendingMasterCompanyId);
+    } else {
+      handleSubmit();
+    }
   };
 
   const submitPin = async (pinValue) => {
@@ -386,6 +429,35 @@ export default function Login() {
                 <span style={{ fontWeight: 600, fontSize: 12, color: C.text.muted }}>{roleMeta.admin.title}</span>
               </button>
             </div>
+          </>
+        ) : totpRequired ? (
+          // ── MFA challenge — required on the admin role and master-code
+          // paths once enrolled from the Admin Panel ──────────────────
+          <>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Enter your authenticator code</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Or a backup code, if you don't have your device.</div>
+
+            <input
+              style={styles.input}
+              type="text"
+              inputMode="numeric"
+              placeholder="6-digit code or backup code"
+              value={totpCode}
+              onChange={e => setTotpCode(e.target.value)}
+              autoFocus
+              onKeyDown={e => { if (e.key === "Enter" && !checking) submitTotp(); }}
+            />
+
+            {error && (
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
+              </div>
+            )}
+
+            <button style={styles.primaryBtn} disabled={checking || !totpCode.trim()} onClick={submitTotp}>
+              {checking ? "Checking…" : "Verify"}
+            </button>
+            <button style={styles.backBtn} onClick={resetToRolePick}><ChevronLeft size={14} /> Start over</button>
           </>
         ) : masterTicket ? (
           // ── Master code: pick any company ──────────────────────────
