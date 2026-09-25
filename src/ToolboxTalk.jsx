@@ -589,22 +589,28 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontSize: 13, color: C.text.muted }}>Presenter: <strong>{presenter}</strong>{!presenterSigned && " — sign first, then pass the device to each attendee."}</div>
           </div>
 
-          {/* Signed list */}
+          {/* Signed list — `attendees` already carries the presenter's own
+              entry (set by "Presenter Sign" below), so it's rendered once
+              here via the dedicated row and excluded from the generic map
+              below rather than counted/listed twice. */}
           {(presenterSigned || attendees.length > 0) && (
             <div style={s.card}>
-              <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>Signed ({(presenterSigned ? 1 : 0) + attendees.length})</div>
+              <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, marginBottom: 8 }}>Signed ({attendees.length})</div>
               {presenterSigned && (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: attendees.length > 0 ? `1px solid ${C.line}` : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: attendees.length > 1 ? `1px solid ${C.line}` : "none" }}>
                   <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><User size={14} strokeWidth={2.25} /> {presenter} <span style={{ fontSize: 11, color: accent, fontWeight: 700 }}>PRESENTER</span></span>
                   <span style={{ fontSize: 12, color: C.status.success.text, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}><Check size={13} strokeWidth={3} /> signed</span>
                 </div>
               )}
-              {attendees.map((a, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < attendees.length - 1 ? `1px solid ${C.line}` : "none" }}>
-                  <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><HardHat size={14} strokeWidth={2.25} /> {a.name}{a.guest && <span style={{ fontSize: 11, color: C.text.faint, fontWeight: 600 }}>GUEST</span>}</span>
-                  <button onClick={() => removeAttendee(i)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
-                </div>
-              ))}
+              {(() => {
+                const others = attendees.map((a, i) => [a, i]).filter(([a]) => !a.presenter);
+                return others.map(([a, i], pos) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: pos < others.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                    <span style={{ fontSize: 14, color: C.text.body, display: "flex", alignItems: "center", gap: 6 }}><HardHat size={14} strokeWidth={2.25} /> {a.name}{a.guest && <span style={{ fontSize: 11, color: C.text.faint, fontWeight: 600 }}>GUEST</span>}</span>
+                    <button onClick={() => removeAttendee(i)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                  </div>
+                ));
+              })()}
             </div>
           )}
 
