@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { resolveEquipmentId, resolveEquipmentIds } from '../server-lib/equipmentScope.js';
+import { sanitizeSignerRosterIds } from '../server-lib/rosterSignerScope.js';
 import { openCorrectiveActions, correctiveActionsFromInspection, resolvedItemsFromPosttrip, resolveCorrectiveActionsForItems, groupFindingsByMachine } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
@@ -400,6 +401,13 @@ export default async function handler(req, res) {
         const resolvedEquipmentIds = await resolveEquipmentIds(supabaseAdmin, session.companyId, recordToInsert.equipment_ids);
         if (resolvedEquipmentIds === false) return res.status(403).json({ error: 'Not allowed for this equipment.' });
         recordToInsert.equipment_ids = resolvedEquipmentIds;
+      }
+
+      // Break #31 — a Toolbox Talk attendee's rosterId is client-asserted;
+      // strip any that don't actually belong to this company's roster
+      // before it's stored and treated as verified. See rosterSignerScope.js.
+      if (Object.prototype.hasOwnProperty.call(recordToInsert, 'attendees_json')) {
+        recordToInsert.attendees_json = await sanitizeSignerRosterIds(supabaseAdmin, session.companyId, recordToInsert.attendees_json);
       }
       let pdfLinked = true;
       if (Object.prototype.hasOwnProperty.call(recordToInsert, 'pdf_url')) {

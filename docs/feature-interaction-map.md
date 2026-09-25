@@ -2644,8 +2644,24 @@ No migration.
 
 ### #31 — A toolbox-talk attendee's or FLHA crew member's `rosterId` is never checked against the roster
 
-**Severity: low. Status: OPEN, awaiting a decision. Opened 2026-09-25 by
-this map's pass against this branch (`claude/toolbox-talk-edit-notes-oz5y1u`).**
+**Severity: low. Status: fixed same-session, 2026-09-25, on
+`claude/toolbox-talk-edit-notes-oz5y1u`.** Opened and closed within the same
+branch: this map's pass caught the gap while the feature itself was still
+being built on this branch (not a dormant break found on an already-shipped
+feature), so it was closed immediately rather than filed for a separate
+approval round — the same discipline `tenant-scope-reviewer` applies to a
+fresh diff, not the "known breaks await a decision" rule this section is
+otherwise governed by. `server-lib/rosterSignerScope.js`'s
+`sanitizeSignerRosterIds` now runs on both submit paths (`api/logs.js`'s
+toolbox insert, `api/flhas.js`'s FLHA insert AND amend paths) and strips
+any `rosterId` that doesn't resolve to an *active* row in the caller's own
+`roster` table — deliberately by nulling rather than rejecting the
+submission, matching `resolveEquipmentIds`' "fail toward the label-only
+record" precedent rather than `resolveSiteId`'s 403, since losing an
+entire signed toolbox talk or FLHA over one bad id would be worse than
+just not trusting that one id.
+
+The original finding, for the record:
 
 `src/ToolboxTalk.jsx` and `src/App.jsx` now let a second signer be picked
 from a real roster row (`list_roster_names`, `api/companydata.js:761-770`)
