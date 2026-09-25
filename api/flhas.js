@@ -6,6 +6,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
+import { sanitizeSignerRosterIds } from '../server-lib/rosterSignerScope.js';
 import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
@@ -323,6 +324,12 @@ export default async function handler(req, res) {
           if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
           amendUpdate.site_id = resolvedSiteId;
         }
+        // Break #31 — an additional crew member's rosterId is client-
+        // asserted; strip any that don't actually belong to this company's
+        // roster before it's stored and treated as verified.
+        if (Object.prototype.hasOwnProperty.call(amendUpdate, 'crew_signatures')) {
+          amendUpdate.crew_signatures = await sanitizeSignerRosterIds(supabaseAdmin, session.companyId, amendUpdate.crew_signatures);
+        }
         // Derive from the hazards being written; fall back to the hazards
         // already on the row when an amendment doesn't touch them.
         let amendedHazards;
@@ -386,6 +393,10 @@ export default async function handler(req, res) {
           const resolvedSiteId = await resolveSiteId(supabaseAdmin, session.companyId, recordToInsert.site_id);
           if (resolvedSiteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
           recordToInsert.site_id = resolvedSiteId;
+        }
+        // Break #31 — same guard as the amend path above.
+        if (Object.prototype.hasOwnProperty.call(recordToInsert, 'crew_signatures')) {
+          recordToInsert.crew_signatures = await sanitizeSignerRosterIds(supabaseAdmin, session.companyId, recordToInsert.crew_signatures);
         }
         const normalized = normalizeHazardsJson(recordToInsert.hazards_json);
         if (!normalized.ok) return res.status(400).json({ error: 'Invalid hazard data.' });

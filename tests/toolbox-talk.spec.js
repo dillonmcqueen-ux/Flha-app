@@ -25,7 +25,10 @@ test.describe('Toolbox Talk', () => {
     await page.getByRole('button', { name: 'Generate Talking Points' }).click();
 
     await expect(page.getByText('After Incident Toolbox Talk')).toBeVisible();
-    await expect(page.getByText('Excavation hazards')).toBeVisible();
+    // The review step's summary/section heading/bullets/discussion are now
+    // editable inputs, not static text (src/ToolboxTalk.jsx) — so a section
+    // heading is asserted by input value, not getByText.
+    await expect(page.locator('input[value="Excavation hazards"]')).toBeVisible();
     await page.getByRole('button', { name: 'Continue to Sign-Off →' }).click();
 
     await expect(page.getByText('Attendance & Sign-Off')).toBeVisible();

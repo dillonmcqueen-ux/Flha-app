@@ -750,6 +750,27 @@ export default async function handler(req, res) {
       return res.status(200).json({ counts });
     }
 
+    // Worker-facing roster lookup — deliberately separate from `list_roster`
+    // above (supervisor/admin only, richer columns). This is for picking an
+    // attendee/crew-member signer by name (ToolboxTalk.jsx, App.jsx's FLHA
+    // crew sign-off) so a second signature on a submission is tied to a real
+    // roster_id instead of a typed name nobody can verify later. Same
+    // no-role-check, company-scoped-only pattern as list_sites/list_equipment
+    // below — any logged-in session (worker included) can call it, but only
+    // ever sees its own company's active members, and only id+name+role.
+    if (action === 'list_roster_names') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin
+        .from('roster')
+        .select('id, name, role')
+        .eq('company_id', companyId)
+        .eq('active', true)
+        .order('name');
+      if (error) return res.status(500).json({ error: 'Could not load roster.' });
+      return res.status(200).json({ members: data || [] });
+    }
+
     // ══ SITES ════════════════════════════════════════════════════════
 
     if (action === 'list_sites') {

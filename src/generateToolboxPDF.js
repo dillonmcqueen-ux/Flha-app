@@ -90,6 +90,16 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
     y += 4;
   }
 
+  // presenter notes
+  if (points?.presenterNotes) {
+    if (y > 250) { doc.addPage(); y = 20; }
+    doc.setFillColor(249, 250, 251); doc.roundedRect(margin, y, contentW, 6, 2, 2, "F");
+    doc.setTextColor(30, 41, 59); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+    doc.text("PRESENTER NOTES", margin + 3, y + 4.2); y += 10;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(51, 65, 85);
+    y = wrap(doc, points.presenterNotes, margin, y, contentW, 5); y += 4;
+  }
+
   // attendees & signatures
   if (y > 240) { doc.addPage(); y = 20; }
   doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(margin, y, W - margin, y); y += 8;
@@ -104,7 +114,7 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
     if (a.signature) { try { doc.addImage(a.signature, "PNG", x, y, 45, 14); } catch (e) {} }
     doc.setDrawColor(150, 150, 150); doc.line(x, y + 15, x + 50, y + 15);
     doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
-    doc.text(a.name + (a.presenter ? "  (Presenter)" : "") + (a.signedLate ? "  (signed late)" : ""), x, y + 19, { maxWidth: colW - 6 });
+    doc.text(a.name + (a.presenter ? "  (Presenter)" : "") + (a.guest ? "  (Guest)" : "") + (a.signedLate ? "  (signed late)" : ""), x, y + 19, { maxWidth: colW - 6 });
     if (a.signedAt) {
       doc.setTextColor(148, 163, 184); doc.setFont("helvetica", "normal"); doc.setFontSize(7);
       doc.text(`Signed ${new Date(a.signedAt).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" })}`, x, y + 23);

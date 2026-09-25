@@ -768,11 +768,15 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
   );
 }
 
-function ToolboxCard({ talk, onClose, onDelete, onSave }) {
+function ToolboxCard({ talk, onClose, onDelete, onSave, onAddNote }) {
   const p = talk.talking_points_json || {};
   const attendees = talk.attendees_json || [];
+  const notes = talk.supervisor_notes_json || [];
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [editPresenter, setEditPresenter] = useState(talk.presenter_name || "");
   const [editMeetingType, setEditMeetingType] = useState(talk.meeting_type || "");
   const [editSite, setEditSite] = useState(talk.site || "");
@@ -806,6 +810,14 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
     setEditing(false);
   };
 
+  const submitNote = async () => {
+    if (!noteText.trim() || !onAddNote) return;
+    setSavingNote(true);
+    const ok = await onAddNote(talk.id, noteText.trim());
+    setSavingNote(false);
+    if (ok) { setNoteText(""); setAddingNote(false); }
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -814,7 +826,7 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
             <div style={{ fontWeight: 800, fontSize: 18, color: "#5B21B6" }}>{talk.meeting_type} Toolbox Talk</div>
             <div style={{ fontSize: 13, color: "#A1A1AA" }}>{new Date(talk.created_at).toLocaleString("en-CA")} · {talk.site}</div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             {talk.pdf_url && (
               <a href={talk.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#7C3AED", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>
             )}
@@ -822,6 +834,9 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
               <button onClick={() => onDelete(talk.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
             {onSave && !editing && <EditToggleButton onClick={startEdit} />}
+            {onAddNote && !addingNote && (
+              <button onClick={() => setAddingNote(true)} style={{ background: "rgba(124,58,237,0.14)", color: "#A78BFA", border: "1.5px solid rgba(124,58,237,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ Note</button>
+            )}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
@@ -835,6 +850,18 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
             <EditField label="Summary"><textarea style={EDIT_TEXTAREA_STYLE} value={editSummary} onChange={e => setEditSummary(e.target.value)} /></EditField>
             <EditField label="Discussion Points (one per line)"><textarea style={EDIT_TEXTAREA_STYLE} value={editDiscussion} onChange={e => setEditDiscussion(e.target.value)} /></EditField>
           </EditPanel>
+        )}
+
+        {addingNote && (
+          <div style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#F5F5F4", marginBottom: 6 }}>Add a note</div>
+            <div style={{ fontSize: 12, color: "#A1A1AA", marginBottom: 8 }}>Notes are added to the record — the generated talk itself can't be changed once submitted.</div>
+            <textarea style={EDIT_TEXTAREA_STYLE} value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="e.g. Confirmed with site super this was covered before the pour started." />
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button disabled={!noteText.trim() || savingNote} onClick={submitNote} style={{ background: "#7C3AED", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: noteText.trim() ? "pointer" : "not-allowed", opacity: noteText.trim() ? 1 : 0.5 }}>{savingNote ? "Saving…" : "Save Note"}</button>
+              <button onClick={() => { setAddingNote(false); setNoteText(""); }} style={{ background: "transparent", border: "1px solid #242424", color: "#A1A1AA", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
         )}
 
         <div style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
@@ -863,13 +890,32 @@ function ToolboxCard({ talk, onClose, onDelete, onSave }) {
           </div>
         )}
 
+        {p.presenterNotes && (
+          <div style={{ background: "rgba(124,58,237,0.10)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#5B21B6", marginBottom: 6 }}>📝 Presenter Notes</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{p.presenterNotes}</div>
+          </div>
+        )}
+
+        {notes.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#F5F5F4", marginBottom: 8 }}>Supervisor Notes ({notes.length})</div>
+            {notes.map((n, i) => (
+              <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: "#A1A1AA", marginBottom: 4 }}>{n.author || (n.role === "admin" ? "Admin" : "Supervisor")} · {new Date(n.at).toLocaleString("en-CA")}</div>
+                <div style={{ fontSize: 14, color: "#D4D4D8", whiteSpace: "pre-wrap" }}>{n.note}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={{ borderTop: "1px solid #242424", paddingTop: 12 }}>
           <div style={{ fontWeight: 800, fontSize: 14, color: "#F5F5F4", marginBottom: 8 }}>Attendance ({attendees.length})</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {attendees.map((a, i) => (
               <div key={i} style={{ border: "1px solid #242424", borderRadius: 8, padding: 8 }}>
                 {a.signature && <img src={a.signature} alt="" style={{ width: "100%", height: 40, objectFit: "contain" }} />}
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#D4D4D8", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#D4D4D8", marginTop: 4 }}>{a.name}{a.presenter ? " (Presenter)" : ""}{a.guest ? " (Guest)" : ""}</div>
               </div>
             ))}
           </div>
@@ -4030,7 +4076,29 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setSelectedToolbox(null);
   };
 
-  // ── Supervisor/Admin: fix a mistake in an already-submitted toolbox talk ─
+  // ── Supervisor/Admin: add a note to a submitted toolbox talk. Unlike
+  // saveToolboxEdit below (founder-admin only, now that api/logs.js blocks
+  // `update` for supervisors on toolbox talks), this never touches the
+  // generated document — it's purely additive, and both roles can use it.
+  const addToolboxNote = async (id, note) => {
+    try {
+      const res = await fetch("/api/logs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "toolbox", action: "add_toolbox_note", token, id, note }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setToolboxTalks(prev => prev.map(t => t.id === id ? { ...t, supervisor_notes_json: data.notes || t.supervisor_notes_json } : t));
+        setSelectedToolbox(prev => prev && prev.id === id ? { ...prev, supervisor_notes_json: data.notes || prev.supervisor_notes_json } : prev);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // ── Admin only: fix a mistake in an already-submitted toolbox talk ──
   const saveToolboxEdit = async (id, edited) => {
     const record = toolboxTalks.find(t => t.id === id);
     if (!record) return;
@@ -4719,7 +4787,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       `}</style>
       {selectedFlha && <FLHACard flha={selectedFlha} onClose={() => setSelectedFlha(null)} onDelete={deleteFlha} onApprove={approveFLHA} onSave={saveFlhaEdit} defaultSupName={userName} />}
       {selectedInspection && <InspectionCard insp={selectedInspection} onClose={() => setSelectedInspection(null)} onDelete={deleteInspection} onSave={saveInspectionEdit} />}
-      {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} onSave={saveToolboxEdit} />}
+      {selectedToolbox && <ToolboxCard talk={selectedToolbox} onClose={() => setSelectedToolbox(null)} onDelete={deleteToolbox} onSave={isAdmin ? saveToolboxEdit : undefined} onAddNote={addToolboxNote} />}
       {selectedNearMiss && <NearMissCard nm={selectedNearMiss} onClose={() => setSelectedNearMiss(null)} onDelete={deleteNearMiss} onReview={reviewNearMiss} onSave={saveNearMissEdit} defaultReviewerName={userName} />}
       {selectedIncident && <IncidentCard inc={selectedIncident} onClose={() => setSelectedIncident(null)} onDelete={deleteIncident} onReview={reviewIncident} onSave={saveIncidentEdit} defaultReviewerName={userName} />}
       {selectedDaily && <DailyCard dr={selectedDaily} onClose={() => setSelectedDaily(null)} onDelete={deleteDaily} onSave={saveDailyEdit} />}

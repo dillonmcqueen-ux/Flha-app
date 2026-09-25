@@ -503,9 +503,43 @@ One concept, **three column shapes across ten features**:
 |---|---|
 | Time Clock | ✅ FK `roster_id` |
 | Certifications | ✅ FK, path-namespaced `certifications.js:130` |
-| Every document form | ❌ free-text `worker_name` / `reporter_name` / `presenter_name` |
+| Every document form (primary signer) | ✅ `submitted_by_roster_id`, stamped server-side from the session (#3, fixed PR #118) |
+| Toolbox Talk attendee / FLHA crew (secondary signer) | ⚠️ **new as of this branch — client-asserted, not server-validated.** See below. |
 
-**This is break #3 below.**
+**The primary-signer link is break #3, closed.** The new secondary-signer link
+is a narrower, weaker version of the same idea, and is **not** a re-file of
+#3 — it's genuinely new surface, tracked as **#31** below.
+
+**What shipped:** a new worker-facing action, `list_roster_names`
+(`api/companydata.js:761-770`, added this branch) — company-scoped, `id,
+name, role` only, `active = true`, any logged-in session (no role check,
+same pattern as `list_sites`/`list_equipment`). `src/ToolboxTalk.jsx` (a
+second signer/"attendee") and `src/App.jsx` (FLHA "additional crew") both
+call it and let the signer pick a real roster row instead of typing a name.
+Each picked entry gets a `rosterId` field:
+- Toolbox Talk attendee: `{ name, rosterId, guest, signature, signedAt }` —
+  `rosterId: null, guest: true` is a deliberate escape hatch for a genuine
+  non-employee signer (`src/ToolboxTalk.jsx:275-280`).
+- FLHA crew: `{ name, rosterId, signature, signedAt }` — no guest option;
+  `src/App.jsx:502-504`'s comment states additional crew is always assumed
+  to be an actual employee.
+- Both flows block adding a second signer entirely (not falling back to
+  free text) if `list_roster_names` returns zero active members
+  (`ToolboxTalk.jsx:612`, `App.jsx:1495`).
+
+**Where it agrees with #3, and where it doesn't:** #3's `submitted_by_roster_id`
+is a real column, a real FK, and stamped **server-side from the session** —
+a client cannot forge it. This new `rosterId` is a plain field inside a
+jsonb blob (`toolbox_talks.attendees_json`, `flhas.crew_signatures`), and
+those columns are on the client-submittable allowlist on both sides
+(`api/logs.js:159` `attendees_json`; `api/flhas.js:148` `crew_signatures`).
+Nothing in `api/logs.js`'s toolbox submit path or `api/flhas.js`'s FLHA
+submit path re-reads `rosterId` out of the JSON and checks it against the
+caller's own roster (confirmed absent — see #31). Compare to `site_id` and
+`equipment_id`, which travel the same "text stays authoritative, an id
+rides along" pattern but **are** validated against the caller's company on
+submit (`equipmentScope.js`, comments at `logs.js:154-157,161-163`). The
+attendee/crew `rosterId` skips that step entirely.
 
 ### `company_id` (tenancy)
 Honoured everywhere. Governed by `tenant-scope-reviewer`, not this map.
@@ -2608,6 +2642,79 @@ attachment's label for its own items. Needs a decision on the signal's shape
 `server-lib/companyBrainSummary.js:106` reads `signal.equipment` as a single string.
 No migration.
 
+### #31 — A toolbox-talk attendee's or FLHA crew member's `rosterId` is never checked against the roster
+
+**Severity: low. Status: fixed same-session, 2026-09-25, on
+`claude/toolbox-talk-edit-notes-oz5y1u`.** Opened and closed within the same
+branch: this map's pass caught the gap while the feature itself was still
+being built on this branch (not a dormant break found on an already-shipped
+feature), so it was closed immediately rather than filed for a separate
+approval round — the same discipline `tenant-scope-reviewer` applies to a
+fresh diff, not the "known breaks await a decision" rule this section is
+otherwise governed by. `server-lib/rosterSignerScope.js`'s
+`sanitizeSignerRosterIds` now runs on both submit paths (`api/logs.js`'s
+toolbox insert, `api/flhas.js`'s FLHA insert AND amend paths) and strips
+any `rosterId` that doesn't resolve to an *active* row in the caller's own
+`roster` table — deliberately by nulling rather than rejecting the
+submission, matching `resolveEquipmentIds`' "fail toward the label-only
+record" precedent rather than `resolveSiteId`'s 403, since losing an
+entire signed toolbox talk or FLHA over one bad id would be worse than
+just not trusting that one id.
+
+The original finding, for the record:
+
+`src/ToolboxTalk.jsx` and `src/App.jsx` now let a second signer be picked
+from a real roster row (`list_roster_names`, `api/companydata.js:761-770`)
+instead of typed free text, and stamp a `rosterId` onto that attendee/crew
+entry client-side (`ToolboxTalk.jsx:275-280`, `App.jsx:526-529`). Nothing on
+the server re-derives or re-checks it.
+
+`toolbox_talks.attendees_json` and `flhas.crew_signatures` are both plain
+jsonb columns on the client-submittable allowlist (`api/logs.js:159`,
+`api/flhas.js:148`) and neither submit path opens the array to validate a
+member `rosterId` against `roster` — confirmed absent:
+
+```
+grep -n "attendees_json\|crew_signatures" api/logs.js api/flhas.js
+→ only the allowlist/select/update lines already cited above; no
+  per-entry validation, no roster lookup, in either file.
+```
+
+So a `rosterId` a client sends can be any value at all — another
+company's roster id, an id belonging to someone `active: false`, or a
+made-up number — and it saves, prints on the PDF, and is indistinguishable
+in storage from a genuine pick. Compare to `site_id`/`equipment_id`, which
+travel the exact same "id rides beside authoritative text" shape but *are*
+checked against the caller's own company before being trusted (§2,
+`site_id`/`equipment_id` entries; `server-lib/equipmentScope.js`).
+
+**Why this is worth a decision rather than an assumed non-issue:** the
+whole point of the feature, per its own inline comments, is that a second
+signature is "tied to a real roster_id... instead of a typed name nobody
+can verify later" (`api/companydata.js:755-757`). An unverified `rosterId` delivers the *look*
+of that guarantee (a dropdown, a real name shown) without the substance —
+anyone who can reach the submit endpoint directly (not through the picker
+UI) can write any `rosterId` they like into the JSON. `tenant-scope-reviewer`
+territory as much as this map's — filed here because it's a join-key gap,
+not flagging it as exploited.
+
+**Distinct from break #3, not a duplicate.** #3 is the *primary* submitter
+(`worker_name`/`presenter_name`), stamped server-side from the session —
+already unforgeable. This is the *secondary* signer, asserted by the
+client and never checked. Different trust level, same table (`roster`),
+which is exactly the situation §2 warns about: a real FK on one side
+(`submitted_by_roster_id`) and something that only *looks* like one on the
+sibling column right next to it.
+
+**A fix would touch:** the toolbox submit path (`api/logs.js`, wherever
+`attendees_json` is written) and the FLHA submit path (`api/flhas.js`,
+wherever `crew_signatures` is written) — validate every non-guest
+`rosterId` in the array belongs to an active roster row in the caller's own
+company before insert, the same shape `equipmentScope.js` already provides
+for `equipment_id`. No migration; no schema change (`rosterId` is already
+free-form inside jsonb, so tightening is a server-side check, not a column
+addition).
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -2877,3 +2984,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-23 | `42ed3c7` | **Line-number refresh, as Dillon asked.** Every live `src/Dashboard.jsx` citation in §1–§5 re-read against the 7274-line file at `42ed3c7` and re-cited where the code actually is — no offsets applied. The previous pass had flagged these as already stale at `f561f42` (e.g. `complianceEnabled` cited `:2755`, the Compliance sub-tab `:2832`, Fleet Overview `:5913`); at `42ed3c7` they are `:2784`, `:2869` and `:5990`. Also re-anchored, because #13/#18's `companydata.js` insertions moved them by 34–48 lines: the `companydata.js` guard, carve-out and time-clock anchors in §2, §5 and #27's built table; and the `customforms.js` anchors in §2/§5 (one line down since #25's import). Left as found on purpose: the changelog, the "as found at `ac80f96`" tables, the text quoted from `98f9d70`, and the `git show`-pinned historical claims in §1 and #19. Other `api/` anchors in older break entries were not swept and may be stale. No application code touched. |
 | 2026-09-23 | `afc4b93`, `e7bd475` | **Re-anchored after two follow-up commits on the branch; no break status changed.** `afc4b93` (tenant-scope review): `fleet_activity`'s `mountedOn` is now filtered to the company's own fleet ids (`api/companydata.js:877-880`), since attachment ids come from client jsonb; and `resolveCorrectiveActionsForItems`' update carries `.eq('company_id', companyId)` next to `.in('id', ids)` (`server-lib/correctiveActions.js:345`). Both recorded in #13/#18/§3 and #17. `e7bd475` moved the `fleet_activity` block above `list_equipment`'s comment, which fixes the misplacement the previous row's report noted: the block is `:857-883` (was `:865-891`), its no-gate comment `:849-856`, queries `:863-866`, and the retired-machines comment is back directly over `list_equipment` at `:885-892`. Re-read against HEAD: everything in `companydata.js` from `list_equipment` (`:893`) down is **unchanged** — `set_equipment_pm_interval` `:1251` (guard `:1253`, refusals `:1273,1276`), the compliance guards `:1065,1114,1183,1231`, the time-clock guards `:1486,1578,1610,1638,1698`, carve-outs `:1503,1524,1543,1651,1676`, reasoning `:1473-1483`, `latestEntryAt` `:1662-1673` — so none of those needed to move. `correctiveActions.js` anchors cited by the #17 build (`:419,449,471-478,489-504,495`) re-read and still correct; three older §2 anchors (`:272-352`, `:298`, `:327`) re-anchored to `:273-356` and `:328`. #28, #29, #30 still OPEN. |
 | 2026-09-23 | `1301c76` | **#28 BUILT, not closed — closes when PR #129 merges.** Dillon approved it ("Complete 28, then merge"). "Is it towed?" is now `isTowedUnit` (`server-lib/fleetActivity.js:79-82`), by type alone — the inspection's own test — and `pmAllowedFor` (`:88-91`) delegates to it. `list_status` sets `isTowed = isTowedUnit(eq)` (`api/maintenance.js:219`), so an unflagged trailer runs the towed-KM clock (`:223-242`) instead of reading `ok` forever; a trailer already set up in **Hours** now returns `unit_mismatch` (`:231-236`, rendered by `src/Dashboard.jsx:6430`) rather than comparing KM to hours. `set_equipment_pm_interval` requires KM for any towed unit (`api/companydata.js:1276-1279`), and `attachmentStats` counts unflagged trailers (`fleetActivity.js:127-129`). Evidence: 4 new tests (`tests/unit/fleet-activity.test.js:120,126,132`, `tests/unit/timeclock-gate.test.js:242`) fail 4/35 with those files dropped into a `427895e` worktree and pass 35/35 at `1301c76`; `npm run test:unit` 419/419. Gap: no test runs `list_status` itself, so `maintenance.js:219` and the new `unit_mismatch` return are verified by reading. **Re-anchored** everything the commit shifted: `fleetActivity.js` +13 from `pmAllowedFor` down (`:75→88`, `towedDistanceSince` `:86→99`, `:95→108`, `attachmentStats` `:113→126`, filter `:114→129`); `maintenance.js` +2 from `:217` and +8 from `:229` (towed branch `:221-233→223-242`, `list_records`-area and `log_field_service` anchors); `companydata.js` +1 from `:1276` (time-clock `:1503,1524,1543,1651,1676,1698` → `:1504,1525,1544,1652,1677,1699`, reasoning `:1474-1484`, `latestEntryAt` `:1663-1674`). Changelog rows and "as found" blocks keep their original numbers. **#29 and #30 still OPEN.** |
+| 2026-09-25 | this branch (`claude/toolbox-talk-edit-notes-oz5y1u`) | **New surface reached its join key: Toolbox Talk attendee and FLHA crew (secondary) signers now pick a real roster row instead of typing a name.** New worker-facing action `list_roster_names` (`api/companydata.js:761-770`) — company-scoped, `id, name, role`, active only, no role check, same pattern as `list_sites`/`list_equipment`. `src/ToolboxTalk.jsx` adds a `rosterId` (or `rosterId: null, guest: true` for a genuine non-employee, `:275-280`) to each `attendees_json` entry; `src/App.jsx`'s FLHA crew adds `rosterId` to each `crew_signatures` entry with no guest fallback (`:502-504,526-529`) since additional crew is assumed to always be an employee. Both flows block adding a second signer at all (no free-text fallback) if the company has zero active roster members (`ToolboxTalk.jsx:612`, `App.jsx:1495`). **Placed as a refinement of the `roster_id` join key (§2), not a new key** — same target table, same shape as break #3's `submitted_by_roster_id`, but weaker: `attendees_json`/`crew_signatures` are client-submittable jsonb columns (`api/logs.js:159`, `api/flhas.js:148`) and neither submit path validates the embedded `rosterId` against the caller's own roster, unlike `site_id`/`equipment_id`, which get exactly that check. **Filed as new break #31, OPEN, not approved, not worked** — a client can currently write any `rosterId` value into either array. No `api/logs.js` or `api/flhas.js` application code touched by this pass; map only. |
