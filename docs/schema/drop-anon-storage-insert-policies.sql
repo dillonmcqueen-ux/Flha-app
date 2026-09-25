@@ -66,3 +66,26 @@ drop policy if exists "onboarding uploads anon insert" on storage.objects;
 -- flha-reports returns 403 "new row violates row-level security policy".
 
 drop policy if exists "Allow public insert 1ly6hwx_0" on storage.objects;
+
+
+-- ── Third pass, 2026-09-25, as part of SOC 2 readiness remediation ────────
+-- "Allow logo insert 1y3lpeg_0" -> company-logos, the one deliberately held
+-- back above on 2026-09-14 as out of scope. Re-verified before dropping:
+-- both onboarding (src/Onboarding.jsx) and AdminPanel (src/AdminPanel.jsx)
+-- upload logos via createUploadUrl() (server-lib/uploadUrls.js, called from
+-- api/admin.js and api/login.js) and uploadToSignedUrl() on the client side
+-- — a signed upload token, not a direct anon .upload(). Nothing in the
+-- codebase depends on an anon INSERT policy for this bucket either.
+--
+-- After this statement, storage.objects carries zero policies across all 8
+-- buckets, meaning every unauthenticated write anywhere in Supabase Storage
+-- is refused — matching CLAUDE.md's bar that only company-logos itself
+-- (READ, by design, for logo display) should ever be reachable without
+-- authentication.
+--
+-- APPLIED to the live FORA Supabase project (wzyvbtzxxdcxgvbkcqmt) on
+-- 2026-09-25. Reversible: re-create the policy with the same name, INSERT
+-- command and with_check expression `(bucket_id = 'company-logos'::text)`
+-- to restore the previous behavior.
+
+drop policy if exists "Allow logo insert 1y3lpeg_0" on storage.objects;

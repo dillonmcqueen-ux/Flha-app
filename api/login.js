@@ -22,6 +22,7 @@ import { sendEmail, siteOrigin } from '../server-lib/email.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
+import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -43,6 +44,14 @@ const PIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 const MASTER_CODE_THROTTLE_MIN_LENGTH = 14;
 const MASTER_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MASTER_CODE_THROTTLE_MAX_ATTEMPTS = 20;
+
+// Once someone has a valid ADMIN_CODE or master code, a 6-digit TOTP code
+// is the next thing worth guessing — short enough that it needs its own
+// per-IP ceiling, separate from (and tighter than) the code throttles
+// above, since 1,000,000 possible codes at 10/15min is already a very
+// slow brute force.
+const TOTP_THROTTLE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const TOTP_THROTTLE_MAX_ATTEMPTS = 10;
 
 function clientIp(req) {
   // Vercel sets x-vercel-forwarded-for itself and a client cannot forge it,
@@ -211,10 +220,13 @@ function verifyTicket(ticket) {
 }
 
 // scrypt (Node builtin, no new dependency) + a per-user random salt. A
-// 4-digit PIN is inherently low-entropy against a full database compromise,
-// but scrypt raises that cost significantly — the actual defense against
-// realistic online guessing is the per-account lockout below, which must
-// hold regardless of hash strength.
+// PIN (6 digits since 2026-09-25, was 4 — see
+// docs/security/soc2-readiness-gaps.md item 8; existing shorter PINs still
+// verify fine, login compares against the stored hash, not a fixed length)
+// is inherently low-entropy against a full database compromise, but scrypt
+// raises that cost significantly — the actual defense against realistic
+// online guessing is the per-account lockout below, which must hold
+// regardless of hash strength.
 function hashPin(pin, salt) {
   return crypto.scryptSync(String(pin), salt, 64).toString('hex');
 }
@@ -270,6 +282,37 @@ async function verifyMasterCode(entered) {
   const a = Buffer.from(hashPin(entered, row.master_code_salt), 'hex');
   const b = Buffer.from(row.master_code_hash, 'hex');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Gates both privileged login paths (admin role, master code) behind TOTP
+// once enrolled — see docs/schema/mfa-totp-migration.sql. `totp` may be
+// either a 6-digit authenticator code or a one-time backup code; a
+// matched backup code is immediately marked used so it can't be replayed.
+// Returns { required: false } if MFA isn't enrolled yet (nothing to check,
+// login proceeds as before), or { required: true, ok } once it is.
+async function checkMfa(ip, totp) {
+  const { data, error } = await supabaseAdmin
+    .from('app_settings')
+    .select('totp_enabled, totp_secret, backup_codes')
+    .eq('id', 1)
+    .limit(1);
+  const row = data && data[0];
+  if (error || !row || !row.totp_enabled || !row.totp_secret) return { required: false };
+
+  const allowed = await checkIpThrottle(`totp:${ip}`, TOTP_THROTTLE_MAX_ATTEMPTS, TOTP_THROTTLE_WINDOW_MS);
+  if (!allowed) return { required: true, ok: false, throttled: true };
+
+  if (!totp) return { required: true, ok: false };
+
+  if (verifyTotpCode(row.totp_secret, totp)) return { required: true, ok: true };
+
+  const { matched, codes } = consumeBackupCode(totp, row.backup_codes);
+  if (matched) {
+    await supabaseAdmin.from('app_settings').update({ backup_codes: codes }).eq('id', 1);
+    return { required: true, ok: true };
+  }
+
+  return { required: true, ok: false };
 }
 
 // Best-effort notification for a new onboarding submission — silently
@@ -569,6 +612,10 @@ export default async function handler(req, res) {
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
 
+    const mfa = await checkMfa(clientIp(req), req.body.totp);
+    if (mfa.throttled) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+    if (mfa.required && !mfa.ok) return res.status(200).json({ stage: 'need_totp' });
+
     await supabaseAdmin.from('master_login_log').insert({ company_id: company.id, role: pickedRole });
 
     // Legacy-shaped session, same as any pre-cutover login — deliberately
@@ -857,8 +904,8 @@ export default async function handler(req, res) {
     const { claimToken, rosterId, pin } = req.body;
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
-    if (!rosterId || !/^\d{4}$/.test(String(pin || ''))) {
-      return res.status(400).json({ error: 'Enter a 4-digit PIN.' });
+    if (!rosterId || !/^\d{6}$/.test(String(pin || ''))) {
+      return res.status(400).json({ error: 'Enter a 6-digit PIN.' });
     }
 
     // Ownership check — this rosterId must actually belong to the company
@@ -943,6 +990,10 @@ export default async function handler(req, res) {
   // ── Admin path — checked against the secret ADMIN_CODE in Vercel ──────
   if (role === 'admin') {
     if (process.env.ADMIN_CODE && safeEqual(entered, process.env.ADMIN_CODE)) {
+      const mfa = await checkMfa(clientIp(req), req.body.totp);
+      if (mfa.throttled) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+      if (mfa.required && !mfa.ok) return res.status(200).json({ stage: 'need_totp' });
+
       const payload = { role: 'admin', companyId: null, issuedAt: Date.now() };
       const token = signSession(payload);
       return res.status(200).json({ session: payload, token });

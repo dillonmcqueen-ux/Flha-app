@@ -18,7 +18,7 @@ Three roles: **worker**, **supervisor**, and **admin**.
   values. Admin can edit any of these from the Admin Panel's Codes tab.
 - **Individual roster login** — a company can opt into per-person logins
   instead of a shared code: each worker/supervisor gets their own name and a
-  4-digit PIN (managed from the Admin Panel's Roster tab), so deactivating
+  6-digit PIN (managed from the Admin Panel's Roster tab), so deactivating
   one person cuts off exactly that person, immediately. This is what
   auto-fills a person's name on the paperwork they submit.
 - **Master code** — a single admin-settable code that logs into any

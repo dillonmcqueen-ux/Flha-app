@@ -381,6 +381,116 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [masterLoginLogs, setMasterLoginLogs] = useState([]);
   const [logsShown, setLogsShown] = useState(10);
 
+  // ── Administrative audit log — config/access changes, not every read or
+  // form submission. See docs/schema/audit-log-migration.sql. ────────────
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogsShown, setAuditLogsShown] = useState(10);
+
+  const loadAuditLog = async () => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_audit_log", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setAuditLogs(data.logs || []);
+      setAuditLogsShown(10);
+    } catch (e) { /* leave list as-is if the request fails */ }
+  };
+
+  const AUDIT_ACTION_LABELS = {
+    set_plan_tier: "Changed plan tier",
+    set_master_code: "Changed master code",
+    enroll_mfa_confirm: "Enabled MFA",
+    disable_mfa: "Disabled MFA",
+    create_company: "Created company",
+    update_company_codes: "Changed company codes",
+    toggle_suspend: "Changed suspension",
+    delete_company: "Deleted company",
+    approve_onboarding_request: "Approved onboarding request",
+    delete_onboarding_request: "Deleted onboarding request",
+  };
+
+  // ── MFA (TOTP) — gates the admin role and master-code login paths once
+  // enrolled. See api/admin.js's enroll_mfa_start/confirm/disable_mfa and
+  // docs/schema/mfa-totp-migration.sql. ─────────────────────────────────
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaEnrollment, setMfaEnrollment] = useState(null); // { secret, qrDataUrl } while mid-enrollment
+  const [mfaConfirmCode, setMfaConfirmCode] = useState("");
+  const [mfaBackupCodes, setMfaBackupCodes] = useState(null); // shown once, right after confirming
+  const [mfaDisableCode, setMfaDisableCode] = useState("");
+  const [mfaShowDisable, setMfaShowDisable] = useState(false);
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [mfaMsg, setMfaMsg] = useState("");
+
+  const loadMfaStatus = async () => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_mfa_status", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setMfaEnabled(!!data.enabled);
+    } catch (e) { /* leave state as-is if the request fails */ }
+  };
+
+  const startMfaEnrollment = async () => {
+    setMfaMsg(""); setMfaBusy(true);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enroll_mfa_start", token }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMfaMsg(data.error || "Couldn't start MFA enrollment."); setMfaBusy(false); return; }
+      setMfaEnrollment({ secret: data.secret, qrDataUrl: data.qrDataUrl });
+    } catch (e) {
+      setMfaMsg("Couldn't start MFA enrollment. Try again.");
+    }
+    setMfaBusy(false);
+  };
+
+  const confirmMfaEnrollment = async () => {
+    if (!mfaConfirmCode.trim()) { setMfaMsg("Enter the 6-digit code from your authenticator app."); return; }
+    setMfaMsg(""); setMfaBusy(true);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enroll_mfa_confirm", token, code: mfaConfirmCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMfaMsg(data.error || "Incorrect code."); setMfaBusy(false); return; }
+      setMfaEnabled(true);
+      setMfaEnrollment(null);
+      setMfaConfirmCode("");
+      setMfaBackupCodes(data.backupCodes || []);
+    } catch (e) {
+      setMfaMsg("Couldn't confirm MFA enrollment. Try again.");
+    }
+    setMfaBusy(false);
+  };
+
+  const disableMfa = async () => {
+    if (!mfaDisableCode.trim()) { setMfaMsg("Enter a current code to confirm."); return; }
+    if (!window.confirm("Disable MFA on the admin and master-code login paths?")) return;
+    setMfaMsg(""); setMfaBusy(true);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "disable_mfa", token, code: mfaDisableCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMfaMsg(data.error || "Incorrect code."); setMfaBusy(false); return; }
+      setMfaEnabled(false);
+      setMfaShowDisable(false);
+      setMfaDisableCode("");
+      setMfaMsg("MFA disabled.");
+    } catch (e) {
+      setMfaMsg("Couldn't disable MFA. Try again.");
+    }
+    setMfaBusy(false);
+  };
+
   const loadAllCodesView = async () => {
     try {
       const res = await fetch("/api/admin", {
@@ -391,6 +501,8 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       if (res.ok) setMasterLoginLogs(data.logs || []);
       setLogsShown(10);
     } catch (e) { /* leave list as-is if the request fails */ }
+    loadMfaStatus();
+    loadAuditLog();
   };
 
   // ── Onboarding Requests: submissions from the public /onboarding form ──
@@ -1379,6 +1491,58 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   </div>
                 </div>
 
+                <div style={{ ...st.card, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Two-factor authentication</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                    Requires an authenticator app code (or a backup code) after the admin code and the master code, on top of the code itself.
+                  </div>
+
+                  {mfaMsg && <div style={{ fontSize: 12, color: C.orange, marginBottom: 10 }}>{mfaMsg}</div>}
+
+                  {mfaBackupCodes ? (
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: C.ink, marginBottom: 6 }}>
+                        Save these backup codes now — shown only this once. Each works once, if you lose your device.
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 12 }}>
+                        {mfaBackupCodes.map(c => (
+                          <span key={c} style={{ ...st.code, textAlign: "center" }}>{c}</span>
+                        ))}
+                      </div>
+                      <button style={st.darkBtn} onClick={() => setMfaBackupCodes(null)}>Done, I saved them</button>
+                    </div>
+                  ) : mfaEnrollment ? (
+                    <div>
+                      <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10 }}>
+                        Scan this with Google Authenticator, Authy, or similar, then enter the 6-digit code it shows.
+                      </div>
+                      <img src={mfaEnrollment.qrDataUrl} alt="MFA QR code" style={{ width: 180, height: 180, marginBottom: 10 }} />
+                      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+                        Can't scan? Enter this key manually: <span style={st.code}>{mfaEnrollment.secret}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="6-digit code" value={mfaConfirmCode} onChange={e => setMfaConfirmCode(e.target.value)} />
+                        <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={confirmMfaEnrollment} disabled={mfaBusy}>{mfaBusy ? "Checking…" : "Confirm"}</button>
+                      </div>
+                      <button style={{ ...st.ghost, marginTop: 8, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => { setMfaEnrollment(null); setMfaConfirmCode(""); }}>Cancel</button>
+                    </div>
+                  ) : mfaEnabled ? (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.green, marginBottom: 10 }}>Enabled</div>
+                      {mfaShowDisable ? (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="Current code, to confirm" value={mfaDisableCode} onChange={e => setMfaDisableCode(e.target.value)} />
+                          <button style={{ ...st.ghost, flexShrink: 0, color: C.status.danger.text, border: `1.5px solid ${C.status.danger.border}` }} onClick={disableMfa} disabled={mfaBusy}>{mfaBusy ? "Checking…" : "Disable"}</button>
+                        </div>
+                      ) : (
+                        <button style={{ ...st.ghost, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setMfaShowDisable(true)}>Disable MFA</button>
+                      )}
+                    </div>
+                  ) : (
+                    <button style={st.darkBtn} onClick={startMfaEnrollment} disabled={mfaBusy}>{mfaBusy ? "Starting…" : "Set up two-factor authentication"}</button>
+                  )}
+                </div>
+
                 <div style={st.card}>
                   <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Recent master-code logins</div>
                   {masterLoginLogs.length === 0 ? (
@@ -1394,6 +1558,33 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                       {masterLoginLogs.length > logsShown && (
                         <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setLogsShown(n => n + 10)}>
                           Show more ({masterLoginLogs.length - logsShown} more)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <div style={{ ...st.card, marginTop: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Audit log</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10 }}>
+                    Who changed plan tiers, codes, MFA, or company records — not every read or form submission (those already self-document).
+                  </div>
+                  {auditLogs.length === 0 ? (
+                    <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No audit log entries yet.</div>
+                  ) : (
+                    <>
+                      {auditLogs.slice(0, auditLogsShown).map((l, i, arr) => (
+                        <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", fontSize: 13, gap: 8 }}>
+                          <span style={{ color: C.ink, fontWeight: 600 }}>
+                            {AUDIT_ACTION_LABELS[l.action] || l.action}
+                            {l.company_name && <span style={{ color: C.muted, fontWeight: 400 }}> · {l.company_name}</span>}
+                          </span>
+                          <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{new Date(l.created_at).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {auditLogs.length > auditLogsShown && (
+                        <button style={{ ...st.ghost, width: "100%", marginTop: 10, color: C.inkSoft, border: `1.5px solid ${C.line}` }} onClick={() => setAuditLogsShown(n => n + 10)}>
+                          Show more ({auditLogs.length - auditLogsShown} more)
                         </button>
                       )}
                     </>
@@ -2263,7 +2454,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add to the roster</div>
-              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Each person gets their own name and a 4-digit PIN, generated automatically and shown once.</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Each person gets their own name and a 6-digit PIN, generated automatically and shown once.</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <input style={{ ...st.input, marginBottom: 0, flex: 1 }} placeholder="Full name" value={newRosterName}
                   onChange={e => setNewRosterName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addRosterMember(); }} />

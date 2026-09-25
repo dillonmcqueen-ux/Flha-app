@@ -86,7 +86,7 @@ export default function ClaimAccount() {
 
   const savePin = async (rosterId) => {
     const pin = (pins[rosterId] || "").trim();
-    if (!/^\d{4}$/.test(pin)) { setMsg("Enter a 4-digit PIN."); return; }
+    if (!/^\d{6}$/.test(pin)) { setMsg("Enter a 6-digit PIN."); return; }
     setPinSaving(rosterId);
     setMsg("");
     try {
@@ -197,15 +197,15 @@ export default function ClaimAccount() {
         {roster.length > 0 && (
           <div style={styles.card}>
             <div style={styles.h2}>Assign PINs to your team</div>
-            <div style={styles.hint}>Give each person a 4-digit PIN — they'll use their name + this PIN to log in.</div>
+            <div style={styles.hint}>Give each person a 6-digit PIN — they'll use their name + this PIN to log in.</div>
             {roster.map((m) => (
               <div key={m.id} style={styles.row}>
                 <div style={{ width: 200, color: "#fff", fontSize: 14 }}>{m.name} <span style={{ color: "#9CA3AF", fontSize: 12 }}>({m.role})</span></div>
                 <input
-                  style={{ ...styles.input, width: 90 }} inputMode="numeric" maxLength={4}
-                  placeholder="1234"
+                  style={{ ...styles.input, width: 110 }} inputMode="numeric" maxLength={6}
+                  placeholder="123456"
                   value={pins[m.id] || ""}
-                  onChange={(e) => setPins((p) => ({ ...p, [m.id]: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                  onChange={(e) => setPins((p) => ({ ...p, [m.id]: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
                 />
                 <button style={styles.primaryBtn} disabled={pinSaving === m.id} onClick={() => savePin(m.id)}>
                   {pinSaved[m.id] ? "✓ Saved — change" : pinSaving === m.id ? "Saving…" : "Save PIN"}

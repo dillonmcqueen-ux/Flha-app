@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import Stripe from 'stripe';
+import QRCode from 'qrcode';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { parseSiteLines, parseUserLines, planSeatCap, randomToken } from '../server-lib/onboardingHelpers.js';
 import { allDocumentSettingsOn } from '../server-lib/pricing.js';
@@ -17,6 +18,14 @@ import {
   hashPin,
   provisionCompanyFromRequest,
 } from '../server-lib/onboardingApproval.js';
+import {
+  generateTotpSecret,
+  totpEnrollmentUri,
+  verifyTotpCode,
+  generateBackupCodes,
+  consumeBackupCode,
+} from '../server-lib/totp.js';
+import { logAuditEvent } from '../server-lib/auditLog.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -129,6 +138,7 @@ export default async function handler(req, res) {
       }
       const { error } = await supabaseAdmin.from('companies').update({ plan_tier: tier }).eq('id', companyId);
       if (error) return res.status(500).json({ error: "Couldn't update plan tier." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'set_plan_tier', companyId, targetType: 'company', targetId: companyId, details: { tier } });
       return res.status(200).json({ ok: true });
     }
 
@@ -154,6 +164,7 @@ export default async function handler(req, res) {
         .from('app_settings')
         .upsert({ id: 1, master_code_hash: hash, master_code_salt: salt, updated_at: new Date().toISOString() });
       if (error) return res.status(500).json({ error: "Couldn't update the master code." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'set_master_code' });
       return res.status(200).json({ ok: true });
     }
 
@@ -173,6 +184,100 @@ export default async function handler(req, res) {
 
       const enriched = (logs || []).map(l => ({ ...l, company_name: nameById[l.company_id] || 'Unknown company' }));
       return res.status(200).json({ logs: enriched });
+    }
+
+    // ── Administrative audit log — who changed what config/access, when.
+    // See docs/schema/audit-log-migration.sql and server-lib/auditLog.js
+    // for scope (config/access changes, not every read or form submission).
+    if (action === 'list_audit_log') {
+      const { data: logs, error: logErr } = await supabaseAdmin
+        .from('audit_log')
+        .select('id, created_at, actor_role, action, company_id, target_type, target_id, details')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (logErr) return res.status(500).json({ error: 'Could not load the audit log.' });
+
+      const companyIds = [...new Set((logs || []).map(l => l.company_id).filter(Boolean))];
+      const { data: companies } = await supabaseAdmin.from('companies').select('id, name').in('id', companyIds.length ? companyIds : [0]);
+      const nameById = {}; (companies || []).forEach(c => { nameById[c.id] = c.name; });
+
+      const enriched = (logs || []).map(l => ({ ...l, company_name: l.company_id ? (nameById[l.company_id] || 'Unknown company') : null }));
+      return res.status(200).json({ logs: enriched });
+    }
+
+    // ── MFA (TOTP) — gates the admin role and master code login paths in
+    // api/login.js once enrolled. See docs/schema/mfa-totp-migration.sql.
+    if (action === 'get_mfa_status') {
+      const { data, error } = await supabaseAdmin.from('app_settings').select('totp_enabled').eq('id', 1).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load MFA status.' });
+      return res.status(200).json({ enabled: !!(data && data[0] && data[0].totp_enabled) });
+    }
+
+    // Generates a new secret and QR code but does NOT enable MFA yet —
+    // enroll_mfa_confirm below does that, only after proving the admin can
+    // actually generate a valid code from it. Re-calling this before
+    // confirming overwrites any in-progress (unconfirmed) secret, which is
+    // fine — nothing depends on it until it's confirmed.
+    //
+    // Blocked while MFA is already enabled: overwriting totp_secret here
+    // would start failing every login immediately (checkMfa reads it live),
+    // before the new secret is ever confirmed — disable_mfa first, then
+    // re-enroll.
+    if (action === 'enroll_mfa_start') {
+      const { data: existing, error: readErr } = await supabaseAdmin.from('app_settings').select('totp_enabled').eq('id', 1).limit(1);
+      if (readErr) return res.status(500).json({ error: 'Could not check current MFA status.' });
+      if (existing && existing[0] && existing[0].totp_enabled) {
+        return res.status(400).json({ error: 'MFA is already enabled. Disable it first to re-enroll.' });
+      }
+      const secret = generateTotpSecret();
+      const { error } = await supabaseAdmin
+        .from('app_settings')
+        .upsert({ id: 1, totp_secret: secret, updated_at: new Date().toISOString() });
+      if (error) return res.status(500).json({ error: "Couldn't start MFA enrollment." });
+      const otpauthUri = totpEnrollmentUri(secret);
+      const qrDataUrl = await QRCode.toDataURL(otpauthUri);
+      return res.status(200).json({ ok: true, secret, otpauthUri, qrDataUrl });
+    }
+
+    // Proves the QR code was scanned correctly, then turns MFA on and
+    // issues backup codes — shown to the admin exactly once, here.
+    if (action === 'enroll_mfa_confirm') {
+      const { code } = req.body;
+      const { data, error } = await supabaseAdmin.from('app_settings').select('totp_secret').eq('id', 1).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load MFA settings.' });
+      const secret = data && data[0] && data[0].totp_secret;
+      if (!secret) return res.status(400).json({ error: 'Start enrollment first.' });
+      if (!verifyTotpCode(secret, code)) return res.status(400).json({ error: 'Incorrect code. Try again.' });
+
+      const { plain, hashed } = generateBackupCodes();
+      const { error: updErr } = await supabaseAdmin
+        .from('app_settings')
+        .update({ totp_enabled: true, backup_codes: hashed, updated_at: new Date().toISOString() })
+        .eq('id', 1);
+      if (updErr) return res.status(500).json({ error: "Couldn't enable MFA." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'enroll_mfa_confirm' });
+      return res.status(200).json({ ok: true, backupCodes: plain });
+    }
+
+    // Requires a current valid code (or backup code) rather than just the
+    // admin session, since disabling MFA is a security-lowering action and
+    // the session that reaches this action could itself be stale/shared.
+    if (action === 'disable_mfa') {
+      const { code } = req.body;
+      const { data, error } = await supabaseAdmin.from('app_settings').select('totp_secret, backup_codes').eq('id', 1).limit(1);
+      if (error) return res.status(500).json({ error: 'Could not load MFA settings.' });
+      const row = data && data[0];
+      const validTotp = row && row.totp_secret && verifyTotpCode(row.totp_secret, code);
+      const validBackup = row && consumeBackupCode(code, row.backup_codes).matched;
+      if (!validTotp && !validBackup) return res.status(400).json({ error: 'Incorrect code.' });
+
+      const { error: updErr } = await supabaseAdmin
+        .from('app_settings')
+        .update({ totp_enabled: false, totp_secret: null, backup_codes: [], updated_at: new Date().toISOString() })
+        .eq('id', 1);
+      if (updErr) return res.status(500).json({ error: "Couldn't disable MFA." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'disable_mfa' });
+      return res.status(200).json({ ok: true });
     }
 
     // ── Onboarding intake — submissions from the public /onboarding form,
@@ -268,6 +373,7 @@ export default async function handler(req, res) {
       }
       const { error } = await supabaseAdmin.from('onboarding_requests').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't delete this request." });
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'delete_onboarding_request', targetType: 'onboarding_request', targetId: id });
       return res.status(200).json({ ok: true });
     }
 
@@ -308,7 +414,7 @@ export default async function handler(req, res) {
     // ── Onboarding intake — approve: create the company from the
     // submission in one click. Sites (one per line) are created outright
     // since they're a single plain field. Users are parsed as "Name —
-    // role" / "Name - role" and get a random 4-digit PIN each — but unlike
+    // role" / "Name - role" and get a random 6-digit PIN each — but unlike
     // before, those PINs are never returned here or emailed anywhere: the
     // contact assigns their own real PINs on the claim-link page (see
     // claim_set_roster_pin in api/login.js), so this handler doesn't even
@@ -345,6 +451,7 @@ export default async function handler(req, res) {
       const result = await provisionCompanyFromRequest(supabaseAdmin, stripe, req, request, { autoApproved: false });
       if (result.error) return res.status(500).json({ error: result.error });
 
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'approve_onboarding_request', companyId: result.companyId || null, targetType: 'onboarding_request', targetId: id });
       return res.status(200).json({ ok: true, ...result });
     }
 
@@ -433,6 +540,7 @@ export default async function handler(req, res) {
           warning: 'Company created, but its document types could not be switched on. Set them from the document toggles before anyone logs in.',
         });
       }
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'create_company', companyId: created.id, targetType: 'company', targetId: created.id, details: { name: name.trim() } });
       return res.status(200).json({ ok: true });
     }
 
@@ -487,6 +595,7 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('companies').update(updates).eq('id', companyId);
       if (error) { console.error("update codes failed:", error.message); return res.status(500).json({ error: "Couldn't update codes. Try again." }); }
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'update_company_codes', companyId, targetType: 'company', targetId: companyId });
       return res.status(200).json({ ok: true });
     }
 
@@ -512,6 +621,7 @@ export default async function handler(req, res) {
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { error } = await supabaseAdmin.from('companies').update({ suspended: !!suspended }).eq('id', companyId);
       if (error) { console.error("company update failed:", error.message); return res.status(500).json({ error: "Couldn't update. Try again." }); }
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'toggle_suspend', companyId, targetType: 'company', targetId: companyId, details: { suspended: !!suspended } });
       return res.status(200).json({ ok: true });
     }
 
@@ -594,8 +704,13 @@ export default async function handler(req, res) {
         const { error: stepError } = await step();
         if (stepError) { console.error("company delete cleanup step failed:", stepError.message); return res.status(500).json({ error: "Couldn't delete. Try again." }); }
       }
+      const { data: companyRow } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
       const { error } = await supabaseAdmin.from('companies').delete().eq('id', companyId);
       if (error) { console.error("company delete failed:", error.message); return res.status(500).json({ error: "Couldn't delete. Try again." }); }
+      // The company's name is captured in details rather than looked up
+      // later by companyId, since the row itself is gone by the time
+      // anyone reads this log entry.
+      await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'delete_company', targetType: 'company', targetId: companyId, details: { name: companyRow?.[0]?.name || null } });
       return res.status(200).json({ ok: true });
     }
 
