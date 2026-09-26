@@ -13,6 +13,7 @@ import Sidebar from "./Sidebar";
 import TimeClockMap from "./TimeClockMap";
 import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
+import WorkerProfileDrawer from "./WorkerProfileDrawer";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
@@ -2108,6 +2109,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [togglingWalletId, setTogglingWalletId] = useState(null);
   const [rosterInviteLink, setRosterInviteLink] = useState(null); // { name, url }
 
+  // ── Worker profile drawer: click a name in the Roster tab ───────────────
+  const [profileRosterId, setProfileRosterId] = useState(null);
+  const [profileData, setProfileData] = useState(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaveError, setProfileSaveError] = useState("");
+  const [togglingProfileActive, setTogglingProfileActive] = useState(false);
+
   // ── Onboard New Employee (onboarding wallet, Phase 4) ───────────────────
   const [showOnboardForm, setShowOnboardForm] = useState(false);
   const [onboardForm, setOnboardForm] = useState({ name: "", role: "worker", email: "", employeeId: "" });
@@ -3152,6 +3162,63 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       setRosterRevealedPin({ name, pin: data.pin });
     } catch (e) { alert("Couldn't reset PIN. Try again."); }
     setResettingRosterId(null);
+  };
+
+  const openWorkerProfile = async (id) => {
+    setProfileRosterId(id);
+    setProfileData(null);
+    setProfileError("");
+    setProfileSaveError("");
+    setLoadingProfile(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_worker_profile", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setProfileError(data.error || "Couldn't load this profile."); setLoadingProfile(false); return; }
+      setProfileData(data);
+    } catch (e) { setProfileError("Couldn't load this profile. Try again."); }
+    setLoadingProfile(false);
+  };
+
+  const closeWorkerProfile = () => {
+    setProfileRosterId(null);
+    setProfileData(null);
+  };
+
+  const saveWorkerProfile = async (draft) => {
+    if (!profileRosterId) return;
+    setProfileSaveError("");
+    setSavingProfile(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_worker_profile", token, id: profileRosterId, email: draft.email, phone: draft.phone, role: draft.role }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setProfileSaveError(data.error || "Couldn't save those changes."); setSavingProfile(false); return; }
+      await openWorkerProfile(profileRosterId);
+      loadRosterList({ silent: true });
+    } catch (e) {
+      setProfileSaveError("Couldn't save those changes. Try again.");
+    }
+    setSavingProfile(false);
+  };
+
+  const toggleWorkerProfileActive = async (member) => {
+    setTogglingProfileActive(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: member.active ? "deactivate_roster_member" : "reactivate_roster_member", token, id: member.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Couldn't update."); setTogglingProfileActive(false); return; }
+      await openWorkerProfile(member.id);
+      loadRosterList({ silent: true });
+    } catch (e) { alert("Couldn't update. Try again."); }
+    setTogglingProfileActive(false);
   };
 
   const startEditEmployeeId = (m) => {
@@ -7155,7 +7222,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           <RowIconTile icon={roleGroup === "supervisor" ? HardHat : CircleUserRound} color={C.text.muted} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 14, fontWeight: 700, color: C.text.primary }}>
-                              {m.name}
+                              <button
+                                onClick={() => openWorkerProfile(m.id)}
+                                title="View profile"
+                                style={{ background: "transparent", border: "none", padding: 0, font: "inherit", fontWeight: 700, color: C.text.primary, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}
+                              >
+                                {m.name}
+                              </button>
                               {m.employee_id && (
                                 <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: C.text.muted, background: C.panelInset, border: `1px solid ${C.line}`, padding: "1px 7px", borderRadius: RAD.pill }}>
                                   ID {m.employee_id}
@@ -7337,6 +7410,20 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
       </div>
       </div>
+      <WorkerProfileDrawer
+        open={!!profileRosterId}
+        loading={loadingProfile}
+        error={profileError}
+        profile={profileData}
+        certifications={employeeDirectory.find(e => e.id === profileRosterId)?.certifications}
+        certsModuleActive={isDocActive("certifications")}
+        onClose={closeWorkerProfile}
+        onSave={saveWorkerProfile}
+        saving={savingProfile}
+        saveError={profileSaveError}
+        onToggleActive={toggleWorkerProfileActive}
+        togglingActive={togglingProfileActive}
+      />
     </div>
   );
 }
