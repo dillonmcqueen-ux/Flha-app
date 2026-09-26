@@ -120,7 +120,7 @@ const TABLES = {
     name: 'inspections',
     docKey: 'inspection',
     jsonColumn: 'results_json',
-    listColumns: 'id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes',
+    listColumns: 'id, worker_name, equipment_label, created_at, results_json, signed_by, company_id, pdf_url, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes, submitted_by_roster_id',
   },
   toolbox: {
     name: 'toolbox_talks',

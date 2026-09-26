@@ -13,7 +13,8 @@ import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
-import { requireDocKey } from '../server-lib/docKeyGate.js';
+import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
+import { signRows } from '../server-lib/signedUrls.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
 
 const supabaseAdmin = createClient(
@@ -707,6 +708,158 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin.from('companies').update({ roster_enabled: enabled }).eq('id', companyId);
       if (error) return res.status(500).json({ error: "Couldn't update." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ── Worker profile: everything this one roster row has signed their
+    // name to, plus their own copy of the punch-location map, behind the
+    // name-click in the Roster tab. Only pulls a table when the company has
+    // switched that document type on (isDocKeyActive), never the hard
+    // requireDocKey 403 — one missing module should thin out this profile,
+    // not fail the whole thing for a company running six of nine modules.
+    //
+    // Joins on submitted_by_roster_id (docs/schema/roster-attribution-migration.sql)
+    // rather than name-matching, unlike api/customforms.js's get_my_documents:
+    // that endpoint is a worker looking up their own name, this one is a
+    // supervisor looking up someone else's, so a name collision or a rename
+    // must not surface a stranger's signed document. incidents/near_misses
+    // predating that migration will simply be missing here for the same
+    // reason the migration deliberately left them unbackfilled.
+    if (action === 'get_worker_profile') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin
+        .from('roster')
+        .select('id, company_id, name, role, active, email, phone, employee_id, wallet_enabled, last_login_at, created_at, onboarding_completed_at')
+        .eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      const member = rows[0];
+      if (session.role === 'supervisor' && member.company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+      const companyId = member.company_id;
+
+      const [flhaOn, toolboxOn, incidentOn, nearmissOn, inspectionOn, monthlyOn, dailyOn, timeclockOn] = await Promise.all(
+        ['flha', 'toolbox', 'incident', 'nearmiss', 'inspection', 'monthly', 'daily', 'timeclock']
+          .map(key => isDocKeyActive(supabaseAdmin, companyId, key))
+      );
+
+      const FETCH_LIMIT = 200;
+      const [flhaRows, inspectionRows, toolboxRows, dailyRows, incidentRows, nearMissRows] = await Promise.all([
+        flhaOn ? supabaseAdmin.from('flhas').select('id, job_site, created_at, pdf_url')
+          .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
+        inspectionOn ? supabaseAdmin.from('inspections').select('id, equipment_label, trip_type, created_at, pdf_url')
+          .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
+        toolboxOn ? supabaseAdmin.from('toolbox_talks').select('id, topic, created_at, pdf_url')
+          .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
+        dailyOn ? supabaseAdmin.from('daily_reports').select('id, site, report_date, created_at, pdf_url')
+          .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
+        incidentOn ? supabaseAdmin.from('incidents').select('id, site, incident_type, created_at, pdf_url')
+          .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
+        nearmissOn ? supabaseAdmin.from('near_misses').select('id, site, created_at, pdf_url')
+          .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
+      ]);
+
+      // Monthly inspections and custom form records carry no company_id of
+      // their own — scoped through their parent form, same as
+      // get_my_documents in api/customforms.js.
+      let monthlyRows = [], monthlyFormMap = {};
+      if (monthlyOn) {
+        const { data: forms } = await supabaseAdmin.from('inspection_forms').select('id, title').eq('company_id', companyId);
+        (forms || []).forEach(f => { monthlyFormMap[f.id] = f.title; });
+        const formIds = (forms || []).map(f => f.id);
+        if (formIds.length) {
+          const { data } = await supabaseAdmin.from('inspection_records').select('id, created_at, pdf_url, form_id')
+            .in('form_id', formIds).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT);
+          monthlyRows = data || [];
+        }
+      }
+
+      const { data: customForms } = await supabaseAdmin.from('custom_forms').select('id, title').eq('company_id', companyId);
+      const customFormMap = {}; (customForms || []).forEach(f => { customFormMap[f.id] = f.title; });
+      const customFormIds = (customForms || []).map(f => f.id);
+      const { data: customRows } = customFormIds.length
+        ? await supabaseAdmin.from('custom_form_records').select('id, created_at, pdf_url, form_id')
+            .in('form_id', customFormIds).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT)
+        : { data: [] };
+
+      const documents = [
+        ...(flhaRows.data || []).map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(inspectionRows.data || []).map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(toolboxRows.data || []).map(r => ({ id: r.id, type: 'toolbox', title: 'Toolbox Talk', subtitle: r.topic || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(dailyRows.data || []).map(r => ({ id: r.id, type: 'daily', title: 'Daily Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(incidentRows.data || []).map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(nearMissRows.data || []).map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...monthlyRows.map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(customRows || []).map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+      ];
+      documents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const signedDocuments = await signRows(supabaseAdmin, documents.slice(0, 150), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+
+      // Punch locations: last 60 days, not just the currently-viewed week on
+      // the Time Clock tab, so a profile opened from the Roster tab (which
+      // never loads that tab's week-scoped state) is self-contained.
+      let timeClockEntries = [];
+      if (timeclockOn) {
+        const since = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+        const { data } = await supabaseAdmin.from('time_clock_entries')
+          .select('id, roster_id, clock_in, clock_out, clock_in_lat, clock_in_lng, clock_in_accuracy_m, clock_out_lat, clock_out_lng, clock_out_accuracy_m')
+          .eq('company_id', companyId).eq('roster_id', id).gte('clock_in', since).order('clock_in', { ascending: true });
+        timeClockEntries = data || [];
+      }
+
+      return res.status(200).json({
+        member: {
+          id: member.id, name: member.name, role: member.role, active: member.active,
+          email: member.email, phone: member.phone, employeeId: member.employee_id,
+          walletEnabled: member.wallet_enabled, lastLoginAt: member.last_login_at,
+          createdAt: member.created_at, onboardingCompletedAt: member.onboarding_completed_at,
+        },
+        documents: signedDocuments,
+        timeClockEntries,
+        timeclockActive: timeclockOn,
+      });
+    }
+
+    // Editable-from-the-profile fields, excluding name (identity, never
+    // edited here) and employee_id (already has its own inline editor and
+    // clash-checking on the Roster row via set_roster_employee_id) and
+    // active (already has its own seat-cap-checked toggle via
+    // deactivate_roster_member/reactivate_roster_member).
+    if (action === 'update_worker_profile') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
+        return res.status(403).json({ error: 'Not allowed.' });
+      }
+
+      const updates = {};
+      if ('email' in req.body) {
+        const email = (req.body.email || '').trim();
+        if (email && !isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+        updates.email = email || null;
+      }
+      if ('phone' in req.body) {
+        updates.phone = (req.body.phone || '').trim().slice(0, 40) || null;
+      }
+      if ('role' in req.body) {
+        if (req.body.role !== 'worker' && req.body.role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+        updates.role = req.body.role;
+      }
+      if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+
+      const { data, error } = await supabaseAdmin.from('roster').update(updates).eq('id', id)
+        .select('id, name, role, email, phone').single();
+      if (error) {
+        console.error('update_worker_profile failed:', error.message);
+        return res.status(500).json({ error: "Couldn't save those changes." });
+      }
+      return res.status(200).json({ ok: true, member: data });
     }
 
     // ══ SOPs ═════════════════════════════════════════════════════════
