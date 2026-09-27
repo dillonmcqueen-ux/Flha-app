@@ -128,28 +128,22 @@
 <section class="hero-sm">
   <div class="glow"></div>
   <div class="wrap">
-    <div class="tagline">Security</div>
-    <h1 style="margin-top:20px;">Stored in Canada. <span class="out">Walled off from every other company.</span></h1>
-    <p class="sub">Not a setting somebody has to remember to turn on. It's how the system is built, and it gets checked, not just claimed.</p>
+    <div class="tagline">Security, for whoever actually asks</div>
+    <h1 style="margin-top:20px;">Zero trust between tenants. <span class="out">Enforced by Postgres, not a promise.</span></h1>
+    <p class="sub">This page names the actual mechanism, not a badge. If you're the one who has to sign off on this before your company gives FORA any data, this is written for you.</p>
     <div class="hero-cta">
-      <a href="mailto:forafieldsolutions@gmail.com?subject=Security%20question&body=Hey%2C%20I%20have%20a%20question%20about%20how%20FORA%20handles%20security." class="cta-btn">Ask a question</a>
+      <a href="mailto:forafieldsolutions@gmail.com?subject=Security%20question&body=Hey%2C%20I%20have%20a%20technical%20question%20about%20how%20FORA%20handles%20security." class="cta-btn">Ask a technical question</a>
       <a href="features.html" class="cta-ghost">See the platform</a>
     </div>
   </div>
 </section>
 
-<section id="audits">
+<section id="stack">
   <div class="wrap">
     <div class="section-head" data-reveal>
-      <div class="kicker">Checked, not just claimed</div>
-      <h2>An automated audit runs every three days.</h2>
-      <p>Most companies write a security page once and never look at it again. FORA's gets re-verified on a schedule: storage buckets, database access rules, secrets in the codebase, and the attacker's-eye view of the whole application. Anything it finds gets fixed or flagged, not filed away.</p>
-    </div>
-    <div class="trust-kpis" data-reveal>
-      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#scan"/></svg><span class="led pulse"></span></div><div class="v amber">Every 3 days</div><div class="l">Storage exposure, database access rules, hardcoded secrets, signed-URL discipline, external surfaces and an attacker's-mindset pass, all re-checked on a fixed schedule.</div></div>
-      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#leaf"/></svg><span class="led"></span></div><div class="v">Canada</div><div class="l">Your records and uploaded files are stored in a database hosted in Canada.</div></div>
-      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#database"/></svg><span class="led"></span></div><div class="v">SOC 2</div><div class="l">Our database provider holds a SOC 2 Type 2 report, audited by a third party.</div></div>
-      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#shield"/></svg><span class="led"></span></div><div class="v">Alberta PIPA</div><div class="l">Personal information is handled under Alberta's PIPA and federal PIPEDA.</div></div>
+      <div class="kicker">Stack</div>
+      <h2>What FORA actually runs on.</h2>
+      <p>React (Vite) on the frontend. Every read and write goes through a Vercel serverless function in <code style="background:var(--panel-2); padding:2px 6px; border-radius:4px; font-size:14px;">api/</code>, never straight from the browser to the database. Supabase-hosted Postgres for storage, with its own SOC&nbsp;2 Type&nbsp;2 report. No ORM abstracting away what a query actually touches.</p>
     </div>
   </div>
 </section>
@@ -158,17 +152,41 @@
   <div class="wrap">
     <div class="section-head" data-reveal>
       <div class="kicker">Access control</div>
-      <h2>Deny by default. Your company only ever sees your company.</h2>
-      <p>Multi-tenant isolation isn't a setting, it's the default every table starts from. Nothing is readable or writable until a rule explicitly says a signed-in user from your company can touch it.</p>
+      <h2>How a request actually gets authorized, layer by layer.</h2>
+      <p>Multi-tenant isolation here is not a Postgres policy doing the heavy lifting. It's application code, with Postgres itself as a deny-by-default backstop underneath it. Both matter, and they're not the same thing.</p>
     </div>
     <div class="layers" data-reveal>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#key"/></svg><div><h3>Signed sessions</h3><p>Every request is checked against a signed, server-verified session first.</p></div></div>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#lock"/></svg><div><h3>Deny by default</h3><p>Row Level Security on every table, no bypass policies. The dashboard is the only door in.</p></div></div>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#users"/></svg><div><h3>Company scoping</h3><p>Every read and write is scoped to your company. You only ever see your data, never another company's.</p></div></div>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#pdf"/></svg><div><h3>Private file storage</h3><p>Documents and photos are served through time-limited signed links, never a public URL.</p></div></div>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#check"/></svg><div><h3>Your data stays yours</h3><p>Export any time. Nothing is sold or used to train anything outside your account.</p></div></div>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#eye"/></svg><div><h3>Straight about the rest</h3><p>Hosting and AI processing run through the providers named in our <a href="privacy.html" style="color:var(--orange);">Privacy Policy</a>.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#key"/></svg><div><h3>HMAC-signed sessions</h3><p>Every request must carry a session token signed server-side with HMAC-SHA256. The signing secret lives only in the server environment, so a token can't be forged from the browser or replayed after tampering with its payload.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#users"/></svg><div><h3>Tenant scoping lives in the handler</h3><p>The signed session carries the caller's company id. Every query in every serverless function scopes explicitly to it. This, not a database policy, is where one company's data actually gets kept out of another's.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#lock"/></svg><div><h3>RLS: deny by default, zero policies</h3><p>Row Level Security is enabled on every table with no policies defined. A request using the public/anon key is refused unconditionally by Postgres itself, before any application code runs at all &mdash; a backstop under the real boundary above, not a substitute for it.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#shield"/></svg><div><h3>The one bypass key never reaches a browser</h3><p>The service-role credential that can bypass RLS exists only inside the Vercel serverless environment. It is never in a client bundle, never in a repo, never shipped anywhere a browser can read it.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#pdf"/></svg><div><h3>Signed, time-limited file URLs</h3><p>Documents and photos sit in private storage buckets. Every link the app hands out is signed and expires; there is no permanent public URL for a private object, and code that would build one is checked for on a recurring schedule.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#card"/></svg><div><h3>Card data never touches our servers</h3><p>Checkout runs entirely on Stripe's hosted page. FORA never receives, sees or stores a card number, and an incoming Stripe webhook is refused unless its signature verifies against our signing secret.</p></div></div>
     </div>
+  </div>
+</section>
+
+<section id="audits">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">Verification, not a one-time claim</div>
+      <h2>An automated audit suite re-runs every three days.</h2>
+      <p>A security page written once at launch and never revisited is a claim, not a control. This one gets re-verified against the live system on a fixed schedule, across six areas:</p>
+    </div>
+    <div class="ftable-wrap" data-reveal>
+      <table class="ftable">
+        <thead><tr><th>Check</th><th>What it verifies</th></tr></thead>
+        <tbody>
+          <tr><td class="lead">Storage exposure</td><td>Every storage bucket except the one deliberately public asset bucket is confirmed private, tested live against unauthenticated requests, not just read from config.</td></tr>
+          <tr><td class="lead">RLS coverage</td><td>Row Level Security is confirmed enabled with zero policies on every table in the schema, including any added since the last pass.</td></tr>
+          <tr><td class="lead">Secret hygiene</td><td>Tracked files are scanned for hardcoded credentials, and env-file coverage in <code style="background:var(--panel-2); padding:1px 5px; border-radius:4px; font-size:13px;">.gitignore</code> is confirmed.</td></tr>
+          <tr><td class="lead">Signed-URL discipline</td><td>Code paths that build a storage URL are checked for one that constructs an unsigned public URL for a private object &mdash; a specific bug class, checked because it has recurred before.</td></tr>
+          <tr><td class="lead">External surface</td><td>Vercel preview-deployment access control and Stripe webhook signature verification, since this exposure lives in connected services, not in this repository's source.</td></tr>
+          <tr><td class="lead">Adversarial review</td><td>A broader pass across authentication, authorization, injection, cross-tenant data access, file-upload handling, rate limiting and dependency vulnerabilities, not limited to one checklist.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Findings that only ever tighten access and are trivially reversible get fixed on the spot. Anything that's a real access-control judgment call, touches production availability, or means a credential needs rotating gets reported for a human decision, not silently patched.</p>
   </div>
 </section>
 
@@ -180,9 +198,12 @@
       <p>Full detail on what's collected, why, and who it's shared with lives in the actual documents. This is the short version.</p>
     </div>
     <div class="points three" data-reveal>
-      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#database"/></svg></span><h3>SOC 2 Type 2 infrastructure</h3><p>The database provider FORA runs on is independently audited to SOC 2 Type 2. That's a third party checking the checker.</p></div>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#database"/></svg></span><h3>SOC 2 Type 2 infrastructure</h3><p>The Postgres provider FORA runs on is independently audited to SOC 2 Type 2. That's a third party checking the checker.</p></div>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#leaf"/></svg></span><h3>Data residency: Canada</h3><p>Your records and uploaded files live in a database hosted in Canada, not wherever a default region happened to land.</p></div>
       <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#shield"/></svg></span><h3>Alberta PIPA &amp; PIPEDA</h3><p>Personal information is handled under Alberta's Personal Information Protection Act and the federal PIPEDA, not whichever rule happens to be convenient.</p></div>
       <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#gavel"/></svg></span><h3>Read the actual terms</h3><p>No summary replaces the real documents. Read the <a href="privacy.html" style="color:var(--orange); font-weight:600;">Privacy Policy</a> and <a href="terms.html" style="color:var(--orange); font-weight:600;">Terms of Use</a> in full.</p></div>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#check"/></svg></span><h3>Your data stays yours</h3><p>Export any time. Nothing is sold, and nothing is used to train a model outside your own account's Brain.</p></div>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#eye"/></svg></span><h3>Straight about the rest</h3><p>Hosting and AI processing run through the specific providers named in our <a href="privacy.html" style="color:var(--orange); font-weight:600;">Privacy Policy</a>, not left vague.</p></div>
     </div>
   </div>
 </section>
