@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>About | FORA</title>
-<meta name="description" content="FORA is built by Dillon McQueen: fifteen years in heavy civil, five years building digital solutions, for the small and mid-sized companies that could never justify the enterprise tools." />
+<title>Security | FORA</title>
+<meta name="description" content="How FORA is secured: hosted in Canada, walled off per company with Row Level Security, checked by an automated audit every three days, and handled under Alberta PIPA and federal PIPEDA." />
 <link rel="icon" type="image/png" href="images/favicon.png">
 <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,7 +45,7 @@
         </div>
       </div>
       <div class="navitem">
-        <a class="navtop" href="security.html">Security<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <a class="navtop active" href="security.html">Security<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
         <div class="dropdown">
           <a href="security.html" class="d-lead">How FORA is secured<span class="d-sub">Built in, not bolted on</span></a>
           <div class="d-rule"></div>
@@ -67,7 +67,7 @@
         </div>
       </div>
       <div class="navitem">
-        <a class="navtop active" href="about.html">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
+        <a class="navtop" href="about.html">Company<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></a>
         <div class="dropdown">
           <a href="about.html" class="d-lead">About FORA<span class="d-sub">Who builds it and why</span></a>
           <div class="d-rule"></div>
@@ -152,70 +152,61 @@
 <section class="hero-sm">
   <div class="glow"></div>
   <div class="wrap">
-    <div class="tagline">Who built this</div>
-    <h1 style="margin-top:20px;">Built by the guy <span class="out">who had to fill it out.</span></h1>
-  </div>
-</section>
-
-<section id="story" style="padding-top:40px;">
-  <div class="wrap">
-    <div class="bio-hero" data-reveal>
-      <img src="images/dillon-mcqueen.jpg" alt="Dillon McQueen, founder of FORA">
-      <div class="bio-body">
-        <p>Fifteen years in heavy civil. Water, sewer, infrastructure, and everything in between.</p>
-        <p>I worked for small and mid-sized companies my whole career. The kind that know exactly what is broken and cannot justify twenty grand a year to fix it. Everyone else in this industry gets software. They get a binder.</p>
-        <p>So I built it from the operator's point of view. <strong>Not from a product manager's whiteboard.</strong> I am still on a machine, which is where the ideas come from.</p>
-      </div>
-    </div>
-    <div class="statstrip" data-reveal style="margin-top:48px;">
-      <div class="stat"><div class="k"><span class="mono">On the machine</span><span class="led"></span></div><div class="v">15 yrs</div><div class="l">Heavy civil, water, sewer and infrastructure.</div></div>
-      <div class="stat"><div class="k"><span class="mono">Building the fix</span><span class="led amber"></span></div><div class="v">5 yrs</div><div class="l">Testing ideas on the side before FORA shipped.</div></div>
-      <div class="stat"><div class="k"><span class="mono">Based in</span><span class="led"></span></div><div class="v">Alberta</div><div class="l">Insured, registered, Central Alberta.</div></div>
-      <div class="stat"><div class="k"><span class="mono">Support queue</span><span class="led"></span></div><div class="v">0</div><div class="l">You email the person who writes the code.</div></div>
+    <div class="tagline">Security</div>
+    <h1 style="margin-top:20px;">Stored in Canada. <span class="out">Walled off from every other company.</span></h1>
+    <p class="sub">Not a setting somebody has to remember to turn on. It's how the system is built, and it gets checked, not just claimed.</p>
+    <div class="hero-cta">
+      <a href="mailto:forafieldsolutions@gmail.com?subject=Security%20question&body=Hey%2C%20I%20have%20a%20question%20about%20how%20FORA%20handles%20security." class="cta-btn">Ask a question</a>
+      <a href="features.html" class="cta-ghost">See the platform</a>
     </div>
   </div>
 </section>
 
-<section id="built-for">
+<section id="audits">
   <div class="wrap">
     <div class="section-head" data-reveal>
-      <div class="kicker">Built for four people at once</div>
-      <h2>Most software here solves for one of them.</h2>
+      <div class="kicker">Checked, not just claimed</div>
+      <h2>An automated audit runs every three days.</h2>
+      <p>Most companies write a security page once and never look at it again. FORA's gets re-verified on a schedule: storage buckets, database access rules, secrets in the codebase, and the attacker's-eye view of the whole application. Anything it finds gets fixed or flagged, not filed away.</p>
     </div>
-    <div class="points" data-reveal>
-      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#hardhat"/></svg></span><h3>The operator</h3><p>Passwords on a scrap of paper in the truck. Phone, cold, gloves on. It still has to work.</p></div>
-      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#clipboard"/></svg></span><h3>The safety coordinator</h3><p>Every FLHA, incident and ticket in one place, ready when an auditor asks.</p></div>
-      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#wrench"/></svg></span><h3>The operations manager</h3><p>Which machine got flagged, what is overdue, what expires this month.</p></div>
-      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#chart"/></svg></span><h3>The owner</h3><p>One bill, one login, and numbers for the insurer without chasing anyone.</p></div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <div class="statement" data-reveal>
-      <p>No suits. No bs. Just results.</p>
-      <div class="after">FORA is an insured, registered business in Central Alberta. There is no support queue and no account manager. You email the person who writes the code, and he emails you back.</div>
+    <div class="trust-kpis" data-reveal>
+      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#scan"/></svg><span class="led pulse"></span></div><div class="v amber">Every 3 days</div><div class="l">Storage exposure, database access rules, hardcoded secrets, signed-URL discipline, external surfaces and an attacker's-mindset pass, all re-checked on a fixed schedule.</div></div>
+      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#leaf"/></svg><span class="led"></span></div><div class="v">Canada</div><div class="l">Your records and uploaded files are stored in a database hosted in Canada.</div></div>
+      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#database"/></svg><span class="led"></span></div><div class="v">SOC 2</div><div class="l">Our database provider holds a SOC 2 Type 2 report, audited by a third party.</div></div>
+      <div class="trust-kpi"><div class="k"><svg class="icon-svg"><use href="icons.svg#shield"/></svg><span class="led"></span></div><div class="v">Alberta PIPA</div><div class="l">Personal information is handled under Alberta's PIPA and federal PIPEDA.</div></div>
     </div>
   </div>
 </section>
 
-<section id="tradeoffs">
+<section id="access">
   <div class="wrap">
     <div class="section-head" data-reveal>
-      <div class="kicker">What that means for you</div>
-      <h2>The trade-offs, said out loud.</h2>
+      <div class="kicker">Access control</div>
+      <h2>Deny by default. Your company only ever sees your company.</h2>
+      <p>Multi-tenant isolation isn't a setting, it's the default every table starts from. Nothing is readable or writable until a rule explicitly says a signed-in user from your company can touch it.</p>
     </div>
-    <div class="ftable-wrap" data-reveal>
-      <table class="ftable">
-        <thead><tr><th>What you get</th><th>What you don't</th></tr></thead>
-        <tbody>
-          <tr><td class="lead">A straight answer on price, in an email, same week</td><td>A 45 minute discovery call before anyone will tell you a number</td></tr>
-          <tr><td class="lead">Software shaped by someone who has run the machine</td><td>A feature roadmap set by whichever enterprise client shouted loudest</td></tr>
-          <tr><td class="lead">Changes made because you asked for them</td><td>A support ticket queued behind four hundred other companies</td></tr>
-          <tr><td class="lead">A price built for a small contractor</td><td>A sales team, a booth at the trade show, and the markup that pays for both</td></tr>
-        </tbody>
-      </table>
+    <div class="layers" data-reveal>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#key"/></svg><div><h3>Signed sessions</h3><p>Every request is checked against a signed, server-verified session first.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#lock"/></svg><div><h3>Deny by default</h3><p>Row Level Security on every table, no bypass policies. The dashboard is the only door in.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#users"/></svg><div><h3>Company scoping</h3><p>Every read and write is scoped to your company. You only ever see your data, never another company's.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#pdf"/></svg><div><h3>Private file storage</h3><p>Documents and photos are served through time-limited signed links, never a public URL.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#check"/></svg><div><h3>Your data stays yours</h3><p>Export any time. Nothing is sold or used to train anything outside your account.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#eye"/></svg><div><h3>Straight about the rest</h3><p>Hosting and AI processing run through the providers named in our <a href="privacy.html" style="color:var(--orange);">Privacy Policy</a>.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="compliance">
+  <div class="wrap">
+    <div class="section-head" data-reveal>
+      <div class="kicker">Compliance</div>
+      <h2>The paperwork behind the paperwork.</h2>
+      <p>Full detail on what's collected, why, and who it's shared with lives in the actual documents. This is the short version.</p>
+    </div>
+    <div class="points three" data-reveal>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#database"/></svg></span><h3>SOC 2 Type 2 infrastructure</h3><p>The database provider FORA runs on is independently audited to SOC 2 Type 2. That's a third party checking the checker.</p></div>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#shield"/></svg></span><h3>Alberta PIPA &amp; PIPEDA</h3><p>Personal information is handled under Alberta's Personal Information Protection Act and the federal PIPEDA, not whichever rule happens to be convenient.</p></div>
+      <div class="point"><span class="ico"><svg class="icon-svg"><use href="icons.svg#gavel"/></svg></span><h3>Read the actual terms</h3><p>No summary replaces the real documents. Read the <a href="privacy.html" style="color:var(--orange); font-weight:600;">Privacy Policy</a> and <a href="terms.html" style="color:var(--orange); font-weight:600;">Terms of Use</a> in full.</p></div>
     </div>
   </div>
 </section>
@@ -223,10 +214,10 @@
 <section class="band">
   <div class="glow"></div>
   <div class="wrap">
-    <h2>Tell me what you hate doing on paper.</h2>
-    <p>That is genuinely the whole pitch. You will hear back from me, not from a sales team.</p>
+    <h2>Ask the person who built it, not a support form.</h2>
+    <p>If you've got a specific question about where your data lives or how it's protected, you'll get a straight answer by email, not a canned one from a security questionnaire template.</p>
     <div class="btnrow">
-      <a href="mailto:forafieldsolutions@gmail.com?subject=Question%20about%20FORA&body=Hey%2C%20I%20have%20this%20I%20hate%20doing%20on%20paper.%20What%20can%20you%20do%2C%20and%20how%20much%20would%20it%20cost%3F" class="cta-btn">Email me</a>
+      <a href="mailto:forafieldsolutions@gmail.com?subject=Security%20question&body=Hey%2C%20I%20have%20a%20question%20about%20how%20FORA%20handles%20security." class="cta-btn">Email us</a>
       <a href="pricing.html" class="cta-ghost">See pricing</a>
     </div>
   </div>
