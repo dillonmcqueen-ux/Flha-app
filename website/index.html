@@ -133,7 +133,11 @@
 
 <section class="hero">
   <div class="glow"></div>
-  <canvas id="heroCanvas" class="hero-canvas" aria-hidden="true"></canvas>
+  <video class="hero-video" autoplay muted loop playsinline aria-hidden="true" poster="images/hero-poster.jpg">
+    <source src="images/hero-supervisor.webm" type="video/webm">
+    <source src="images/hero-supervisor.mp4" type="video/mp4">
+  </video>
+  <div class="hero-scrim" aria-hidden="true"></div>
   <div class="wrap">
     <div class="tagline hero-in" style="--d:0ms;">No suits. No bs. Just results.</div>
     <h1 class="hero-in" style="margin-top:20px; --d:90ms;">One login for <span class="out">everything your crew files.</span></h1>
@@ -425,7 +429,20 @@
 })();
 </script>
 
-<script src="hero-animation.js" defer></script>
+<script>
+(function () {
+  var v = document.querySelector('.hero-video');
+  if (!v) return;
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var small = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+  if (reduce || small) {
+    // Respect reduced motion, and skip the autoplay download on small/mobile
+    // screens to save data — the poster frame stands in as a static hero image.
+    v.removeAttribute('autoplay');
+    v.pause();
+  }
+})();
+</script>
 <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
