@@ -133,11 +133,12 @@
 
 <section class="hero">
   <div class="glow"></div>
+  <canvas id="heroCanvas" class="hero-canvas" aria-hidden="true"></canvas>
   <div class="wrap">
-    <div class="tagline">No suits. No bs. Just results.</div>
-    <h1 style="margin-top:20px;">One login for <span class="out">everything your crew files.</span></h1>
-    <p class="sub">Safety documents, equipment inspections, compliance dates, time clock, fuel logs, daily reports and tickets. One platform that knows your procedures. One login, one bill.</p>
-    <div class="hero-cta">
+    <div class="tagline hero-in" style="--d:0ms;">No suits. No bs. Just results.</div>
+    <h1 class="hero-in" style="margin-top:20px; --d:90ms;">One login for <span class="out">everything your crew files.</span></h1>
+    <p class="sub hero-in" style="--d:180ms;">Safety documents, equipment inspections, compliance dates, time clock, fuel logs, daily reports and tickets. One platform that knows your procedures. One login, one bill.</p>
+    <div class="hero-cta hero-in" style="--d:270ms;">
       <a href="features.html" class="cta-btn">See what's built</a>
       <a href="pricing.html" class="cta-ghost">See pricing</a>
     </div>
@@ -424,6 +425,7 @@
 })();
 </script>
 
+<script src="hero-animation.js" defer></script>
 <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
