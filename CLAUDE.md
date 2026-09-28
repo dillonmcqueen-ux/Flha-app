@@ -10,6 +10,17 @@ bullets/tables, TL;DR, no reassuring language, push back when warranted),
 and what's off-limits. Apply it to every response in the session, not just
 the first one.
 
+Also read `brand.md` before writing or generating **any customer-facing
+content** — website copy, ad copy, social posts, pitch decks, marketing
+images, merch text, anything a customer or prospect will see. It covers
+voice, positioning, and the cringe list. Its hardest rule, repeated here
+because it has already been missed once building Facebook ad images:
+**no em dashes, anywhere, in any generated deliverable — text, image,
+PDF, deck, or otherwise. No exceptions, no "just this once."** Use a
+period, a comma, or start a new sentence instead. Check your own draft
+copy for the `—` character before calling it done, the same way you'd
+check code compiles.
+
 ## Agent delegation
 
 This project uses specialized subagents (`.claude/agents/*.md`) for review
