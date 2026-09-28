@@ -16,7 +16,13 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-**2026-09-23 against `42ed3c7`**, re-anchored the same day against **`e7bd475`**
+**2026-09-28 against the uncommitted working tree** that added the Ted
+client-scoping pipeline (`.claude/agents/ted.md` + three specialists,
+`portal_scope_requests`, `server-lib/portalScopePricing.js`,
+`api/scope-approval.js`, and a `stripe-webhook.js` `invoice.paid` handler)
+— placed as sales-ops plumbing outside §1/§3 with its own join-key note in
+§2 and a deliberate-non-connection entry in §5; no break filed, no
+application code touched. Before that, extended 2026-09-23 against `42ed3c7`, re-anchored the same day against **`e7bd475`**
 (`afc4b93` tightened two company scopes; `e7bd475` moved `fleet_activity` in
 `api/companydata.js`), on `claude/modular-pricing-enforcement-rzdib2` (six
 commits on top of `main` `363da23`): **#13, #17, #18, #24 and #25 are
@@ -555,6 +561,49 @@ caller's own roster (confirmed absent — see #31). Compare to `site_id` and
 rides along" pattern but **are** validated against the caller's company on
 submit (`equipmentScope.js`, comments at `logs.js:154-157,161-163`). The
 attendee/crew `rosterId` skips that step entirely.
+
+### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
+Recorded 2026-09-28 against the uncommitted working tree that added
+`api/scope-approval.js`, `server-lib/portalScopePricing.js`,
+`docs/schema/portal-scope-requests-migration.sql`, and the `invoice.paid`
+handler in `api/stripe-webhook.js`. Pre-company, sales-ops — not a customer
+join key, but it's the same "unguessable link, looked up directly, not
+HMAC-verified" pattern `onboarding_requests.edit_token`/`claim_token`
+already use, so it's tracked here rather than invented fresh.
+
+| Side | Where |
+|---|---|
+| Written | `portal-invoice-handoff` (off-repo, via Supabase MCP) before the client link is sent |
+| Read | `api/scope-approval.js:94-98` — `.eq('approval_token', token).maybeSingle()`, GET renders the proposal, POST (gated on `status === 'sent'`, `:111-113`) creates the Stripe customer + invoice |
+| Rate-limited | `checkIpThrottle` (`scope-approval.js:91`) — 30/hour/IP, same reasoning as `api/checkout.js`: token secrecy alone isn't the only guard |
+
+**A second key rides along once the client approves: `stripe_invoice_id`.**
+Written at `scope-approval.js:146` when the invoice is created and sent;
+read back by `api/stripe-webhook.js`'s `notifyPortalScopePaid` — but *not*
+by matching on `stripe_invoice_id`. The webhook instead reads
+`invoice.metadata.portal_scope_request_id` (set at `scope-approval.js:133`,
+read at `stripe-webhook.js:54`) and looks the row up by `id`
+(`stripe-webhook.js:57-61`). `stripe_invoice_id` is stored and uniquely
+indexed (`portal-scope-requests-migration.sql:53-54`) but nothing reads it
+back — the same "written, never read" shape §4b calls out elsewhere on this
+page, except here it's not a gap: the metadata id is the more direct key for
+a webhook that only ever needs "find this one row," and `stripe_invoice_id`
+exists for a human looking the row up from the Stripe side, not for code.
+Not filed as a break; noted so the next session doesn't assume the webhook
+joins on it.
+
+**Confirmed: `status = 'paid'` does not join to `onboarding_requests` or
+`companies`.** `notifyPortalScopePaid` (`stripe-webhook.js:53-78`) only
+updates `portal_scope_requests` and sends a Slack/email notification — it
+never inserts or touches `onboarding_requests`. CLAUDE.md's own description
+of the pipeline says this is deliberate ("Nothing in this pipeline
+automates past payment confirmation... document collection and the actual
+build stay Dillon's manual work"). See §5 — do not file the missing
+`portal_scope_requests` → `onboarding_requests` join as a break; it is a
+considered design decision, not a silent gap, at least for now (Company
+Portal isn't a checkout-purchasable module yet — `portalScopePricing.js:11-13`
+says the monthly fee "would be entered into MODULES... when Portal ships as
+a real subscribable module," which is the trigger to re-open this question).
 
 ### `company_id` (tenancy)
 Honoured everywhere. Governed by `tenant-scope-reviewer`, not this map.
@@ -2930,6 +2979,21 @@ Do **not** flag these. They are decisions, not gaps.
 - **`roster.employee_id` is read by nothing, on purpose.** It is a join key for
   a future HRIS sync; there is no internal consumer that should be reading it
   today. See §2 and §4b.
+- **A paid `portal_scope_requests` row never becomes an `onboarding_requests`
+  row or a `companies` row automatically.** `notifyPortalScopePaid`
+  (`api/stripe-webhook.js:53-78`) marks the scope row `paid` and notifies
+  Dillon by Slack/email — that's the whole handler. Confirmed by reading it:
+  no `.from('onboarding_requests')` or `.from('companies')` call anywhere in
+  the file. Company Portal engagements are hands-on builds (document
+  collection, the actual build) that Dillon picks up manually once payment
+  clears — CLAUDE.md's "Client scoping pipeline (Ted)" section says so in
+  as many words. Do not file the missing auto-handoff as a break. Worth
+  revisiting only if/when Portal becomes a real checkout-purchasable module
+  (`server-lib/portalScopePricing.js:11-13` names that as the trigger) —
+  at that point a paid scope creating a **draft** `onboarding_requests` row
+  Dillon still has to approve (same pattern §1's writer table already uses
+  for every other provisioning path) would be a legitimate opportunity, not
+  a mandate to auto-create a company outright.
 
 ---
 
@@ -3000,3 +3064,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-23 | `afc4b93`, `e7bd475` | **Re-anchored after two follow-up commits on the branch; no break status changed.** `afc4b93` (tenant-scope review): `fleet_activity`'s `mountedOn` is now filtered to the company's own fleet ids (`api/companydata.js:877-880`), since attachment ids come from client jsonb; and `resolveCorrectiveActionsForItems`' update carries `.eq('company_id', companyId)` next to `.in('id', ids)` (`server-lib/correctiveActions.js:345`). Both recorded in #13/#18/§3 and #17. `e7bd475` moved the `fleet_activity` block above `list_equipment`'s comment, which fixes the misplacement the previous row's report noted: the block is `:857-883` (was `:865-891`), its no-gate comment `:849-856`, queries `:863-866`, and the retired-machines comment is back directly over `list_equipment` at `:885-892`. Re-read against HEAD: everything in `companydata.js` from `list_equipment` (`:893`) down is **unchanged** — `set_equipment_pm_interval` `:1251` (guard `:1253`, refusals `:1273,1276`), the compliance guards `:1065,1114,1183,1231`, the time-clock guards `:1486,1578,1610,1638,1698`, carve-outs `:1503,1524,1543,1651,1676`, reasoning `:1473-1483`, `latestEntryAt` `:1662-1673` — so none of those needed to move. `correctiveActions.js` anchors cited by the #17 build (`:419,449,471-478,489-504,495`) re-read and still correct; three older §2 anchors (`:272-352`, `:298`, `:327`) re-anchored to `:273-356` and `:328`. #28, #29, #30 still OPEN. |
 | 2026-09-23 | `1301c76` | **#28 BUILT, not closed — closes when PR #129 merges.** Dillon approved it ("Complete 28, then merge"). "Is it towed?" is now `isTowedUnit` (`server-lib/fleetActivity.js:79-82`), by type alone — the inspection's own test — and `pmAllowedFor` (`:88-91`) delegates to it. `list_status` sets `isTowed = isTowedUnit(eq)` (`api/maintenance.js:219`), so an unflagged trailer runs the towed-KM clock (`:223-242`) instead of reading `ok` forever; a trailer already set up in **Hours** now returns `unit_mismatch` (`:231-236`, rendered by `src/Dashboard.jsx:6430`) rather than comparing KM to hours. `set_equipment_pm_interval` requires KM for any towed unit (`api/companydata.js:1276-1279`), and `attachmentStats` counts unflagged trailers (`fleetActivity.js:127-129`). Evidence: 4 new tests (`tests/unit/fleet-activity.test.js:120,126,132`, `tests/unit/timeclock-gate.test.js:242`) fail 4/35 with those files dropped into a `427895e` worktree and pass 35/35 at `1301c76`; `npm run test:unit` 419/419. Gap: no test runs `list_status` itself, so `maintenance.js:219` and the new `unit_mismatch` return are verified by reading. **Re-anchored** everything the commit shifted: `fleetActivity.js` +13 from `pmAllowedFor` down (`:75→88`, `towedDistanceSince` `:86→99`, `:95→108`, `attachmentStats` `:113→126`, filter `:114→129`); `maintenance.js` +2 from `:217` and +8 from `:229` (towed branch `:221-233→223-242`, `list_records`-area and `log_field_service` anchors); `companydata.js` +1 from `:1276` (time-clock `:1503,1524,1543,1651,1676,1698` → `:1504,1525,1544,1652,1677,1699`, reasoning `:1474-1484`, `latestEntryAt` `:1663-1674`). Changelog rows and "as found" blocks keep their original numbers. **#29 and #30 still OPEN.** |
 | 2026-09-25 | this branch (`claude/toolbox-talk-edit-notes-oz5y1u`) | **New surface reached its join key: Toolbox Talk attendee and FLHA crew (secondary) signers now pick a real roster row instead of typing a name.** New worker-facing action `list_roster_names` (`api/companydata.js:761-770`) — company-scoped, `id, name, role`, active only, no role check, same pattern as `list_sites`/`list_equipment`. `src/ToolboxTalk.jsx` adds a `rosterId` (or `rosterId: null, guest: true` for a genuine non-employee, `:275-280`) to each `attendees_json` entry; `src/App.jsx`'s FLHA crew adds `rosterId` to each `crew_signatures` entry with no guest fallback (`:502-504,526-529`) since additional crew is assumed to always be an employee. Both flows block adding a second signer at all (no free-text fallback) if the company has zero active roster members (`ToolboxTalk.jsx:612`, `App.jsx:1495`). **Placed as a refinement of the `roster_id` join key (§2), not a new key** — same target table, same shape as break #3's `submitted_by_roster_id`, but weaker: `attendees_json`/`crew_signatures` are client-submittable jsonb columns (`api/logs.js:159`, `api/flhas.js:148`) and neither submit path validates the embedded `rosterId` against the caller's own roster, unlike `site_id`/`equipment_id`, which get exactly that check. **Filed as new break #31, OPEN, not approved, not worked** — a client can currently write any `rosterId` value into either array. No `api/logs.js` or `api/flhas.js` application code touched by this pass; map only. |
+| 2026-09-28 | uncommitted working tree | **Client scoping pipeline (Ted) placed on the map, kept off §1/§3 on purpose.** New agents (`.claude/agents/ted.md` + three specialists), new table `portal_scope_requests` (no `company_id` — rows exist pre-company), new pricing module `server-lib/portalScopePricing.js` (separate source of truth from `pricing.js`'s `MODULES`), new endpoint `api/scope-approval.js`, and a new `invoice.paid` handler in `api/stripe-webhook.js` (`notifyPortalScopePaid`). Read every file listed above. Not a product surface — it's sales-ops plumbing that runs before any tenant exists, same reasoning §1 already applies to `api/checkout.js`. One join key recorded in §2 (`approval_token`, same unguessable-link pattern as `onboarding_requests.edit_token`/`claim_token`) plus a note that `stripe_invoice_id` is written and uniquely indexed but never read back — the webhook keys on `invoice.metadata.portal_scope_request_id` instead, which is not a break, just worth knowing before assuming the invoice id is the join. **No new break filed.** Confirmed by reading `stripe-webhook.js:53-78` that a `paid` row does not auto-create an `onboarding_requests` or `companies` row — that's Dillon's manual pickup by design (CLAUDE.md's own description agrees), recorded as a new deliberate non-connection in §5 rather than left for a future pass to mistake for a silent gap. Worth re-opening as a real opportunity once Portal becomes a checkout-purchasable module (`portalScopePricing.js:11-13` names that as the trigger) — not proposed now since that trigger hasn't happened. No application code touched; map only. |
