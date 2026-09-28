@@ -331,6 +331,56 @@ should ever make is editing `custom-builds-pricing-guide.md` itself, and
 that goes through branch → commit → push → draft PR like everywhere
 else.
 
+## Client scoping pipeline (Ted)
+
+`ted` is a lead agent Dillon invokes directly ("Hey Ted, I have a new
+customer...") to scope a new **Company Portal** engagement end to end:
+rough client description in, professional FORA-branded proposal out, then
+approval → invoice → payment confirmation, with Dillon picking the manual
+build back up once payment clears. Scoped to Company Portal builds only
+for now (not standard module signups, which already have a checkout flow,
+and not one-off Custom Build features, which have their own pricing guide
+and `prospect-pitch-builder`).
+
+| Agent | Job |
+|---|---|
+| `ted` | Talks to Dillon, runs intake, delegates to the three specialists below, drafts (never sends) the client outreach email in Gmail, and reports status when asked. |
+| `portal-pricing-scoper` | Prices the engagement from `server-lib/portalScopePricing.js` — the single source of truth for tier, monthly fee, and the document-count-banded setup fee locked in by the Boardroom decision (2026-09-28). Never invents a number. |
+| `portal-proposal-builder` | Writes the scope summary and renders the branded PDF proposal, grounded only in what Dillon actually described and the priced numbers handed to it. |
+| `portal-invoice-handoff` | Creates the `portal_scope_requests` row and approval link before anything is sent, and reports engagement status afterward. Never calls Stripe directly. |
+
+**How the money moves**: the client clicks Approve on a hosted page
+(`api/scope-approval.js`, looked up by an unguessable `approval_token` on
+`portal_scope_requests` — same trust model as `onboarding_requests`'
+existing edit/claim tokens). That endpoint creates the Stripe customer and
+invoice server-side, sends it, and notifies Dillon (Slack/email). Payment
+confirmation arrives separately as an `invoice.paid` event on the existing
+`api/stripe-webhook.js`, which marks the row `paid` and notifies Dillon
+again — that's his cue to request the client's documents and start the
+build. **Nothing in this pipeline automates past payment confirmation**:
+document collection and the actual build stay Dillon's manual work, since
+Portal builds are more hands-on than a standard module signup. No agent
+in this pipeline ever sends a client-facing email itself — `ted` only
+ever produces a Gmail draft for Dillon to review and send.
+
+Payment terms: full setup fee due on receipt (7-day invoice), no deposit
+structure, matching how Custom Builds are already quoted elsewhere in
+this repo.
+
+**One-time setup still needed, outside this repo**: the Stripe Dashboard's
+webhook endpoint needs the `invoice.paid` event added to what it sends to
+`/api/stripe-webhook` (currently only `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted` are
+enabled, per the "Post-upgrade cleanup" section above) — otherwise payment
+confirmations for this pipeline never arrive. `DILLON_NOTIFY_EMAIL` is an
+optional env var (alongside the existing `SLACK_ONBOARDING_WEBHOOK_URL`)
+for the approval/payment notifications both endpoints send.
+
+Schema: `docs/schema/portal-scope-requests-migration.sql`
+(`portal_scope_requests` table — deliberately not company-scoped, since
+these rows exist before a company does; RLS enabled with no policies, same
+deny-by-default backstop as every other table).
+
 ## Daily standup log
 
 Two more agents keep a running, plain-English record of what's happening on this project,
