@@ -150,6 +150,21 @@ Supporting surfaces: Onboarding → Claim (`Onboarding.jsx` → `ClaimAccount.js
 Admin Panel, SOPs, Sites, Equipment fleet, Roster, Custom Fields, Billing
 (`api/checkout.js` + `api/stripe-webhook.js`).
 
+**Client scoping pipeline (Ted) — deliberately off this map's surfaces/matrix,
+recorded 2026-09-28 against the uncommitted working tree.** `ted` +
+`portal-pricing-scoper` / `portal-proposal-builder` / `portal-invoice-handoff`
+(`.claude/agents/`) price and invoice a **Company Portal** engagement before
+any company account exists — `portal_scope_requests`
+(`docs/schema/portal-scope-requests-migration.sql`) has no `company_id` on
+purpose, and every row above lives against a company, a doc key, or a
+module a company already bought. It doesn't belong in §1's surface table or
+§3's matrix for the same reason Billing's Stripe checkout flow isn't in
+either: it's plumbing that runs *before* a tenant exists, not a feature a
+logged-in company uses. Its one join key (`approval_token`) and its
+deliberate non-join to `onboarding_requests`/`companies` are recorded in §2
+and §5 instead, so this doesn't get silently re-scoped into "a product
+surface with no matrix row" by a later pass.
+
 **Every doc-key column above is now enforced, not just displayed.**
 `server-lib/docKeyGate.js` (`48d5889`) is the one gate every handler asks; see
 §2's `document_key` section for the 51 guards (as of `ac80f96`), the

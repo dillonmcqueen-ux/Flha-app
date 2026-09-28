@@ -2,9 +2,12 @@
 // Stripe webhook endpoint — registered in the Stripe Dashboard as this
 // file's URL. Listens for checkout.session.completed (stages the purchased
 // plan tier + Stripe customer id, keyed by Checkout Session id, for
-// submit_onboarding_intake to claim) and customer.subscription.updated/
+// submit_onboarding_intake to claim), customer.subscription.updated/
 // deleted (keeps a company's suspended flag + stripe_subscription_status in
-// sync). Previously shared api/cron-equipment-reports.js with the weekly
+// sync), and invoice.paid (the payment-confirmed step of the Ted portal
+// scoping pipeline — see CLAUDE.md's "Client scoping pipeline" section and
+// api/scope-approval.js, which creates and sends the invoice this reacts
+// to). Previously shared api/cron-equipment-reports.js with the weekly
 // cron job to stay under Vercel's Hobby-plan 12-function cap; split back out
 // once the project moved to Pro (see vercel-function-budget-guardian.md).
 //
@@ -16,6 +19,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { sendEmail } from '../server-lib/email.js';
+import { sendSlackNotification } from '../server-lib/slack.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -40,6 +45,37 @@ async function readRawBody(req) {
 // retrying the payment, so we don't cut access during that grace period.
 const SUSPEND_STATUSES = new Set(['canceled', 'unpaid', 'incomplete_expired']);
 const RESTORE_STATUSES = new Set(['active', 'trialing']);
+
+// Payment-confirmed step of the Ted scoping pipeline. Only invoices this
+// webhook itself created via api/scope-approval.js carry this metadata key
+// — a company's ordinary subscription invoices (created by Stripe's own
+// billing cycle, not by that endpoint) don't, so this is a no-op for those.
+async function notifyPortalScopePaid(invoice) {
+  const scopeId = invoice.metadata?.portal_scope_request_id;
+  if (!scopeId) return;
+
+  const { data: scope, error: findErr } = await supabaseAdmin
+    .from('portal_scope_requests')
+    .select('id, client_name, status')
+    .eq('id', scopeId)
+    .maybeSingle();
+  if (findErr) throw new Error(`portal_scope_requests lookup failed: ${findErr.message}`);
+  if (!scope || scope.status === 'paid') return; // already handled, or the row is gone
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('portal_scope_requests')
+    .update({ status: 'paid', paid_at: new Date().toISOString() })
+    .eq('id', scopeId);
+  if (updateErr) throw new Error(`portal_scope_requests paid update failed: ${updateErr.message}`);
+
+  const text = `Payment confirmed: ${scope.client_name} paid their Portal setup fee. Time to request their documents and start the build.`;
+  await Promise.allSettled([
+    sendSlackNotification(text),
+    process.env.DILLON_NOTIFY_EMAIL
+      ? sendEmail({ to: process.env.DILLON_NOTIFY_EMAIL, subject: `Payment confirmed: ${scope.client_name}`, text })
+      : Promise.resolve(),
+  ]);
+}
 
 async function syncSubscriptionToCompany(subscription) {
   const status = subscription.status;
@@ -159,6 +195,8 @@ export default async function handler(req, res) {
       if (stageErr) throw new Error(`stripe_checkouts upsert failed: ${stageErr.message}`);
     } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
       await syncSubscriptionToCompany(event.data.object);
+    } else if (event.type === 'invoice.paid') {
+      await notifyPortalScopePaid(event.data.object);
     }
   } catch (e) {
     // Deliberately no processed_at stamp: the claim stays unfinished so
