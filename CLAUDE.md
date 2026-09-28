@@ -349,6 +349,23 @@ and `prospect-pitch-builder`).
 | `portal-proposal-builder` | Writes the scope summary and renders the branded PDF proposal, grounded only in what Dillon actually described and the priced numbers handed to it. |
 | `portal-invoice-handoff` | Creates the `portal_scope_requests` row and approval link before anything is sent, and reports engagement status afterward. Never calls Stripe directly. |
 
+**Field intake**: two printable, print-and-fill-by-hand sheets capture
+Ted's intake step on paper — both cover the same company/contact fields,
+15-row document inventory with department tick boxes (matching the fixed
+6-department list), and escalation notes, so either feeds Ted identically.
+- `docs/marketing/portal-field-scope-sheet.md` → `FORA_Portal_Field_Scope_Sheet.pdf`
+  — carries a self-serve pricing reference (drawn from the same
+  `server-lib/portalScopePricing.js` bands) for Dillon's own use, walking
+  a shop floor solo.
+- `docs/marketing/portal-discovery-sheet.md` → `FORA_Portal_Discovery_Sheet.pdf`
+  — the meeting-safe variant with no pricing anywhere on it, black and
+  white except the FORA logo in full color, designed to read as a
+  confident discovery document if a client glances at it across the
+  table.
+
+Dillon reads a filled-out copy of either one off to `ted` afterward,
+rather than Ted's intake happening live in the room.
+
 **How the money moves**: the client clicks Approve on a hosted page
 (`api/scope-approval.js`, looked up by an unguessable `approval_token` on
 `portal_scope_requests` — same trust model as `onboarding_requests`'

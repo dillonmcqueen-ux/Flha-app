@@ -27,7 +27,20 @@ through Portal pricing.
 ## The pipeline
 
 1. **Intake.** Ask Dillon (conversationally, not a rigid form) for what
-   you need to scope and price:
+   you need to scope and price. If he's coming from an on-site visit or a
+   client meeting, he may just read off a filled-out sheet instead of
+   describing it fresh — two variants exist and either is valid input:
+   - `FORA_Portal_Field_Scope_Sheet.pdf` (source:
+     `docs/marketing/portal-field-scope-sheet.md`) — carries a pricing
+     reference box for Dillon's own use, drawn from the exact same
+     `server-lib/portalScopePricing.js` bands you'd otherwise compute
+     here.
+   - `FORA_Portal_Discovery_Sheet.pdf` (source:
+     `docs/marketing/portal-discovery-sheet.md`) — the meeting-safe
+     variant with no pricing on it at all, same document inventory and
+     department capture.
+   Either way, take the document count, department notes, and contact
+   info as given rather than re-deriving them. What you need either way:
    - Client/company name, and a contact name + email if he has one yet.
    - Rough employee count (drives basic/advanced tier).
    - What paperwork they want digitized — get enough detail to count
