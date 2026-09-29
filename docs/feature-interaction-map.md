@@ -16,7 +16,20 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; **most recent pass
-2026-09-29 on branch `portal-pdf-email` (`ba5f6ab`)** — Company Portal
+2026-09-29 on branch `fix-portal-p3` (`b97b231`), the Company Portal parity
+sweep** — everything merged since the last pass recorded. **#35, #36 and #33
+are CLOSED** (PR #158 for the first two; #33's Unfinished list was only
+truly fixed by #37 below). Four breaks filed by the sweep, numbered
+**#37-#40**: **#37 (Resume on a Portal draft) and #38 (a submitted Portal
+record could not be edited or deleted) are FIXED and merged, PR #159; #39
+(site and company delete ignored Portal) is approved and FIXED on this
+branch, closes when its PR merges; #40 (Portal missing from Overview Recent
+Activity, Site Activity and Analytics) is OPEN, not approved.** The Overview
+"Company Portal" panel (PR #157) is now read and mapped. Known and unchanged:
+Portal is still not in `server-lib/pricing.js`, and Portal answers emit no
+Brain signals (a product decision, §5). The paragraph that follows
+describes the pass before this one: **2026-09-29 on branch
+`portal-pdf-email` (`ba5f6ab`)** — Company Portal
 "email documents to a department" placed on the map (§2's
 `portal_report_schedules` section, breaks #35 and #36, changelog); the
 paragraph that follows describes the pass before it. Earlier extension:
@@ -936,10 +949,11 @@ Escalations tab.
 ### `portal_report_schedules` / department email (Company Portal follow-up, step 5)
 Recorded 2026-09-29 against branch `portal-pdf-email` (`ba5f6ab`). New table
 `portal_report_schedules` (`docs/schema/portal-report-schedules-migration.sql`,
-**NOT applied live** as of this pass: until it is, `list_report_schedules`
-returns 500 (`api/portal.js:1046-1047`) and the daily cron 500s
-(`api/cron-portal-reports.js:32-34,49-50`). A deploy-order dependency, not a
-break). This feature is a pure **consumer** of four existing keys and adds
+**NOT applied live** as of the `ba5f6ab` pass. **Update 2026-09-29: applied
+live now, per Dillon; that is a database fact this pass could not check from
+code, so it is taken from him, not re-verified.** Before it was, the actions
+returned 500 and the daily cron 500'd (`api/cron-portal-reports.js:32-34,49-50`).
+A deploy-order dependency, not a break). This feature is a pure **consumer** of four existing keys and adds
 no new key of its own.
 
 | Consumed | Producer side | Consumer side | Key agrees? |
@@ -961,11 +975,14 @@ the document's own `departments` (`:1603` in the working tree, `:1602` in `ba5f6
 Cron registered `vercel.json:9` (`0 13 * * *`); gated only by `CRON_SECRET`
 (`cron-portal-reports.js:27`). Company Portal has no doc key or `MODULES`
 entry, so `isDocKeyActive` does not apply, same open flag as phases 1-5, not
-refiled. **Unlike its sibling `cron-equipment-reports.js:88`, this cron does
-not check `roster_enabled` or `suspended`** (the Portal UI tab rides
-`roster_enabled`): a company that is switched off keeps getting its
-schedules sent. Noted here, not filed, because the gate it would copy is
-itself UI-only for the rest of Portal.
+refiled. **Update (PR #158, read 2026-09-29):** this cron now gates like its
+sibling `cron-equipment-reports.js:88`. It selects `companies.roster_enabled,
+suspended` and only runs schedules for companies where `roster_enabled &&
+!suspended` (`api/cron-portal-reports.js:36-39`, applied at `:43`), and
+`runSchedule` returns `marked: false, reason: 'email_not_configured'` without
+`RESEND_API_KEY` (`server-lib/portalReports.js:128`). The gate is on
+`roster_enabled` because that is what the Portal UI tab rides, not a Portal
+doc key; still no `MODULES` entry.
 
 **Encryption spine this rides on** (earlier merged steps, recorded so the
 next pass doesn't re-derive it): `roster.email` is AES-256-GCM via
@@ -977,8 +994,19 @@ next pass doesn't re-derive it): `roster.email` is AES-256-GCM via
 consumed `login.js:860-868` (edit link, blanked once approved) and
 `onboardingApproval.js:276-293` (approval writes the encrypted roster
 emails). Supervisors creating assignment rules: `portal.js:797-798`
-(`admin` or `supervisor`). The Overview "Company Portal" panel in
-`Dashboard.jsx` was **not** read in this pass: `?`.
+(`admin` or `supervisor`). The Overview "Company Portal" panel: **read
+2026-09-29, no longer `?`.** See the next section.
+
+### Overview "Company Portal" panel (PR #157)
+Consumer only, no new key. `src/Dashboard.jsx:5502-5508` builds four tiles
+from `portalRecords` (`:2378`, new this week by `created_at`),
+`portalLibraryDocs` (`:2380`, `is_active`), `portalAssignmentRows` (`:2385`,
+`status === "overdue"`) and `portalEscalations` (`:2393`, `status ===
+"open"`), the same four lists the Portal tab uses. It returns `null` when the
+company has no documents and no records (`:5508`). The loader effect fires on
+the Overview too, only when `TAB_VISIBLE.portal` is on (`:3460-3468`, effect
+calls `loadPortalRecords/Library/Assignments/Escalations`). It is not
+included in `recentActivityList` or Site Activity, see #40.
 
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
@@ -3245,8 +3273,10 @@ drafts section, has its own separate allowlist that still excludes
 
 ### #33 — An in-progress Portal draft never shows up in Unfinished, unlike every other form type
 
-**Severity: low/medium. Status: CLOSED — PR #151, branch
-`fix-break-33-unfinished-portal-drafts`, commit `a02612d`.** Filed
+**Severity: low/medium. Status: CLOSED. PR #151 (`a02612d`) made the draft
+appear in Unfinished, but that fix was incomplete: tapping Resume on it went
+nowhere. The other half is break #37, fixed in PR #159. Only with both is a
+Portal draft findable and resumable.** Filed
 2026-09-29 while building the #32 fix (PR #149) — distinct from #32 and
 NOT fixed by it. Fixed same-day once approved: `TYPE_META` in
 `src/MyDocuments.jsx:37` now carries `portalform: { label: "Portal
@@ -3395,8 +3425,14 @@ history UI, unrelated to escalation). Distinct, new item.
 
 ### #35 — A department report with nobody to send to is marked "sent" and its documents are never emailed
 
-**Severity: medium. Status: FIXED on branch `portal-pdf-email`, not closed
-until it merges.** Filed 2026-09-29 placing `portal-pdf-email` (`ba5f6ab`).
+**Severity: medium. Status: CLOSED. Fixed and merged in PR #158, re-read
+2026-09-29.** `runSchedule` now returns `marked: false` whenever `sent === 0`
+on a non-empty run (`server-lib/portalReports.js:148`, so zero recipients no
+longer advances `last_sent_at`), refuses without `RESEND_API_KEY` (`:128`), and
+the cron skips `roster_enabled`-off or `suspended` companies
+(`api/cron-portal-reports.js:36-39`). Re-check: `sed -n 144,151p
+server-lib/portalReports.js` (the `sent === 0` return must precede the
+`update`). Filed 2026-09-29 placing `portal-pdf-email` (`ba5f6ab`).
 This is a bug in the feature's own unmerged code, so it was fixed in the same
 PR rather than waiting for a sweep decision: `runSchedule` now refuses to mark
 a schedule handled whenever `sent === 0` on a non-empty run, refuses to run at
@@ -3431,8 +3467,10 @@ Not run against a live DB; verified by reading only.
 
 ### #36 — "Email to department" lets the server send a record to a department the document isn't routed to
 
-**Severity: low-medium. Status: FIX COMMITTED on `portal-pdf-email` as
-`e3c49ad`, branch not merged, so not closed.** Filed
+**Severity: low-medium. Status: CLOSED. Fix (`e3c49ad`) merged in PR #158,
+re-read 2026-09-29: the server check is at `api/portal.js:1260`, `if
+(session.role !== 'admin' && !(doc.departments || []).includes(department))
+return denied();`. Admin is deliberately unrestricted.** Filed
 2026-09-29 against `ba5f6ab`; while this entry was being written someone
 else fixed it (first uncommitted, then committed as `e3c49ad`): `api/portal.js:1150-1153` now denies a non-admin whose
 target `department` is not in `doc.departments`, and `Dashboard.jsx:1603`
@@ -3462,6 +3500,86 @@ side door; a pay or medical document can be pushed to Operations.
 `doc.departments.includes(department)`).
 
 *A fix would touch:* one condition after `api/portal.js:1146` (that is what the working-tree change is).
+
+### The Company Portal parity sweep (2026-09-29): #37-#40
+
+Method: for each thing a built-in document can do, check whether a Portal
+document can. Sweep found four gaps, numbered here in the order it listed them
+(P1-P4 in the sweep notes).
+
+### #37 (P1) — Resume on a Portal draft went nowhere
+
+**Severity: medium. Status: CLOSED. Fixed and merged, PR #159.** Second half
+of #33. Unfinished (`MyDocuments.jsx`) listed a Portal draft after PR #151,
+but `WorkerMenu.jsx`'s `onResume` handler only knew `customform` and the
+built-in types, so `portalform` fell into `setDoc(type)` with an id-less type
+that opens nothing. Now `src/WorkerMenu.jsx:221`: `else if (type ===
+"portalform") { setPortalDocumentId(formId); setDoc("portal"); }`. Re-check:
+`grep -n '"portalform"' src/WorkerMenu.jsx` (expect `:38` resubmit map and
+`:221`); absence of `:221` means it regressed. Customer loses (before): a
+worker sees their unfinished Portal form and can't reopen it.
+
+### #38 (P2) — A submitted Portal record could not be edited, regenerated or deleted
+
+**Severity: medium. Status: CLOSED. Fixed and merged, PR #159.** Built-in
+documents have `update_record` and friends in `api/customforms.js`; Portal had
+no update or delete in `api/portal.js`, so a wrong answer or a test submission
+was permanent. Now: `update_portal_record` (`api/portal.js:1037`) and
+`delete_portal_record` (`:1085`), both admin/supervisor, both scoped by
+`loadManageableRecord` (`:1021`: own company, an individually-identified
+supervisor only for documents routed to their departments, one generic 403).
+Edits are checked per field type by `validateEditedPortalAnswer`
+(`server-lib/portalFieldTypes.js:48`, called `api/portal.js:1059`), capped at
+200 answers (`:1041`), and only answers belonging to that record are touched.
+Escalations already raised are left as snapshots (comment at `:1068`). Delete
+also removes the stored PDF (`flha-reports`) and attachments
+(`portal-attachments`) from storage, best-effort (`:1085-1113`, removal at `:1108-1109`), and cascades
+answers and escalations. UI: `PortalRecordCard` edit, regenerate-PDF and
+delete (`src/Dashboard.jsx:1601`, `:1653`, `:1663`). Re-check: `grep -n
+"update_portal_record\|delete_portal_record" api/portal.js src/Dashboard.jsx`.
+
+Related, same PR: `get_portal_record_detail` now returns one generic 403 for
+a missing record and for a foreign one when the caller is not admin
+(`api/portal.js:721-723`, and `:729` for a missing document); admin still gets
+404. Probing record ids can no longer reveal what exists in another company.
+
+### #39 (P3) — Deleting a site or a company did not know about Company Portal
+
+**Severity: medium. Status: APPROVED by Dillon and FIXED on branch
+`fix-portal-p3` (`b97b231`). Not closed until its PR merges.** Found by the
+sweep: `portal_records.site_id` is NOT NULL with no cascade, and
+`portal_documents.company_id` has no cascade, so both deletes either hit the
+foreign key or orphaned Portal rows. Before: `delete_site`
+(`api/companydata.js`) returned the generic "Couldn't remove site." with no
+reason; `delete_company` (`api/admin.js`) had no Portal step. Now:
+`delete_site` counts `portal_records` on the site and adds "N Company Portal
+submission(s)" to the blocker list (`api/companydata.js:1027-1032`, the same
+blockers message every other document type uses); `delete_company` counts
+Portal submissions through `portal_documents.company_id`
+(`api/admin.js:685-698`, folded into the existing total-records refusal), and
+when there are none deletes the company's `portal_documents` (cascading
+questions, rules, assignments, escalations, `:729`) and
+`portal_report_schedules` (`:731`, deleted unconditionally) before the roster. Verified by reading only;
+not run against a live database. Re-check: `grep -n "portal_records"
+api/companydata.js api/admin.js`.
+
+### #40 (P4) — Portal submissions and escalations are absent from Overview Recent Activity, Site Activity and Analytics
+
+**Severity: low-medium. Status: OPEN, not approved.** `recentActivityList`
+(`src/Dashboard.jsx:4248-4257`) merges eight built-in lists plus
+`walletActivity` and no Portal source. `siteActivity` (`:4262`) is fed
+`fieldSiteActivity(companyFlhas, companyToolbox, companyDaily,
+companyNearMisses, companyIncidents, ...)`, no Portal. `grep -in portal
+src/Analytics.jsx` returns nothing. The data is already in memory on the
+Overview (`portalRecords`, `portalEscalations`, loaded at `:3460-3468`) and
+the new Company Portal panel shows counts, but a Portal submission never
+appears in the activity feed, never counts toward a site, and never reaches
+Analytics. Customer loses: a company whose paperwork is mostly Portal
+documents sees a quiet Recent Activity. *A fix would touch:*
+`recentActivityList` and its row renderer (`:5596-5622`), `fieldSiteActivity`
+(`portal_records.site_id` is a real FK, so this joins cleanly), and
+`src/Analytics.jsx`. Re-check: `grep -n "portalRecords" src/Dashboard.jsx`
+between `:4248` and `:4270` returns nothing.
 
 ## 4b. The recurring shape: a key written and never read
 
@@ -3526,6 +3644,15 @@ Two related instances, same family:
 ## 5. Deliberate non-connections
 
 Do **not** flag these. They are decisions, not gaps.
+
+- **Company Portal answers emit no Brain signals.** `grep -n "source_type:"
+  api/portal.js` returns nothing. Parity with custom documents, which also
+  emit none (break #4's remaining unwired list). A product decision, checked
+  2026-09-29 (parity sweep). Do not refile as a new break.
+- **Company Portal is not in `server-lib/pricing.js`.** Known and unchanged
+  (`grep -n "portal" server-lib/pricing.js` returns nothing, 2026-09-29). The
+  Portal tab rides `roster_enabled`; the department-report cron gates on it
+  too (`api/cron-portal-reports.js:36-39`).
 
 - **Gatehouse is a separate product.** Gated by `companies.app_type ===
   'gatehouse'` (`AdminPanel.jsx:1687`), not by a doc key or module. A
@@ -3818,3 +3945,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-29 | PR #151 (branch `fix-break-33-unfinished-portal-drafts`), commit `a02612d` | **Break #33 CLOSED on merge.** One-line, client-only fix: `TYPE_META.portalform` added to `src/MyDocuments.jsx:37`, so an in-progress Portal draft now shows up in Unfinished the same way every other form type does. Re-verified against the merged code (`grep -n "portalform" src/MyDocuments.jsx` → `:37`) before rewriting §4's break #33 entry from open to closed. No other application code touched by this pass; map only. |
 | 2026-09-29 | PR #152 (branch `fix-break-34-escalation-notification`), commit `582ee3d` | **Break #34 CLOSED on merge.** `api/portal.js`'s escalation-insert block (`:588-611`) now sends a second best-effort `sendEmail` to the escalation's own target department, gated on the insert actually succeeding and wrapped in its own try/catch — mirrors the phase-3 submission email's recipient shape but keyed on `escalation_department` instead of the document's `departments`. Re-verified against the merged code (`grep -n "sendEmail" api/portal.js` → import at `:27`, escalation email at `:603`, phase-3 email at `:643` — three hits, was two before the fix) before rewriting §4's break #34 entry from built-not-closed to closed. No other application code touched by this pass; map only. |
 | 2026-09-29 | branch `portal-pdf-email`, `ba5f6ab` | **Company Portal "email documents to a department" placed on the map.** New table `portal_report_schedules` (migration written, **not applied live**), `server-lib/portalReports.js`, `api/cron-portal-reports.js` (`vercel.json:9`), five `api/portal.js` actions (`:1042-1158`), `src/PortalReports.jsx`, and the Email to department button (`Dashboard.jsx:1651`). Consumes `PORTAL_DEPARTMENTS`, `roster.departments`, `portal_documents.departments`, `portal_records.pdf_url` and encrypted `roster.email`; all keys agree (table in §2). Earlier merged steps recorded in the same §2 section: `fieldCrypto` roster/onboarding encryption, `people_encrypted`, supervisor-created assignment rules. **Breaks #35** (zero-recipient run marks documents as sent, `portalReports.js:143-145`) **and #36** (one-off email doesn't check the target department against the document's routing, `portal.js:1138-1149`) opened. #35 not approved. #36 was fixed in `e3c49ad` (`portal.js:1150-1153`, `Dashboard.jsx:1603`), not closed until the branch merges. That commit also rejects recipient addresses containing `,;<>()"` (`portal.js:1067`), not mapped as a break. Noted, not filed: the cron skips no `roster_enabled`/`suspended` check, unlike `cron-equipment-reports.js:88`. Overview Company Portal panel not read (`?`). Map only; no application code touched. |
+| 2026-09-29 | branch `fix-portal-p3` (`b97b231`), PRs #157, #158, #159 | **Company Portal parity sweep, plus everything merged since the last pass.** PR #158 merged (department report emails; `portal_report_schedules` reported applied live by Dillon, not verifiable from code): **#35 and #36 CLOSED**, cron now gated on `companies.roster_enabled`/`suspended` (`cron-portal-reports.js:36-39`), `runSchedule` refuses without `RESEND_API_KEY` (`portalReports.js:128`). PR #157 merged: Overview "Company Portal" panel read (`Dashboard.jsx:5502-5508`), the standing `?` cleared. Sweep filed four breaks: **#37** (Resume on a Portal draft, `WorkerMenu.jsx:221`) CLOSED, PR #159; **#38** (edit, regenerate, delete a submitted Portal record: `update_portal_record` `portal.js:1037`, `delete_portal_record` `:1085`, `validateEditedPortalAnswer` `portalFieldTypes.js:48`, `PortalRecordCard` edit UI, delete also removes stored PDF and attachments) CLOSED, PR #159; **#39** (`delete_site` `companydata.js:1027-1032`, `delete_company` `admin.js:685-731` ignored Portal) approved and FIXED on this branch, closes when its PR merges; **#40** (Portal absent from Overview Recent Activity, Site Activity, Analytics, `Dashboard.jsx:4248-4262`) OPEN, not approved. **#33 amended:** its Unfinished-list fix (PR #151) was incomplete until #37, since Resume went nowhere. `get_portal_record_detail` now returns one generic 403 for missing versus foreign record for non-admin (`portal.js:721-729`). Known, unchanged, now in §5: Portal not in `pricing.js`; Portal answers emit no Brain signals. Map only; no application code touched. |
