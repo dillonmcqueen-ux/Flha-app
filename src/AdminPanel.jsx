@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
+import PortalDocumentBuilder from "./PortalDocumentBuilder.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
 import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
@@ -21,11 +22,19 @@ import Sidebar from "./Sidebar";
 // supervisor dashboard. `view` state below still drives which screen
 // renders; these just map the sidebar's tab keys onto that existing state
 // so nothing about data-loading/handlers underneath had to change.
-const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound };
-const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes" };
-const ADMIN_CATEGORY_ICON = { admin: Building2 };
-const ADMIN_CATEGORIES = [{ key: "admin", label: "Admin", tabs: ["onboarding", "codes"] }];
-const VIEW_TO_ADMIN_TAB = { home: "overview", onboardingRequests: "onboarding", allCodes: "codes" };
+// documentBuilder: Company Portal phase 2's admin document builder (FORA
+// Company Portal — Build Spec, "Admin document builder") — founder-only,
+// same access boundary as every other tab here. A separate top-level
+// category rather than folded into "Admin" because it isn't a console
+// operation on a company record; it's Dillon building a document for one.
+const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound, documentBuilder: FileText };
+const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes", documentBuilder: "Document Builder" };
+const ADMIN_CATEGORY_ICON = { admin: Building2, portal: FileText };
+const ADMIN_CATEGORIES = [
+  { key: "admin", label: "Admin", tabs: ["onboarding", "codes"] },
+  { key: "portal", label: "Company Portal", tabs: ["documentBuilder"] },
+];
+const VIEW_TO_ADMIN_TAB = { home: "overview", onboardingRequests: "onboarding", allCodes: "codes", documentBuilder: "documentBuilder" };
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1317,7 +1326,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // it, e.g. openManage/addCompany), this block just maps its three
   // "top-level destination" values onto sidebar tab keys instead of
   // rendering each as its own <div style={st.wrap}> screen.
-  if (view === "home" || view === "allCodes" || view === "onboardingRequests") {
+  if (view === "home" || view === "allCodes" || view === "onboardingRequests" || view === "documentBuilder") {
     const activeAdminTab = VIEW_TO_ADMIN_TAB[view];
     const newOnboardingCount = onboardingRequests.filter(r => r.status === "new").length;
     const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
@@ -1329,6 +1338,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       setMsg("");
       if (key === "onboarding") { setView("onboardingRequests"); loadOnboardingRequests(); }
       else if (key === "codes") { setView("allCodes"); loadAllCodesView(); }
+      else if (key === "documentBuilder") { setView("documentBuilder"); }
       else setView("home");
     };
 
@@ -1379,7 +1389,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             categoryIcon={ADMIN_CATEGORY_ICON}
             tabIcon={ADMIN_TAB_ICON}
             tabLabel={ADMIN_TAB_LABEL}
-            tabVisible={{ onboarding: true, codes: true }}
+            tabVisible={{ onboarding: true, codes: true, documentBuilder: true }}
             tabCounts={{ onboarding: newOnboardingCount }}
             activeTab={activeAdminTab}
             onSelectTab={goToTab}
@@ -1393,6 +1403,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             )}
 
             {/* ── Overview ───────────────────────────────────────────── */}
+            {activeAdminTab === "documentBuilder" && (
+              <PortalDocumentBuilder companies={companies} token={token} />
+            )}
+
             {activeAdminTab === "overview" && (
               <>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>

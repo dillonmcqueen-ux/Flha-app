@@ -7,6 +7,7 @@ import Incident, { resubmitIncident } from "./Incident.jsx";
 import DailyReport, { resubmitDaily } from "./DailyReport.jsx";
 import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
+import PortalDocumentForm, { resubmitPortalForm } from "./PortalDocumentForm.jsx";
 import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import FieldService, { resubmitFieldService } from "./FieldService.jsx";
@@ -34,6 +35,7 @@ const RESUBMIT_HANDLERS = {
   customform: resubmitCustomForm,
   fuellog: resubmitFuelLog,
   fieldservice: resubmitFieldService,
+  portalform: resubmitPortalForm,
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
@@ -80,6 +82,11 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [customFormId, setCustomFormId] = useState(null);
   const [builtinActive, setBuiltinActive] = useState(null); // null = loading
   const [customForms, setCustomForms] = useState([]);
+  // Company Portal phase 2 — not yet department/assignment-scoped (phase
+  // 3/4): every active portal_documents row for this company, shown to
+  // every worker, same interim behavior custom forms already have.
+  const [portalDocumentId, setPortalDocumentId] = useState(null);
+  const [portalDocuments, setPortalDocuments] = useState([]);
   const [showMyDocs, setShowMyDocs] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
@@ -112,6 +119,18 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       }
     }
     loadDocs();
+
+    async function loadPortalDocs() {
+      try {
+        const res = await fetch("/api/portal", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_worker_portal_documents", token }),
+        });
+        const data = await res.json();
+        if (res.ok) setPortalDocuments(data.documents || []);
+      } catch (e) { /* leave list empty on a transient error */ }
+    }
+    loadPortalDocs();
   }, [token]);
 
   // Certification expiry notification (onboarding wallet, Phase 3) — only
@@ -229,6 +248,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   if (doc === "custom" && customFormId) {
     return <CustomForm companyId={companyId} companyName={companyName} userName={userName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
   }
+  if (doc === "portal" && portalDocumentId) {
+    return <PortalDocumentForm companyId={companyId} companyName={companyName} userName={userName} documentId={portalDocumentId} onBack={() => { setDoc(null); setPortalDocumentId(null); }} onLogout={onLogout} token={token} />;
+  }
   if (doc === "timeclock") {
     return <TimeClock companyId={companyId} companyName={companyName} userName={userName} userId={userId} onBack={() => setDoc(null)} token={token} clockOutOnly={builtinActive?.timeclock === false} />;
   }
@@ -289,7 +311,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     .map(cat => ({ ...cat, ...categoryItems(cat) }))
     .filter(cat => cat.builtins.length > 0 || cat.forms.length > 0);
 
-  const totalItems = categorizedBuiltins.length + customForms.length + (timeclockItem ? 1 : 0);
+  const totalItems = categorizedBuiltins.length + customForms.length + portalDocuments.length + (timeclockItem ? 1 : 0);
 
   const renderItemCard = (d) => {
     const Icon = d.icon;
@@ -319,6 +341,25 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{f.title}</div>
         <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>Custom document</div>
+      </div>
+      <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+    </div>
+  );
+
+  // Company Portal documents — the customer's own paper forms, built by
+  // Dillon per company. Deliberately not folded into the safety/equipment/
+  // general categories above: those are FORA's own document taxonomy,
+  // while a Portal document's category is Dillon's free-text tag for
+  // cross-company analytics, not a worker-facing grouping. Shown as their
+  // own section instead.
+  const renderPortalCard = (d) => (
+    <div key={d.id} style={s.card("#F97316", true)} onClick={() => { setPortalDocumentId(d.id); setDoc("portal"); }}>
+      <div style={s.iconTile("#F97316")}>
+        {d.icon ? <span style={{ fontSize: 22 }}>{d.icon}</span> : <FileText size={22} color="#F97316" strokeWidth={2.25} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{d.title}</div>
+        <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>Company document</div>
       </div>
       <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
     </div>
@@ -547,6 +588,8 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
               </div>
             );
           })}
+
+          {portalDocuments.map(renderPortalCard)}
 
           {!loading && totalItems === 0 && (
             <div style={{ textAlign: "center", padding: "40px 0", color: C.text.muted }}>
