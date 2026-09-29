@@ -1,8 +1,10 @@
 // api/portal.js
-// Company Portal phase 2 (FORA Company Portal — Build Spec, "Document
-// engine v2"): the admin document builder (AI-assisted draft + manual
-// editing + publish), and the worker submission / supervisor-admin viewing
-// paths for portal_documents/portal_questions/portal_records/portal_answers.
+// Company Portal (FORA Company Portal — Build Spec): the admin document
+// builder (AI-assisted draft + manual editing + publish), the worker
+// submission path, and supervisor/admin viewing, assignment, and
+// escalation handling for
+// portal_documents/portal_questions/portal_records/portal_answers/
+// portal_assignment_rules/portal_assignments/portal_escalations.
 //
 // Deliberately a separate file from api/customforms.js rather than folded
 // into it — custom_forms is a company self-service, yes/no-only builder
@@ -11,14 +13,11 @@
 // engine. Sharing one file would mean every future edit to either has to
 // reason about both.
 //
-// Phase 3 (document-level routing + notification) and phase 4 (assignment
-// + compliance) are NOT built here — see the "not yet" notes below each
-// relevant action. In particular: every active portal_documents row is
-// currently shown to every worker in the company (no department-based
-// dashboard filtering, no assignment rules yet), and there is no
-// supervisor/admin dashboard UI wired to list_portal_records yet — that's
-// explicitly a phase 3 deliverable (the spec ties department-scoped
-// dashboards to routing).
+// All 5 build-order phases are built here: departments (phase 1, in
+// api/companydata.js/roster), document engine v2 (phase 2), document-level
+// routing + notification (phase 3), assignment + compliance (phase 4), and
+// question-level escalation (phase 5). Phases 1-4 are the sellable v1;
+// phase 5 is a roadmap item on top of it, not sold as included until now.
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -28,7 +27,7 @@ import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
-import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions } from '../server-lib/portalFieldTypes.js';
+import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate } from '../server-lib/portalFieldTypes.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -119,6 +118,17 @@ function validateQuestions(questions) {
         return `"${q.questionText}" needs at least two options.`;
       }
     }
+    // Phase 5: escalation is only ever set alongside a target department AND
+    // a trigger value, on a field type that has a fixed set of possible
+    // answers to compare against — see server-lib/portalFieldTypes.js.
+    if (q.escalationDepartment) {
+      if (!PORTAL_DEPARTMENTS.includes(q.escalationDepartment)) return `Invalid escalation department for "${q.questionText}".`;
+      if (!fieldTypeCanEscalate(q.fieldType)) return `"${q.questionText}" can't escalate — only Yes/No, Dropdown, or Multi-select questions can.`;
+      if (!q.escalationTriggerValue || !String(q.escalationTriggerValue).trim()) return `"${q.questionText}" needs a value that triggers the escalation.`;
+      if (q.fieldType !== 'yesno' && !(q.options || []).includes(q.escalationTriggerValue)) {
+        return `"${q.questionText}"'s escalation trigger must be one of its own options.`;
+      }
+    }
   }
   return null;
 }
@@ -193,7 +203,7 @@ Propose a JSON object with this exact shape and nothing else (no markdown fence,
   "category": "a short category label for this document type (e.g. 'Vehicle Pre-Trip Inspection')",
   "departments": ["zero or more of: hr, payroll, safety, maintenance, operations_manager — whichever department(s) would primarily receive this document"],
   "questions": [
-    { "questionText": "exact or lightly cleaned-up field label from the form", "fieldType": "one of: yesno, short_text, number, date, dropdown, multiselect, signature, file_upload", "options": ["only for dropdown/multiselect — the choices"] }
+    { "questionText": "exact or lightly cleaned-up field label from the form", "fieldType": "one of: yesno, short_text, number, date, dropdown, multiselect, signature, file_upload", "options": ["only for dropdown/multiselect — the choices"], "escalationDepartment": "only if this exact question has a clear fail/flag condition on the source form — one of: hr, payroll, safety, maintenance, operations_manager — else omit/null", "escalationTriggerValue": "only alongside escalationDepartment — the exact answer value (a yesno of 'no', or one of this question's own options) that means it's flagged — else omit/null" }
   ]
 }
 
@@ -203,6 +213,7 @@ Rules:
 - One question per field on the source form. Do not invent fields that aren't there.
 - Pick "yesno" only for genuine yes/no or pass/fail items. Use "dropdown" for a fixed set of choices, "short_text" for open text, "number" for a quantity/measurement, "date" for a date field, "signature" for a sign-off line, "file_upload" for an attachment field.
 - "departments" is a best guess from the form's subject matter (e.g. a vehicle inspection likely goes to "maintenance"; an HR form to "hr"). Leave it empty if unclear — Dillon will set it by hand either way.
+- escalationDepartment/escalationTriggerValue: only set these on a yesno/dropdown/multiselect question where the source form ITSELF marks a clear fail/flag/reject condition (e.g. a pass/fail column, a defect checkbox, an "N/A" that means something needs follow-up). Never guess or invent one on an ordinary field just because a department seems related — leave both null far more often than not. Dillon reviews and can add one by hand either way.
 - Respond with ONLY the JSON object.`;
 
       contentBlocks.push({ type: 'text', text: instructions });
@@ -246,11 +257,27 @@ Rules:
       const departments = Array.isArray(draft.departments) ? draft.departments.filter(d => PORTAL_DEPARTMENTS.includes(d)) : [];
       const questions = Array.isArray(draft.questions) ? draft.questions
         .filter(q => q && typeof q.questionText === 'string' && q.questionText.trim())
-        .map(q => ({
-          questionText: q.questionText.trim().slice(0, 300),
-          fieldType: PORTAL_FIELD_TYPE_KEYS.includes(q.fieldType) ? q.fieldType : 'short_text',
-          options: Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 20) : [],
-        })) : [];
+        .map(q => {
+          const fieldType = PORTAL_FIELD_TYPE_KEYS.includes(q.fieldType) ? q.fieldType : 'short_text';
+          const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 20) : [];
+          // Same rules publish_document enforces (validateQuestions) — a
+          // model-proposed escalation the builder couldn't actually publish
+          // unedited is worse than no suggestion at all, so drop anything
+          // that wouldn't survive it rather than showing it and having
+          // Publish reject it later.
+          let escalationDepartment = null, escalationTriggerValue = null;
+          if (typeof q.escalationDepartment === 'string' && PORTAL_DEPARTMENTS.includes(q.escalationDepartment) && fieldTypeCanEscalate(fieldType)) {
+            const trigger = typeof q.escalationTriggerValue === 'string' ? q.escalationTriggerValue.trim() : '';
+            if (trigger && (fieldType === 'yesno' ? (trigger === 'yes' || trigger === 'no') : options.includes(trigger))) {
+              escalationDepartment = q.escalationDepartment;
+              escalationTriggerValue = trigger;
+            }
+          }
+          return {
+            questionText: q.questionText.trim().slice(0, 300),
+            fieldType, options, escalationDepartment, escalationTriggerValue,
+          };
+        }) : [];
 
       return res.status(200).json({
         draft: {
@@ -370,6 +397,8 @@ Rules:
         field_type: q.fieldType,
         options: fieldTypeNeedsOptions(q.fieldType) ? q.options.filter(o => (o || '').trim()) : null,
         sort_order: i,
+        escalation_department: q.escalationDepartment || null,
+        escalation_trigger_value: q.escalationDepartment ? String(q.escalationTriggerValue).trim() : null,
       }));
       const { error: insErr } = await supabaseAdmin.from('portal_questions').insert(rows);
       if (insErr) return res.status(500).json({ error: "Couldn't save questions." });
@@ -504,7 +533,7 @@ Rules:
 
       // Only ever accept an answer whose question actually belongs to this
       // document — same guard as api/customforms.js's submit_custom.
-      const { data: docQuestions } = await supabaseAdmin.from('portal_questions').select('id, field_type').eq('document_id', documentId);
+      const { data: docQuestions } = await supabaseAdmin.from('portal_questions').select('id, field_type, question_text, escalation_department, escalation_trigger_value').eq('document_id', documentId);
       const questionById = new Map((docQuestions || []).map(q => [String(q.id), q]));
 
       for (const a of answers) {
@@ -519,6 +548,33 @@ Rules:
           row.value_text = a.value != null ? String(a.value).slice(0, 2000) : null;
         }
         await supabaseAdmin.from('portal_answers').insert(row);
+
+        // Phase 5: question-level escalation. A narrow, separate record —
+        // never the whole document — spun off to a different department
+        // when this specific answer matches the question's configured
+        // trigger. Snapshots question_text/answer_value at creation time
+        // rather than joining live, because publish_document's
+        // wholesale-replace on a republish can delete the question row out
+        // from under an escalation raised against an earlier version (see
+        // the phase 5 migration's header comment). Best-effort like the
+        // submission email below — the record and its answers are already
+        // saved either way, so a failure here must not fail the submission.
+        if (q.escalation_department && q.escalation_trigger_value) {
+          const matches = q.field_type === 'multiselect'
+            ? Array.isArray(a.value) && a.value.includes(q.escalation_trigger_value)
+            : String(a.value) === q.escalation_trigger_value;
+          if (matches) {
+            try {
+              await supabaseAdmin.from('portal_escalations').insert({
+                record_id: record.id, document_id: documentId, question_id: q.id,
+                question_text: q.question_text, answer_value: String(a.value),
+                target_department: q.escalation_department, status: 'open',
+              });
+            } catch (e) {
+              console.error('portal escalation insert failed:', e.message);
+            }
+          }
+        }
       }
 
       // Phase 3: "email fires on submission" (build spec, "Build order").
@@ -788,6 +844,89 @@ Rules:
           };
         });
       return res.status(200).json({ rows });
+    }
+
+    // ══ SUPERVISOR / ADMIN: escalations ══════════════════════════════════
+    // Phase 5 (question-level escalation). Deliberately NOT scoped by the
+    // source document's own departments() — that's the whole point of an
+    // escalation: it can route to a DIFFERENT department than the document
+    // it came from (spec's Maintenance-from-a-Safety-inspection example).
+    // Scoped instead by portal_escalations.target_department directly,
+    // same individually-identified-supervisor-vs-shared-code-login split as
+    // every other Portal read above.
+
+    if (action === 'list_escalations') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { status } = req.body;
+
+      let escQuery = supabaseAdmin.from('portal_escalations').select('*').order('created_at', { ascending: false });
+      if (status === 'open' || status === 'actioned') escQuery = escQuery.eq('status', status);
+      const { data: escalations, error: escErr } = await escQuery;
+      if (escErr) return res.status(500).json({ error: 'Could not load escalations.' });
+      if (!escalations || escalations.length === 0) return res.status(200).json({ escalations: [] });
+
+      const docIds = [...new Set(escalations.map(e => e.document_id))];
+      const { data: documents } = await supabaseAdmin.from('portal_documents').select('id, company_id, title, icon').in('id', docIds);
+      const docMap = {}; (documents || []).forEach(d => { docMap[d.id] = d; });
+
+      let visible = escalations.filter(e => {
+        const doc = docMap[e.document_id];
+        if (!doc) return false;
+        if (session.role === 'supervisor' && doc.company_id !== session.companyId) return false;
+        return true;
+      });
+
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: rosterRows } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).limit(1);
+        const myDepartments = rosterRows?.[0]?.departments || [];
+        visible = visible.filter(e => myDepartments.includes(e.target_department));
+      }
+
+      const recordIds = [...new Set(visible.map(e => e.record_id))];
+      const { data: records } = await supabaseAdmin.from('portal_records').select('id, site_id, submitted_by, created_at').in('id', recordIds.length ? recordIds : [0]);
+      const recordMap = {}; (records || []).forEach(r => { recordMap[r.id] = r; });
+      const siteIds = [...new Set((records || []).map(r => r.site_id))];
+      const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
+      const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
+
+      const enriched = visible.map(e => ({
+        ...e,
+        document_title: docMap[e.document_id]?.title || 'Unknown document',
+        document_icon: docMap[e.document_id]?.icon || '📄',
+        company_id: docMap[e.document_id]?.company_id,
+        submitted_by: recordMap[e.record_id]?.submitted_by || 'Unknown',
+        site_name: siteMap[recordMap[e.record_id]?.site_id] || 'Unknown site',
+        submitted_at: recordMap[e.record_id]?.created_at,
+      }));
+      return res.status(200).json({ escalations: enriched });
+    }
+
+    if (action === 'action_escalation') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { escalationId } = req.body;
+      if (!escalationId) return res.status(400).json({ error: 'Missing escalation id.' });
+
+      const { data: escRows } = await supabaseAdmin.from('portal_escalations').select('*').eq('id', escalationId).limit(1);
+      const escalation = escRows && escRows[0];
+      if (!escalation) return res.status(404).json({ error: 'Escalation not found.' });
+
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('company_id').eq('id', escalation.document_id).limit(1);
+      const document = docRows && docRows[0];
+      if (!document) return res.status(404).json({ error: 'Document not found.' });
+      // Same generic 403 as every other cross-tenant/cross-department check
+      // above — a distinct message would leak existence/department info.
+      if (session.role === 'supervisor' && document.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: rosterRows } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).limit(1);
+        const myDepartments = rosterRows?.[0]?.departments || [];
+        if (!myDepartments.includes(escalation.target_department)) return res.status(403).json({ error: 'Not allowed.' });
+      }
+
+      const { error: updErr } = await supabaseAdmin.from('portal_escalations').update({
+        status: 'actioned', actioned_by_roster_id: authorRosterId(session), actioned_at: new Date().toISOString(),
+      }).eq('id', escalationId);
+      if (updErr) return res.status(500).json({ error: "Couldn't update escalation." });
+      return res.status(200).json({ ok: true });
     }
 
     return res.status(400).json({ error: 'Unknown action.' });
