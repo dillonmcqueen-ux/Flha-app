@@ -18,7 +18,7 @@
 // black box. A founder acting on "Acme is at risk" needs to see why.
 
 import { BASE, MODULES, MODULE_KEYS, TIERS } from './pricing.js';
-import { planSeatCap } from './onboardingHelpers.js';
+import { effectiveSeatCap } from './onboardingHelpers.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -102,7 +102,7 @@ export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], d
     const paymentRisk = status ? PAYMENT_RISK_STATUSES.has(status) : false;
 
     const seatsUsed = (rosterBy[c.id] || {}).active || 0;
-    const cap = planSeatCap(c.plan_tier);
+    const cap = effectiveSeatCap(c.plan_tier);
     const seatPct = cap ? Math.round((seatsUsed / cap) * 100) : null;
 
     const ageDays = c.created_at ? Math.floor((t - new Date(c.created_at).getTime()) / DAY) : null;
