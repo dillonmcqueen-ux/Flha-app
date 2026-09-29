@@ -60,6 +60,85 @@ function Table({ columns, rows, empty }) {
 }
 
 const shortDay = (iso) => iso.slice(5);
+const STATE_LABEL = { ok: "OK", failed: "Last run failed", overdue: "Overdue", not_observed_yet: "Not seen yet" };
+const STATE_COLOR = { ok: C.status.success.text, failed: C.status.danger.text, overdue: C.status.danger.text, not_observed_yet: C.text.muted };
+const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "never";
+const tokens = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+const dollars = (n) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
+
+function HealthSection({ health }) {
+  if (health.unavailable) {
+    return <Card title="Platform health"><div style={{ color: C.text.faint, fontSize: 13 }}>The telemetry table could not be read. Check that platform_events exists and the database is reachable.</div></Card>;
+  }
+  if (health.empty) {
+    return <Card title="Platform health" subtitle="Scheduled jobs, email delivery, AI generation success and cost."><div style={{ color: C.text.faint, fontSize: 13 }}>No events recorded yet. Telemetry starts collecting when the instrumentation reaches production; this fills in as jobs run and documents are generated.</div></Card>;
+  }
+  const { crons, email, ai, recentFailures } = health;
+  return (
+    <>
+      <Card title="Scheduled jobs" subtitle={`Collecting since ${fmtWhen(health.collectingSince)}. A job is overdue once it is 1.5 cadences late.`}>
+        <Table empty="No scheduled jobs." rows={crons} columns={[
+          { key: "label", label: "Job" },
+          { key: "state", label: "Status", render: r => <span style={{ color: STATE_COLOR[r.state], fontWeight: 700 }}>{STATE_LABEL[r.state]}</span> },
+          { key: "lastAt", label: "Last run", render: r => fmtWhen(r.lastAt) },
+          { key: "runs30", label: "Runs (30d)", align: "right" },
+          { key: "failed30", label: "Failed", align: "right" },
+        ]} />
+      </Card>
+
+      <Card title="Email delivery" subtitle="Last 30 days, counted at the send. Addresses and subjects are never recorded.">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Tile label="Sent" value={email.sent} />
+          <Tile label="Failed" value={email.failed} sub={email.failureRatePct === null ? "no sends yet" : `${email.failureRatePct}% of attempts`} />
+          <Tile label="Skipped" value={email.skipped} sub="no email key configured" />
+        </div>
+        {email.failureKinds.length > 0 && <div style={{ marginTop: 12 }}><Table empty="" rows={email.failureKinds} columns={[{ key: "kind", label: "Failure" }, { key: "count", label: "Count", align: "right" }]} /></div>}
+      </Card>
+
+      <Card title="AI generation" subtitle={health.pricingNote}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Tile label="Calls (30d)" value={ai.calls} sub={ai.rateLimited ? `${ai.rateLimited} rate limited` : null} />
+          <Tile label="Success rate" value={ai.successRatePct === null ? "n/a" : `${ai.successRatePct}%`} sub="ok over ok, error, refused, truncated" />
+          <Tile label="Estimated cost" value={dollars(ai.estimatedCost)} sub={`${tokens(ai.inputTokens)} in, ${tokens(ai.outputTokens)} out`} />
+        </div>
+        {ai.unpricedCalls > 0 && <div style={{ fontSize: 12, color: C.status.warning.text, marginTop: 10 }}>{ai.unpricedCalls} call(s) used a model with no price on file, so they are not in the cost.</div>}
+        <div style={{ marginTop: 12 }}>
+          <Table empty="No AI calls yet." rows={ai.bySubtype} columns={[
+            { key: "label", label: "Where" },
+            { key: "calls", label: "Calls", align: "right" },
+            { key: "ok", label: "OK", align: "right" },
+            { key: "failed", label: "Failed", align: "right" },
+            { key: "refused", label: "Refused", align: "right" },
+            { key: "truncated", label: "Cut off", align: "right" },
+            { key: "avgLatencyMs", label: "Avg time", align: "right", render: r => r.avgLatencyMs === null ? "n/a" : `${(r.avgLatencyMs / 1000).toFixed(1)}s` },
+            { key: "cost", label: "Est. cost", align: "right", render: r => dollars(r.cost) },
+          ]} />
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <Table empty="" rows={ai.byModel} columns={[
+            { key: "model", label: "Model" },
+            { key: "calls", label: "Calls", align: "right" },
+            { key: "inputTokens", label: "Input", align: "right", render: r => tokens(r.inputTokens) },
+            { key: "outputTokens", label: "Output", align: "right", render: r => tokens(r.outputTokens) },
+            { key: "cost", label: "Est. cost", align: "right", render: r => r.priced ? dollars(r.cost) : "no price on file" },
+          ]} />
+        </div>
+        {ai.topCompanies.length > 0 && <div style={{ marginTop: 12 }}><Table empty="" rows={ai.topCompanies} columns={[{ key: "name", label: "Company" }, { key: "calls", label: "Calls", align: "right" }, { key: "cost", label: "Est. cost", align: "right", render: r => dollars(r.cost) }]} /></div>}
+      </Card>
+
+      <Card title="Recent trouble" subtitle="Latest failures, refusals, cut-off generations and rate limits across everything above">
+        <Table empty="Nothing has gone wrong in the last 30 days." rows={recentFailures} columns={[
+          { key: "at", label: "When", render: r => fmtWhen(r.at) },
+          { key: "type", label: "What", render: r => `${r.type}${r.subtype ? ` / ${r.subtype}` : ""}` },
+          { key: "status", label: "Outcome" },
+          { key: "httpStatus", label: "HTTP", align: "right", render: r => r.httpStatus ?? "n/a" },
+        ]} />
+        <div style={{ fontSize: 12, color: C.text.faint, marginTop: 12 }}>Not visible from the app: {health.notInApp.join(", ").toLowerCase()}. Ask a Claude Code session to check those.</div>
+      </Card>
+    </>
+  );
+}
+
 const money = (n) => `$${Math.round(n).toLocaleString("en-CA")}`;
 const BAND_LABEL = { healthy: "Healthy", watch: "Watch", at_risk: "At risk", new: "New" };
 const BAND_COLOR = { healthy: C.status.success.text, watch: C.status.warning.text, at_risk: C.status.danger.text, new: C.text.muted };
@@ -135,7 +214,7 @@ export default function PlatformDashboard({ token }) {
   if (error && !data) return <div style={{ color: C.status.danger.text, padding: 16 }}>{error}</div>;
   if (!data) return null;
 
-  const { totals, documents, signups, plans, modules, perCompany, business } = data;
+  const { totals, documents, signups, plans, modules, perCompany, business, platformHealth } = data;
   const hasDocs = documents.perDay.some(d => d.total > 0);
   const typeBars = documents.byType.filter(t => t.last30 > 0).map(t => ({ label: t.label, count: t.last30 }));
   const funnelRows = Object.entries(signups.funnel).map(([status, count]) => ({ status, count }));
@@ -157,6 +236,8 @@ export default function PlatformDashboard({ token }) {
       </Card>
 
       {business && <BusinessSection business={business} />}
+
+      {platformHealth && <HealthSection health={platformHealth} />}
 
       <Card title="Documents per day" subtitle="Every document type, last 30 days">
         {!hasDocs ? <div style={{ color: C.text.faint, fontSize: 13 }}>No documents in the last 30 days.</div> : (
