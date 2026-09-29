@@ -119,8 +119,13 @@ never looks at `fuel_logs.hour_reading`, while `api/fuellogs.js` reads both
 — so a company that fuels daily and inspects weekly has a PM clock running
 behind readings FORA already holds; and the Company Brain receives signals
 from only 4 of 9 document types, never seeing equipment-inspection defects,
-which is the most company-specific data the product collects. All 8 are
-awaiting a decision, not being worked.
+which is the most company-specific data the product collects. All 8 were
+awaiting a decision at the time of the seed sweep. **Update, 2026-09-29:**
+the Brain claim is stale and #4 is closed. Equipment-inspection defects
+(`api/logs.js:466`), monthly inspections (`api/monthly.js:470`) and daily
+reports (`api/logs.js:484`) all emit signals now, for 7 source types in
+total; custom documents and corrective actions are excluded on purpose. The
+map's §4 has the current status of every break.
 
 ## Continuous UI/UX development agents
 

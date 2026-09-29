@@ -15,7 +15,7 @@ paying for, and nobody finds out.
 two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
-**Status:** seeded 2026-09-16 against commit `0bd289c`; **most recent pass
+**Status:** seeded 2026-09-16 against commit `0bd289c`; **latest addition 2026-09-29, `platform_events` telemetry (uncommitted, branch `platform-events-instrumentation`): surface #23, a §2 section, and pending link P1 (no reader yet, by design), see the changelog;** the paragraph after this describes the last full pass. **Most recent pass
 2026-09-29 on branch `fix-portal-p3` (`b97b231`), the Company Portal parity
 sweep** — everything merged since the last pass recorded. **#35, #36 and #33
 are CLOSED** (PR #158 for the first two; #33's Unfinished list was only
@@ -225,7 +225,8 @@ when PR #124 merges).
 | 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:6208`) | `api/companydata.js:1063-1241` | `equipment_compliance` — module `compliance` (`pricing.js:98-103`), added `2560819` |
 | 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:6147`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:302`) | `inspection` |
 | 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6089`) | `api/maintenance.js:415` | `maintenance` |
-| 23 | Founder Dashboard (Platform tab), slices 3a and 3b | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`); 3b adds Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`, mounted `:159`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221`; 3b is `server-lib/platformBusiness.js` `buildBusinessMetrics`, called at `platformOverview.js:190` | *(none on purpose, admin-only, see §5)* |
+| 23 | Platform events (founder telemetry; **migration written, NOT applied live**, branch `platform-events-instrumentation`) | none yet (Admin Panel, planned phase 3c) | writer `server-lib/platformEvents.js:47` (`recordPlatformEvent`); table `docs/schema/platform-events-migration.sql:19` | *(none, platform-wide, not a company feature)* |
+| 24 | Founder Dashboard (Platform tab), slices 3a and 3b | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`); 3b adds Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`, mounted `:159`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221`; 3b is `server-lib/platformBusiness.js` `buildBusinessMetrics`, called at `platformOverview.js:190` | *(none on purpose, admin-only, see §5)* |
 
 **The Equipment hub, 2026-09-17, corrected 2026-09-18.** Maintenance and Fuel
 Logs stopped being top-level tabs and became sub-tabs of Equipment, and the hub
@@ -1052,6 +1053,52 @@ Portal isn't a checkout-purchasable module yet — `portalScopePricing.js:11-13`
 says the monthly fee "would be entered into MODULES... when Portal ships as
 a real subscribable module," which is the trigger to re-open this question).
 
+### `platform_events` (founder telemetry; producer side only, by design)
+Recorded 2026-09-29 against the **uncommitted** working tree on branch
+`platform-events-instrumentation`. Table `platform_events`
+(`docs/schema/platform-events-migration.sql:19-27`) is **written and NOT yet
+applied to the live DB** (`:36-37`). It is a platform-health log for the
+founder dashboard, not a company feature, so it has no doc key and is not
+gated (`server-lib/platformEvents.js` has no `requireDocKey`/
+`isDocKeyActive` call, and should not; a company must not be able to switch
+off the founder's view of the platform).
+
+| Column | Meaning | Join |
+|---|---|---|
+| `event_type` | `cron_run` / `email_send` / `ai_generation` (`platformEvents.js:17`) | Enforced in the writer, not by a CHECK (`migration:22`, comment only) |
+| `status` | `ok`/`error`/`skipped`/`refused`/`rate_limited`/`truncated` (`platformEvents.js:18`) | Same |
+| `subtype` | cron name, document type, or AI call site | free text, capped at 60 chars (`platformEvents.js:60`) |
+| `company_id` | set only where the writer knows it | **nullable, deliberately not an FK** (`migration:25`), so deleting a company keeps its history. Coerced to an integer or null (`platformEvents.js:61`) |
+| `metrics` | counts, tokens, latency only | `sanitizeMetrics` drops objects, arrays and long text (`platformEvents.js:34-45`) |
+
+**Producers (all read in the code, 2026-09-29):**
+
+| Producer | `event_type` | Call site |
+|---|---|---|
+| `api/cron-equipment-reports.js` | `cron_run` | `:57`, `:120`, `:139` |
+| `api/cron-company-brain-summary.js` | `cron_run` | `:41`, `:54` |
+| `api/cron-portal-reports.js` | `cron_run` | `:55`, `:62` |
+| `server-lib/email.js` `sendEmail` | `email_send` | `:27`, `:45`, `:50`, `:53` (passes `null` client, uses the writer's own service-role fallback, `platformEvents.js:24-29`) |
+| `api/generate-flha.js` | `ai_generation` | `:290` (rate limited), `:297` (`record` helper) |
+| `api/portal.js` `ai_draft_document` | `ai_generation` | `:244`, `:248` |
+| `server-lib/companyBrainSummary.js` | `ai_generation` | `:66`, `:70` |
+| `server-lib/onboardingDrafting.js` | `ai_generation` | `:57`, `:61` |
+
+Those are the 4 Anthropic call sites named for this change; the map has not
+searched for a fifth (`grep -rn "api.anthropic.com" api/ server-lib/` is the
+re-check, and any hit not in the table above is an unmetered AI call).
+
+**Consumer: none yet, on purpose.** Confirmed 2026-09-29:
+`grep -rn "platform_events" src/ api/` returns no reader (the only
+`from('platform_events')` is the writer's insert, `platformEvents.js:57`).
+The Admin Panel reader is planned as phase 3c. This is recorded as a **known
+pending link, not a break**; see §4's "Known pending links".
+
+**Privacy contract to keep:** no prompts, outputs, email addresses, subjects,
+document content or worker names (`migration:7-11`, `platformEvents.js:8-10`).
+A future producer that passes any of those in `metrics` breaks the contract;
+`sanitizeMetrics` only stops objects and long strings, not a short name.
+
 ### `company_id` (tenancy)
 Honoured everywhere. Governed by `tenant-scope-reviewer`, not this map.
 
@@ -1225,14 +1272,19 @@ added; the server now agrees with it.
 ### `source_type` → `company_signals` (the Brain's input)
 | Writer | source_type |
 |---|---|
-| `api/flhas.js:370` | `flha_edit` |
-| `api/reports.js:231` | `incident`, `near_miss` |
-| `api/logs.js:244` | `toolbox_talk` |
-| `api/logs.js` (PR #118) | `equipment_inspection` |
-| `api/monthly.js` (PR #118) | `monthly_inspection` |
+| `api/flhas.js:436` | `flha_edit` |
+| `api/reports.js:303` | `incident`, `near_miss` |
+| `api/logs.js:442` | `toolbox_talk` |
+| `api/logs.js:466` (PR #118) | `equipment_inspection` |
+| `api/monthly.js:470` (PR #118) | `monthly_inspection` |
+| `api/logs.js:484` (PR #120) | `daily_report` (working conditions only) |
 
-Daily reports, custom documents and corrective actions still write nothing.
-**This is break #4 below.**
+Re-read 2026-09-29 (`grep -rn "source_type:" api/`): 7 source types.
+Custom documents and corrective actions write nothing **on purpose** (see
+break #4, closed, and its two documented exclusions). Equipment-inspection
+defects **do** reach the Brain (`api/logs.js:466`). Line numbers in this
+table were re-anchored 2026-09-29; the earlier values (`:370`, `:231`,
+`:244`) had drifted.
 
 A source type is only half-wired by its writer. `bySourceType` in
 `api/companydata.js:800` drops any type missing from its map, so an
@@ -1276,10 +1328,10 @@ corrective actions the fourth writer of that table, alongside
 |---|---|---|---|---|---|---|---|
 | Equipment Inspection | ✅ `maint:129` | ✅ `fuel:106` | ✅ | ✅ *(#4, PR #118; post-trip too, #10, PR #121)* | ⚠️ label-joined | ✅ *(#5, PR #118; post-trip opens AND closes, #10/#11, PR #121)* | — |
 | Fuel Log | ✅ *(#1, PR #118)* | — | ✅ *(#1, PR #120)* | — *(no finding to extract)* | ⚠️ label-joined | — | — |
-| FLHA | — | — | — | ✅ `flhas:370` | ✅ | — | — |
-| Toolbox Talk | — | — | — | ✅ `logs:244` | ✅ | — | — |
-| Incident | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
-| Near Miss | — | — | — | ✅ `reports:231` | ✅ | ✅ *(#5, PR #118)* | — |
+| FLHA | — | — | — | ✅ `flhas:436` | ✅ | — | — |
+| Toolbox Talk | — | — | — | ✅ `logs:442` | ✅ | — | — |
+| Incident | — | — | — | ✅ `reports:303` | ✅ | ✅ *(#5, PR #118)* | — |
+| Near Miss | — | — | — | ✅ `reports:303` | ✅ | ✅ *(#5, PR #118)* | — |
 | Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
 | Daily Report | — *(candidate for #13, not chosen)* | — | — *(candidate for #13, not chosen)* | ✅ *(#4, PR #120)* | ⚠️ machines still label-only in `analyticsUtils.js` | — | — |
 | Custom Document | — | — | — | — *(excluded, #4)* | ✅ | — | — |
@@ -1287,12 +1339,18 @@ corrective actions the fourth writer of that table, alongside
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
 | Certifications | — | — | — | — | — | — | ✅ *(#8, PR #120: expiry now reaches document review)* |
 | Sites | ⚠️ #2 | ✅ | — | — | ✅ *(#2, PR #120)* | — | — |
-| Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ❌ #4 | ⚠️ label | ✅ *(#11, PR #121)* | — |
+| Equipment fleet | ✅ | ✅ | ✅ *(#7, PR #119)* | ✅ *(#4 closed: inspection defects emit at `logs.js:466`)* | ⚠️ label | ✅ *(#11, PR #121)* | — |
 | Corrective Actions | ✅ *(#11, PR #121: a post-trip repair writes `field_service`)* | — | — | — *(excluded, #4)* | — | — | — |
 | SOPs | — | — | — | ✅ | — | — | — |
 | Attachments (`is_attachment`) | ✅ **trailers only**, towed KM *(#18 as rescoped, built `42ed3c7`: `maintenance.js:223-242`)*; non-trailers `—` by design (§5); **#28** built `1301c76` (closes with PR #129); ⚠️ **#29** | — | ✅ `equipmentreports.js:345,552` | ❌ **#30** (host label, `logs.js:214-215`) | ✅ *(#18: most used / most repaired, fleet-id keyed, `Analytics.jsx:362-370`)* | ✅ *(#17, built `bb13340`: `logs.js:517-527`)* | — |
 | Equipment Compliance | ❌ #14 | — | ✅ *(#14, PR #122: `reportPdfs.js:142`)*, gated on its own doc key since `2560819` (`equipmentreports.js:618`) | ❌ #14 | ❌ #14 | ❌ #14 | — *(the cert analogue it copies: `Dashboard.jsx:4885`; the overview banner it now matches is `Dashboard.jsx:4917`, and both are now gated the same way — cert on `isDocActive("certifications")`, compliance on `complianceEnabled`)* |
 | Fleet retirement (`retired_at`) | ✅ *(#15, PR #123 merged `18645f0`: no PM clock)* | ✅ picker filtered | ✅ *(#15: off the weekly report)* | — | — | — | — |
+| Platform events (`platform_events`, telemetry) | — | — | — | — *(its `ai_generation` rows log the Brain summary call, not a Brain input)* | — | — | — |
+
+The Platform events row is all `—` on purpose: it is a founder-only health
+log, not a product feature a company uses, and it feeds none of the seven
+columns. Its only planned consumer is the Admin Panel, which is not a column
+here. See §2's `platform_events` section and §4's "Known pending links".
 
 **Fleet Overview as a consumer — new joins as of `42ed3c7` (#13, #18).**
 Fleet Overview has no column above because until now it consumed nothing but
@@ -1310,7 +1368,7 @@ And one new join into PM: **Equipment Inspection → PM for a trailer**, via
 `linked_inspection_id` and the pre-trip's attachment list
 (`maintenance.js:163` → `fleetActivity.js:99-119`). See §2's reading table.
 
-**The founder dashboard as a consumer, 2026-09-29 (`cb9908a`, surface #23).**
+**The founder dashboard as a consumer, 2026-09-29 (`cb9908a`, surface #24).**
 It produces nothing another feature reads. It consumes:
 
 | From ↓ | Join | Shown as | State |
@@ -1536,10 +1594,13 @@ Adding a source type means updating four places, not one: the writer,
 dropped), the Brain tab in `AdminPanel.jsx`, and the prompt builder in
 `server-lib/companyBrainSummary.js`. `tests/unit/brain-signal-capture.test.js`
 asserts the writer list and `bySourceType` agree.
- CLAUDE.md calls the Brain FORA's flagship. It receives
-signals only from FLHA edits, toolbox talks, incidents and near misses.
-It never sees: **equipment inspection defects**, monthly inspection
-findings, corrective actions, daily reports, or custom documents.
+
+**Original finding, as found 2026-09-16 (historical, superseded by the
+closure above; kept so the evidence trail reads):** CLAUDE.md calls the
+Brain FORA's flagship. It received signals only from FLHA edits, toolbox
+talks, incidents and near misses. It did not see equipment inspection
+defects, monthly inspection findings or daily reports. All three now emit
+(`api/logs.js:466`, `api/monthly.js:470`, `api/logs.js:484`).
 
 The single richest source of company-specific knowledge — which machines
 keep failing which checks — never reaches the profile that
@@ -3675,10 +3736,39 @@ designed, but the number means less than its label):
    capped at 20000 rows (`:189-199,221`), so a cap hit makes `total` and the
    older days a floor. The dashboard says so through `truncated` (`:166`).
 
-**Pending link, not a break:** `platform_events` (task label P1) has no
-reader, and `grep -rn platform_events` across the repo, excluding this map,
-returns nothing at all, so there is no table, writer or reader to verify. `?`
-until slice 3c lands. Distinct from the Portal-sweep P1 (#37).
+**Pending link, not a break:** `platform_events` (surface #23, pending link P1
+below) has a writer and a migration on this branch through the merge from
+`main`, but no reader yet. The founder dashboard's health slice 3c is planned
+to read it and is not on this branch's map. Distinct from the Portal-sweep P1
+(#37).
+
+## Known pending links (intentional, not breaks)
+
+A producer with no consumer **yet**, where the consumer is a scheduled phase
+of work. A later sweep must not file these as new breaks. Each has an exit
+condition; when it is met, promote the entry to a real break if the consumer
+is still absent.
+
+### P1 — `platform_events` has no reader (Admin Panel, planned phase 3c)
+**Status: pending by design, recorded 2026-09-29. Not a break, not approved
+for a fix, nothing to build now.** Writers exist at eight call sites (§2,
+`platform_events` section); the migration is written and **not applied live**
+(`docs/schema/platform-events-migration.sql:36-37`), so until Dillon applies it
+every `recordPlatformEvent` insert fails quietly. That is safe: the writer
+logs and swallows the error (`server-lib/platformEvents.js:64-67`) and never
+fails the cron, email or AI call it measures.
+
+*What a customer loses today:* nothing. Only the founder is affected, and only
+in that he cannot yet see platform health.
+
+*Exit condition:* the Admin Panel phase 3c reads the table. If a sweep runs
+after that ships and `grep -rn "platform_events" src/ api/` still shows only
+the writer, promote this to a break.
+
+*Re-check:*
+`grep -rn "platform_events" src/ api/ server-lib/` (reader appears as a
+`from('platform_events')` with `.select`), and confirm the table exists live
+before trusting any dashboard number.
 
 ### #42: The dashboard's seat cap is not the copy that enforces the cap
 **Severity: low** (founder-facing, no customer loses anything today, values agreed).
@@ -4131,7 +4221,8 @@ purpose because checkout has no trial. Churn is not measured (see #42 weak point
 | 2026-09-29 | PR #152 (branch `fix-break-34-escalation-notification`), commit `582ee3d` | **Break #34 CLOSED on merge.** `api/portal.js`'s escalation-insert block (`:588-611`) now sends a second best-effort `sendEmail` to the escalation's own target department, gated on the insert actually succeeding and wrapped in its own try/catch — mirrors the phase-3 submission email's recipient shape but keyed on `escalation_department` instead of the document's `departments`. Re-verified against the merged code (`grep -n "sendEmail" api/portal.js` → import at `:27`, escalation email at `:603`, phase-3 email at `:643` — three hits, was two before the fix) before rewriting §4's break #34 entry from built-not-closed to closed. No other application code touched by this pass; map only. |
 | 2026-09-29 | branch `portal-pdf-email`, `ba5f6ab` | **Company Portal "email documents to a department" placed on the map.** New table `portal_report_schedules` (migration written, **not applied live**), `server-lib/portalReports.js`, `api/cron-portal-reports.js` (`vercel.json:9`), five `api/portal.js` actions (`:1042-1158`), `src/PortalReports.jsx`, and the Email to department button (`Dashboard.jsx:1651`). Consumes `PORTAL_DEPARTMENTS`, `roster.departments`, `portal_documents.departments`, `portal_records.pdf_url` and encrypted `roster.email`; all keys agree (table in §2). Earlier merged steps recorded in the same §2 section: `fieldCrypto` roster/onboarding encryption, `people_encrypted`, supervisor-created assignment rules. **Breaks #35** (zero-recipient run marks documents as sent, `portalReports.js:143-145`) **and #36** (one-off email doesn't check the target department against the document's routing, `portal.js:1138-1149`) opened. #35 not approved. #36 was fixed in `e3c49ad` (`portal.js:1150-1153`, `Dashboard.jsx:1603`), not closed until the branch merges. That commit also rejects recipient addresses containing `,;<>()"` (`portal.js:1067`), not mapped as a break. Noted, not filed: the cron skips no `roster_enabled`/`suspended` check, unlike `cron-equipment-reports.js:88`. Overview Company Portal panel not read (`?`). Map only; no application code touched. |
 | 2026-09-29 | branch `fix-portal-p3` (`b97b231`), PRs #157, #158, #159 | **Company Portal parity sweep, plus everything merged since the last pass.** PR #158 merged (department report emails; `portal_report_schedules` reported applied live by Dillon, not verifiable from code): **#35 and #36 CLOSED**, cron now gated on `companies.roster_enabled`/`suspended` (`cron-portal-reports.js:36-39`), `runSchedule` refuses without `RESEND_API_KEY` (`portalReports.js:128`). PR #157 merged: Overview "Company Portal" panel read (`Dashboard.jsx:5502-5508`), the standing `?` cleared. Sweep filed four breaks: **#37** (Resume on a Portal draft, `WorkerMenu.jsx:221`) CLOSED, PR #159; **#38** (edit, regenerate, delete a submitted Portal record: `update_portal_record` `portal.js:1037`, `delete_portal_record` `:1085`, `validateEditedPortalAnswer` `portalFieldTypes.js:48`, `PortalRecordCard` edit UI, delete also removes stored PDF and attachments) CLOSED, PR #159; **#39** (`delete_site` `companydata.js:1027-1032`, `delete_company` `admin.js:685-731` ignored Portal) approved and FIXED on this branch, closes when its PR merges; **#40** (Portal absent from Overview Recent Activity, Site Activity, Analytics, `Dashboard.jsx:4248-4262`) OPEN, not approved. **#33 amended:** its Unfinished-list fix (PR #151) was incomplete until #37, since Resume went nowhere. `get_portal_record_detail` now returns one generic 403 for missing versus foreign record for non-admin (`portal.js:721-729`). Known, unchanged, now in §5: Portal not in `pricing.js`; Portal answers emit no Brain signals. Map only; no application code touched. |
-| 2026-09-29 | branch `founder-dashboard-activity`, `cb9908a` | **Founder dashboard slice 3a placed on the map.** New surface #23 (Admin Panel > Platform): `api/admin.js:127-134` `platform_overview` → `server-lib/platformOverview.js:221` `loadPlatformOverview`, rendered by `src/PlatformDashboard.jsx` (`AdminPanel.jsx:1408-1409`). Aggregates only, no new table, not gated by a company doc key on purpose (§5). It is a **new consumer** of the doc-key/module invariant (#6) and of `company_document_settings`, `roster.last_login_at`, `companies.created_at`/`plan_tier`/`stripe_subscription_status` and `onboarding_requests`. All nine document tables, the three via-parent tables and the four join names read from resolve against the code (`platformOverview.js:201-219`). **Break #41 opened** (the dashboard's own document-type list is a second copy of the doc-key list and nothing ties it to `pricing.js`, so adoption can undercount silently), not approved, no code touched. Two weak points recorded, not filed: "active workers" counts PIN logins only (`login.js:514` is the only `last_login_at` write; invite-link sessions at `:581-591` never set it), and the totals mix live-only and all-company denominators (`platformOverview.js:67-79` vs `:114-116`). `platform_events` (pending link P1 as named in the task) has **zero** references anywhere in the repo, so it is `?` here: no table, writer or reader can be verified from code. Not to be confused with the existing Portal-sweep P1 (#37). Slices 3b (MRR, churn, seat usage, health scores) and 3c (`platform_events` health) are not built and not mapped. Map only; no application code touched. |
-| 2026-09-29 | branch `founder-dashboard-activity`, `8502cb2` | **#41 BUILT, closed pending merge of its PR** (same convention as #37-#40). Dillon approved it. `server-lib/platformOverview.js` exports `UNMEASURED_DOC_KEYS` (`:46`) and `tests/unit/platform-overview.test.js:148-173` has four guard tests requiring `DOC_TYPES` plus that list to cover `pricing.js` `ALL_DOC_KEYS` (`:124`) exactly, with no stray and no double-listed keys. Read all three files. The builder reported a fake doc key made the test fail clearly, then restored `pricing.js`; this pass did not re-run that. §3 consumer table cell for the module join moved from warning to fine. The dashboard is now the **second consumer of the doc-key/module invariant with its own guard**, alongside #6's `doc-key-module-invariant.test.js`. `UNMEASURED_DOC_KEYS` is three keys, and the export added 8 lines to `platformOverview.js`, so the anchors below line 47 in the #41 entry and §3 table were re-cited (`DOC_SOURCES` `:208-218`, `VIA_PARENT` `:222-226`, module loop `:144-155`, settings read `:126-133`). Other `platformOverview.js` line cites elsewhere in the map (the surface #23 row `:221`, weak points 2 and 3 in #41) were not swept and may sit about 8 lines low. Map only. |
+| 2026-09-29 | branch `founder-dashboard-activity`, `cb9908a` | **Founder dashboard slice 3a placed on the map.** New surface #24 (Admin Panel > Platform): `api/admin.js:127-134` `platform_overview` → `server-lib/platformOverview.js:221` `loadPlatformOverview`, rendered by `src/PlatformDashboard.jsx` (`AdminPanel.jsx:1408-1409`). Aggregates only, no new table, not gated by a company doc key on purpose (§5). It is a **new consumer** of the doc-key/module invariant (#6) and of `company_document_settings`, `roster.last_login_at`, `companies.created_at`/`plan_tier`/`stripe_subscription_status` and `onboarding_requests`. All nine document tables, the three via-parent tables and the four join names read from resolve against the code (`platformOverview.js:201-219`). **Break #41 opened** (the dashboard's own document-type list is a second copy of the doc-key list and nothing ties it to `pricing.js`, so adoption can undercount silently), not approved, no code touched. Two weak points recorded, not filed: "active workers" counts PIN logins only (`login.js:514` is the only `last_login_at` write; invite-link sessions at `:581-591` never set it), and the totals mix live-only and all-company denominators (`platformOverview.js:67-79` vs `:114-116`). `platform_events` (surface #23, pending link P1) was recorded here as having zero references in the repo; that is stale once `main` is merged in, since it now has a writer and a migration (see the `platform-events-instrumentation` row below). It still has no reader, so the dashboard link stays `?` until health slice 3c lands. Not to be confused with the existing Portal-sweep P1 (#37). Slices 3b (MRR, churn, seat usage, health scores) and 3c (`platform_events` health) are not built and not mapped. Map only; no application code touched. |
+| 2026-09-29 | branch `founder-dashboard-activity`, `8502cb2` | **#41 BUILT, closed pending merge of its PR** (same convention as #37-#40). Dillon approved it. `server-lib/platformOverview.js` exports `UNMEASURED_DOC_KEYS` (`:46`) and `tests/unit/platform-overview.test.js:148-173` has four guard tests requiring `DOC_TYPES` plus that list to cover `pricing.js` `ALL_DOC_KEYS` (`:124`) exactly, with no stray and no double-listed keys. Read all three files. The builder reported a fake doc key made the test fail clearly, then restored `pricing.js`; this pass did not re-run that. §3 consumer table cell for the module join moved from warning to fine. The dashboard is now the **second consumer of the doc-key/module invariant with its own guard**, alongside #6's `doc-key-module-invariant.test.js`. `UNMEASURED_DOC_KEYS` is three keys, and the export added 8 lines to `platformOverview.js`, so the anchors below line 47 in the #41 entry and §3 table were re-cited (`DOC_SOURCES` `:208-218`, `VIA_PARENT` `:222-226`, module loop `:144-155`, settings read `:126-133`). Other `platformOverview.js` line cites elsewhere in the map (the surface #24 row `:221`, weak points 2 and 3 in #41) were not swept and may sit about 8 lines low. Map only. |
+| 2026-09-29 | branch `platform-events-instrumentation` (uncommitted) | **`platform_events` placed on the map.** New surface #23 in §1, new §2 join-key section, new all-`—` matrix row, and a new "Known pending links" section (P1) recording that it has no reader yet on purpose (Admin Panel, phase 3c). Migration `docs/schema/platform-events-migration.sql` written, **not applied live**. Eight producers verified in code: three crons (`cron_run`), `server-lib/email.js` (`email_send`), and four Anthropic call sites (`ai_generation`: `api/generate-flha.js:297`, `api/portal.js:248`, `server-lib/companyBrainSummary.js:70`, `server-lib/onboardingDrafting.js:61`). No break filed. **Stale Brain wording corrected:** §2's `source_type` table said daily reports and the equipment inspection "write nothing" and pointed at open break #4; it now lists all 7 source types with re-anchored lines (`flhas.js:436`, `reports.js:303`, `logs.js:442`, `logs.js:466`, `monthly.js:470`, `logs.js:484`), the "Equipment fleet" to Brain matrix cell went from `❌ #4` to `✅`, and #4's leftover "never sees equipment inspection defects" paragraph is now labelled historical. |
 | 2026-09-29 | branch `founder-dashboard-business`, `d4217e7` | **Founder dashboard slice 3b placed on the map.** New `server-lib/platformBusiness.js` (pure, imported only by `platformOverview.js:18,190`, so it stays behind `api/admin.js`'s founder-only `platform_overview`) adds a `business` section: estimated MRR, seat usage, median days to first document, per-company health score. Rendered as Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`). Tests: `tests/unit/platform-business.test.js`. New consumer rows added to §3 for `pricing.js` (good: one price source), `company_document_settings`, `stripe_subscription_status`, `planSeatCap`, `roster.last_login_at` (PIN logins only) and `created_at`. **Filed #42** (the Seats card uses `planSeatCap`, but enforcement uses a separate `SEAT_CAP_BY_TIER`, `companydata.js:219`, so the brief's claim that they cannot drift does not hold) with six recorded weak points, chiefly that the webhook suspends canceled/unpaid companies so they drop out of MRR and never show as at risk. Health thresholds are a judgment call for Dillon to tune. Tests were not re-run by this pass. Map only. |
 | 2026-09-29 | branch `founder-dashboard-business`, `c1a9266` | **#42 BUILT, closed pending merge of its PR** (same convention as #37-#41). Dillon approved it. `server-lib/onboardingHelpers.js:101-103` exports `effectiveSeatCap`; `api/companydata.js` lost its own `SEAT_CAP_BY_TIER` and calls it at `:362,392,457,582`; `platformBusiness.js:105` uses it, so the Seats card reports what enforcement uses and an unknown tier is basic in both. `tests/unit/seat-cap-source.test.js` (5 tests) pins one source and the Admin Panel copy; the copy test was shown to fail with advanced changed to 60. Left on purpose: `api/admin.js:355` keeps `planSeatCap`, and `src/AdminPanel.jsx:56` stays a copy, now test-pinned. §3 planSeatCap consumer row moved from broken to fine. Not marked merged. |
