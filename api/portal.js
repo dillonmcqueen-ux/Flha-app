@@ -564,14 +564,51 @@ Rules:
             ? Array.isArray(a.value) && a.value.includes(q.escalation_trigger_value)
             : String(a.value) === q.escalation_trigger_value;
           if (matches) {
+            let escalationInserted = false;
             try {
               await supabaseAdmin.from('portal_escalations').insert({
                 record_id: record.id, document_id: documentId, question_id: q.id,
                 question_text: q.question_text, answer_value: String(a.value),
                 target_department: q.escalation_department, status: 'open',
               });
+              escalationInserted = true;
             } catch (e) {
               console.error('portal escalation insert failed:', e.message);
+            }
+
+            // Break #34 fix: an escalation is meant to reach a DIFFERENT
+            // department than the one that already got the phase-3
+            // submission email below, so it needs its own notification
+            // keyed on the escalation's own target_department rather than
+            // the document's departments. Same best-effort, non-blocking
+            // posture as every other side effect in this handler — a send
+            // failure must never affect the already-saved escalation row,
+            // so this only runs (and only logs on failure) after the
+            // insert above has actually succeeded.
+            if (escalationInserted) {
+              try {
+                const { data: escRecipients } = await supabaseAdmin
+                  .from('roster')
+                  .select('email, departments')
+                  .eq('company_id', session.companyId)
+                  .eq('role', 'supervisor')
+                  .eq('active', true)
+                  .not('email', 'is', null);
+                const escToAddresses = [...new Set(
+                  (escRecipients || [])
+                    .filter(r => (r.departments || []).includes(q.escalation_department))
+                    .map(r => r.email)
+                )];
+                if (escToAddresses.length > 0) {
+                  await sendEmail({
+                    to: escToAddresses,
+                    subject: `Escalation: ${q.question_text}`,
+                    text: `An answer to "${q.question_text}" on "${docRows[0].title}" was flagged for escalation to your department.\n\nLog in to FORA to view it.`,
+                  });
+                }
+              } catch (e) {
+                console.error('portal escalation email failed:', e.message);
+              }
             }
           }
         }
