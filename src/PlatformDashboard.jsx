@@ -60,6 +60,57 @@ function Table({ columns, rows, empty }) {
 }
 
 const shortDay = (iso) => iso.slice(5);
+const money = (n) => `$${Math.round(n).toLocaleString("en-CA")}`;
+const BAND_LABEL = { healthy: "Healthy", watch: "Watch", at_risk: "At risk", new: "New" };
+const BAND_COLOR = { healthy: C.status.success.text, watch: C.status.warning.text, at_risk: C.status.danger.text, new: C.text.muted };
+
+function BusinessSection({ business }) {
+  const { mrr, health, timeToFirstDocument: ttfd, seats } = business;
+  const tierRows = Object.entries(mrr.byTier).map(([tier, amount]) => ({ tier, amount }));
+  const scored = business.perCompany.slice().sort((a, b) => (a.score ?? 101) - (b.score ?? 101));
+  return (
+    <>
+      <Card title="Revenue (estimate)" subtitle={mrr.note}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Tile label="Estimated MRR" value={money(mrr.estimated)} sub="all live companies, list price" />
+          <Tile label="Billed via Stripe" value={money(mrr.billed)} sub="subscription active or trialing" />
+          <Tile label="Not billed via Stripe" value={money(mrr.notBilled)} sub="no subscription on file" />
+          <Tile label="Payment at risk" value={money(mrr.atRisk)} sub="past due, unpaid or canceled" />
+        </div>
+        {mrr.unpriced > 0 && <div style={{ fontSize: 12, color: C.status.warning.text, marginTop: 10 }}>{mrr.unpriced} live compan{mrr.unpriced === 1 ? "y has" : "ies have"} no plan tier set, so {mrr.unpriced === 1 ? "it is" : "they are"} not priced.</div>}
+        <div style={{ marginTop: 12 }}>
+          <Table empty="No priced companies yet." rows={tierRows} columns={[{ key: "tier", label: "Tier" }, { key: "amount", label: "Estimated MRR", align: "right", render: r => money(r.amount) }]} />
+        </div>
+      </Card>
+
+      <Card title="Company health" subtitle="Rule-based score out of 100: recent documents (40), worker logins this week (30), paid modules in use (20), payment status (10). Companies under 14 days old are not scored. Reasons are listed so you can see why.">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <Tile label="Healthy" value={health.healthy} />
+          <Tile label="Watch" value={health.watch} />
+          <Tile label="At risk" value={health.atRisk} />
+          <Tile label="New" value={health.new} />
+          <Tile label="Median days to first document" value={ttfd.medianDays === null ? "n/a" : ttfd.medianDays} sub={`${ttfd.filed} filed, ${ttfd.neverFiled} never`} />
+        </div>
+        <Table empty="No live companies." rows={scored} columns={[
+          { key: "name", label: "Company" },
+          { key: "score", label: "Score", align: "right", render: r => r.score === null ? "n/a" : r.score },
+          { key: "band", label: "Status", render: r => <span style={{ color: BAND_COLOR[r.band], fontWeight: 700 }}>{BAND_LABEL[r.band]}</span> },
+          { key: "monthly", label: "Est. MRR", align: "right", render: r => r.monthly === null ? "no tier" : money(r.monthly) },
+          { key: "reasons", label: "Why", render: r => r.reasons.length ? r.reasons.join("; ") : "n/a" },
+        ]} />
+      </Card>
+
+      <Card title="Seats" subtitle="Companies at 80% or more of their plan's seat cap, the natural upgrade conversation">
+        <Table empty="No company is near its seat cap." rows={seats.nearCap} columns={[
+          { key: "name", label: "Company" },
+          { key: "used", label: "Seats used", align: "right" },
+          { key: "cap", label: "Cap", align: "right" },
+          { key: "pct", label: "Used", align: "right", render: r => `${r.pct}%` },
+        ]} />
+      </Card>
+    </>
+  );
+}
 
 export default function PlatformDashboard({ token }) {
   const [data, setData] = useState(null);
@@ -84,7 +135,7 @@ export default function PlatformDashboard({ token }) {
   if (error && !data) return <div style={{ color: C.status.danger.text, padding: 16 }}>{error}</div>;
   if (!data) return null;
 
-  const { totals, documents, signups, plans, modules, perCompany } = data;
+  const { totals, documents, signups, plans, modules, perCompany, business } = data;
   const hasDocs = documents.perDay.some(d => d.total > 0);
   const typeBars = documents.byType.filter(t => t.last30 > 0).map(t => ({ label: t.label, count: t.last30 }));
   const funnelRows = Object.entries(signups.funnel).map(([status, count]) => ({ status, count }));
@@ -104,6 +155,8 @@ export default function PlatformDashboard({ token }) {
           <Tile label="Documents (30 days)" value={documents.perDay.reduce((n, d) => n + d.total, 0)} />
         </div>
       </Card>
+
+      {business && <BusinessSection business={business} />}
 
       <Card title="Documents per day" subtitle="Every document type, last 30 days">
         {!hasDocs ? <div style={{ color: C.text.faint, fontSize: 13 }}>No documents in the last 30 days.</div> : (

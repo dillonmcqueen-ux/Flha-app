@@ -15,6 +15,7 @@
 // buildPlatformOverview() is pure, loadPlatformOverview() only fetches.
 
 import { MODULES, MODULE_KEYS } from './pricing.js';
+import { buildBusinessMetrics } from './platformBusiness.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -186,6 +187,7 @@ export function buildPlatformOverview({ companies = [], docs = {}, roster = [], 
     plans: { byTier, bySubscription },
     modules,
     perCompany,
+    business: buildBusinessMetrics({ companies, docs, roster, docSettings }, { typeByDocKey }, now),
   };
 }
 
