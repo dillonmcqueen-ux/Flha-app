@@ -1315,9 +1315,9 @@ It produces nothing another feature reads. It consumes:
 
 | From ↓ | Join | Shown as | State |
 |---|---|---|---|
-| Nine document tables (`flhas`, `toolbox_talks`, `incidents`, `near_misses`, `daily_reports`, `inspections`, `fuel_logs`, `time_clock_entries`, `worker_certifications`) | `company_id`, `created_at` (`platformOverview.js:201-211,236`) | Documents per day and per type, per-company activity | ✅ |
-| Monthly, Custom, Portal records | `form_id`/`document_id` → parent's `company_id` (`:215-219,238-243`) | Same | ✅ *(a record whose parent was deleted counts in the daily total but credits no company, `:73-75`)* |
-| `company_document_settings` + `pricing.js` `MODULES` | `document_key` (`:121-126,137-147`) | Modules bought vs used | ⚠️ **#41**: the doc-type list joining them is a second copy |
+| Nine document tables (`flhas`, `toolbox_talks`, `incidents`, `near_misses`, `daily_reports`, `inspections`, `fuel_logs`, `time_clock_entries`, `worker_certifications`) | `company_id`, `created_at` (`platformOverview.js:208-218,244`) | Documents per day and per type, per-company activity | ✅ |
+| Monthly, Custom, Portal records | `form_id`/`document_id` → parent's `company_id` (`:222-226,246-251`) | Same | ✅ *(a record whose parent was deleted counts in the daily total but credits no company, `:73-75`)* |
+| `company_document_settings` + `pricing.js` `MODULES` | `document_key` (`:126-133,144-155`) | Modules bought vs used | ✅ **#41** built, closes when its PR merges: `UNMEASURED_DOC_KEYS` (`platformOverview.js:46`) plus four guard tests (`tests/unit/platform-overview.test.js:148-173`) keep the doc-type list equal to `ALL_DOC_KEYS` (`pricing.js:124`) |
 | `roster.last_login_at` | `login.js:514` | Active workers | ⚠️ PIN logins only, #41 weak point 1 |
 | `companies`, `onboarding_requests` | `created_at`, `plan_tier`, `stripe_subscription_status`, `status` (`:225-232`) | Sign-ups, plan mix | ✅ |
 | Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | n/a, deliberate |
@@ -3607,42 +3607,51 @@ documents sees a quiet Recent Activity. *A fix would touch:*
 between `:4248` and `:4270` returns nothing.
 
 ### #41: The founder dashboard's document-type list is a second copy nothing checks against the modules
-**Severity: low** (founder-facing, no customer loses anything), but it fails silently.
-**Status: OPEN, not approved, no code touched.** Opened 2026-09-29 against `cb9908a`.
+**Severity: low** (founder-facing, no customer loses anything), but it failed silently.
+**Status: BUILT and approved by Dillon, closed pending merge of its PR (`8502cb2` on
+`founder-dashboard-activity`), same convention as #37-#40.** Opened 2026-09-29
+against `cb9908a`. Do not mark merged until the PR is.
 
 The dashboard decides what "used" means from its own hand-written list,
 `DOC_TYPES` (`server-lib/platformOverview.js:26-39`), plus a table list
-`DOC_SOURCES` (`:201-211`) and `VIA_PARENT` (`:215-219`). It decides what
-"bought" means from `company_document_settings` rows (`:121-126`). It joins the
-two through `pricing.js` `MODULES[k].docKeys` (`:137-147`, `pricing.js:60-116`).
-Break #6's test (`tests/unit/doc-key-module-invariant.test.js`) keeps
-`BUILTIN_DOC_KEYS` (`api/customforms.js:120`) and `MODULES` in agreement.
-Nothing keeps `DOC_TYPES` in agreement with either:
-`tests/unit/platform-overview.test.js` never references `DOC_TYPES` or
-`MODULES` (grep returned no match).
+`DOC_SOURCES` (`:208-218`) and `VIA_PARENT` (`:222-226`). It decides what
+"bought" means from `company_document_settings` rows (`:126-133`). It joins the
+two through `pricing.js` `MODULES[k].docKeys` (`:144-155`, `pricing.js:60-116`).
+Before the fix nothing kept `DOC_TYPES` in agreement with `MODULES`
+(`tests/unit/platform-overview.test.js` never referenced either), so a new doc
+key added to a module, or a key with no module, either undercounted `used` or
+vanished from the dashboard with no error.
 
-In product terms: Dillon reads adoption to decide who is getting value and who
-might churn, and it can be wrong without saying so.
+**What was built (read, not taken from the PR text):**
+- `UNMEASURED_DOC_KEYS = ['equipment_reports', 'maintenance', 'equipment_compliance']`
+  is exported (`platformOverview.js:46`), the explicit "gates a module, files
+  nothing of its own" list, with a comment naming the test (`:41-45`).
+- Four guard tests (`tests/unit/platform-overview.test.js:148-173`): every
+  `ALL_DOC_KEYS` entry is measured or unmeasured (`:148-153`); the dashboard
+  names no key `pricing.js` does not know (`:155-159`); no key is both measured
+  and unmeasured (`:161-164`); every module's keys are covered (`:166-173`).
+  Together they require `DOC_TYPES` plus `UNMEASURED_DOC_KEYS` to cover
+  `ALL_DOC_KEYS` (`pricing.js:124`) exactly.
+- Verification reported by the builder, not re-run by this pass: a fake doc key
+  added to a module made the first test fail with a clear message, and
+  `pricing.js` was restored.
 
-- **New doc key added to an existing module** that already has a measurable
-  key: filings under the new key are in no `DOC_TYPES` row, so `filedIn30`
-  (`:131-135`) never sees them and `used` undercounts. No error, no `null`.
-- **New doc key with no module** (the #6 mistake): the module loop
-  (`:137-148`) is driven by `MODULE_KEYS`, so the key appears nowhere on the
-  dashboard at all.
-- **New module whose keys are all new**: this one is *not* silent.
-  `measurable` is false (`:139`) and the row renders `not measurable`
-  (`PlatformDashboard.jsx:149`). Recorded so it is not re-filed.
+**Second consumer of the doc-key/module invariant, with its own guard.** #6's
+test (`tests/unit/doc-key-module-invariant.test.js`) keeps `BUILTIN_DOC_KEYS`
+(`api/customforms.js:120`) and `MODULES` in agreement, which protects billing.
+The founder dashboard is now the second consumer of the same invariant and has
+its own guard, protecting adoption numbers. The two tests are independent: a
+key added to `pricing.js` must now satisfy both. Any *third* consumer that
+keeps a hand-written doc-key list should get the same kind of test.
 
-Today the lists agree. `DOC_TYPES` carries ten doc keys (`:27-36`), and the
-only `MODULES` keys it does not carry are `equipment_reports` (measured through
-its module's `inspection` key), `maintenance` and `equipment_compliance` (no
-filing of their own, the deliberate `not measurable` cases).
+Known limit, unchanged and not a break: the guard checks keys only. A key
+added to `DOC_TYPES` with a wrong `type`/table pairing in `DOC_SOURCES` is not
+caught, and `equipment_reports` stays on the unmeasured list even though its
+module is measured through its `inspection` key (`:146`), which is why that
+module still reads as measurable.
 
-**A fix would touch:** one unit test asserting every `docKey` in `MODULES` is
-either a `DOC_TYPES.docKey` or on an explicit "not measurable" list. No
-application code. Same shape as #6's fix.
-**Re-check:** `grep -n "docKey:" server-lib/platformOverview.js` against
+**Re-check:** `npm run test:unit -- tests/unit/platform-overview.test.js`, and
+`grep -n "docKey:" server-lib/platformOverview.js` against
 `grep -n "docKeys:" server-lib/pricing.js`.
 
 **Weak points on the same surface, recorded, not filed** (each works as
@@ -3963,7 +3972,7 @@ supervisor, missing and garbage tokens, and `:138` pins that no other
 `server-lib` file imports `platformOverview.js` (it takes a service-role client
 and reads across companies). Do not file "ungated surface" against it. Also
 deliberate: Preventative Maintenance and Equipment Compliance report `not
-measurable` (`platformOverview.js:22-25,139,147`, rendered
+measurable` (`platformOverview.js:22-25,46,146,154`, rendered
 `PlatformDashboard.jsx:149`) because they read other documents and file none
 of their own; Custom Document and Company Portal filings count toward activity
 (`:37-38`) but toward no module (`docKey: null`), consistent with Portal not
@@ -4052,3 +4061,4 @@ not missing links.
 | 2026-09-29 | branch `portal-pdf-email`, `ba5f6ab` | **Company Portal "email documents to a department" placed on the map.** New table `portal_report_schedules` (migration written, **not applied live**), `server-lib/portalReports.js`, `api/cron-portal-reports.js` (`vercel.json:9`), five `api/portal.js` actions (`:1042-1158`), `src/PortalReports.jsx`, and the Email to department button (`Dashboard.jsx:1651`). Consumes `PORTAL_DEPARTMENTS`, `roster.departments`, `portal_documents.departments`, `portal_records.pdf_url` and encrypted `roster.email`; all keys agree (table in §2). Earlier merged steps recorded in the same §2 section: `fieldCrypto` roster/onboarding encryption, `people_encrypted`, supervisor-created assignment rules. **Breaks #35** (zero-recipient run marks documents as sent, `portalReports.js:143-145`) **and #36** (one-off email doesn't check the target department against the document's routing, `portal.js:1138-1149`) opened. #35 not approved. #36 was fixed in `e3c49ad` (`portal.js:1150-1153`, `Dashboard.jsx:1603`), not closed until the branch merges. That commit also rejects recipient addresses containing `,;<>()"` (`portal.js:1067`), not mapped as a break. Noted, not filed: the cron skips no `roster_enabled`/`suspended` check, unlike `cron-equipment-reports.js:88`. Overview Company Portal panel not read (`?`). Map only; no application code touched. |
 | 2026-09-29 | branch `fix-portal-p3` (`b97b231`), PRs #157, #158, #159 | **Company Portal parity sweep, plus everything merged since the last pass.** PR #158 merged (department report emails; `portal_report_schedules` reported applied live by Dillon, not verifiable from code): **#35 and #36 CLOSED**, cron now gated on `companies.roster_enabled`/`suspended` (`cron-portal-reports.js:36-39`), `runSchedule` refuses without `RESEND_API_KEY` (`portalReports.js:128`). PR #157 merged: Overview "Company Portal" panel read (`Dashboard.jsx:5502-5508`), the standing `?` cleared. Sweep filed four breaks: **#37** (Resume on a Portal draft, `WorkerMenu.jsx:221`) CLOSED, PR #159; **#38** (edit, regenerate, delete a submitted Portal record: `update_portal_record` `portal.js:1037`, `delete_portal_record` `:1085`, `validateEditedPortalAnswer` `portalFieldTypes.js:48`, `PortalRecordCard` edit UI, delete also removes stored PDF and attachments) CLOSED, PR #159; **#39** (`delete_site` `companydata.js:1027-1032`, `delete_company` `admin.js:685-731` ignored Portal) approved and FIXED on this branch, closes when its PR merges; **#40** (Portal absent from Overview Recent Activity, Site Activity, Analytics, `Dashboard.jsx:4248-4262`) OPEN, not approved. **#33 amended:** its Unfinished-list fix (PR #151) was incomplete until #37, since Resume went nowhere. `get_portal_record_detail` now returns one generic 403 for missing versus foreign record for non-admin (`portal.js:721-729`). Known, unchanged, now in §5: Portal not in `pricing.js`; Portal answers emit no Brain signals. Map only; no application code touched. |
 | 2026-09-29 | branch `founder-dashboard-activity`, `cb9908a` | **Founder dashboard slice 3a placed on the map.** New surface #23 (Admin Panel > Platform): `api/admin.js:127-134` `platform_overview` → `server-lib/platformOverview.js:221` `loadPlatformOverview`, rendered by `src/PlatformDashboard.jsx` (`AdminPanel.jsx:1408-1409`). Aggregates only, no new table, not gated by a company doc key on purpose (§5). It is a **new consumer** of the doc-key/module invariant (#6) and of `company_document_settings`, `roster.last_login_at`, `companies.created_at`/`plan_tier`/`stripe_subscription_status` and `onboarding_requests`. All nine document tables, the three via-parent tables and the four join names read from resolve against the code (`platformOverview.js:201-219`). **Break #41 opened** (the dashboard's own document-type list is a second copy of the doc-key list and nothing ties it to `pricing.js`, so adoption can undercount silently), not approved, no code touched. Two weak points recorded, not filed: "active workers" counts PIN logins only (`login.js:514` is the only `last_login_at` write; invite-link sessions at `:581-591` never set it), and the totals mix live-only and all-company denominators (`platformOverview.js:67-79` vs `:114-116`). `platform_events` (pending link P1 as named in the task) has **zero** references anywhere in the repo, so it is `?` here: no table, writer or reader can be verified from code. Not to be confused with the existing Portal-sweep P1 (#37). Slices 3b (MRR, churn, seat usage, health scores) and 3c (`platform_events` health) are not built and not mapped. Map only; no application code touched. |
+| 2026-09-29 | branch `founder-dashboard-activity`, `8502cb2` | **#41 BUILT, closed pending merge of its PR** (same convention as #37-#40). Dillon approved it. `server-lib/platformOverview.js` exports `UNMEASURED_DOC_KEYS` (`:46`) and `tests/unit/platform-overview.test.js:148-173` has four guard tests requiring `DOC_TYPES` plus that list to cover `pricing.js` `ALL_DOC_KEYS` (`:124`) exactly, with no stray and no double-listed keys. Read all three files. The builder reported a fake doc key made the test fail clearly, then restored `pricing.js`; this pass did not re-run that. §3 consumer table cell for the module join moved from warning to fine. The dashboard is now the **second consumer of the doc-key/module invariant with its own guard**, alongside #6's `doc-key-module-invariant.test.js`. `UNMEASURED_DOC_KEYS` is three keys, and the export added 8 lines to `platformOverview.js`, so the anchors below line 47 in the #41 entry and §3 table were re-cited (`DOC_SOURCES` `:208-218`, `VIA_PARENT` `:222-226`, module loop `:144-155`, settings read `:126-133`). Other `platformOverview.js` line cites elsewhere in the map (the surface #23 row `:221`, weak points 2 and 3 in #41) were not swept and may sit about 8 lines low. Map only. |
