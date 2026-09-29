@@ -124,6 +124,7 @@ const PIN_IP_THROTTLE_MAX_FAILURES = 50;
 // A genuine submitter needs one or two attempts, not twenty.
 const ONBOARDING_THROTTLE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const ONBOARDING_INTAKE_MAX_PER_HOUR = 10;
+const ONBOARDING_GET_MAX_PER_HOUR = 60;
 const ONBOARDING_UPLOAD_MAX_PER_HOUR = 40;
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
@@ -836,6 +837,10 @@ export default async function handler(req, res) {
   if (action === 'get_onboarding_intake') {
     const { editToken } = req.body;
     if (!editToken) return res.status(400).json({ error: 'Missing edit link.' });
+    // The edit token now unlocks decrypted roster emails, so brute-force
+    // guessing gets the same per-IP throttle the submit action has.
+    const getAllowed = await checkIpThrottle(`onbget:${clientIp(req)}`, ONBOARDING_GET_MAX_PER_HOUR, ONBOARDING_THROTTLE_WINDOW_MS);
+    if (!getAllowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
     const { data: rows, error } = await supabaseAdmin
       .from('onboarding_requests')
       .select('company_name, contact_name, contact_email, contact_phone, address, sites_list, units_list, users_list, people_encrypted, custom_request, sop_file_paths, logo_url, status, admin_note, created_company_id')
@@ -847,11 +852,18 @@ export default async function handler(req, res) {
     // Hand the form back its structured rows; the ciphertext itself never
     // leaves the server. A row that can't be decrypted falls back to the
     // plain users_list text, which the form already knows how to show.
-    try {
-      request.people = request.people_encrypted ? JSON.parse(decryptField(request.people_encrypted)) : null;
-    } catch (e) {
-      console.error('Could not decrypt onboarding people:', e.message);
-      request.people = null;
+    // Once the company exists the roster lives in the app, so the emails
+    // stop being served from this link. `peopleUnreadable` tells the form to
+    // ask for the emails again instead of silently resubmitting without them.
+    request.people = null;
+    request.peopleUnreadable = false;
+    if (request.people_encrypted && !request.created_company_id) {
+      try {
+        request.people = JSON.parse(decryptField(request.people_encrypted));
+      } catch (e) {
+        console.error('Could not decrypt onboarding people:', e.message);
+        request.peopleUnreadable = true;
+      }
     }
     delete request.people_encrypted;
     return res.status(200).json({ request });

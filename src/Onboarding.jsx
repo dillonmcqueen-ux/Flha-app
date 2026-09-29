@@ -227,6 +227,7 @@ export default function Onboarding() {
         setPeople(Array.isArray(r.people) && r.people.length
           ? r.people.map((p) => ({ name: p.name || "", role: p.role === "supervisor" ? "supervisor" : "worker", email: p.email || "" }))
           : personRowsFromUsersList(r.users_list));
+        if (r.peopleUnreadable) setError("We couldn't load the email addresses you gave us. Please re-enter them before saving.");
         setAdminNote(r.admin_note || "");
         setAgreed(true); // already agreed once, at original submission
       } catch (e) {
