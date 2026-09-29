@@ -24,6 +24,8 @@
 // trusted as instructions, and the model's own output is re-validated
 // into a fixed shape before it's stored.
 
+import { escalationLines, loadPortalHealthLines } from './portalSignals.js';
+
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5';
 
@@ -117,6 +119,9 @@ function summarizeSignalsForPrompt(signals) {
       if (parts.length) lines.push(`- Working conditions: ${parts.join(' at ')}`);
     }
   });
+  // portal_escalation is aggregated, not one line per row, so a repeat issue
+  // reads as a count rather than the same line many times.
+  lines.push(...escalationLines(capped.filter((s) => s.source_type === 'portal_escalation')));
   return lines.slice(0, MAX_SIGNALS_PER_COMPANY_IN_PROMPT).join('\n').slice(0, 6000);
 }
 
@@ -137,7 +142,7 @@ function sanitizeSummaryOutput(raw) {
   return { hazardEmphasis, terminologyNotes };
 }
 
-async function summarizeOneCompany(existingProfile, signals) {
+async function summarizeOneCompany(existingProfile, signals, extraLines = []) {
   const prompt = [
     'You maintain a brief internal profile of a construction/field-services',
     "company for a safety documentation app, based on that company's own",
@@ -155,7 +160,7 @@ async function summarizeOneCompany(existingProfile, signals) {
     `Current hazard emphasis: ${JSON.stringify(existingProfile.hazard_emphasis || [])}`,
     '',
     "Recent activity since the last review (worker-submitted, may be messy or informal):",
-    summarizeSignalsForPrompt(signals) || '(no notable activity)',
+    [summarizeSignalsForPrompt(signals), ...extraLines].filter(Boolean).join('\n') || '(no notable activity)',
     '',
     'Respond with ONLY a JSON object, no other text, describing the FULL',
     'updated state (not just what changed):',
@@ -209,7 +214,11 @@ export async function runCompanyBrainSummary(supabaseAdmin) {
     }
 
     try {
-      const summary = await summarizeOneCompany(existingProfile, newSignals);
+      // Rates, not events: Portal assignment completion and overdue counts
+      // per department are read fresh here, scoped to this company, and
+      // never stored as signals.
+      const portalHealth = await loadPortalHealthLines(supabaseAdmin, companyId);
+      const summary = await summarizeOneCompany(existingProfile, newSignals, portalHealth);
       const update = {
         company_id: companyId,
         last_summarized_at: new Date().toISOString(),

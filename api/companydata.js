@@ -1635,9 +1635,9 @@ export default async function handler(req, res) {
       // recorded and summarized. Writers today: api/flhas.js (flha_edit),
       // api/logs.js (toolbox_talk, equipment_inspection), api/reports.js
       // (incident, near_miss), api/monthly.js (monthly_inspection),
-      // api/logs.js again (daily_report).
-      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0, daily_report: 0 };
-      const tally = { addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {}, workingConditions: {} };
+      // api/logs.js again (daily_report), api/portal.js (portal_escalation).
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0, daily_report: 0, portal_escalation: 0 };
+      const tally = { portalFlagged: {}, addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {}, workingConditions: {} };
       const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
       (data || []).forEach((row) => {
         const j = row.signal_json || {};
@@ -1666,6 +1666,10 @@ export default async function handler(req, res) {
           if (j.tempBand && j.tempBand !== 'moderate') bump(tally.workingConditions, j.tempBand);
         } else if (row.source_type === 'monthly_inspection') {
           (j.failed || []).forEach((q) => bump(tally.monthlyFailures, q));
+        } else if (row.source_type === 'portal_escalation') {
+          // Question and document only. The answer and the worker are never
+          // in the signal, so they cannot be in this list either.
+          if (j.question && j.document) bump(tally.portalFlagged, `${j.question} (${j.document})`);
         }
       });
       const topN = (map, n = 8) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
@@ -1682,6 +1686,7 @@ export default async function handler(req, res) {
         topDefectiveItems: topN(tally.defectiveItems),
         topInspectedEquipment: topN(tally.inspectedEquipment),
         topMonthlyFailures: topN(tally.monthlyFailures),
+        topPortalFlagged: topN(tally.portalFlagged),
       });
     }
 

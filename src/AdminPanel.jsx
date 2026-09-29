@@ -2243,6 +2243,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.equipment_inspection ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Equipment defects</div></div>
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.monthly_inspection ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Site findings</div></div>
                     <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.daily_report ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Working conditions</div></div>
+                    <div><div style={{ fontSize: 20, fontWeight: 800, color: C.ink }}>{brainTrends.bySourceType.portal_escalation ?? 0}</div><div style={{ fontSize: 11, color: C.muted }}>Portal flagged answers</div></div>
                   </div>
                   {[
                     ["Hazards most often added by workers", brainTrends.topAddedHazards],
@@ -2254,6 +2255,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                     ["Checks most often failing on equipment", brainTrends.topDefectiveItems],
                     ["Machines with the most inspection findings", brainTrends.topInspectedEquipment],
                     ["Site inspection questions most often failed", brainTrends.topMonthlyFailures],
+                    ["Portal questions most often flagged", brainTrends.topPortalFlagged],
                   ].filter(([, list]) => (list || []).length > 0).map(([label, list]) => (
                     <div key={label}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, marginBottom: 6 }}>{label}</div>

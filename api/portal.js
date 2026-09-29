@@ -25,6 +25,7 @@ import { authorRosterId } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
+import { portalEscalationSignal } from '../server-lib/portalSignals.js';
 import { withDecryptedEmail, encryptField } from '../server-lib/fieldCrypto.js';
 import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
@@ -569,14 +570,40 @@ Rules:
           if (matches) {
             let escalationInserted = false;
             try {
-              await supabaseAdmin.from('portal_escalations').insert({
+              // supabase-js returns { error } rather than throwing, so the
+              // old bare await marked the insert as done even when it had
+              // failed, and the department got an email about an escalation
+              // that did not exist. Check the result.
+              const { error: escInsertErr } = await supabaseAdmin.from('portal_escalations').insert({
                 record_id: record.id, document_id: documentId, question_id: q.id,
                 question_text: q.question_text, answer_value: String(a.value),
                 target_department: q.escalation_department, status: 'open',
               });
+              if (escInsertErr) throw new Error(escInsertErr.message);
               escalationInserted = true;
             } catch (e) {
               console.error('portal escalation insert failed:', e.message);
+            }
+
+            // Company Brain: a flagged answer is the Portal signal worth
+            // learning from. Metadata only (document, question label,
+            // department), never the answer or the worker. Best-effort and
+            // non-blocking like every other signal writer.
+            if (escalationInserted) {
+              try {
+                const signal = portalEscalationSignal({ documentTitle: docRows[0].title, questionText: q.question_text, department: q.escalation_department });
+                if (signal) {
+                  const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+                    company_id: session.companyId,
+                    source_type: 'portal_escalation',
+                    source_id: String(record.id),
+                    signal_json: signal,
+                  });
+                  if (signalErr) console.error('company_signals insert failed for portal escalation', record.id, signalErr.message);
+                }
+              } catch (e) {
+                console.error('company_signals capture failed for portal escalation', record.id, e.message);
+              }
             }
 
             // Break #34 fix: an escalation is meant to reach a DIFFERENT
