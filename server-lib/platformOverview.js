@@ -38,6 +38,13 @@ export const DOC_TYPES = [
   { type: 'portal', label: 'Company Portal', docKey: null },
 ];
 
+// Doc keys that gate a module but have no filing of their own to count, so
+// DOC_TYPES cannot measure them. Listed on purpose: tests/unit/platform-
+// overview.test.js requires DOC_TYPES plus this list to cover every key in
+// pricing.js exactly (map break #41). Add a document key to a module and that
+// test fails until the key is either measured above or named here.
+export const UNMEASURED_DOC_KEYS = ['equipment_reports', 'maintenance', 'equipment_compliance'];
+
 const dayKey = (d) => new Date(d).toISOString().slice(0, 10);
 
 export function buildPlatformOverview({ companies = [], docs = {}, roster = [], docSettings = [], onboarding = [], truncated = false } = {}, now = new Date()) {

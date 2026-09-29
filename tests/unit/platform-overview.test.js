@@ -12,7 +12,8 @@ process.env.SUPABASE_URL ||= 'http://127.0.0.1:1/';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 process.env.SESSION_SECRET ||= 'test-session-secret';
 
-const { buildPlatformOverview } = await import('../../server-lib/platformOverview.js');
+const { buildPlatformOverview, DOC_TYPES, UNMEASURED_DOC_KEYS } = await import('../../server-lib/platformOverview.js');
+const { ALL_DOC_KEYS, MODULES, MODULE_KEYS } = await import('../../server-lib/pricing.js');
 const adminHandler = (await import('../../api/admin.js')).default;
 
 const NOW = new Date('2026-09-29T12:00:00Z');
@@ -140,4 +141,33 @@ test('only api/admin.js imports the overview loader', () => {
     }
   }
   assert.deepEqual(importers, ['api/admin.js']);
+});
+
+// ── break #41: the dashboard's list must track pricing.js ───────────────
+
+test('every module doc key is either measured or explicitly listed as unmeasured', () => {
+  const measured = DOC_TYPES.map(t => t.docKey).filter(Boolean);
+  const covered = new Set([...measured, ...UNMEASURED_DOC_KEYS]);
+  const missing = ALL_DOC_KEYS.filter(k => !covered.has(k));
+  assert.deepEqual(missing, [], `pricing.js has doc keys the dashboard neither measures nor lists as unmeasured: ${missing.join(', ')}. Add them to DOC_TYPES or UNMEASURED_DOC_KEYS in server-lib/platformOverview.js.`);
+});
+
+test('the dashboard does not name a doc key that no module sells', () => {
+  const known = new Set(ALL_DOC_KEYS);
+  const stray = [...DOC_TYPES.map(t => t.docKey).filter(Boolean), ...UNMEASURED_DOC_KEYS].filter(k => !known.has(k));
+  assert.deepEqual(stray, [], `platformOverview.js names doc keys pricing.js does not know: ${stray.join(', ')}`);
+});
+
+test('a key is never both measured and listed as unmeasured', () => {
+  const measured = new Set(DOC_TYPES.map(t => t.docKey).filter(Boolean));
+  assert.deepEqual(UNMEASURED_DOC_KEYS.filter(k => measured.has(k)), []);
+});
+
+test('every module reports either a measurable key or only unmeasured ones, never neither', () => {
+  const measured = new Set(DOC_TYPES.map(t => t.docKey).filter(Boolean));
+  for (const key of MODULE_KEYS) {
+    for (const dk of MODULES[key].docKeys) {
+      assert.ok(measured.has(dk) || UNMEASURED_DOC_KEYS.includes(dk), `${key}: ${dk} is uncovered`);
+    }
+  }
 });
