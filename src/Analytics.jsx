@@ -7,7 +7,7 @@ import {
   severityBreakdown, nearMissIncidentRatio, reviewBacklog, highRiskFlhaRate,
   equipmentIssueStats, fieldSiteActivity, scheduledSiteActivity, monthlyTrend,
   correctiveActionAging, reporterLeaderboard, monthlyPassRate, toolboxAvgAttendance,
-  maintenanceSummary, fuelSummary,
+  maintenanceSummary, fuelSummary, portalSummary,
 } from "./analyticsUtils";
 import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
 
@@ -438,6 +438,55 @@ export function EquipmentAnalyticsPanel({ tier, companyName, inspections = [], d
           Ask your admin to enable Advanced Analytics for equipment issue detail, preventative maintenance tracking, and fuel cost/consumption breakdowns.
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Company Portal analytics. Rendered inside the Portal tab (Portal is its
+// own product, with its own departments, so it is not folded into Safety or
+// Equipment). Data is whatever the server already scoped to this supervisor's
+// departments, so a department supervisor sees their slice, not the company.
+export function PortalAnalyticsPanel({ companyName, records = [], escalations = [], assignmentRows = [], siteNames = {} }) {
+  const sum = portalSummary(records, escalations, assignmentRows, siteNames);
+  return (
+    <div>
+      <SectionCard title={`Portal Analytics${companyName ? ` — ${companyName}` : ""}`} subtitle="Covers the documents and escalations routed to your department(s).">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <StatTile label="Submissions" value={sum.total} sub={`${sum.last30} in the last 30 days`} />
+          <StatTile label="Open Escalations" value={sum.openEscalations} tone={sum.openEscalations > 0 ? "bad" : "good"} />
+          <StatTile label="Flagged Submissions" value={`${sum.flaggedPct}%`} sub="had at least one escalation" tone={sum.flaggedPct > 0 ? "warn" : "good"} />
+          <StatTile label="Assignments Completed" value={sum.assigned > 0 ? `${sum.completionPct}%` : "n/a"} sub={sum.assigned > 0 ? `${sum.submitted} of ${sum.assigned}` : "none assigned"} tone={sum.assigned > 0 && sum.completionPct < 100 ? "warn" : "good"} />
+          <StatTile label="Overdue" value={sum.overdue} tone={sum.overdue > 0 ? "bad" : "good"} />
+        </div>
+      </SectionCard>
+
+      <SectionCard title="6-Month Trend" subtitle="Submissions and escalations per month">
+        <TrendChart
+          buckets={sum.trend}
+          series={[{ key: "submissions", label: "Submissions", color: C.orange }, { key: "escalations", label: "Escalations", color: C.status.danger.solid }]}
+          emptyLabel="No Portal submissions in the last 6 months."
+        />
+      </SectionCard>
+
+      <SectionCard title="Submissions by Document">
+        <RankedBarList items={sum.byDocument} limit={8} emptyLabel="No Portal submissions yet." />
+      </SectionCard>
+
+      <SectionCard title="Escalations by Department" subtitle="Where flagged answers were routed">
+        <RankedBarList items={sum.escalationsByDepartment} emptyLabel="No escalations yet." barColor={C.status.danger.solid} />
+      </SectionCard>
+
+      <SectionCard title="Portal Activity by Site">
+        <SimpleTable
+          emptyLabel="No site-tagged Portal submissions yet."
+          columns={[
+            { key: "site", label: "Site" },
+            { key: "submissions", label: "Submissions", align: "right" },
+            { key: "openEscalations", label: "Open Escalations", align: "right" },
+          ]}
+          rows={sum.bySite}
+        />
+      </SectionCard>
     </div>
   );
 }

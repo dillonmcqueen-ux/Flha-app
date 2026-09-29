@@ -16,16 +16,19 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; **latest addition 2026-09-29, `platform_events` telemetry (uncommitted, branch `platform-events-instrumentation`): surface #23, a §2 section, and pending link P1 (no reader yet, by design), see the changelog;** the paragraph after this describes the last full pass. **Most recent pass
-2026-09-29 on branch `fix-portal-p3` (`b97b231`), the Company Portal parity
-sweep** — everything merged since the last pass recorded. **#35, #36 and #33
-are CLOSED** (PR #158 for the first two; #33's Unfinished list was only
-truly fixed by #37 below). Four breaks filed by the sweep, numbered
-**#37-#40**: **#37 (Resume on a Portal draft) and #38 (a submitted Portal
-record could not be edited or deleted) are FIXED and merged, PR #159; #39
-(site and company delete ignored Portal) is approved and FIXED on this
-branch, closes when its PR merges; #40 (Portal missing from Overview Recent
-Activity, Site Activity and Analytics) is OPEN, not approved.** The Overview
-"Company Portal" panel (PR #157) is now read and mapped. Known and unchanged:
+2026-09-29 on branch `portal-parity-analytics` (`23aad0b`), closing out #40**
+after the Company Portal parity sweep (branch `fix-portal-p3`, `b97b231`).
+**#35, #36 and #33 are CLOSED** (PR #158 for the first two; #33's Unfinished
+list was only truly fixed by #37 below). Four breaks filed by the sweep,
+numbered **#37-#40**: **#37 (Resume on a Portal draft) and #38 (a submitted
+Portal record could not be edited or deleted) are FIXED and merged, PR #159;
+#39 (site and company delete ignored Portal) is approved and FIXED, closes
+when its PR merges; #40 (Portal missing from Overview Recent Activity, Site
+Activity and Analytics) is now fully built: Recent Activity merged in PR #161,
+Site Activity and Portal Analytics on `portal-parity-analytics`, closes when
+that PR merges.** One residual gap under #40: workforce-category custom
+documents appear in no Analytics panel (open, low, see #40). The Overview
+"Company Portal" panel (PR #157) is read and mapped. Known and unchanged:
 Portal is still not in `server-lib/pricing.js`, and Portal answers emit no
 Brain signals (a product decision, §5). The paragraph that follows
 describes the pass before this one: **2026-09-29 on branch
@@ -1007,7 +1010,9 @@ from `portalRecords` (`:2378`, new this week by `created_at`),
 company has no documents and no records (`:5508`). The loader effect fires on
 the Overview too, only when `TAB_VISIBLE.portal` is on (`:3460-3468`, effect
 calls `loadPortalRecords/Library/Assignments/Escalations`). It is not
-included in `recentActivityList` or Site Activity, see #40.
+included in `recentActivityList` (`:4268-4270`) and Site Activity
+(`:4278-4282`) since #40, and the Portal tab has its own Analytics sub-tab
+(`:6567-6575`).
 
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
@@ -1333,7 +1338,8 @@ corrective actions the fourth writer of that table, alongside
 | Near Miss | — | — | — | ✅ `reports:303` | ✅ | ✅ *(#5, PR #118)* | — |
 | Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
 | Daily Report | — *(candidate for #13, not chosen)* | — | — *(candidate for #13, not chosen)* | ✅ *(#4, PR #120)* | ⚠️ machines still label-only in `analyticsUtils.js` | — | — |
-| Custom Document | — | — | — | — *(excluded, #4)* | ✅ | — | — |
+| Custom Document | — | — | — | — *(excluded, #4)* | ✅ safety (`Dashboard.jsx:6646`) and operations (`:6678`) categories; ⚠️ workforce category reaches only Overview Site Activity (`:4280`), no Analytics panel (#40 residual) | — | — |
+| Portal submission / escalation | — | — | — | — *(deliberate, §5)* | ✅ *(#40, built `23aad0b`)*: Overview Site Activity (`Dashboard.jsx:4278-4282` → `analyticsUtils.js:138`), Portal Analytics sub-tab (`Dashboard.jsx:6567-6575` → `Analytics.jsx:449` → `analyticsUtils.js:165`); deliberately not in Safety Analytics or its PDF (§5) | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
 | Certifications | — | — | — | — | — | — | ✅ *(#8, PR #120: expiry now reaches document review)* |
@@ -3626,18 +3632,51 @@ api/companydata.js api/admin.js`.
 
 ### #40 (P4) — Portal submissions and escalations are absent from Overview Recent Activity, Site Activity and Analytics
 
-**Severity: low-medium. Status: PARTLY FIXED on branch `fix-portal-p4`,
-approved by Dillon; stays open until its PR merges, and Site Activity and
-Analytics are still open.** The Recent Activity half is built: Portal
-submissions (`type: "portal"`) and open escalations (`type:
-"portalescalation"`) are merged into `recentActivityList` only when
-`TAB_VISIBLE.portal` is on, with `DOC_TYPE_META` entries, a tone in
-`feedTone`, a status line in the row renderer, and click-through in
-`openWeekDoc` (a submission opens the record card, an escalation opens the
-Portal Escalations sub-tab). Not done: `siteActivity` and `src/Analytics.jsx`
-(a bigger change, and custom documents share the same gap, so it wants one
-decision for both). The text below is the original finding, written before the
-fix. `recentActivityList`
+**Severity: low-medium. Status: FULLY BUILT, closed pending merge (same
+convention as #37-#39).** Recent Activity merged in PR #161 (branch
+`fix-portal-p4`); Site Activity and Analytics built on
+`portal-parity-analytics` (`23aad0b`), closes when that PR merges. Verified by
+reading the code:
+
+- **Recent Activity** (PR #161): Portal submissions (`type: "portal"`) and open
+  escalations (`type: "portalescalation"`) join `recentActivityList` only when
+  `TAB_VISIBLE.portal` is on (`src/Dashboard.jsx:4268-4270`).
+- **Site Activity**: `fieldSiteActivity` takes a 7th `extras` argument
+  `{portal, custom}`, default `{}` (`src/analyticsUtils.js:122`), bumped
+  through the same `siteBucketKey` id-first bucketing (`:138-139`), so both
+  join on the real `site_id`. Overview passes `portalRecords` (only when
+  `TAB_VISIBLE.portal`) and `companyCustomDocs` of every category
+  (`src/Dashboard.jsx:4278-4281`), and totals include the two new counts
+  (`:4282`). Safety Analytics (`src/Analytics.jsx:147`) and its PDF
+  (`src/generateSafetyAnalyticsPDF.js:43`) pass no `extras`, so they are
+  unchanged and custom safety docs are not double counted (they already show
+  in `scheduledSiteActivity`, `Analytics.jsx:247`).
+- **Portal Analytics**: `portalSummary()` (`src/analyticsUtils.js:165`) and
+  `PortalAnalyticsPanel` (`src/Analytics.jsx:449`), rendered as the
+  "Analytics" sub-tab of the Portal tab (`src/Dashboard.jsx:6462`, `:6567-6575`)
+  from the already-loaded `portalRecords`, `portalEscalations`,
+  `portalAssignmentRows`. Those are server-side department-scoped, so a
+  department supervisor sees their slice; the panel subtitle says so
+  (`Analytics.jsx:453`). An escalation has no site column, so it borrows its
+  record's `site_id` (`analyticsUtils.js:198-201`).
+- **Tests**: `tests/unit/portal-analytics.test.js` (six tests, including
+  no-extras unchanged, shared site-id bucket, and out-of-scope escalation
+  fallback). Not run by me; read only.
+- **Deliberately not done**: no Portal column in the Safety Analytics PDF or
+  Safety tab (Portal is its own product, `Analytics.jsx:445-448`), no new API.
+
+**Residual gap, OPEN, low, not numbered separately:** workforce-category custom
+documents appear in no Analytics panel. `companyWorkforceCustomDocs`
+(`src/Dashboard.jsx:4005`) is used only by its own tab (`:6440`); the Safety
+panel gets `companySafetyCustomDocs` (`:6646`) and the Equipment panel
+`companyOperationsCustomDocs` (`:6678`). They now show in Overview Site Activity
+only (`:4280`). Nothing in the code or docs records this as a decision, so it
+is open rather than deliberate; it needs a call on whether workforce documents
+belong in any Analytics view. Re-check: `grep -n "companyWorkforceCustomDocs"
+src/Dashboard.jsx` returns only `:4005` and `:6440`.
+
+The text below is the original finding, written before the fix, so its line
+numbers and "returns nothing" checks are historical. `recentActivityList`
 (`src/Dashboard.jsx:4248-4257`) merges eight built-in lists plus
 `walletActivity` and no Portal source. `siteActivity` (`:4262`) is fed
 `fieldSiteActivity(companyFlhas, companyToolbox, companyDaily,
@@ -3749,6 +3788,10 @@ Do **not** flag these. They are decisions, not gaps.
   api/portal.js` returns nothing. Parity with custom documents, which also
   emit none (break #4's remaining unwired list). A product decision, checked
   2026-09-29 (parity sweep). Do not refile as a new break.
+- **Portal is not in Safety Analytics, its PDF, or the Safety tab.** Portal is
+  its own product with its own departments; it gets its own Analytics sub-tab
+  (`src/Analytics.jsx:445-449`) and joins only Overview Site Activity
+  (`src/Dashboard.jsx:4278-4282`). Decided with #40, 2026-09-29.
 - **Company Portal is not in `server-lib/pricing.js`.** Known and unchanged
   (`grep -n "portal" server-lib/pricing.js` returns nothing, 2026-09-29). The
   Portal tab rides `roster_enabled`; the department-report cron gates on it
@@ -4046,4 +4089,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-29 | PR #152 (branch `fix-break-34-escalation-notification`), commit `582ee3d` | **Break #34 CLOSED on merge.** `api/portal.js`'s escalation-insert block (`:588-611`) now sends a second best-effort `sendEmail` to the escalation's own target department, gated on the insert actually succeeding and wrapped in its own try/catch — mirrors the phase-3 submission email's recipient shape but keyed on `escalation_department` instead of the document's `departments`. Re-verified against the merged code (`grep -n "sendEmail" api/portal.js` → import at `:27`, escalation email at `:603`, phase-3 email at `:643` — three hits, was two before the fix) before rewriting §4's break #34 entry from built-not-closed to closed. No other application code touched by this pass; map only. |
 | 2026-09-29 | branch `portal-pdf-email`, `ba5f6ab` | **Company Portal "email documents to a department" placed on the map.** New table `portal_report_schedules` (migration written, **not applied live**), `server-lib/portalReports.js`, `api/cron-portal-reports.js` (`vercel.json:9`), five `api/portal.js` actions (`:1042-1158`), `src/PortalReports.jsx`, and the Email to department button (`Dashboard.jsx:1651`). Consumes `PORTAL_DEPARTMENTS`, `roster.departments`, `portal_documents.departments`, `portal_records.pdf_url` and encrypted `roster.email`; all keys agree (table in §2). Earlier merged steps recorded in the same §2 section: `fieldCrypto` roster/onboarding encryption, `people_encrypted`, supervisor-created assignment rules. **Breaks #35** (zero-recipient run marks documents as sent, `portalReports.js:143-145`) **and #36** (one-off email doesn't check the target department against the document's routing, `portal.js:1138-1149`) opened. #35 not approved. #36 was fixed in `e3c49ad` (`portal.js:1150-1153`, `Dashboard.jsx:1603`), not closed until the branch merges. That commit also rejects recipient addresses containing `,;<>()"` (`portal.js:1067`), not mapped as a break. Noted, not filed: the cron skips no `roster_enabled`/`suspended` check, unlike `cron-equipment-reports.js:88`. Overview Company Portal panel not read (`?`). Map only; no application code touched. |
 | 2026-09-29 | branch `fix-portal-p3` (`b97b231`), PRs #157, #158, #159 | **Company Portal parity sweep, plus everything merged since the last pass.** PR #158 merged (department report emails; `portal_report_schedules` reported applied live by Dillon, not verifiable from code): **#35 and #36 CLOSED**, cron now gated on `companies.roster_enabled`/`suspended` (`cron-portal-reports.js:36-39`), `runSchedule` refuses without `RESEND_API_KEY` (`portalReports.js:128`). PR #157 merged: Overview "Company Portal" panel read (`Dashboard.jsx:5502-5508`), the standing `?` cleared. Sweep filed four breaks: **#37** (Resume on a Portal draft, `WorkerMenu.jsx:221`) CLOSED, PR #159; **#38** (edit, regenerate, delete a submitted Portal record: `update_portal_record` `portal.js:1037`, `delete_portal_record` `:1085`, `validateEditedPortalAnswer` `portalFieldTypes.js:48`, `PortalRecordCard` edit UI, delete also removes stored PDF and attachments) CLOSED, PR #159; **#39** (`delete_site` `companydata.js:1027-1032`, `delete_company` `admin.js:685-731` ignored Portal) approved and FIXED on this branch, closes when its PR merges; **#40** (Portal absent from Overview Recent Activity, Site Activity, Analytics, `Dashboard.jsx:4248-4262`) OPEN, not approved. **#33 amended:** its Unfinished-list fix (PR #151) was incomplete until #37, since Resume went nowhere. `get_portal_record_detail` now returns one generic 403 for missing versus foreign record for non-admin (`portal.js:721-729`). Known, unchanged, now in §5: Portal not in `pricing.js`; Portal answers emit no Brain signals. Map only; no application code touched. |
+| 2026-09-29 | branch `portal-parity-analytics`, `23aad0b` (after PR #161 `599ba95`) | **Break #40 FULLY BUILT, closed pending merge.** Recent Activity merged earlier in PR #161. This commit: `fieldSiteActivity` gains a 7th `extras` argument `{portal, custom}` (`analyticsUtils.js:122,138-139`), Overview Site Activity passes Portal records and custom docs of every category (`Dashboard.jsx:4278-4282`), new `portalSummary` (`analyticsUtils.js:165`) and `PortalAnalyticsPanel` (`Analytics.jsx:449`) as the Portal tab's Analytics sub-tab (`Dashboard.jsx:6567-6575`), department-scoped by the server. Safety Analytics and its PDF unchanged (no `extras`). Tests: `tests/unit/portal-analytics.test.js`. New matrix row for Portal, Custom Document row annotated. New §5 entry: Portal deliberately not in Safety Analytics or its PDF. Residual gap recorded: workforce-category custom docs appear in no Analytics panel (open, low). Map only; no application code touched. |
 | 2026-09-29 | branch `platform-events-instrumentation` (uncommitted) | **`platform_events` placed on the map.** New surface #23 in §1, new §2 join-key section, new all-`—` matrix row, and a new "Known pending links" section (P1) recording that it has no reader yet on purpose (Admin Panel, phase 3c). Migration `docs/schema/platform-events-migration.sql` written, **not applied live**. Eight producers verified in code: three crons (`cron_run`), `server-lib/email.js` (`email_send`), and four Anthropic call sites (`ai_generation`: `api/generate-flha.js:297`, `api/portal.js:248`, `server-lib/companyBrainSummary.js:70`, `server-lib/onboardingDrafting.js:61`). No break filed. **Stale Brain wording corrected:** §2's `source_type` table said daily reports and the equipment inspection "write nothing" and pointed at open break #4; it now lists all 7 source types with re-anchored lines (`flhas.js:436`, `reports.js:303`, `logs.js:442`, `logs.js:466`, `monthly.js:470`, `logs.js:484`), the "Equipment fleet" to Brain matrix cell went from `❌ #4` to `✅`, and #4's leftover "never sees equipment inspection defects" paragraph is now labelled historical. |
