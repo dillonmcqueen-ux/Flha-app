@@ -218,6 +218,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
         onResume={(type, formId) => {
           setShowMyDocs(false);
           if (type === "customform") { setCustomFormId(formId); setDoc("custom"); }
+          else if (type === "portalform") { setPortalDocumentId(formId); setDoc("portal"); }
           else setDoc(type);
         }}
       />

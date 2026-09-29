@@ -25,10 +25,12 @@ import { authorRosterId } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
-import { withDecryptedEmail } from '../server-lib/fieldCrypto.js';
+import { withDecryptedEmail, encryptField } from '../server-lib/fieldCrypto.js';
+import { isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
-import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate } from '../server-lib/portalFieldTypes.js';
+import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -715,12 +717,16 @@ Rules:
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
 
       const { data: recordRows, error: recErr } = await supabaseAdmin.from('portal_records').select('*').eq('id', recordId).limit(1);
-      if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
+      // A supervisor gets the same 403 for "no such record" as for "not
+      // yours", so probing ids can't reveal what exists in another company.
+      if (recErr || !recordRows || recordRows.length === 0) {
+        return session.role === 'admin' ? res.status(404).json({ error: 'Record not found.' }) : res.status(403).json({ error: 'Not allowed.' });
+      }
       const record = { ...recordRows[0], pdf_url: await signStoredUrl(recordRows[0].pdf_url, 'flha-reports') };
 
       const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, title, icon, departments').eq('id', record.document_id).limit(1);
       const document = docRows && docRows[0];
-      if (!document) return res.status(404).json({ error: 'Document not found.' });
+      if (!document) return session.role === 'admin' ? res.status(404).json({ error: 'Document not found.' }) : res.status(403).json({ error: 'Not allowed.' });
       if (session.role === 'supervisor' && document.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
       // Same department scoping as list_portal_records — a saved link must
       // not reach into a record outside a supervisor's own department(s).
@@ -741,11 +747,11 @@ Rules:
       if (ansErr) return res.status(500).json({ error: 'Could not load answers.' });
       const signedAnswers = await signRows(supabaseAdmin, answers, [{ key: 'file_url', bucket: 'portal-attachments' }]);
 
-      const { data: questions } = await supabaseAdmin.from('portal_questions').select('id, question_text, field_type, sort_order').eq('document_id', record.document_id).order('sort_order', { ascending: true });
+      const { data: questions } = await supabaseAdmin.from('portal_questions').select('id, question_text, field_type, sort_order, options').eq('document_id', record.document_id).order('sort_order', { ascending: true });
       const questionMap = {}; (questions || []).forEach(q => { questionMap[q.id] = q; });
 
       const items = signedAnswers
-        .map(a => ({ ...a, question_text: questionMap[a.question_id]?.question_text || 'Unknown question', field_type: questionMap[a.question_id]?.field_type, sort_order: questionMap[a.question_id]?.sort_order ?? 0 }))
+        .map(a => ({ ...a, question_text: questionMap[a.question_id]?.question_text || 'Unknown question', field_type: questionMap[a.question_id]?.field_type, sort_order: questionMap[a.question_id]?.sort_order ?? 0, options: questionMap[a.question_id]?.options || [] }))
         .sort((a, b) => a.sort_order - b.sort_order);
 
       return res.status(200).json({ record, document, site: siteRows && siteRows[0], items });
@@ -1002,6 +1008,264 @@ Rules:
       }).eq('id', escalationId);
       if (updErr) return res.status(500).json({ error: "Couldn't update escalation." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ══ SUPERVISOR / ADMIN: correct or remove a submitted record ═════════
+    // Break P2 from the 2026-09-29 parity sweep: the built-in forms all let a
+    // supervisor fix a wrong answer, re-link a regenerated PDF, and delete a
+    // record; Portal had none of the three. Scope is exactly
+    // get_portal_record_detail's: own company, and for an individually-
+    // identified supervisor only documents routed to their department(s),
+    // with one generic 403 for missing/foreign/out-of-department.
+    async function loadManageableRecord(recordId) {
+      const denied = { status: 403, error: 'Not allowed.' };
+      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id').eq('id', recordId).limit(1);
+      const record = recordRows && recordRows[0];
+      if (!record) return session.role === 'admin' ? { status: 404, error: 'Record not found.' } : denied;
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, departments').eq('id', record.document_id).limit(1);
+      const document = docRows && docRows[0];
+      if (!document) return denied;
+      if (session.role === 'supervisor' && document.company_id !== session.companyId) return denied;
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: me } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+        const mine = (me && me[0] && me[0].departments) || [];
+        if (!(document.departments || []).some(dep => mine.includes(dep))) return denied;
+      }
+      return { record, document };
+    }
+
+    if (action === 'update_portal_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId, answers, pdfUrl } = req.body;
+      if (!recordId || !Array.isArray(answers)) return res.status(400).json({ error: 'Missing details.' });
+      if (answers.length > 200) return res.status(400).json({ error: 'Too many answers in one request.' });
+      const scope = await loadManageableRecord(recordId);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+
+      // Only ever touch answers that belong to THIS record, and check each
+      // value against its question's field type before writing anything.
+      const [{ data: existing }, { data: questions }] = await Promise.all([
+        supabaseAdmin.from('portal_answers').select('id, question_id').eq('record_id', recordId),
+        supabaseAdmin.from('portal_questions').select('id, field_type, options').eq('document_id', scope.record.document_id),
+      ]);
+      const answerById = new Map((existing || []).map(a => [String(a.id), a]));
+      const questionById = new Map((questions || []).map(q => [String(q.id), q]));
+      const updates = [];
+      for (const a of answers) {
+        const row = a && answerById.get(String(a.id));
+        if (!row) return res.status(400).json({ error: 'One of those answers isn\'t part of this record.' });
+        const q = questionById.get(String(row.question_id));
+        if (!q) return res.status(400).json({ error: 'That question no longer exists.' });
+        const problem = validateEditedPortalAnswer(q.field_type, q.options, a.value);
+        if (problem) return res.status(400).json({ error: problem });
+        updates.push({
+          id: row.id,
+          patch: q.field_type === 'multiselect'
+            ? { value_json: a.value }
+            : { value_text: String(a.value).slice(0, 2000), ...(q.field_type === 'yesno' ? { notes: a.value === 'no' ? (String(a.note || '').slice(0, 2000) || null) : null } : {}) },
+        });
+      }
+      // Escalations already raised are deliberately left alone: they are
+      // snapshots of what was flagged at submission time (see the phase 5
+      // migration), not live views of the answer.
+      for (const u of updates) {
+        const { error } = await supabaseAdmin.from('portal_answers').update(u.patch).eq('id', u.id).eq('record_id', recordId);
+        if (error) return res.status(500).json({ error: "Couldn't save those changes." });
+      }
+
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
+      if (resolvedPdfUrl) {
+        const { error } = await supabaseAdmin.from('portal_records').update({ pdf_url: resolvedPdfUrl }).eq('id', recordId);
+        if (error) return res.status(500).json({ error: "Couldn't save those changes." });
+      }
+      return res.status(200).json({ ok: true, pdfLinked, updated: updates.length });
+    }
+
+    if (action === 'delete_portal_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId } = req.body;
+      if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
+      const scope = await loadManageableRecord(recordId);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      // Note the files this record points at BEFORE the rows go, so a real
+      // delete also removes the PDF and any signature/upload attachments
+      // from their private buckets instead of leaving them unreachable.
+      const [{ data: recRows }, { data: ansRows }] = await Promise.all([
+        supabaseAdmin.from('portal_records').select('pdf_url').eq('id', recordId).limit(1),
+        supabaseAdmin.from('portal_answers').select('file_url').eq('record_id', recordId),
+      ]);
+      const pdfPath = pathFromStoredUrl(recRows && recRows[0] && recRows[0].pdf_url, 'flha-reports');
+      const attachmentPaths = (ansRows || []).map(a => pathFromStoredUrl(a.file_url, 'portal-attachments')).filter(Boolean);
+
+      // Answers and escalations for this record go with it (both cascade).
+      const { error } = await supabaseAdmin.from('portal_records').delete().eq('id', recordId);
+      if (error) return res.status(500).json({ error: "Couldn't delete that record." });
+
+      // Best-effort: the record is already gone either way, so a storage
+      // hiccup is logged, not surfaced.
+      try {
+        if (pdfPath) await supabaseAdmin.storage.from('flha-reports').remove([pdfPath]);
+        if (attachmentPaths.length) await supabaseAdmin.storage.from('portal-attachments').remove(attachmentPaths);
+      } catch (e) {
+        console.error('portal record file cleanup failed:', e.message);
+      }
+      return res.status(200).json({ ok: true });
+    }
+
+    // ══ SUPERVISOR / ADMIN: department report emails ═════════════════════
+    // Step 5 of the Portal follow-up (docs/schema/portal-report-schedules-migration.sql).
+    // A supervisor sets up "email this department's completed documents"
+    // schedules (who, how often) and can also email one record on demand.
+    // Same scoping as everywhere else in this file: own company, and an
+    // individually-identified supervisor only for their own department(s);
+    // missing and foreign ids get the same 403.
+
+    async function myDepartmentList() {
+      if (session.role !== 'supervisor' || !session.userId) return null; // null = no department limit
+      const { data: me } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+      return (me && me[0] && me[0].departments) || [];
+    }
+
+    // Returns { schedule } the session may manage, or { status, error }.
+    async function loadManageableSchedule(id) {
+      const { data: rows } = await supabaseAdmin.from('portal_report_schedules').select('*').eq('id', id).limit(1);
+      const schedule = rows && rows[0];
+      const denied = { status: 403, error: 'Not allowed.' };
+      if (!schedule) return session.role === 'admin' ? { status: 404, error: 'Schedule not found.' } : denied;
+      if (session.role === 'admin') return { schedule };
+      if (schedule.company_id !== session.companyId) return denied;
+      const mine = await myDepartmentList();
+      if (mine && !mine.includes(schedule.department)) return denied;
+      return { schedule };
+    }
+
+    const presentSchedule = (row) => ({
+      id: row.id, name: row.name, department: row.department, frequency: row.frequency, weekday: row.weekday,
+      includeDepartmentSupervisors: row.include_department_supervisors, active: row.active,
+      lastSentAt: row.last_sent_at, recipients: readRecipients(row),
+    });
+
+    if (action === 'list_report_schedules') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin.from('portal_report_schedules').select('*').eq('company_id', companyId).order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: 'Could not load report schedules.' });
+      const mine = await myDepartmentList();
+      const visible = (data || []).filter(r => !mine || mine.includes(r.department));
+      return res.status(200).json({ schedules: visible.map(presentSchedule) });
+    }
+
+    if (action === 'save_report_schedule') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, name, department, frequency, weekday, includeDepartmentSupervisors, recipients, active } = req.body;
+      const cleanName = String(name || '').trim().slice(0, 80);
+      if (!cleanName) return res.status(400).json({ error: 'Give the schedule a name.' });
+      if (!PORTAL_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Pick a department.' });
+      if (frequency !== 'daily' && frequency !== 'weekly') return res.status(400).json({ error: 'Pick daily or weekly.' });
+      let cleanWeekday = null;
+      if (frequency === 'weekly') {
+        cleanWeekday = Number(weekday);
+        if (!Number.isInteger(cleanWeekday) || cleanWeekday < 0 || cleanWeekday > 6) return res.status(400).json({ error: 'Pick a day of the week.' });
+      }
+      const list = Array.isArray(recipients) ? recipients.map(e => String(e || '').trim()).filter(Boolean) : [];
+      if (list.length > 20) return res.status(400).json({ error: 'Up to 20 extra email addresses per schedule.' });
+      const bad = list.find(e => !isValidEmail(e) || /[,;<>()"]/.test(e));
+      if (bad) return res.status(400).json({ error: `"${bad}" doesn't look like a valid email address.` });
+      const includeSupers = includeDepartmentSupervisors !== false;
+      if (!includeSupers && list.length === 0) return res.status(400).json({ error: 'Add at least one email address, or include the department\'s supervisors.' });
+
+      const mine = await myDepartmentList();
+      if (mine && !mine.includes(department)) return res.status(403).json({ error: 'Not allowed.' });
+
+      let recipientsEncrypted = null;
+      try {
+        recipientsEncrypted = list.length > 0 ? encryptField(JSON.stringify([...new Set(list)])) : null;
+      } catch (e) {
+        console.error('Could not encrypt report recipients:', e.message);
+        return res.status(500).json({ error: "Couldn't save the schedule." });
+      }
+      const fields = {
+        name: cleanName, department, frequency, weekday: cleanWeekday,
+        include_department_supervisors: includeSupers, recipients_encrypted: recipientsEncrypted,
+        active: active !== false,
+      };
+
+      if (id) {
+        const scope = await loadManageableSchedule(id);
+        if (scope.error) return res.status(scope.status).json({ error: scope.error });
+        const { data, error } = await supabaseAdmin.from('portal_report_schedules').update(fields).eq('id', id).select().single();
+        if (error) return res.status(500).json({ error: "Couldn't save the schedule." });
+        return res.status(200).json({ ok: true, schedule: presentSchedule(data) });
+      }
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin.from('portal_report_schedules')
+        .insert({ ...fields, company_id: companyId, created_by_roster_id: authorRosterId(session) }).select().single();
+      if (error) return res.status(500).json({ error: "Couldn't save the schedule." });
+      return res.status(200).json({ ok: true, schedule: presentSchedule(data) });
+    }
+
+    if (action === 'delete_report_schedule') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing schedule id.' });
+      const scope = await loadManageableSchedule(id);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      const { error } = await supabaseAdmin.from('portal_report_schedules').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't delete the schedule." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Send a schedule right now, outside its timetable. Covers everything
+    // since it last went out, same as the cron would.
+    if (action === 'send_report_schedule_now') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing schedule id.' });
+      const scope = await loadManageableSchedule(id);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      try {
+        const result = await runSchedule(supabaseAdmin, scope.schedule);
+        return res.status(200).json({ ok: true, ...result });
+      } catch (e) {
+        console.error('send_report_schedule_now failed:', e.message);
+        return res.status(500).json({ error: "Couldn't send that report." });
+      }
+    }
+
+    // One record to one department's supervisors, from the record detail
+    // view. Recipients are always roster supervisors (no free-typed
+    // addresses here), so this can't be used to send to an outsider.
+    if (action === 'email_portal_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId, department } = req.body;
+      if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
+      if (!PORTAL_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Pick a department.' });
+
+      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, submitted_by, created_at, pdf_url').eq('id', recordId).limit(1);
+      const record = recordRows && recordRows[0];
+      const denied = () => res.status(403).json({ error: 'Not allowed.' });
+      if (!record) return session.role === 'admin' ? res.status(404).json({ error: 'Record not found.' }) : denied();
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('company_id, title, departments').eq('id', record.document_id).limit(1);
+      const doc = docRows && docRows[0];
+      if (!doc) return denied();
+      if (session.role === 'supervisor' && doc.company_id !== session.companyId) return denied();
+      const mine = await myDepartmentList();
+      if (mine && !(doc.departments || []).some(dep => mine.includes(dep))) return denied();
+      // A supervisor can only send a record to a department the document is
+      // actually routed to, so this can't be used to push a document at a
+      // department that isn't meant to see it. Admin is unrestricted.
+      if (session.role !== 'admin' && !(doc.departments || []).includes(department)) return denied();
+
+      try {
+        const result = await emailRecordToDepartment(supabaseAdmin, { companyId: doc.company_id, record, documentTitle: doc.title, department });
+        return res.status(200).json({ ok: true, ...result });
+      } catch (e) {
+        console.error('email_portal_record failed:', e.message);
+        return res.status(500).json({ error: "Couldn't send that email." });
+      }
     }
 
     return res.status(400).json({ error: 'Unknown action.' });

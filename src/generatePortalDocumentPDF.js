@@ -54,7 +54,7 @@ function drawAnswer(doc, item, y, margin, contentW, W) {
 }
 
 export async function generateAndUploadPortalDocument({
-  documentTitle, siteName, companyName, companyLogo, submittedBy, aiSummary, items, signatureDataUrl, token,
+  documentTitle, siteName, companyName, companyLogo, submittedBy, aiSummary, items, signatureDataUrl, token, footerNote,
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -112,6 +112,12 @@ export async function generateAndUploadPortalDocument({
   doc.setTextColor(100, 116, 139); doc.setFontSize(8); doc.setFont("helvetica", "normal");
   doc.text(`Printed name: ${submittedBy}`, margin, y + 29);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, W - margin, y + 29, { align: "right" });
+  if (footerNote) {
+    // Used when a supervisor regenerates a copy: the hand-drawn signature is
+    // only ever drawn into the original PDF, so say so on the copy.
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
+    doc.splitTextToSize(footerNote, contentW).forEach((line, i) => doc.text(line, margin, y + 36 + i * 4));
+  }
 
   const foraLogo = await getForaLogoDataUrl();
   const H = 297; const pageCount = doc.internal.getNumberOfPages();
