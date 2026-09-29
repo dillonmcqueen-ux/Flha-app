@@ -752,32 +752,59 @@ Rules:
     }
 
     // ══ ADMIN (founder-only): assignment rules ═══════════════════════════
-    // Phase 4 (assignment + compliance). Gated the same as the document
-    // builder itself — an assignment rule shapes what a document DOES
-    // (who's on the hook for it, by when), same category of decision as
-    // building the document, so it stays founder-only rather than
-    // self-service. See server-lib/portalAssignments.js for the
-    // materialization logic both actions below trigger.
+    // Phase 4 (assignment + compliance). Building a document stays
+    // founder-only, but WHO has to complete it is a supervisor's call (their
+    // people, their departments), so the three rule actions below are open
+    // to a supervisor too, scoped to their own company and, for an
+    // individually-identified supervisor, to documents routed to their own
+    // department(s) (the same rule get_assignment_rollup applies). See
+    // server-lib/portalAssignments.js for the materialization logic.
+
+    // Loads the document and answers "may this session manage its
+    // assignment rules?". An admin may manage any document. A supervisor
+    // needs the document to be in their own company and, when they are an
+    // individually-identified supervisor, to share a department with it.
+    async function loadManageableDocument(documentId) {
+      const { data: docRows } = await supabaseAdmin
+        .from('portal_documents').select('id, company_id, departments').eq('id', documentId).limit(1);
+      const doc = docRows && docRows[0];
+      if (!doc) return { status: 404, error: 'Document not found.' };
+      if (session.role === 'admin') return { doc };
+      if (doc.company_id !== session.companyId) return { status: 403, error: 'Not allowed.' };
+      if (session.userId) {
+        const { data: me } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+        const mine = (me && me[0] && me[0].departments) || [];
+        if (!(doc.departments || []).some(dep => mine.includes(dep))) return { status: 403, error: 'Not allowed.' };
+      }
+      return { doc };
+    }
 
     if (action === 'list_assignment_rules') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { documentId } = req.body;
       if (!documentId) return res.status(400).json({ error: 'Missing document id.' });
+      const scope = await loadManageableDocument(documentId);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
       const { data, error } = await supabaseAdmin.from('portal_assignment_rules').select('*').eq('document_id', documentId).order('created_at', { ascending: false });
       if (error) return res.status(500).json({ error: 'Could not load assignment rules.' });
       return res.status(200).json({ rules: data || [] });
     }
 
     if (action === 'create_assignment_rule') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { documentId, targetType, targetRole, targetRosterId, dueDays, autoApplyNewHires } = req.body;
       if (!documentId) return res.status(400).json({ error: 'Missing document id.' });
+      const scope = await loadManageableDocument(documentId);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
       if (!['everyone', 'role', 'individual'].includes(targetType)) return res.status(400).json({ error: 'Invalid target.' });
       if (targetType === 'role' && targetRole !== 'worker' && targetRole !== 'supervisor') {
         return res.status(400).json({ error: 'Invalid role.' });
       }
       if (targetType === 'individual' && !targetRosterId) {
         return res.status(400).json({ error: 'Pick a person.' });
+      }
+      if (dueDays !== null && dueDays !== undefined && dueDays !== '' && !(Number.isInteger(Number(dueDays)) && Number(dueDays) >= 0 && Number(dueDays) <= 365)) {
+        return res.status(400).json({ error: 'Due days must be a whole number from 0 to 365.' });
       }
       // Not a tenant-isolation gap (applyRuleToExistingRoster below always
       // re-scopes to the document's own company, so a mismatched id just
@@ -812,9 +839,13 @@ Rules:
     }
 
     if (action === 'delete_assignment_rule') {
-      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { ruleId } = req.body;
       if (!ruleId) return res.status(400).json({ error: 'Missing rule id.' });
+      const { data: ruleRows } = await supabaseAdmin.from('portal_assignment_rules').select('document_id').eq('id', ruleId).limit(1);
+      if (!ruleRows || !ruleRows[0]) return res.status(404).json({ error: 'Rule not found.' });
+      const scope = await loadManageableDocument(ruleRows[0].document_id);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
       // Deleting a rule does not retract assignments it already created —
       // someone already told to complete a document should not have that
       // silently vanish because the rule that generated it was removed;

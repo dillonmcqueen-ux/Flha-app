@@ -4,6 +4,7 @@ import { colors as T, font as FONT, radius as RAD, shadow as SHAD } from "./them
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
 import { PORTAL_FIELD_TYPES, fieldTypeNeedsOptions, fieldTypeCanEscalate } from "../server-lib/portalFieldTypes";
 import { Upload, Plus, Trash2, Loader2, FileText, CheckCircle2, AlertTriangle } from "lucide-react";
+import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
 
 const C = {
   ink: T.text.primary, inkSoft: T.text.body, muted: T.text.faint,
@@ -43,15 +44,6 @@ export default function PortalDocumentBuilder({ companies, token }) {
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-
-  // Company Portal phase 4 — assignment rules. Only meaningful for an
-  // already-published document (a rule needs a real documentId), so this
-  // section only shows once draftDocumentId is set.
-  const [assignmentRules, setAssignmentRules] = useState([]);
-  const [loadingRules, setLoadingRules] = useState(false);
-  const [companyRoster, setCompanyRoster] = useState([]);
-  const [newRule, setNewRule] = useState({ targetType: "everyone", targetRole: "worker", targetRosterId: "", dueDays: "7", autoApplyNewHires: true });
-  const [savingRule, setSavingRule] = useState(false);
 
   const loadDocuments = async (id) => {
     if (!id) { setDocuments([]); return; }
@@ -151,66 +143,6 @@ export default function PortalDocumentBuilder({ companies, token }) {
       setMsg(e.message || "Couldn't load this document.");
     }
     setStarting(false);
-  };
-
-  const loadAssignmentRules = async (documentId) => {
-    setLoadingRules(true);
-    try {
-      const res = await fetch("/api/portal", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_assignment_rules", token, documentId }),
-      });
-      const data = await res.json();
-      if (res.ok) setAssignmentRules(data.rules || []);
-    } catch (e) { /* leave as-is */ }
-    setLoadingRules(false);
-  };
-
-  useEffect(() => {
-    if (!draftDocumentId) { setAssignmentRules([]); return; }
-    loadAssignmentRules(draftDocumentId);
-    (async () => {
-      try {
-        const res = await fetch("/api/companydata", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_roster", token, companyId }),
-        });
-        const data = await res.json();
-        if (res.ok) setCompanyRoster(data.members || []);
-      } catch (e) { /* leave as-is */ }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDocumentId]);
-
-  const createRule = async () => {
-    setSavingRule(true);
-    try {
-      const res = await fetch("/api/portal", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "create_assignment_rule", token, documentId: draftDocumentId,
-          targetType: newRule.targetType,
-          targetRole: newRule.targetType === "role" ? newRule.targetRole : undefined,
-          targetRosterId: newRule.targetType === "individual" ? newRule.targetRosterId : undefined,
-          dueDays: newRule.dueDays === "" ? null : newRule.dueDays,
-          autoApplyNewHires: newRule.autoApplyNewHires,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      await loadAssignmentRules(draftDocumentId);
-    } catch (e) {
-      setMsg(e.message || "Couldn't create assignment rule.");
-    }
-    setSavingRule(false);
-  };
-
-  const deleteRule = async (ruleId) => {
-    await fetch("/api/portal", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete_assignment_rule", token, ruleId }),
-    });
-    loadAssignmentRules(draftDocumentId);
   };
 
   const toggleDept = (dept) => setDraft(d => ({
@@ -373,68 +305,7 @@ export default function PortalDocumentBuilder({ companies, token }) {
         {draftDocumentId && (
           <div style={s.card}>
             <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 15, color: C.ink, marginBottom: 4 }}>Who needs to complete this</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>Assignment rules. A rule applies immediately to everyone it matches today, and (when "auto-apply to new hires" is on) to anyone added later who matches it.</div>
-
-            {loadingRules ? (
-              <div style={{ fontSize: 13, color: C.muted }}>Loading…</div>
-            ) : assignmentRules.length === 0 ? (
-              <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>No assignment rules yet — this document is available but not assigned to anyone.</div>
-            ) : (
-              <div style={{ marginBottom: 12 }}>
-                {assignmentRules.map(r => (
-                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.line}` }}>
-                    <div style={{ flex: 1, fontSize: 13, color: C.inkSoft }}>
-                      {r.target_type === "everyone" && "Everyone"}
-                      {r.target_type === "role" && `Every ${r.target_role}`}
-                      {r.target_type === "individual" && (companyRoster.find(m => m.id === r.target_roster_id)?.name || `Roster #${r.target_roster_id}`)}
-                      {r.due_days != null ? ` · due ${r.due_days} day${r.due_days === 1 ? "" : "s"} after assignment` : " · no due date"}
-                      {r.auto_apply_new_hires ? " · auto-applies to new hires" : ""}
-                    </div>
-                    <button onClick={() => deleteRule(r.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, cursor: "pointer", padding: 4 }}><Trash2 size={14} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <div>
-                <label style={s.label}>Assign to</label>
-                <select style={s.input} value={newRule.targetType} onChange={e => setNewRule(r => ({ ...r, targetType: e.target.value }))}>
-                  <option value="everyone">Everyone</option>
-                  <option value="role">By role</option>
-                  <option value="individual">One person</option>
-                </select>
-              </div>
-              {newRule.targetType === "role" && (
-                <div>
-                  <label style={s.label}>Role</label>
-                  <select style={s.input} value={newRule.targetRole} onChange={e => setNewRule(r => ({ ...r, targetRole: e.target.value }))}>
-                    <option value="worker">Worker</option>
-                    <option value="supervisor">Supervisor</option>
-                  </select>
-                </div>
-              )}
-              {newRule.targetType === "individual" && (
-                <div>
-                  <label style={s.label}>Person</label>
-                  <select style={s.input} value={newRule.targetRosterId} onChange={e => setNewRule(r => ({ ...r, targetRosterId: e.target.value }))}>
-                    <option value="">Select…</option>
-                    {companyRoster.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                  </select>
-                </div>
-              )}
-              <div style={{ width: 130 }}>
-                <label style={s.label}>Due (days)</label>
-                <input style={s.input} type="number" min="0" value={newRule.dueDays} onChange={e => setNewRule(r => ({ ...r, dueDays: e.target.value }))} placeholder="No due date" />
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.inkSoft, paddingBottom: 9 }}>
-                <input type="checkbox" checked={newRule.autoApplyNewHires} onChange={e => setNewRule(r => ({ ...r, autoApplyNewHires: e.target.checked }))} />
-                Auto-apply to new hires
-              </label>
-              <button style={s.btn(savingRule ? C.panelInset : C.amber, savingRule ? C.muted : C.onOrange)} disabled={savingRule || (newRule.targetType === "individual" && !newRule.targetRosterId)} onClick={createRule}>
-                {savingRule ? <Loader2 size={14} className="fora-spin" /> : <Plus size={14} />} Add rule
-              </button>
-            </div>
+            <PortalAssignmentRules token={token} companyId={companyId} documentId={draftDocumentId} />
           </div>
         )}
 
