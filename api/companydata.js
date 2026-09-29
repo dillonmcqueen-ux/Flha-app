@@ -9,7 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
-import { randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { randomToken, isValidEmail, effectiveSeatCap } from '../server-lib/onboardingHelpers.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
 import { siteOrigin, sendEmail } from '../server-lib/email.js';
@@ -214,9 +214,9 @@ async function ensureTimeClockReportPdf(report, companyName, companyLogo) {
   }
 }
 
-// Total active roster seats a plan tier allows — workers and supervisors
+// Total active roster seats a plan tier allows are defined once, in
+// server-lib/onboardingHelpers.js (effectiveSeatCap): workers and supervisors
 // combined, since both count as a "user" for billing.
-const SEAT_CAP_BY_TIER = { basic: 10, advanced: 50 };
 
 function genSalt() {
   return crypto.randomBytes(16).toString('hex');
@@ -359,7 +359,7 @@ export default async function handler(req, res) {
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
       const activeSeatCount = (members || []).filter(m => m.active).length;
 
-      return res.status(200).json({ members: members || [], activeSeatCount, cap: SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic, tier });
+      return res.status(200).json({ members: members || [], activeSeatCount, cap: effectiveSeatCap(tier), tier });
     }
 
     // Admin-only: { [companyId]: { total, active } } across all companies,
@@ -389,7 +389,7 @@ export default async function handler(req, res) {
       const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', companyId).limit(1);
       if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
-      const cap = SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic;
+      const cap = effectiveSeatCap(tier);
 
       const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized').eq('company_id', companyId).eq('active', true);
       if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
@@ -454,7 +454,7 @@ export default async function handler(req, res) {
       if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
       const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
-      const cap = SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic;
+      const cap = effectiveSeatCap(tier);
 
       const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized').eq('company_id', companyId).eq('active', true);
       if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
@@ -579,7 +579,7 @@ export default async function handler(req, res) {
         const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', member.company_id).limit(1);
         if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
         const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
-        const cap = SEAT_CAP_BY_TIER[tier] || SEAT_CAP_BY_TIER.basic;
+        const cap = effectiveSeatCap(tier);
         const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id').eq('company_id', member.company_id).eq('active', true);
         if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
         if ((activeRows || []).length >= cap) {

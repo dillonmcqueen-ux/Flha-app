@@ -93,6 +93,15 @@ export function planSeatCap(planTier) {
   return PLAN_SEAT_CAPS[planTier] || null;
 }
 
+// The cap the app actually enforces when a company adds someone: an unknown
+// or missing tier is treated as basic, never as unlimited. api/companydata.js
+// enforces with this, and the founder dashboard's Seats card reads it, so the
+// two cannot drift (map break #42). planSeatCap above stays for the places
+// that want to know whether a tier is real at all.
+export function effectiveSeatCap(planTier) {
+  return planSeatCap(planTier) || PLAN_SEAT_CAPS.basic;
+}
+
 // Server-side mirror of the checks Onboarding.jsx already nudges the
 // submitter to fix client-side, re-run here since the client can't be
 // trusted. Returns a list of user-facing field errors — empty means clean.
