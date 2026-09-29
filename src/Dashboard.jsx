@@ -3457,7 +3457,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   useEffect(() => {
-    if (activeTab !== "portal" || !selectedCompany) return;
+    // The Overview's Company Portal panel reads the same four lists, so it
+    // loads them too, but only for a company that actually has Portal on.
+    const overviewNeedsPortal = activeTab === "overview" && !!TAB_VISIBLE.portal;
+    if ((activeTab !== "portal" && !overviewNeedsPortal) || !selectedCompany) return;
     loadPortalRecords();
     loadPortalLibrary();
     loadPortalAssignments();
@@ -5495,6 +5498,44 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 ? { text: `${fuelFlagged.length} machine${fuelFlagged.length === 1 ? "" : "s"} flagged`, tone: "warning" }
                 : { text: "No machines flagged", tone: "success" })}
           </div>
+
+          {TAB_VISIBLE.portal && (() => {
+            const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            const newSubmissions = portalRecords.filter(r => new Date(r.created_at).getTime() >= weekAgo).length;
+            const liveDocs = portalLibraryDocs.filter(d => d.is_active).length;
+            const overdue = portalAssignmentRows.filter(r => r.status === "overdue").length;
+            const openEsc = portalEscalations.filter(e => e.status === "open").length;
+            if (portalLibraryDocs.length === 0 && portalRecords.length === 0 && !loadingPortalLibrary) return null;
+            const go = (sub) => () => { setPortalSubTab(sub); setActiveTab("portal"); };
+            const tiles = [
+              { label: "New this week", value: newSubmissions, sub: "inbox", tone: "neutral" },
+              { label: "Live documents", value: liveDocs, sub: "library", tone: "neutral" },
+              { label: "Overdue", value: overdue, sub: "assignments", tone: overdue > 0 ? "danger" : "success" },
+              { label: "Open escalations", value: openEsc, sub: "escalations", tone: openEsc > 0 ? "danger" : "success" },
+            ];
+            return (
+              <div style={{ ...kpiCard, padding: "18px 20px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <FileText size={18} color={C.orange} strokeWidth={2.25} />
+                  <span style={{ fontFamily: FONT.heading, fontSize: 16, fontWeight: 600, color: C.text.primary, textTransform: "uppercase", letterSpacing: "0.06em" }}>Company Portal</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+                  {tiles.map(t => {
+                    const tone = t.tone === "danger" ? C.status.danger : t.tone === "success" ? C.status.success : null;
+                    return (
+                      <button key={t.sub} type="button" onClick={go(t.sub)} style={{
+                        textAlign: "left", cursor: "pointer", background: C.panelInset,
+                        border: `1px solid ${tone ? tone.border : C.line}`, borderRadius: RAD.sm, padding: "12px 14px",
+                      }}>
+                        <div style={{ fontFamily: FONT.heading, fontSize: 26, fontWeight: 600, color: tone ? tone.text : C.text.primary }}>{t.value}</div>
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{t.label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="fora-overview-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(300px,1fr)", gap: 20, alignItems: "start" }}>
             {/* Site activity: real per-site submission counts across the
