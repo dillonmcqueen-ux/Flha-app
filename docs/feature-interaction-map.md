@@ -16,7 +16,34 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-**2026-09-29 on branch `company-portal-phase-3-routing-notification`** for
+**2026-09-29 on branch `company-portal-phase-4-assignment-compliance`** for
+Company Portal phase 4 (assignment + compliance) — new tables
+`portal_assignment_rules`/`portal_assignments`
+(`docs/schema/company-portal-phase4-migration.sql`, applied live),
+`server-lib/portalAssignments.js` (materializes a rule against the current
+roster and auto-applies rules to new hires), three new admin-only
+`api/portal.js` actions (`create_assignment_rule`/`list_assignment_rules`/
+`delete_assignment_rule`) and a new supervisor/admin `get_assignment_rollup`
+action that computes not_started/submitted/overdue at read time by
+cross-referencing `portal_records` rather than storing a status column;
+two new call sites in `api/companydata.js`'s `add_roster_member`/
+`onboard_new_employee`; a new assignment-rules section in
+`src/PortalDocumentBuilder.jsx` and a new "Assignments" sub-tab in
+`src/Dashboard.jsx`'s Portal tab. **This closes the sellable-v1 cut line —
+phases 1-4 are now complete; phase 5 (escalation) remains completely
+unbuilt, confirmed by grep.** New join-key section in §2
+(`portal_assignment_rules`/`portal_assignments`); the phase-2/3 deferrals
+bullet in §5 updated to mark assignment rules built; a new §5 bullet
+records a deliberate spec deviation — the build spec's "role/group/
+individual/everyone" targeting was built as `everyone | role | individual`
+only, no department-based ("group") targeting, because `roster.departments`
+exists only on supervisor-tier rows and a department-targeted rule could
+therefore never reach a worker. No new break filed. Break #32 (Portal
+submissions missing from My Forms) is unaffected by this phase — it
+doesn't touch `MyDocuments.jsx` or `get_my_documents` — and stays exactly
+as recorded at the phase-3 pass; not re-verified as new. See the
+changelog. Same-day, before that, extended
+**against branch `company-portal-phase-3-routing-notification`** for
 Company Portal phase 3 (document-level routing + notification) —
 `api/portal.js`'s `list_portal_records`/`get_portal_record_detail` now
 filter an individually-identified supervisor by matching their own
@@ -472,10 +499,16 @@ logic above, that row's departments superset any document's routing, so it
 sees every document unfiltered. No `company_admin` role, column, or check
 exists anywhere in `api/portal.js` or `roster` — do not go looking for one.
 
-Phase 4 (assignment rules, rule-based targeting like "assign to everyone in
-Safety") remains unbuilt — `portal_assignment_rules` still does not exist
-(`grep -rln "portal_assignment_rules" api/ src/ server-lib/` → no hits as of
-this pass).
+**Phase 4 (2026-09-29, branch `company-portal-phase-4-assignment-compliance`)
+is now built — but deliberately does NOT use `roster.departments` as a
+targeting dimension.** See the new `portal_assignment_rules`/
+`portal_assignments` join-key section in §2 below for why: this column's
+only real-world use as a targeting concept ("assign to everyone in
+Safety") is undercut by the same producer-side-only fact recorded above —
+it exists solely on supervisor-tier rows, so a department-targeted rule
+could never reach a worker, which is the wrong default for a feature about
+assigning paperwork to the people doing the work. `target_type` is
+`everyone | role | individual` instead; see §5.
 
 ### `equipment_compliance.equipment_id` → `equipment.id`
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
@@ -722,7 +755,16 @@ not assumed), and updated by the phase-3 pass below:**
 - **Escalation is phase 5, not built.** `escalation_department`/
   `escalation_condition` on `portal_questions`, and a `portal_escalations`
   table, are absent from the migration on purpose (migration comment,
-  `company-portal-phase2-migration.sql:12-17`), and untouched by phase 3.
+  `company-portal-phase2-migration.sql:12-17`), and untouched by phase 3
+  **and phase 4** — confirmed by grep against
+  `company-portal-phase-4-assignment-compliance`: no hits for
+  `portal_escalations`/`escalation_department`/`escalation_condition`
+  anywhere in `api/`, `src/`, `server-lib/`, or the new phase-4 migration.
+  Sequenced last on purpose per the build spec; phases 1-4 are the
+  complete sellable v1 as of this pass.
+- **Assignment rules (phase 4) — built.** See the new
+  `portal_assignment_rules`/`portal_assignments` §2 entry below. This
+  closes the last of the phase-2 deferrals list.
 - **Company Portal is still not in `server-lib/pricing.js`'s `MODULES`.**
   Confirmed: `grep -n "portal" server-lib/pricing.js` → no hits. `api/portal.js`
   calls neither `requireDocKey` nor `docKeyGate` anywhere (confirmed by
@@ -743,6 +785,60 @@ as of the phase-3 pass** — phase 3 only touches supervisor/admin dashboard
 reads and the submission-notification email; it does not add anything to
 `api/customforms.js`'s `get_my_documents`. Re-check: `grep -n "portal"
 api/customforms.js src/MyDocuments.jsx` → still no hits in either file.
+
+### `portal_assignment_rules.id` → `portal_assignments` (Company Portal phase 4 — assignment + compliance)
+New tables, recorded 2026-09-29 against branch
+`company-portal-phase-4-assignment-compliance`
+(`docs/schema/company-portal-phase4-migration.sql`, applied live). This is
+the phase-1/2 deferral — "no rule-based targeting yet" — finally getting
+built, and it closes the sellable-v1 cut line: phases 1-4 are now the
+complete v1 per the Boardroom decision. Phase 5 (escalation) is confirmed
+still absent: `grep -rln "portal_escalations\|escalation_department\|escalation_condition" api/ src/ server-lib/ docs/schema/company-portal-phase4-migration.sql` finds nothing new added by this phase.
+
+| Table | Join | Where |
+|---|---|---|
+| `portal_assignment_rules.document_id` → `portal_documents.id` (cascade delete) | write | `api/portal.js`'s `create_assignment_rule` action, admin-only |
+| `portal_assignments.rule_id` → `portal_assignment_rules.id` (`on delete set null`) | materialization | `server-lib/portalAssignments.js`'s `applyRuleToExistingRoster` (called right after a rule is created, `api/portal.js`'s `create_assignment_rule`) and `applyRulesToNewRosterMember` (called right after a roster insert in `api/companydata.js`'s `add_roster_member` and `onboard_new_employee`) |
+| `portal_assignments.roster_id` → `roster.id` | scoped by `roster.company_id` and `roster.active` in `applyRuleToExistingRoster`'s query; by the company's own `portal_documents` set in `applyRulesToNewRosterMember` | `server-lib/portalAssignments.js` |
+| `(portal_assignments.document_id, portal_assignments.roster_id)` unique | idempotency for re-running a rule | `upsert(..., { onConflict: 'document_id,roster_id', ignoreDuplicates: true })`, `server-lib/portalAssignments.js`'s `insertAssignmentsIgnoringConflicts` |
+| Rollup consumer | reads `portal_assignments` + `portal_records` together, computing status **at read time**, not stored | `api/portal.js`'s `get_assignment_rollup` — a submission satisfies an assignment when it's the same `document_id`/`submitted_by_roster_id` (a trustworthy server-stamped column, not free text — same join `portal_records` already uses per its phase-2 entry above) with `created_at >= portal_assignments.created_at`; `status` is `submitted` / `overdue` (`due_at` in the past, no matching submission) / `not_started` |
+| UI | `src/PortalDocumentBuilder.jsx`'s new "Who needs to complete this" section (rule create/delete, roster picker for `individual`), `src/Dashboard.jsx`'s new "Assignments" sub-tab on the Portal tab (rollup rows, overdue in red) |
+
+**Both `server-lib/portalAssignments.js` entry points are best-effort and
+non-blocking, matching this app's existing posture on side effects that
+must never undo the write that triggered them** (same reasoning already
+used for the phase-3 submission-notification email and the onboarding
+email): `api/companydata.js`'s two call sites wrap the call in
+`try/catch` and only `console.error` on failure, so a roster add or
+onboard never fails because assignment materialization did.
+
+**Deliberate deviation from the build spec's literal targeting wording,
+already resolved and recorded in the migration's own header comment.**
+The spec names "role/group/individual/everyone" as the four target types.
+This codebase's only sub-roster grouping concept is `roster.departments`
+(phase 1), and that column exists ONLY on supervisor-tier rows (§2's
+`roster.departments` entry above; `api/companydata.js:864-865` forces it
+to `[]` on any worker row) — a worker holds no department value at all,
+so a department-targeted assignment rule could never reach the very
+people this feature is supposed to put paperwork in front of. Built as
+`target_type` in `('everyone', 'role', 'individual')` instead, with no
+department-based option — `'role'` (worker | supervisor) is the closest
+built primitive to the spec's "group". See §5. Flagged in the migration's
+header comment as worth reopening if a real customer needs
+department-scoped assignment once workers get some equivalent grouping —
+not filed as a break, since nothing today can silently fail to reach a
+department that was never offered as a target in the first place.
+
+**`get_assignment_rollup`'s scoping matches its `list_portal_records`
+sibling, not a new pattern:** for an admin session, `docsQuery` carries no
+`company_id` filter at all (only a supervisor session adds
+`.eq('company_id', session.companyId)`, `api/portal.js:729`) — same shape
+as `list_portal_records` (`api/portal.js:572`), where `src/Dashboard.jsx`
+filters the admin's multi-company view down to `selectedCompany`
+client-side (`loadPortalAssignments`'s `.filter(r => !isAdmin ||
+r.company_id === selectedCompany)`). Read both actions side by side before
+assuming this is new: it's the pre-existing admin-dashboard shape, not a
+gating disagreement introduced by phase 4.
 
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
