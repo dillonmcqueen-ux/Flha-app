@@ -34,6 +34,7 @@ const TYPE_META = {
   daily: { label: "Daily Report", icon: ClipboardList },
   monthly: { label: "Monthly Inspection", icon: CalendarClock },
   customform: { label: "Custom Document", icon: FolderKanban },
+  portalform: { label: "Portal Document", icon: FileText },
 };
 
 // Every draft key looks like fora_draft_<formType>_<scopeId>, and scopeId is
