@@ -26,6 +26,7 @@ import {
   consumeBackupCode,
 } from '../server-lib/totp.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
+import { loadPlatformOverview } from '../server-lib/platformOverview.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -117,6 +118,24 @@ export default async function handler(req, res) {
       const result = await createUploadUrl(supabaseAdmin, 'company-logos', filename);
       if (result.error) return res.status(500).json({ error: result.error });
       return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
+    }
+
+    // ── Founder dashboard: platform-wide aggregates ────────────────────────
+    // Counts only, never a document or a worker. Safe to live behind this
+    // handler because everything above already rejected any session that is
+    // not the global ADMIN_CODE login (role 'admin').
+    if (action === 'platform_overview') {
+      // The ADMIN_CODE login carries no userId. Requiring that here means a
+      // roster-backed session can never read cross-company data, even if a
+      // roster row's role were ever set to 'admin' (the live table's CHECK
+      // constraint already forbids it; this is the second lock).
+      if (session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      try {
+        return res.status(200).json(await loadPlatformOverview(supabaseAdmin));
+      } catch (e) {
+        console.error('platform_overview failed:', e.message);
+        return res.status(500).json({ error: 'Could not load platform overview.' });
+      }
     }
 
     // ── List all companies (includes codes + contact info) ─────────────

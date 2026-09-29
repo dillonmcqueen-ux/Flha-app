@@ -4,13 +4,14 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import PortalDocumentBuilder from "./PortalDocumentBuilder.jsx";
+import PlatformDashboard from "./PlatformDashboard.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
 import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
 import {
   Construction, Inbox, Building2, FileText, User, DollarSign, Brain, Sparkles,
   MapPin, Tractor, HardHat, Zap, ArrowUpRight, CircleCheckBig, Hourglass,
-  Check, Download, Menu, KeyRound, AlertTriangle,
+  Check, Download, Menu, KeyRound, AlertTriangle, Activity,
 } from "lucide-react";
 import { colors as T, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import Sidebar from "./Sidebar";
@@ -27,14 +28,14 @@ import Sidebar from "./Sidebar";
 // same access boundary as every other tab here. A separate top-level
 // category rather than folded into "Admin" because it isn't a console
 // operation on a company record; it's Dillon building a document for one.
-const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound, documentBuilder: FileText };
-const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes", documentBuilder: "Document Builder" };
+const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound, documentBuilder: FileText, platform: Activity };
+const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes", documentBuilder: "Document Builder", platform: "Platform" };
 const ADMIN_CATEGORY_ICON = { admin: Building2, portal: FileText };
 const ADMIN_CATEGORIES = [
-  { key: "admin", label: "Admin", tabs: ["onboarding", "codes"] },
+  { key: "admin", label: "Admin", tabs: ["onboarding", "codes", "platform"] },
   { key: "portal", label: "Company Portal", tabs: ["documentBuilder"] },
 ];
-const VIEW_TO_ADMIN_TAB = { home: "overview", onboardingRequests: "onboarding", allCodes: "codes", documentBuilder: "documentBuilder" };
+const VIEW_TO_ADMIN_TAB = { home: "overview", onboardingRequests: "onboarding", allCodes: "codes", documentBuilder: "documentBuilder", platform: "platform" };
 
 function randomSuffix(len = 3) {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1326,7 +1327,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // it, e.g. openManage/addCompany), this block just maps its three
   // "top-level destination" values onto sidebar tab keys instead of
   // rendering each as its own <div style={st.wrap}> screen.
-  if (view === "home" || view === "allCodes" || view === "onboardingRequests" || view === "documentBuilder") {
+  if (view === "home" || view === "allCodes" || view === "onboardingRequests" || view === "documentBuilder" || view === "platform") {
     const activeAdminTab = VIEW_TO_ADMIN_TAB[view];
     const newOnboardingCount = onboardingRequests.filter(r => r.status === "new").length;
     const STATUS_LABEL = { new: "New", in_progress: "In progress", needs_info: "Needs info", done: "Done" };
@@ -1339,6 +1340,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       if (key === "onboarding") { setView("onboardingRequests"); loadOnboardingRequests(); }
       else if (key === "codes") { setView("allCodes"); loadAllCodesView(); }
       else if (key === "documentBuilder") { setView("documentBuilder"); }
+      else if (key === "platform") { setView("platform"); }
       else setView("home");
     };
 
@@ -1389,7 +1391,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             categoryIcon={ADMIN_CATEGORY_ICON}
             tabIcon={ADMIN_TAB_ICON}
             tabLabel={ADMIN_TAB_LABEL}
-            tabVisible={{ onboarding: true, codes: true, documentBuilder: true }}
+            tabVisible={{ onboarding: true, codes: true, documentBuilder: true, platform: true }}
             tabCounts={{ onboarding: newOnboardingCount }}
             activeTab={activeAdminTab}
             onSelectTab={goToTab}
@@ -1403,6 +1405,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             )}
 
             {/* ── Overview ───────────────────────────────────────────── */}
+            {activeAdminTab === "platform" && (
+              <PlatformDashboard token={token} />
+            )}
+
             {activeAdminTab === "documentBuilder" && (
               <PortalDocumentBuilder companies={companies} token={token} />
             )}
