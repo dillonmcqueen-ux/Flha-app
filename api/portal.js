@@ -26,6 +26,7 @@ import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolve
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
 import { portalEscalationSignal } from '../server-lib/portalSignals.js';
+import { recordPlatformEvent, anthropicUsageMetrics } from '../server-lib/platformEvents.js';
 import { withDecryptedEmail, encryptField } from '../server-lib/fieldCrypto.js';
 import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
@@ -222,6 +223,8 @@ Rules:
 
       contentBlocks.push({ type: 'text', text: instructions });
 
+      const draftModel = 'claude-opus-5';
+      const draftStartedAt = Date.now();
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -230,7 +233,7 @@ Rules:
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-opus-5',
+          model: draftModel,
           max_tokens: 4000,
           messages: [{ role: 'user', content: contentBlocks }],
         }),
@@ -239,9 +242,16 @@ Rules:
       if (!response.ok) {
         const errText = await response.text();
         console.error(`Anthropic API error (portal draft): ${response.status} ${errText}`);
+        await recordPlatformEvent(supabaseAdmin, { eventType: 'ai_generation', status: 'error', subtype: 'portal_ai_draft', companyId: resolveCompanyId(session, companyId), metrics: { model: draftModel, http_status: response.status } });
         return res.status(500).json({ error: "Couldn't read this document. Try again, or start from scratch." });
       }
       const data = await response.json();
+      await recordPlatformEvent(supabaseAdmin, {
+        eventType: 'ai_generation',
+        status: data.stop_reason === 'refusal' ? 'refused' : (data.stop_reason === 'max_tokens' ? 'truncated' : 'ok'),
+        subtype: 'portal_ai_draft', companyId: resolveCompanyId(session, companyId),
+        metrics: anthropicUsageMetrics(data, { model: draftModel, startedAt: draftStartedAt }),
+      });
       if (data.stop_reason === 'refusal') {
         return res.status(200).json({ error: "The AI declined to read this one. Start from scratch instead — every field is editable." });
       }

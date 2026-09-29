@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import { buildReportForCompanyWeek, mondayOf, toISODate } from './equipmentreports.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
+import { recordPlatformEvent } from '../server-lib/platformEvents.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -39,6 +40,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized.' });
   }
 
+  const startedAt = Date.now();
   try {
     // Runs Sunday 11:59pm UTC (see vercel.json), right at the close of the
     // week — `mondayOf(now)` on a Sunday resolves to the Monday that
@@ -51,7 +53,10 @@ export default async function handler(req, res) {
     const weekEndExclusiveISO = nextMonday.toISOString();
 
     const { data: companies, error: coErr } = await supabaseAdmin.from('companies').select('id, roster_enabled');
-    if (coErr) return res.status(500).json({ error: 'Could not load companies.' });
+    if (coErr) {
+      await recordPlatformEvent(supabaseAdmin, { eventType: 'cron_run', subtype: 'equipment_reports', status: 'error', metrics: { duration_ms: Date.now() - startedAt } });
+      return res.status(500).json({ error: 'Could not load companies.' });
+    }
 
     const equipmentResults = [];
     const timeClockResults = [];
@@ -110,12 +115,28 @@ export default async function handler(req, res) {
       }
     }
 
+    const failedOf = (rs) => rs.filter((r) => r.ok === false).length;
+    const failed = failedOf(equipmentResults) + failedOf(timeClockResults);
+    await recordPlatformEvent(supabaseAdmin, {
+      eventType: 'cron_run', subtype: 'equipment_reports', status: failed > 0 ? 'error' : 'ok',
+      metrics: {
+        companies: (companies || []).length,
+        equipment_ok: equipmentResults.filter((r) => r.ok).length,
+        equipment_failed: failedOf(equipmentResults),
+        equipment_skipped: equipmentResults.filter((r) => r.skipped).length,
+        timeclock_ok: timeClockResults.filter((r) => r.ok).length,
+        timeclock_failed: failedOf(timeClockResults),
+        timeclock_skipped: timeClockResults.filter((r) => r.skipped).length,
+        duration_ms: Date.now() - startedAt,
+      },
+    });
     return res.status(200).json({ ok: true, weekStart: weekStartISO, equipmentResults, timeClockResults });
   } catch (e) {
     // Raw exception text can carry Supabase/Anthropic internals (table and
     // constraint names). Log it, return a generic message — the same
     // discipline the other 17 handlers already follow.
     console.error('Cron job failed:', e.message);
+    await recordPlatformEvent(supabaseAdmin, { eventType: 'cron_run', subtype: 'equipment_reports', status: 'error', metrics: { duration_ms: Date.now() - startedAt } });
     return res.status(500).json({ error: 'Cron job failed.' });
   }
 }

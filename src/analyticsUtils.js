@@ -113,12 +113,18 @@ function siteBucketKey(siteId, rawSite) {
   return name ? `name:${name}` : null;
 }
 
-export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, siteNames = {}) {
+// `extras` is the one place new document families join Site Activity (map
+// break #40): { portal: [...portal_records], custom: [...custom_form_records] }.
+// Both default to empty, so a caller that does not pass them (the Safety
+// Analytics tab and its PDF, where custom safety docs already appear in the
+// scheduled-sites table) is unchanged and nothing is counted twice. Portal
+// records carry a real site_id; custom docs carry site_id and site_name.
+export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, siteNames = {}, extras = {}) {
   const buckets = {};
   const bump = (rawSite, siteId, field) => {
     const key = siteBucketKey(siteId, rawSite);
     if (!key) return;
-    if (!buckets[key]) buckets[key] = { siteId: key.startsWith("id:") ? siteId : null, labelCounts: {}, flhas: 0, toolbox: 0, daily: 0, nearMisses: 0, incidents: 0 };
+    if (!buckets[key]) buckets[key] = { siteId: key.startsWith("id:") ? siteId : null, labelCounts: {}, flhas: 0, toolbox: 0, daily: 0, nearMisses: 0, incidents: 0, portal: 0, custom: 0 };
     const b = buckets[key];
     const label = (rawSite || "").trim();
     if (label) b.labelCounts[label] = (b.labelCounts[label] || 0) + 1;
@@ -129,6 +135,8 @@ export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, 
   daily.forEach(d => bump(d.site, d.site_id, "daily"));
   nearMisses.forEach(n => bump(n.site, n.site_id, "nearMisses"));
   incidents.forEach(i => bump(i.site, i.site_id, "incidents"));
+  (extras.portal || []).forEach(r => bump(r.site_name, r.site_id, "portal"));
+  (extras.custom || []).forEach(c => bump(c.site_name, c.site_id, "custom"));
 
   return Object.values(buckets)
     .map(b => {
@@ -141,9 +149,87 @@ export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, 
       let label = "", bestCount = 0;
       Object.entries(b.labelCounts).forEach(([l, count]) => { if (count > bestCount) { label = l; bestCount = count; } });
       const canonical = b.siteId != null ? siteNames[b.siteId] : null;
-      return { site: canonical || label || "Unknown site", siteId: b.siteId, flhas: b.flhas, toolbox: b.toolbox, daily: b.daily, nearMisses: b.nearMisses, incidents: b.incidents };
+      return { site: canonical || label || "Unknown site", siteId: b.siteId, flhas: b.flhas, toolbox: b.toolbox, daily: b.daily, nearMisses: b.nearMisses, incidents: b.incidents, portal: b.portal, custom: b.custom };
     })
     .sort((a, b) => (b.nearMisses + b.incidents) - (a.nearMisses + a.incidents));
+}
+
+// ── Company Portal ──────────────────────────────────────────
+// Everything here is derived from the three arrays the Dashboard already
+// loads for the Portal tab (records, escalations, assignment rollup), which
+// the server has already department-scoped for the logged-in supervisor. So
+// the numbers describe what this person is allowed to see, not the whole
+// company, and the panel says so.
+const PORTAL_DEPT_LABEL = { hr: "HR", payroll: "Payroll", safety: "Safety", maintenance: "Maintenance", operations_manager: "Operations Manager" };
+
+export function portalSummary(records = [], escalations = [], assignmentRows = [], siteNames = {}) {
+  const now = Date.now();
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const inLast30 = (r) => r.created_at && new Date(r.created_at).getTime() >= thirtyDaysAgo;
+
+  const recordById = {};
+  records.forEach(r => { recordById[r.id] = r; });
+  const flaggedRecordIds = new Set(escalations.map(e => e.record_id));
+
+  const openEscalations = escalations.filter(e => e.status === "open").length;
+  const assigned = assignmentRows.length;
+  const submitted = assignmentRows.filter(a => a.status === "submitted").length;
+  const overdue = assignmentRows.filter(a => a.status === "overdue").length;
+
+  const docCounts = {};
+  records.forEach(r => { const k = r.document_title || "Unknown document"; docCounts[k] = (docCounts[k] || 0) + 1; });
+  const byDocument = Object.entries(docCounts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+
+  const deptCounts = {};
+  escalations.forEach(e => { const k = PORTAL_DEPT_LABEL[e.target_department] || e.target_department || "Unrouted"; deptCounts[k] = (deptCounts[k] || 0) + 1; });
+  const escalationsByDepartment = Object.entries(deptCounts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+
+  // A site's bucket is its real id when we have one. An escalation has no
+  // site column of its own, so it borrows its record's; if that record is not
+  // in this person's scope it falls back to the site name the server sent.
+  const sites = {};
+  const bucket = (siteId, rawName) => {
+    const key = siteBucketKey(siteId, rawName);
+    if (!key) return null;
+    if (!sites[key]) sites[key] = { siteId: key.startsWith("id:") ? siteId : null, name: (rawName || "").trim(), submissions: 0, openEscalations: 0 };
+    return sites[key];
+  };
+  records.forEach(r => { const b = bucket(r.site_id, r.site_name); if (b) b.submissions += 1; });
+  escalations.filter(e => e.status === "open").forEach(e => {
+    const rec = recordById[e.record_id];
+    const b = rec ? bucket(rec.site_id, rec.site_name) : bucket(null, e.site_name);
+    if (b) b.openEscalations += 1;
+  });
+  const bySite = Object.values(sites)
+    .map(b => ({ ...b, site: (b.siteId != null ? siteNames[b.siteId] : null) || b.name || "Unknown site" }))
+    .sort((a, b) => b.openEscalations - a.openEscalations || b.submissions - a.submissions);
+
+  const d0 = new Date();
+  const buckets = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(d0.getFullYear(), d0.getMonth() - i, 1);
+    buckets.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString("en-CA", { month: "short", year: "2-digit" }), submissions: 0, escalations: 0 });
+  }
+  const bucketMap = {};
+  buckets.forEach(b => { bucketMap[b.key] = b; });
+  const bump = (list, field) => list.forEach(r => {
+    if (!r.created_at) return;
+    const d = new Date(r.created_at);
+    const b = bucketMap[`${d.getFullYear()}-${d.getMonth()}`];
+    if (b) b[field] += 1;
+  });
+  bump(records, "submissions");
+  bump(escalations, "escalations");
+
+  return {
+    total: records.length,
+    last30: records.filter(inLast30).length,
+    openEscalations,
+    flaggedPct: pct(flaggedRecordIds.size, records.length),
+    assigned, submitted, overdue,
+    completionPct: pct(submitted, assigned),
+    byDocument, escalationsByDepartment, bySite, trend: buckets,
+  };
 }
 
 export function scheduledSiteActivity(monthlyRecords, monthlyActions, customDocs, siteNames = {}) {
