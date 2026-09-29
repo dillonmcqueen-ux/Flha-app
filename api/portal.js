@@ -25,6 +25,7 @@ import crypto from 'crypto';
 import { authorRosterId } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
+import { sendEmail } from '../server-lib/email.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions } from '../server-lib/portalFieldTypes.js';
 
@@ -284,6 +285,29 @@ Rules:
       return res.status(200).json({ documents: data || [] });
     }
 
+    // Phase 3's read-only "Portal document library" (FORA Company Portal —
+    // Build Spec, "Company Admin" — reframed per Dillon's 2026-09-29 call as
+    // any supervisor-tier login, not a new customer-facing admin role: this
+    // app has no customer admin, only worker/supervisor logins — see
+    // server-lib/docKeyGate.js's comment on why founder-only `admin` is
+    // never a customer role). Deliberately separate from `list_documents`
+    // above: that one is the founder's builder listing (admin-only, used to
+    // decide what's editable); this is a read-only company-scoped view any
+    // supervisor can see, same "view only, editing goes through Dillon's
+    // builder" boundary the spec draws.
+    if (action === 'list_portal_documents_for_dashboard') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin
+        .from('portal_documents')
+        .select('id, title, icon, category, departments, is_active')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: 'Could not load documents.' });
+      return res.status(200).json({ documents: data || [] });
+    }
+
     if (action === 'get_document') {
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { documentId } = req.body;
@@ -445,7 +469,7 @@ Rules:
       if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed for this site.' });
       }
-      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, is_active').eq('id', documentId).limit(1);
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, title, is_active, departments').eq('id', documentId).limit(1);
       if (!docRows || docRows.length === 0 || docRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed for this document.' });
       }
@@ -496,22 +520,77 @@ Rules:
         await supabaseAdmin.from('portal_answers').insert(row);
       }
 
+      // Phase 3: "email fires on submission" (build spec, "Build order").
+      // Best-effort and non-blocking, same posture as every other email in
+      // this app (api/companydata.js's onboard_new_employee) — a send
+      // failure must never undo or fail the submission that already saved.
+      // Recipients are every active supervisor-tier roster member holding
+      // one of this document's routed department(s), same population the
+      // department-scoped dashboard above shows this document to. Silently
+      // sends nothing when the document has no departments set, or nobody
+      // in them has an email on file — there is no "everyone" fallback,
+      // since a document with no department is also invisible to every
+      // individually-identified supervisor's Portal Inbox.
+      if ((docRows[0].departments || []).length > 0) {
+        try {
+          const { data: recipients } = await supabaseAdmin
+            .from('roster')
+            .select('email, departments')
+            .eq('company_id', session.companyId)
+            .eq('role', 'supervisor')
+            .eq('active', true)
+            .not('email', 'is', null);
+          const toAddresses = [...new Set(
+            (recipients || [])
+              .filter(r => (r.departments || []).some(dep => docRows[0].departments.includes(dep)))
+              .map(r => r.email)
+          )];
+          if (toAddresses.length > 0) {
+            await sendEmail({
+              to: toAddresses,
+              subject: `New submission: ${docRows[0].title}`,
+              text: `${submittedBy} just submitted "${docRows[0].title}".\n\nLog in to FORA to view it.`,
+            });
+          }
+        } catch (e) {
+          console.error('portal submission email failed:', e.message);
+        }
+      }
+
       return res.status(200).json({ id: record.id, pdfLinked });
     }
 
     // ══ SUPERVISOR / ADMIN: viewing submissions ═════════════════════════
-    // Not yet wired into any Dashboard.jsx UI — that lands with phase 3's
-    // department-scoped dashboard. These two actions exist now so the data
-    // is retrievable as soon as that UI is built, same shape as
+    // Wired into Dashboard.jsx's Portal tab (phase 3). These two actions
+    // are department-scoped for a supervisor session, same shape as
     // api/customforms.js's list_records/get_record_detail.
 
     if (action === 'list_portal_records') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      let docsQuery = supabaseAdmin.from('portal_documents').select('id, company_id, title, icon');
+      let docsQuery = supabaseAdmin.from('portal_documents').select('id, company_id, title, icon, departments');
       if (session.role === 'supervisor') docsQuery = docsQuery.eq('company_id', session.companyId);
       const { data: documents, error: docsErr } = await docsQuery;
       if (docsErr) return res.status(500).json({ error: 'Could not load documents.' });
-      const docIds = (documents || []).map(d => d.id);
+
+      // Department-scoped dashboard (phase 3, FORA Company Portal — Build
+      // Spec's "Role-based dashboards"). An individually-identified
+      // supervisor (a real roster row, session.userId) sees only documents
+      // routed to a department their own row holds — a supervisor holding
+      // every department therefore sees everything, which is the "Company
+      // Admin" behavior the spec describes, without a new role (2026-09-29
+      // decision — this app has no customer admin login, only
+      // worker/supervisor, see server-lib/docKeyGate.js). A shared-code
+      // supervisor login (no per-person roster row — pre-cutover companies)
+      // has no individual departments to scope by, so it falls back to
+      // unfiltered, same as every other document type already shows it.
+      let visibleDocuments = documents || [];
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: rosterRows } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).limit(1);
+        const myDepartments = rosterRows?.[0]?.departments || [];
+        visibleDocuments = visibleDocuments.filter(d => (d.departments || []).some(dep => myDepartments.includes(dep)));
+      }
+
+      const docIds = visibleDocuments.map(d => d.id);
       if (docIds.length === 0) return res.status(200).json({ records: [] });
 
       const { data: records, error: recErr } = await supabaseAdmin
@@ -521,7 +600,7 @@ Rules:
       const siteIds = [...new Set((records || []).map(r => r.site_id))];
       const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
       const siteMap = {}; (sites || []).forEach(s => { siteMap[s.id] = s.name; });
-      const docMap = {}; (documents || []).forEach(d => { docMap[d.id] = d; });
+      const docMap = {}; visibleDocuments.forEach(d => { docMap[d.id] = d; });
 
       const signedRecords = await signRows(supabaseAdmin, records, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
       const enriched = signedRecords.map(r => ({
@@ -542,10 +621,19 @@ Rules:
       if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
       const record = { ...recordRows[0], pdf_url: await signStoredUrl(recordRows[0].pdf_url, 'flha-reports') };
 
-      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, title, icon').eq('id', record.document_id).limit(1);
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, title, icon, departments').eq('id', record.document_id).limit(1);
       const document = docRows && docRows[0];
       if (!document) return res.status(404).json({ error: 'Document not found.' });
       if (session.role === 'supervisor' && document.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      // Same department scoping as list_portal_records — a saved link must
+      // not reach into a record outside a supervisor's own department(s).
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: rosterRows } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).limit(1);
+        const myDepartments = rosterRows?.[0]?.departments || [];
+        if (!(document.departments || []).some(dep => myDepartments.includes(dep))) {
+          return res.status(403).json({ error: 'Not allowed for this document.' });
+        }
+      }
 
       const { data: siteRows } = await supabaseAdmin.from('sites').select('id, name').eq('id', record.site_id).limit(1);
       const { data: answers, error: ansErr } = await supabaseAdmin.from('portal_answers').select('*').eq('record_id', recordId);

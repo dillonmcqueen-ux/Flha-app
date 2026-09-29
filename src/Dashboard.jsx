@@ -60,8 +60,9 @@ const TAB_ICON = {
   roster: KeyRound,
   certifications: ShieldCheck,
   workforcecustomdocs: FolderKanban,
+  portal: FileText,
 };
-const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users };
+const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users, portal: FileText };
 
 // Sidebar nav labels — same strings the old two-row tab bar used, moved
 // here as a lookup table since the sidebar (src/Sidebar.jsx) renders every
@@ -72,6 +73,7 @@ const TAB_LABEL = {
   inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance", fuel: "Fuel Logs",
   customdocs: "Custom Docs", analytics: "Equipment Analytics",
   timeclock: "Time Clock", roster: "Roster", certifications: "Certifications", workforcecustomdocs: "Custom Docs",
+  portal: "Portal",
 };
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
@@ -1584,6 +1586,61 @@ function CustomDocCard({ data, onClose, onSave }) {
   );
 }
 
+// Read-only — a Portal answer's content varies by field_type (yes/no,
+// short text, number, date, dropdown, multi-select, signature, file
+// upload), unlike CustomDocCard's single boolean shape, and there is no
+// edit path for a Portal submission yet (phase 3 is dashboard viewing
+// only; editing would need its own field-type-aware form, not built here).
+function PortalRecordCard({ data, onClose }) {
+  if (!data) return null;
+  const { record, document, site, items } = data;
+  const accent = C.orange;
+
+  const renderValue = (it) => {
+    if (it.field_type === "yesno") return it.value_text === "yes" ? "YES" : "NO";
+    if (it.field_type === "multiselect") return (it.value_json || []).length ? it.value_json.join(", ") : "—";
+    if (it.field_type === "signature" || it.field_type === "file_upload") {
+      return it.file_url ? <a href={it.file_url} target="_blank" rel="noreferrer" style={{ color: accent, fontWeight: 700 }}>View attachment</a> : "Not provided";
+    }
+    return it.value_text || "—";
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: accent }}>{document?.icon} {document?.title}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{site?.name} · {new Date(record.created_at).toLocaleString("en-CA")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
+            <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
+          </div>
+        </div>
+
+        {record.ai_summary && (
+          <div style={{ background: "#1A1A1A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4 }}>SUMMARY</div>
+            <div style={{ fontSize: 14, color: "#D4D4D8" }}>{record.ai_summary}</div>
+          </div>
+        )}
+        <div style={{ fontSize: 13, color: "#D4D4D8", marginBottom: 16 }}>Submitted by: <strong>{record.submitted_by}</strong></div>
+
+        {items.map((it, i) => (
+          <div key={it.id} style={{ border: "1.5px solid #242424", background: "#1A1A1A", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#F5F5F4" }}>{i + 1}. {it.question_text}</div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#D4D4D8", flexShrink: 0 }}>{renderValue(it)}</span>
+            </div>
+            {it.notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 4, fontStyle: "italic" }}>{it.notes}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ThisWeekDocsCard({ docs, meta, certifications = [], onOpen, onClose }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
@@ -2167,6 +2224,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // the current tab is still valid.
   const [activeTab, setActiveTab] = useState("overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Company Portal (phase 3) — Inbox (portal_records) and the read-only
+  // Document Library (portal_documents). Department scoping for the Inbox
+  // happens server-side (api/portal.js's list_portal_records), not here.
+  const [portalSubTab, setPortalSubTab] = useState("inbox");
+  const [portalRecords, setPortalRecords] = useState([]);
+  const [loadingPortalRecords, setLoadingPortalRecords] = useState(false);
+  const [portalLibraryDocs, setPortalLibraryDocs] = useState([]);
+  const [loadingPortalLibrary, setLoadingPortalLibrary] = useState(false);
+  const [selectedPortalRecord, setSelectedPortalRecord] = useState(null);
   // Drives the live date/time line in the page header. Minute resolution
   // is all it shows, so a 30s tick is plenty.
   const [clockNow, setClockNow] = useState(() => Date.now());
@@ -2887,6 +2953,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
     safetyanalytics: true,
+    // Company Portal isn't in server-lib/pricing.js's MODULES yet (a known,
+    // already-flagged gap — see docs/feature-interaction-map.md), so there
+    // is no company_document_settings key to gate this on the way every
+    // other tab here is gated. Department scoping needs a real roster row
+    // per supervisor, so this rides the same signal the "roster" tab
+    // already uses rather than inventing a second one.
+    portal: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     analytics: true,
     sops: true,
   };
@@ -2903,6 +2976,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "corrective", "sops", "safetycustomdocs", "safetyanalytics"] },
     { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "customdocs", "analytics"] },
     { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "certifications", "workforcecustomdocs"] },
+    // Company Portal (phase 3) — its own top-level group rather than folded
+    // into Safety/Operations/Workforce, same reasoning WorkerMenu.jsx's
+    // renderPortalCard gives: a Portal document's category is the
+    // customer's own paperwork, not FORA's document taxonomy.
+    { key: "portal", label: "Portal", tabs: ["portal"] },
   ];
   // The Equipment hub's own sub-tabs, in the order a supervisor actually
   // works through them: what do I own, what needs service, what has been
@@ -3149,6 +3227,52 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     loadRosterList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
+
+  const loadPortalRecords = async ({ silent = false } = {}) => {
+    if (!selectedCompany) return;
+    if (!silent) setLoadingPortalRecords(true);
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_portal_records", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setPortalRecords((data.records || []).filter(r => !isAdmin || r.company_id === selectedCompany));
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingPortalRecords(false);
+  };
+
+  const loadPortalLibrary = async () => {
+    if (!selectedCompany) return;
+    setLoadingPortalLibrary(true);
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_portal_documents_for_dashboard", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setPortalLibraryDocs(data.documents || []);
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingPortalLibrary(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "portal" || !selectedCompany) return;
+    loadPortalRecords();
+    loadPortalLibrary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedCompany, token]);
+
+  const openPortalRecord = async (record) => {
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_portal_record_detail", token, recordId: record.id }),
+      });
+      const data = await res.json();
+      if (res.ok) setSelectedPortalRecord(data);
+    } catch (e) { /* leave detail closed if the request fails */ }
+  };
 
   const resetRosterMemberPin = async (id, name) => {
     setResettingRosterId(id);
@@ -4862,6 +4986,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} error={equipmentPdfError} />}
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} onSave={saveCustomDocRecordEdit} />}
+      {selectedPortalRecord && <PortalRecordCard data={selectedPortalRecord} onClose={() => setSelectedPortalRecord(null)} />}
       {showThisWeekModal && (
         <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} certifications={companyCertifications} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}
@@ -6040,6 +6165,76 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
         {activeTab === "safetycustomdocs" && TAB_VISIBLE.safetycustomdocs && renderCustomDocsTab(companySafetyCustomDocs, "safetycustomdocs")}
         {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
+
+        {activeTab === "portal" && TAB_VISIBLE.portal && (
+          <div style={styles.card}>
+            <PanelHeader
+              icon={TAB_ICON.portal}
+              title={`${company?.name || ""} — Portal`}
+              subtitle={portalSubTab === "inbox"
+                ? "Documents and escalations routed to your department(s). Company Portal documents — the customer's own paperwork, built by FORA."
+                : "Every Portal document built for this company. View only — changes go through FORA's document builder."}
+            />
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button style={styles.tab(portalSubTab === "inbox")} onClick={() => setPortalSubTab("inbox")}>Inbox {portalRecords.length > 0 ? `(${portalRecords.length})` : ""}</button>
+              <button style={styles.tab(portalSubTab === "library")} onClick={() => setPortalSubTab("library")}>Document Library {portalLibraryDocs.length > 0 ? `(${portalLibraryDocs.length})` : ""}</button>
+            </div>
+
+            {portalSubTab === "inbox" && (
+              loadingPortalRecords ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+              ) : portalRecords.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>
+                  <div style={{ marginBottom: 8 }}><FileText size={32} strokeWidth={1.5} style={{ opacity: 0.6 }} /></div>
+                  No Portal submissions yet.
+                </div>
+              ) : (
+                portalRecords.map((r, i) => (
+                  <div key={r.id} style={{
+                    padding: "12px 4px", borderBottom: i < portalRecords.length - 1 ? `1px solid ${C.line}` : "none",
+                    display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer"
+                  }} onClick={() => openPortalRecord(r)}>
+                    <RowIconTile icon={FileText} color={r.pdf_url ? C.status.success.text : C.text.muted} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.document_icon} {r.document_title}</div>
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {new Date(r.created_at).toLocaleDateString("en-CA")}</div>
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{r.submitted_by}</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: r.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
+                        {r.pdf_url && <FileText size={11} />}{r.pdf_url ? "PDF" : ""} →
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )
+            )}
+
+            {portalSubTab === "library" && (
+              loadingPortalLibrary ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+              ) : portalLibraryDocs.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>No Portal documents built for this company yet.</div>
+              ) : (
+                portalLibraryDocs.map((d, i) => (
+                  <div key={d.id} style={{ padding: "12px 4px", borderBottom: i < portalLibraryDocs.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "center", gap: 10 }}>
+                    <RowIconTile icon={FileText} color={d.is_active ? C.status.success.text : C.text.faint} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{d.icon} {d.title}</div>
+                      <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{d.category || "No category"} · {(d.departments || []).length > 0 ? d.departments.join(", ") : "No department set"}</div>
+                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, borderRadius: RAD.pill, padding: "3px 9px", flexShrink: 0,
+                      background: d.is_active ? C.status.success.bg : C.status.danger.bg,
+                      color: d.is_active ? C.status.success.text : C.status.danger.text,
+                    }}>{d.is_active ? "ACTIVE" : "OFF"}</span>
+                  </div>
+                ))
+              )
+            )}
+          </div>
+        )}
 
         {activeTab === "safetyanalytics" && (
           <>
