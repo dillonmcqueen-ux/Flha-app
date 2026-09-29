@@ -17,12 +17,20 @@ line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
 **2026-09-29 against the uncommitted working tree** that added Company
-Portal phase 1 (Departments) — `roster.departments` (migration applied
-live), `server-lib/portalDepartments.js`, `api/companydata.js`'s
-`update_worker_profile` validation, and `src/WorkerProfileDrawer.jsx`'s
-chip picker. Placed as a new join key in §2 with its own note; producer
-side only, no consumer yet, no break filed — see the changelog. Before
-that, extended 2026-09-28 against the uncommitted working tree that added the Ted
+Portal phase 2 (Document engine v2) — `portal_documents`/`portal_questions`/
+`portal_records`/`portal_answers` (migration applied live),
+`server-lib/portalFieldTypes.js`, new file `api/portal.js`,
+`src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` and
+`src/PortalDocumentBuilder.jsx`. Placed as a new join-key section in §2;
+**break #32 filed** (a worker's Portal submissions never show up in My
+Forms) and the phase-3/4/5 deferrals recorded as deliberate, not breaks —
+see the changelog. Same-day, before that, extended against the same working
+tree for Company Portal phase 1 (Departments) — `roster.departments`
+(migration applied live), `server-lib/portalDepartments.js`,
+`api/companydata.js`'s `update_worker_profile` validation, and
+`src/WorkerProfileDrawer.jsx`'s chip picker. Placed as a new join key in §2
+with its own note; producer side only, no consumer yet, no break filed —
+see the changelog. Before that, extended 2026-09-28 against the uncommitted working tree that added the Ted
 client-scoping pipeline (`.claude/agents/ted.md` + three specialists,
 `portal_scope_requests`, `server-lib/portalScopePricing.js`,
 `api/scope-approval.js`, and a `stripe-webhook.js` `invoice.paid` handler)
@@ -615,6 +623,70 @@ caller's own roster (confirmed absent — see #31). Compare to `site_id` and
 rides along" pattern but **are** validated against the caller's company on
 submit (`equipmentScope.js`, comments at `logs.js:154-157,161-163`). The
 attendee/crew `rosterId` skips that step entirely.
+
+### `portal_documents.id` → `portal_questions`/`portal_records`/`portal_answers` (Company Portal phase 2 — Document engine v2)
+New tables, recorded 2026-09-29 against the uncommitted working tree that
+added `docs/schema/company-portal-phase2-migration.sql` (applied live),
+`server-lib/portalFieldTypes.js` (the 8 field types: `yesno`, `short_text`,
+`number`, `date`, `dropdown`, `multiselect`, `signature`, `file_upload` —
+generalizing `custom_form_questions`' yes/no-only shape), `api/portal.js`
+(new file, admin builder + worker submit + supervisor/admin view actions),
+`src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` (worker
+submission, registered in `WorkerMenu.jsx:38`'s `RESUBMIT_HANDLERS` as
+`portalform`), and `src/PortalDocumentBuilder.jsx` (admin builder, wired
+into `AdminPanel.jsx:1407` as a founder-only "Document Builder" tab,
+`:31`). This is phase 1's `roster.departments` finally getting a table on
+the other side of it — but that table isn't the consumer yet either; see
+below.
+
+| Table | Join | Where |
+|---|---|---|
+| `portal_documents.id` | → `portal_questions.document_id` (cascade delete) | `api/portal.js:293-294` (read), `:305-353` (`publish_document` — wholesale question replace on edit, insert on create) |
+| `portal_documents.id` | → `portal_records.document_id` | `api/portal.js:448-470` (submit, company-scope-checked at `:449`) |
+| `portal_records.id` | → `portal_answers.record_id` (cascade delete) | `api/portal.js:485-497` — only an answer whose `question_id` belongs to the submitted document is accepted (`questionById` map, `:482-487`), same guard shape as `api/customforms.js`'s `submit_custom` |
+| `portal_records.site_id` → `sites.id` | validated against caller's company | `api/portal.js:444-447`, `:401-404` (`get_active_portal_document`) |
+| `portal_records.submitted_by_roster_id` | stamped server-side via `authorRosterId(session)` | `api/portal.js:466` — same unforgeable pattern as break #3's `submitted_by_roster_id` on the nine original document tables, not the client-asserted shape break #31 found on toolbox/FLHA secondary signers |
+| `portal_records.client_submission_id` | idempotency key for the offline-drain retry path | `api/portal.js:456-460,472-476` — same shape as `custom_form_records.client_submission_id` |
+
+**Read every file listed above.** Two new private Supabase Storage buckets
+back this: `portal-sources` (admin-uploaded source documents for
+`ai_draft_document`'s vision/document call — a real Anthropic vision block,
+`api/portal.js:179-182`, not a stub) and `portal-attachments` (worker
+per-question signature/file_upload answers, `api/portal.js:492`). Both go
+through the same signed-upload-receipt model as every other bucket in this
+app (`server-lib/uploadUrls.js`), never a client-supplied path taken at
+face value.
+
+**Deliberately not built in this phase (per the spec, confirmed by grep —
+not assumed):**
+- **`portal_documents.departments`/`.category` have no reader yet.**
+  Written and validated (`api/portal.js:124-126,309`), but nothing filters
+  a worker's document list or a supervisor's dashboard by department, and
+  nothing rolls categories into Platform Analytics — `get_worker_portal_documents`
+  (`api/portal.js:384-394`) shows every active document in the company to
+  every worker, full stop. Phase 3 (document-level routing) is the named
+  consumer. Same §4b shape as `roster.departments` in the phase-1 entry
+  above — correct for this phase, not a break, because the consuming
+  behavior is scoped to a later phase, not silently dropped from this one.
+- **`list_portal_records`/`get_portal_record_detail` have no UI.**
+  `api/portal.js:508-563` — confirmed by `grep -rn "list_portal_records\|get_portal_record_detail" src/` returning only the two definitions' call sites nowhere in `src/`. Phase 3's dashboard-filtering work is the named consumer.
+- **Escalation is phase 5, not built.** `escalation_department`/
+  `escalation_condition` on `portal_questions`, and a `portal_escalations`
+  table, are absent from the migration on purpose (migration comment,
+  `company-portal-phase2-migration.sql:12-17`).
+- **Company Portal is still not in `server-lib/pricing.js`'s `MODULES`.**
+  Confirmed: `grep -n "portal" server-lib/pricing.js` → no hits. `api/portal.js`
+  calls neither `requireDocKey` nor `docKeyGate` anywhere (confirmed by
+  grep — no hits in the file). `portal_documents.is_active` is the only gate
+  a submission or a worker's document list passes through
+  (`api/portal.js:390,407,452-454`); a document's mere existence as an
+  active row is what currently gates a company having Portal at all — same
+  shape break #19 was before Fleet Overview/Compliance got sorted into BASE
+  vs. a real module. Flagged already at the phase-1 entry above; not
+  refiled as a new break, since it is the same open item, not a new one.
+
+**Break #32, filed by this pass:** Portal submissions don't show up in a
+worker's own document history. See below.
 
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
@@ -2833,6 +2905,51 @@ for `equipment_id`. No migration; no schema change (`rosterId` is already
 free-form inside jsonb, so tightening is a server-side check, not a column
 addition).
 
+### #32 — A worker's own Portal submissions don't show up in My Forms
+
+**Severity: medium. Status: open, not approved, not worked.** Filed by
+this pass, distinct from the phase-3/4/5 items recorded above — those are
+deferrals the build spec names on purpose; this one is not planned in any
+future phase, so it will not fix itself when a later phase ships.
+
+`src/MyDocuments.jsx` ("My Forms") is a worker's history of everything
+they've submitted, resumed via `api/customforms.js`'s `get_my_documents`
+action. Read the handler directly:
+
+```
+grep -n "portal" api/customforms.js src/MyDocuments.jsx
+→ no matches in either file
+```
+
+`get_my_documents` (`api/customforms.js:405-445`) queries `flhas`,
+`inspections`, `toolbox_talks`, `daily_reports`, `incidents`,
+`near_misses`, `inspection_records` (via `inspection_forms`) and
+`custom_form_records` (via `custom_forms`) — eight sources, all matched by
+`submitted_by`/`worker_name`/`presenter_name`/`reporter_name` against the
+logged-in session's name. `portal_records` is not one of them, and nothing
+elsewhere in either file references it.
+
+**Consequence:** a worker who fills out a Portal document has no screen to
+find it again. They can't pull up their own signed PDF, can't see it was
+received, and can't resume a Portal draft the way `WorkerMenu.jsx:38`'s
+`RESUBMIT_HANDLERS.portalform` lets them resume a Portal submission stuck
+in the *offline queue* — that's a different, narrower recovery path
+(client-side, pre-submit) than "see my past submissions" (server-side,
+post-submit), and only the first one exists for Portal today. Every other
+document type in the product gets both.
+
+*The fix would touch:* `api/customforms.js`'s `get_my_documents` — add a
+`portal_records` query (joined through `portal_documents` for the title/
+icon the way monthly inspections join through `inspection_forms` at
+`:433-439`, and matched on `submitted_by_roster_id` the way the nine
+break-#3 tables already can be, rather than a name-string match, since
+`portal_records.submitted_by_roster_id` is stamped server-side and
+therefore trustworthy) — and `src/MyDocuments.jsx`'s render/type-mapping
+list. No schema change; the column data already exists.
+
+*Re-check:* `grep -n "portal" api/customforms.js src/MyDocuments.jsx` — an
+empty result means the gap is still open.
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -3048,6 +3165,21 @@ Do **not** flag these. They are decisions, not gaps.
   Dillon still has to approve (same pattern §1's writer table already uses
   for every other provisioning path) would be a legitimate opportunity, not
   a mandate to auto-create a company outright.
+- **Company Portal phase 2's named deferrals are not breaks.**
+  `portal_documents.departments`/`.category` having no reader yet,
+  `list_portal_records`/`get_portal_record_detail` having no
+  `Dashboard.jsx` UI, and escalation (`portal_escalations`,
+  `escalation_department`/`escalation_condition`) being absent from the
+  migration are all phases 3/4/5 per the build spec, confirmed by grep to
+  genuinely not exist yet — `grep -rln "portal_documents\|portal_assignment_rules"
+  api/ src/ server-lib/` (phase-1 pass) and
+  `grep -rn "list_portal_records\|get_portal_record_detail" src/` (this
+  pass) both come back with nothing outside `api/portal.js` itself. Do not
+  file any of these as breaks. **Break #32 (Portal submissions missing
+  from My Forms) is different** — nothing names it as a future phase's job,
+  which is why it's filed and these aren't. Company Portal still missing
+  from `server-lib/pricing.js`'s `MODULES` is also not a new item here —
+  it's the same open flag from the phase-1 entry, not a new one.
 
 ---
 
@@ -3120,3 +3252,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-25 | this branch (`claude/toolbox-talk-edit-notes-oz5y1u`) | **New surface reached its join key: Toolbox Talk attendee and FLHA crew (secondary) signers now pick a real roster row instead of typing a name.** New worker-facing action `list_roster_names` (`api/companydata.js:761-770`) — company-scoped, `id, name, role`, active only, no role check, same pattern as `list_sites`/`list_equipment`. `src/ToolboxTalk.jsx` adds a `rosterId` (or `rosterId: null, guest: true` for a genuine non-employee, `:275-280`) to each `attendees_json` entry; `src/App.jsx`'s FLHA crew adds `rosterId` to each `crew_signatures` entry with no guest fallback (`:502-504,526-529`) since additional crew is assumed to always be an employee. Both flows block adding a second signer at all (no free-text fallback) if the company has zero active roster members (`ToolboxTalk.jsx:612`, `App.jsx:1495`). **Placed as a refinement of the `roster_id` join key (§2), not a new key** — same target table, same shape as break #3's `submitted_by_roster_id`, but weaker: `attendees_json`/`crew_signatures` are client-submittable jsonb columns (`api/logs.js:159`, `api/flhas.js:148`) and neither submit path validates the embedded `rosterId` against the caller's own roster, unlike `site_id`/`equipment_id`, which get exactly that check. **Filed as new break #31, OPEN, not approved, not worked** — a client can currently write any `rosterId` value into either array. No `api/logs.js` or `api/flhas.js` application code touched by this pass; map only. |
 | 2026-09-29 | uncommitted working tree | **New join key: `roster.departments` — Company Portal phase 1 (Departments), producer side only.** `docs/schema/roster-departments-migration.sql` (applied live) adds `roster.departments text[] not null default '{}'`; `server-lib/portalDepartments.js` fixes the v1 list (`hr`, `payroll`, `safety`, `maintenance`, `operations_manager` — deliberately excludes `company_admin`, since that access already comes from `roster.role === 'admin'`); `api/companydata.js:862-876`'s `update_worker_profile` validates against that list, forces `[]` on any worker-tier row, and clears it when a row is demoted from supervisor in the same request; `src/WorkerProfileDrawer.jsx` gained the chip picker, shown only when the drafted role is supervisor. Read every file listed. **No consumer exists yet, and that's correct for this phase, not a break** — phase 3 (document routing) and phase 4 (assignment rules) are the named future consumers per the build spec, and their tables (`portal_documents`, `portal_assignment_rules`) don't exist yet (confirmed by grep: no hits in `api/`, `src/`, `server-lib/`). Recorded in §2 with two things to re-check once those phases land: client-side department validation, and whether the phase-3/4 surface needs `document_key`-style gating (Company Portal isn't in `pricing.js`'s `MODULES` yet, so an ungated arrival would repeat break #19's shape). No break filed. No application code beyond what's listed touched by this pass; map only. |
 | 2026-09-28 | uncommitted working tree | **Client scoping pipeline (Ted) placed on the map, kept off §1/§3 on purpose.** New agents (`.claude/agents/ted.md` + three specialists), new table `portal_scope_requests` (no `company_id` — rows exist pre-company), new pricing module `server-lib/portalScopePricing.js` (separate source of truth from `pricing.js`'s `MODULES`), new endpoint `api/scope-approval.js`, and a new `invoice.paid` handler in `api/stripe-webhook.js` (`notifyPortalScopePaid`). Read every file listed above. Not a product surface — it's sales-ops plumbing that runs before any tenant exists, same reasoning §1 already applies to `api/checkout.js`. One join key recorded in §2 (`approval_token`, same unguessable-link pattern as `onboarding_requests.edit_token`/`claim_token`) plus a note that `stripe_invoice_id` is written and uniquely indexed but never read back — the webhook keys on `invoice.metadata.portal_scope_request_id` instead, which is not a break, just worth knowing before assuming the invoice id is the join. **No new break filed.** Confirmed by reading `stripe-webhook.js:53-78` that a `paid` row does not auto-create an `onboarding_requests` or `companies` row — that's Dillon's manual pickup by design (CLAUDE.md's own description agrees), recorded as a new deliberate non-connection in §5 rather than left for a future pass to mistake for a silent gap. Worth re-opening as a real opportunity once Portal becomes a checkout-purchasable module (`portalScopePricing.js:11-13` names that as the trigger) — not proposed now since that trigger hasn't happened. No application code touched; map only. |
+| 2026-09-29 | uncommitted working tree | **Company Portal phase 2 (Document engine v2) placed on the map.** New tables `portal_documents`/`portal_questions`/`portal_records`/`portal_answers` (`docs/schema/company-portal-phase2-migration.sql`, applied live), `server-lib/portalFieldTypes.js` (8 field types, generalizing `custom_form_questions`' yes/no-only shape), new file `api/portal.js` (admin builder incl. a real Anthropic vision/document call in `ai_draft_document`, worker submit, supervisor/admin view actions), `src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` (registered in `WorkerMenu.jsx:38`'s `RESUBMIT_HANDLERS` as `portalform`), `src/PortalDocumentBuilder.jsx` (wired into `AdminPanel.jsx:1407`, founder-only). Two new private Storage buckets, `portal-sources` and `portal-attachments`, both through the existing signed-upload-receipt model. Read every file listed. Recorded as a new join-key section in §2 (`portal_documents.id` → `portal_questions`/`portal_records`/`portal_answers`, with the submit-time question/document/site company-scope checks and the `authorRosterId`-stamped `submitted_by_roster_id`). **Break #32 filed:** a worker's Portal submissions don't appear in `src/MyDocuments.jsx`'s "My Forms" — `api/customforms.js:405-445`'s `get_my_documents` queries eight other sources and never `portal_records` (confirmed: `grep -n "portal" api/customforms.js src/MyDocuments.jsx` → no hits in either file). Distinct from the phase-3/4/5 deferrals (department/category routing, records-list UI, escalation) recorded in the same §2 entry and in a new §5 bullet — those are named future phases per the build spec and confirmed absent by grep; #32 is not planned anywhere and won't close on its own. Company Portal still not in `server-lib/pricing.js`'s `MODULES` (confirmed: `grep -n "portal" server-lib/pricing.js` → no hits) and `api/portal.js` calls neither `requireDocKey` nor `docKeyGate` — `is_active` on the row itself is the only gate, same open flag already carried from the phase-1 entry, not refiled as new. No application code touched by this pass; map only. |

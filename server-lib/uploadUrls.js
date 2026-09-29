@@ -211,6 +211,15 @@ const ALLOWED_EXTENSIONS = {
   'gatehouse-uploads': ['jpg', 'jpeg', 'png', 'webp'],
   'worker-certifications': ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
   'worker-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
+  // Company Portal (docs/schema/company-portal-phase2-migration.sql):
+  // portal-sources holds the admin builder's uploaded source document
+  // (the customer's own paper form, as PDF or a photo of it) that the AI
+  // draft step reads — Word docs aren't accepted here because Claude's
+  // document content block only reads PDF and images, not .docx (see
+  // api/portal.js's ai_draft_document). portal-attachments holds a
+  // worker's per-question signature/file_upload answers.
+  'portal-sources': ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+  'portal-attachments': ['png', 'jpg', 'jpeg', 'webp', 'pdf'],
 };
 
 // `companyId` binds the issued receipt to the caller's tenant, and (new,
