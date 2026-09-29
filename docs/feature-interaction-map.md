@@ -16,6 +16,23 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
+**2026-09-29 on branch `fix-break-32-portal-my-documents`, PR #149**
+(commit `6b2fc3a`) — **break #32 CLOSED**: `api/customforms.js`'s
+`get_my_documents` now also queries `portal_records` (scoped through
+`portal_documents.company_id`, matched on `submitted_by`) so a worker's
+Portal submissions show up in `src/MyDocuments.jsx`'s "My Forms" Submitted
+section as `type: 'portalform'` — no client-side change needed, since that
+section's existing `TYPE_META[doc.type] || { label: doc.title, icon:
+FileText }` fallback (`MyDocuments.jsx:196`) already renders an
+unrecognized type correctly. New §2 join-key row under
+`portal_documents.id`. **Break #33 filed, found while building the fix,
+not fixed by it:** the *separate* Unfinished-drafts section of the same
+screen (`scanDrafts`, `MyDocuments.jsx:41-70`) has no such fallback — its
+`TYPE_META[type]` check at `:54` is a strict allowlist that still excludes
+`portalform`, so an in-progress (unsubmitted) Portal draft is silently
+skipped even though `PortalDocumentForm.jsx` genuinely autosaves one under
+the same `fora_draft_` namespace `scanDrafts` reads. See the changelog and
+§4's #32/#33 entries. Before that, last extended
 **2026-09-29 on branch `company-portal-phase-4-assignment-compliance`** for
 Company Portal phase 4 (assignment + compliance) — new tables
 `portal_assignment_rules`/`portal_assignments`
@@ -717,6 +734,7 @@ below.
 | `portal_records.site_id` → `sites.id` | validated against caller's company | `api/portal.js:444-447`, `:401-404` (`get_active_portal_document`) |
 | `portal_records.submitted_by_roster_id` | stamped server-side via `authorRosterId(session)` | `api/portal.js:466` — same unforgeable pattern as break #3's `submitted_by_roster_id` on the nine original document tables, not the client-asserted shape break #31 found on toolbox/FLHA secondary signers |
 | `portal_records.client_submission_id` | idempotency key for the offline-drain retry path | `api/portal.js:456-460,472-476` — same shape as `custom_form_records.client_submission_id` |
+| `portal_records.document_id` → `portal_documents.id`/`.company_id` | consumed by a worker's own document history | `api/customforms.js:451-462` (`get_my_documents`, fixed for break #32, PR #149, commit `6b2fc3a`) — `portal_records` has no `company_id` column of its own, so the query scopes through `portal_documents.company_id` first (same shape `custom_form_records` already used via `custom_forms`, `:441-446`), then matches the worker by `submitted_by` (name-string match, same as every other row in this handler except break #3's `roster_id` carve-outs — not upgraded to `submitted_by_roster_id` even though the column exists and is trustworthy, per PR #149's description) and renders in `src/MyDocuments.jsx`'s Submitted section as `type: 'portalform'` via the existing unrecognized-type fallback (`MyDocuments.jsx:196`, `TYPE_META[doc.type] \|\| { label: doc.title, icon: FileText }`) — no client-side change needed. **Submitted history only — see break #33 for the separate Unfinished-drafts gap this fix does not touch.** |
 
 **Read every file listed above.** Two new private Supabase Storage buckets
 back this: `portal-sources` (admin-uploaded source documents for
@@ -779,12 +797,13 @@ not assumed), and updated by the phase-3 pass below:**
   `roster.departments` section above) — not refiled as a new break, since
   it is the same open item, not a new one.
 
-**Break #32, filed at the phase-2 pass:** Portal submissions don't show up
-in a worker's own document history. See below. **Re-confirmed still open
-as of the phase-3 pass** — phase 3 only touches supervisor/admin dashboard
-reads and the submission-notification email; it does not add anything to
-`api/customforms.js`'s `get_my_documents`. Re-check: `grep -n "portal"
-api/customforms.js src/MyDocuments.jsx` → still no hits in either file.
+**Break #32, filed at the phase-2 pass: CLOSED, PR #149 (branch
+`fix-break-32-portal-my-documents`, commit `6b2fc3a`).** Portal submissions
+now show up in a worker's own document history — see below for the fixed
+entry. **Break #33 filed while building that fix:** a *separate* screen,
+`src/MyDocuments.jsx`'s Unfinished-drafts section, still silently drops an
+in-progress Portal draft. See below; distinct from #32 and not fixed by
+PR #149.
 
 ### `portal_assignment_rules.id` → `portal_assignments` (Company Portal phase 4 — assignment + compliance)
 New tables, recorded 2026-09-29 against branch
@@ -3059,53 +3078,112 @@ addition).
 
 ### #32 — A worker's own Portal submissions don't show up in My Forms
 
-**Severity: medium. Status: open, not approved, not worked.** Filed at the
-phase-2 pass, distinct from the phase-3/4/5 items recorded above — those
-are deferrals the build spec names on purpose; this one is not planned in
-any future phase, so it will not fix itself when a later phase ships.
-**Re-confirmed still open at the phase-3 pass (2026-09-29,
-`company-portal-phase-3-routing-notification`)** — that phase built
-supervisor/admin dashboard reads and a submission-notification email, both
-unrelated to the worker's own document history; it does not touch
-`api/customforms.js` or `src/MyDocuments.jsx` at all.
+**Severity: medium. Status: CLOSED — PR #149, branch
+`fix-break-32-portal-my-documents`, commit `6b2fc3a`.** Filed at the
+phase-2 pass (2026-09-29), re-confirmed open through phases 3 and 4, then
+fixed same-day once approved.
 
 `src/MyDocuments.jsx` ("My Forms") is a worker's history of everything
 they've submitted, resumed via `api/customforms.js`'s `get_my_documents`
-action. Read the handler directly:
+action. Before the fix, that handler queried `flhas`, `inspections`,
+`toolbox_talks`, `daily_reports`, `incidents`, `near_misses`,
+`inspection_records` (via `inspection_forms`) and `custom_form_records`
+(via `custom_forms`) — eight sources — and never `portal_records`.
 
-```
-grep -n "portal" api/customforms.js src/MyDocuments.jsx
-→ no matches in either file
-```
+**The fix (`api/customforms.js:451-462`):** a `portal_records` query,
+scoped through `portal_documents.company_id` first — `portal_records` has
+no `company_id` column of its own, same indirection `custom_form_records`
+already needed via `custom_forms` (`:441-446`) — then matched to the
+requesting worker by `submitted_by` (a name-string match, consistent with
+every other row this handler already used; **not** upgraded to
+`submitted_by_roster_id`, even though that column exists and is
+server-stamped/trustworthy per §2's `portal_records.submitted_by_roster_id`
+entry — worth another pass, not filed as its own break since the other
+seven name-matched rows in this same handler share the identical
+weakness, and singling out Portal for it would misrepresent the scope).
+Merged into the handler's `documents` array as `type: 'portalform'`.
 
-`get_my_documents` (`api/customforms.js:405-445`) queries `flhas`,
-`inspections`, `toolbox_talks`, `daily_reports`, `incidents`,
-`near_misses`, `inspection_records` (via `inspection_forms`) and
-`custom_form_records` (via `custom_forms`) — eight sources, all matched by
-`submitted_by`/`worker_name`/`presenter_name`/`reporter_name` against the
-logged-in session's name. `portal_records` is not one of them, and nothing
-elsewhere in either file references it.
+**No client-side change was needed.** `src/MyDocuments.jsx`'s Submitted
+section already renders an unrecognized `doc.type` correctly —
+`MyDocuments.jsx:196`, `const meta = TYPE_META[doc.type] || { label:
+doc.title, icon: FileText };` — falling back to the record's own `title`
+(here, `portalDocMap[r.document_id] || 'Portal Document'` from the API
+response) and a generic file icon, rather than crashing or silently
+dropping the row. Verified by reading both files after the fix: `grep -n
+"portal" api/customforms.js src/MyDocuments.jsx` now returns the new query
+in `api/customforms.js` and nothing in `src/MyDocuments.jsx` — correct,
+since the fallback needed no Portal-specific code there.
 
-**Consequence:** a worker who fills out a Portal document has no screen to
-find it again. They can't pull up their own signed PDF, can't see it was
-received, and can't resume a Portal draft the way `WorkerMenu.jsx:38`'s
-`RESUBMIT_HANDLERS.portalform` lets them resume a Portal submission stuck
-in the *offline queue* — that's a different, narrower recovery path
-(client-side, pre-submit) than "see my past submissions" (server-side,
-post-submit), and only the first one exists for Portal today. Every other
-document type in the product gets both.
+**Re-check:** `grep -n "portal_records\|portalform" api/customforms.js` —
+absence means the fix regressed.
 
-*The fix would touch:* `api/customforms.js`'s `get_my_documents` — add a
-`portal_records` query (joined through `portal_documents` for the title/
-icon the way monthly inspections join through `inspection_forms` at
-`:433-439`, and matched on `submitted_by_roster_id` the way the nine
-break-#3 tables already can be, rather than a name-string match, since
-`portal_records.submitted_by_roster_id` is stamped server-side and
-therefore trustworthy) — and `src/MyDocuments.jsx`'s render/type-mapping
-list. No schema change; the column data already exists.
+**Found while building this fix, deliberately not folded into it — see
+break #33 below:** the *other* half of `MyDocuments.jsx`, the Unfinished
+drafts section, has its own separate allowlist that still excludes
+`portalform` and was untouched by PR #149.
 
-*Re-check:* `grep -n "portal" api/customforms.js src/MyDocuments.jsx` — an
-empty result means the gap is still open.
+### #33 — An in-progress Portal draft never shows up in Unfinished, unlike every other form type
+
+**Severity: low/medium. Status: open, not approved, not worked. Filed
+2026-09-29 while building the #32 fix (PR #149) — distinct from #32 and
+NOT fixed by it.** Needs its own explicit yes before anyone builds
+against it, per this map's hard rule.
+
+`src/MyDocuments.jsx` has two sections, both keyed off the same
+`TYPE_META` allowlist (`MyDocuments.jsx:28-37`) but using it two different
+ways:
+
+- **Submitted** (server-side history, break #32's territory): reads
+  `TYPE_META[doc.type]` with a fallback —
+  `TYPE_META[doc.type] || { label: doc.title, icon: FileText }`
+  (`:196`) — so an unlisted type like `portalform` still renders using the
+  record's own title. This is exactly why #32's fix needed no client-side
+  change.
+- **Unfinished** (`scanDrafts`, client-side localStorage scan,
+  `:41-70`): has no such fallback. `:54`, `if (!TYPE_META[type])
+  continue;` — a draft whose `type` isn't a `TYPE_META` key is skipped
+  outright, not rendered generically.
+
+`portalform` is not a `TYPE_META` key (confirmed: the object at `:28-37`
+lists `flha`, `inspection`, `toolbox`, `nearmiss`, `incident`, `daily`,
+`monthly`, `customform` — eight entries, no `portalform`). And a Portal
+draft genuinely gets written to that same `fora_draft_` localStorage
+namespace `scanDrafts` reads: `src/PortalDocumentForm.jsx:167-171` calls
+`useDraftAutosave("portalform", draftScope, ...)`, which autosaves under
+key `fora_draft_portalform_<scope>` — confirmed:
+`grep -n "useDraftAutosave\|portalform" src/PortalDocumentForm.jsx` shows
+the hook wired with `"portalform"` as its `formType` at `:168`, matching
+`DRAFT_PREFIX + type + "_" + scopeId`'s shape in `useDraftAutosave.js`.
+
+**Consequence:** a worker who starts a Portal document, gets interrupted
+(shift change, low battery, accidentally navigates away) and comes back
+to "My Forms" later sees their in-progress FLHA, inspection, toolbox talk,
+etc. sitting in Unfinished, ready to resume — but a half-filled Portal
+document is invisible on that screen. It isn't lost (the draft is still in
+`localStorage` and `PortalDocumentForm.jsx:143`'s `loadDraft("portalform",
+draftScope)` will pick it back up if the worker happens to reopen that
+exact document from the menu), but there's no discovery path back to it
+from the one screen built specifically to be "a spot where they can find
+their unfinished and submitted forms" (`MyDocuments.jsx:4-5`'s own header
+comment, quoting the customer feedback that motivated the screen).
+
+**Distinct from #32:** #32 was the *submitted* side (`get_my_documents`,
+server-side, post-submit). This is the *draft* side (`scanDrafts`,
+client-side, pre-submit) — a different function, a different data source,
+and the #32 fix doesn't touch either.
+
+*A fix would touch:* `src/MyDocuments.jsx`'s `TYPE_META` — add a
+`portalform` entry (label + icon, matching the "Portal Document" naming
+`api/customforms.js`'s fix already uses) so both `:54`'s strict check and
+`:147`'s Unfinished render (which, unlike `:196`, also has no fallback —
+`const meta = TYPE_META[type];` used directly) succeed. No schema or API
+change; this is a client-only, one-object fix — but per CLAUDE.md it still
+needs Dillon's explicit yes before it's built.
+
+*Re-check:* `grep -n "portalform" src/MyDocuments.jsx` — no hits means the
+gap is still open (as of this filing, the only `portalform` reference in
+the whole `src/` tree touching this screen is in
+`WorkerMenu.jsx:38`'s `RESUBMIT_HANDLERS`, unrelated to this screen).
 
 ## 4b. The recurring shape: a key written and never read
 
@@ -3449,3 +3527,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-29 | uncommitted working tree | **Company Portal phase 2 (Document engine v2) placed on the map.** New tables `portal_documents`/`portal_questions`/`portal_records`/`portal_answers` (`docs/schema/company-portal-phase2-migration.sql`, applied live), `server-lib/portalFieldTypes.js` (8 field types, generalizing `custom_form_questions`' yes/no-only shape), new file `api/portal.js` (admin builder incl. a real Anthropic vision/document call in `ai_draft_document`, worker submit, supervisor/admin view actions), `src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` (registered in `WorkerMenu.jsx:38`'s `RESUBMIT_HANDLERS` as `portalform`), `src/PortalDocumentBuilder.jsx` (wired into `AdminPanel.jsx:1407`, founder-only). Two new private Storage buckets, `portal-sources` and `portal-attachments`, both through the existing signed-upload-receipt model. Read every file listed. Recorded as a new join-key section in §2 (`portal_documents.id` → `portal_questions`/`portal_records`/`portal_answers`, with the submit-time question/document/site company-scope checks and the `authorRosterId`-stamped `submitted_by_roster_id`). **Break #32 filed:** a worker's Portal submissions don't appear in `src/MyDocuments.jsx`'s "My Forms" — `api/customforms.js:405-445`'s `get_my_documents` queries eight other sources and never `portal_records` (confirmed: `grep -n "portal" api/customforms.js src/MyDocuments.jsx` → no hits in either file). Distinct from the phase-3/4/5 deferrals (department/category routing, records-list UI, escalation) recorded in the same §2 entry and in a new §5 bullet — those are named future phases per the build spec and confirmed absent by grep; #32 is not planned anywhere and won't close on its own. Company Portal still not in `server-lib/pricing.js`'s `MODULES` (confirmed: `grep -n "portal" server-lib/pricing.js` → no hits) and `api/portal.js` calls neither `requireDocKey` nor `docKeyGate` — `is_active` on the row itself is the only gate, same open flag already carried from the phase-1 entry, not refiled as new. No application code touched by this pass; map only. |
 | 2026-09-29 | branch `company-portal-phase-3-routing-notification` | **Company Portal phase 3 (document-level routing + notification) placed on the map — `roster.departments` and `portal_documents.departments` get their first real consumer.** `api/portal.js`'s `list_portal_records`/`get_portal_record_detail` now filter an individually-identified supervisor (`session.userId` set) to documents whose `departments` intersect their own `roster.departments`; a shared-code supervisor (no `session.userId`) falls back to unfiltered-within-company. `submit_portal` now sends a best-effort, non-blocking notification email (`server-lib/email.js`'s `sendEmail`) to every active, on-department supervisor with an email on file. New company-scoped, read-only action `list_portal_documents_for_dashboard`, and a new "Portal" tab in `src/Dashboard.jsx` (Inbox reading `list_portal_records`, Document Library reading the new action) gated on the same `roster_enabled` signal the Roster tab uses — not on a doc key or `MODULES` entry, which is the same open gating gap already carried from phases 1-2, not a new one. Updated both the phase-1 (`roster.departments`) and phase-2 (`portal_documents.id`) §2 entries from "no consumer yet" to consumed, with file:line evidence, and updated the phase-2 §5 deferrals bullet accordingly. **No new break filed.** Break #32 (Portal submissions missing from My Forms) is untouched by this phase and re-confirmed still open (`grep -n "portal" api/customforms.js src/MyDocuments.jsx` → still no hits in either file) — recorded explicitly so it doesn't read as silently resolved. **Role-model resolution recorded, not a break:** the build spec's "Company Admin" persona was deliberately not built (Dillon's 2026-09-29 decision, mid-build) — this app has no customer-facing admin role, only worker/supervisor; a supervisor row with all 5 `PORTAL_DEPARTMENTS` checked already sees everything under this phase's intersection logic, satisfying the spec's requirement without a new role. New §5 bullet added so a future pass doesn't go looking for a `company_admin` role that was never built. `category` on `portal_documents` still has no reader (unlike `departments`, which this phase consumes); escalation (phase 5) and assignment rules (phase 4) remain unbuilt, confirmed by grep. No application code touched by this pass; map only. |
 | 2026-09-29 | branch `company-portal-phase-4-assignment-compliance` | **Company Portal phase 4 (assignment + compliance) placed on the map — this closes the sellable-v1 cut line (phases 1-4 complete per the Boardroom decision).** New tables `portal_assignment_rules` (`document_id`, `target_type` in `everyone`/`role`/`individual`, `target_role`, `target_roster_id`, `due_days`, `auto_apply_new_hires`) and `portal_assignments` (`rule_id` nullable, `document_id`, `roster_id`, `due_at`, unique on `(document_id, roster_id)`) — `docs/schema/company-portal-phase4-migration.sql`, applied live. New `server-lib/portalAssignments.js`: `applyRuleToExistingRoster` (materializes a new rule against the company's current active roster) and `applyRulesToNewRosterMember` (the spec's "auto-applies to new hires," called from `api/companydata.js`'s `add_roster_member`/`onboard_new_employee` right after the roster insert), both best-effort/non-blocking and idempotent via `upsert ... ignoreDuplicates` against the unique index. New `api/portal.js` actions: admin-only `create_assignment_rule`/`list_assignment_rules`/`delete_assignment_rule`, and supervisor/admin `get_assignment_rollup`, which computes `not_started`/`submitted`/`overdue` **at read time** by cross-referencing `portal_records` — deliberately not a stored column, same reasoning the migration's own header comment gives for not storing a `portal_records`-style "gated" value. New "Who needs to complete this" section in `src/PortalDocumentBuilder.jsx` (shown only for an already-published document) and a new "Assignments" sub-tab in `src/Dashboard.jsx`'s Portal tab (overdue flagged in red). Placed as a new §2 join-key section (`portal_assignment_rules.id → portal_assignments`); the phase-2 §5 deferrals bullet updated to mark assignment rules built, closing that list except for phase 5. **Deliberate spec deviation recorded, not a gap:** the build spec's "role/group/individual/everyone" targeting was built as `everyone \| role \| individual` only — no department ("group") targeting — because `roster.departments` exists only on supervisor-tier rows (phase 1) and a department-targeted rule could therefore never reach a worker, the wrong default for assigning paperwork to the people doing the work. Flagged in the migration's own header comment as worth reopening once workers get some equivalent grouping; new §5 bullet added so it isn't mistaken for a silent break later. **Confirmed phase 5 (escalation) remains completely unbuilt:** `grep -rln "portal_escalations\|escalation_department\|escalation_condition" api/ src/ server-lib/ docs/schema/` → no hits beyond the phase-2 migration's own forward-looking comment. **No new break filed. Break #32 (Portal submissions missing from My Forms) is unaffected by this phase** — it doesn't touch `MyDocuments.jsx` or `get_my_documents` — and is left exactly as recorded at the phase-3 pass, not re-verified as new. Also noted in §2: `get_assignment_rollup`'s admin-session scoping (no `company_id` filter server-side, filtered client-side in `src/Dashboard.jsx`) matches its pre-existing `list_portal_records` sibling exactly — read both before assuming phase 4 introduced a new gating shape; it didn't. No application code touched by this pass; map only. |
+| 2026-09-29 | branch `fix-break-32-portal-my-documents`, PR #149, commit `6b2fc3a` | **Break #32 CLOSED — Portal submissions now reach My Forms.** `api/customforms.js`'s `get_my_documents` (`:451-462`) now also queries `portal_records`, scoped through `portal_documents.company_id` (same indirection `custom_form_records` already used via `custom_forms`) and matched to the requesting worker by `submitted_by`, merging into the response as `type: 'portalform'`. No client-side change needed — `src/MyDocuments.jsx`'s Submitted section already renders an unrecognized `doc.type` via its existing fallback (`:196`, `TYPE_META[doc.type] \|\| { label: doc.title, icon: FileText }`). Updated §2's `portal_documents.id` join-key table with the new consumer row, and rewrote break #32's §4 entry from open to closed. **Break #33 filed, found while building the fix and deliberately not folded into it (needs its own approval per CLAUDE.md's hard rule):** the *separate* Unfinished-drafts half of the same screen (`scanDrafts`, `MyDocuments.jsx:41-70`) has no such fallback — its `TYPE_META[type]` check at `:54` is a strict allowlist that still excludes `portalform`, so an in-progress (unsubmitted) Portal draft is silently skipped by `scanDrafts` even though `src/PortalDocumentForm.jsx:167-171`'s `useDraftAutosave("portalform", ...)` genuinely writes one to the same `fora_draft_` localStorage namespace `scanDrafts` reads. Confirmed the drafts render path also lacks a fallback (`:147`, `const meta = TYPE_META[d.type];` used directly, no `||`). New §4 entry added for #33; not started, awaiting a yes. No other application code touched by this pass. |
