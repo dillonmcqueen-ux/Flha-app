@@ -15,8 +15,15 @@ paying for, and nobody finds out.
 two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
-**Status:** seeded 2026-09-16 against commit `0bd289c`; **most recent pass
-2026-09-29 on branch `fix-portal-p3` (`b97b231`), the Company Portal parity
+**Status:** seeded 2026-09-16 against commit `0bd289c`; **latest pass
+2026-09-29 on branch `portal-brain-signals` (`23bad5b`): Company Portal now
+feeds the Brain.** Flagged answers write a `portal_escalation` signal
+(`api/portal.js:598`, metadata only) and per-department assignment completion
+and overdue counts are read fresh at summary time
+(`server-lib/companyBrainSummary.js:220`). That is 8 `source_type` values and
+7 of 9 document types; custom documents stay excluded on purpose. **#4
+stays closed; no new break filed.** The pass before it: **2026-09-29 on
+branch `fix-portal-p3` (`b97b231`), the Company Portal parity
 sweep** — everything merged since the last pass recorded. **#35, #36 and #33
 are CLOSED** (PR #158 for the first two; #33's Unfinished list was only
 truly fixed by #37 below). Four breaks filed by the sweep, numbered
@@ -26,8 +33,8 @@ record could not be edited or deleted) are FIXED and merged, PR #159; #39
 branch, closes when its PR merges; #40 (Portal missing from Overview Recent
 Activity, Site Activity and Analytics) is OPEN, not approved.** The Overview
 "Company Portal" panel (PR #157) is now read and mapped. Known and unchanged:
-Portal is still not in `server-lib/pricing.js`, and Portal answers emit no
-Brain signals (a product decision, §5). The paragraph that follows
+Portal is still not in `server-lib/pricing.js`. (At that pass Portal answers
+emitted no Brain signals; that changed the same day, see the paragraph above.) The paragraph that follows
 describes the pass before this one: **2026-09-29 on branch
 `portal-pdf-email` (`ba5f6ab`)** — Company Portal
 "email documents to a department" placed on the map (§2's
@@ -1228,13 +1235,33 @@ added; the server now agrees with it.
 | `api/reports.js:231` | `incident`, `near_miss` |
 | `api/logs.js:244` | `toolbox_talk` |
 | `api/logs.js` (PR #118) | `equipment_inspection` |
-| `api/monthly.js` (PR #118) | `monthly_inspection` |
+| `api/monthly.js:470` (PR #118) | `monthly_inspection` |
+| `api/logs.js:484` (PR #120) | `daily_report` |
+| `api/portal.js:598` (2026-09-29) | `portal_escalation` |
 
-Daily reports, custom documents and corrective actions still write nothing.
-**This is break #4 below.**
+Eight source types (`grep -rn "source_type: '" api/` finds `flha_edit`,
+`toolbox_talk`, `equipment_inspection`, `daily_report`, `monthly_inspection`,
+`portal_escalation`; `incident`/`near_miss` come from the ternary at
+`api/reports.js:303`). Custom documents and corrective actions write nothing,
+on purpose (§5). **This was break #4 below, closed.**
+
+**`portal_escalation` carries** `{document, question, department}` and nothing
+else (`server-lib/portalSignals.js:26-32`): never the answer value, never the
+worker. Written only after the `portal_escalations` insert actually succeeded
+(`api/portal.js:577-583,592`), because that insert's returned `error` is now
+checked, which also stops the department email going out for an escalation
+that failed to save (`:618`). **Portal assignment health is not a signal row.**
+Completion and overdue counts per department are computed at summary time by
+`loadPortalHealthLines` (`portalSignals.js:89-110`, filtered by the company id
+at `:92`, `:99`, and through that company's document ids at `:96`, `:101`),
+called from `runCompanyBrainSummary` (`companyBrainSummary.js:220`) and passed
+into the prompt as `extraLines` (`:163`). Because the call sits inside the loop
+after the `MIN_NEW_SIGNALS = 5` check (`:36`, `:211-214`), assignment health
+only reaches the profile for a company that also has 5 new signals. Failure
+returns `[]` (`:106-109`).
 
 A source type is only half-wired by its writer. `bySourceType` in
-`api/companydata.js:800` drops any type missing from its map, so an
+`api/companydata.js:1639` drops any type missing from its map, so an
 unlisted signal is captured and summarized but invisible in the Brain tab.
 `AdminPanel.jsx` and `server-lib/companyBrainSummary.js` are the other two
 places that must learn it.
@@ -1282,6 +1309,7 @@ corrective actions the fourth writer of that table, alongside
 | Monthly Inspection | — | — | — | ✅ *(#4, PR #118)* | ✅ | ✅ `monthly:375` | — |
 | Daily Report | — *(candidate for #13, not chosen)* | — | — *(candidate for #13, not chosen)* | ✅ *(#4, PR #120)* | ⚠️ machines still label-only in `analyticsUtils.js` | — | — |
 | Custom Document | — | — | — | — *(excluded, #4)* | ✅ | — | — |
+| Company Portal | — | — | — | ✅ *(#4, 2026-09-29: flagged answers `portal.js:598`; assignment health `companyBrainSummary.js:220`; counted at `companydata.js:1669`, shown at `AdminPanel.jsx:2246,2258`)* | ❌ #40 | — | — |
 | Time Clock | — | — | — | — | ✅ | — | — |
 | Roster | — | — | — | — | ⚠️ #3 | — | ✅ |
 | Certifications | — | — | — | — | — | — | ✅ *(#8, PR #120: expiry now reaches document review)* |
@@ -1480,7 +1508,24 @@ history all become string matching. `WalletInvite.jsx:115` and
 ### #4 — The Brain learns from 4 of 9 document types
 **Severity: high. Status: closed, with two documented exclusions.** PR #118
 took it from 4 to 6 (`equipment_inspection`, `monthly_inspection`); PR #120
-added `daily_report`, taking it to 7.
+added `daily_report`, taking it to 7. **2026-09-29: Company Portal is covered
+too** (`portal_escalation`, 8 source types). The paragraph headed "CLAUDE.md
+calls the Brain FORA's flagship" further down is the original as-found text
+and is out of date.
+
+**What Portal contributes, and what it does not.** A flagged answer
+contributes the document title, question label and receiving department
+(`server-lib/portalSignals.js:26-32`, written at `api/portal.js:594-601`);
+repeats aggregate into one counted prompt line, `x3` style
+(`portalSignals.js:68-83`, called at `companyBrainSummary.js:124`). Assignment
+completion and overdue counts per department reach the prompt as fresh reads,
+not stored signals (`portalSignals.js:39-64,89-110`;
+`companyBrainSummary.js:220-221`). The answer value, the worker and free text
+stay out. Guarded by `tests/unit/portal-brain-signals.test.js` (26 tests
+across it and `brain-signal-capture.test.js` pass at `23bad5b`) and the
+writers-vs-counters scan in `brain-signal-capture.test.js:125`.
+Custom documents remain excluded (Dillon, 2026-09-17, reconfirmed
+2026-09-29).
 
 **What a daily report contributes, and what it does not.** Crew, visitors
 and the narrative stay out — free text with no structured finding, which is
