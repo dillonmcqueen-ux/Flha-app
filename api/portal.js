@@ -627,11 +627,15 @@ Rules:
       if (session.role === 'supervisor' && document.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
       // Same department scoping as list_portal_records — a saved link must
       // not reach into a record outside a supervisor's own department(s).
+      // Same generic message as the cross-company check above: a distinct
+      // message here would let a supervisor tell "exists, wrong company"
+      // apart from "exists, same company, wrong department" purely from
+      // error text (tenant-scope-reviewer finding, 2026-09-29).
       if (session.role === 'supervisor' && session.userId) {
         const { data: rosterRows } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).limit(1);
         const myDepartments = rosterRows?.[0]?.departments || [];
         if (!(document.departments || []).some(dep => myDepartments.includes(dep))) {
-          return res.status(403).json({ error: 'Not allowed for this document.' });
+          return res.status(403).json({ error: 'Not allowed.' });
         }
       }
 
