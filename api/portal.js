@@ -26,6 +26,7 @@ import { authorRosterId } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
+import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions } from '../server-lib/portalFieldTypes.js';
 
@@ -652,6 +653,129 @@ Rules:
         .sort((a, b) => a.sort_order - b.sort_order);
 
       return res.status(200).json({ record, document, site: siteRows && siteRows[0], items });
+    }
+
+    // ══ ADMIN (founder-only): assignment rules ═══════════════════════════
+    // Phase 4 (assignment + compliance). Gated the same as the document
+    // builder itself — an assignment rule shapes what a document DOES
+    // (who's on the hook for it, by when), same category of decision as
+    // building the document, so it stays founder-only rather than
+    // self-service. See server-lib/portalAssignments.js for the
+    // materialization logic both actions below trigger.
+
+    if (action === 'list_assignment_rules') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { documentId } = req.body;
+      if (!documentId) return res.status(400).json({ error: 'Missing document id.' });
+      const { data, error } = await supabaseAdmin.from('portal_assignment_rules').select('*').eq('document_id', documentId).order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: 'Could not load assignment rules.' });
+      return res.status(200).json({ rules: data || [] });
+    }
+
+    if (action === 'create_assignment_rule') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { documentId, targetType, targetRole, targetRosterId, dueDays, autoApplyNewHires } = req.body;
+      if (!documentId) return res.status(400).json({ error: 'Missing document id.' });
+      if (!['everyone', 'role', 'individual'].includes(targetType)) return res.status(400).json({ error: 'Invalid target.' });
+      if (targetType === 'role' && targetRole !== 'worker' && targetRole !== 'supervisor') {
+        return res.status(400).json({ error: 'Invalid role.' });
+      }
+      if (targetType === 'individual' && !targetRosterId) {
+        return res.status(400).json({ error: 'Pick a person.' });
+      }
+      const { data: rule, error } = await supabaseAdmin
+        .from('portal_assignment_rules')
+        .insert({
+          document_id: documentId, target_type: targetType,
+          target_role: targetType === 'role' ? targetRole : null,
+          target_roster_id: targetType === 'individual' ? targetRosterId : null,
+          due_days: (dueDays === null || dueDays === undefined || dueDays === '') ? null : Number(dueDays),
+          auto_apply_new_hires: autoApplyNewHires !== false,
+        })
+        .select().single();
+      if (error) return res.status(500).json({ error: "Couldn't create assignment rule." });
+
+      // Materialize against the company's CURRENT roster right away — see
+      // server-lib/portalAssignments.js. Best-effort: the rule itself is
+      // already saved either way.
+      try { await applyRuleToExistingRoster(supabaseAdmin, rule); } catch (e) { console.error('applyRuleToExistingRoster failed:', e.message); }
+
+      return res.status(200).json({ ok: true, rule });
+    }
+
+    if (action === 'delete_assignment_rule') {
+      if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+      const { ruleId } = req.body;
+      if (!ruleId) return res.status(400).json({ error: 'Missing rule id.' });
+      // Deleting a rule does not retract assignments it already created —
+      // someone already told to complete a document should not have that
+      // silently vanish because the rule that generated it was removed;
+      // portal_assignments.rule_id just goes null (on delete set null).
+      const { error } = await supabaseAdmin.from('portal_assignment_rules').delete().eq('id', ruleId);
+      if (error) return res.status(500).json({ error: "Couldn't delete assignment rule." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ══ SUPERVISOR / ADMIN: assignment rollup ════════════════════════════
+    // "Per-person completion tracking, rollup view" (build spec). Status
+    // is computed here, not stored — see the migration's header comment.
+    // Department-scoped the same way list_portal_records is: an
+    // individually-identified supervisor sees only assignments for
+    // documents routed to their own department(s); a shared-code
+    // supervisor falls back to unfiltered-within-company.
+    if (action === 'get_assignment_rollup') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      let docsQuery = supabaseAdmin.from('portal_documents').select('id, company_id, title, departments');
+      if (session.role === 'supervisor') docsQuery = docsQuery.eq('company_id', session.companyId);
+      const { data: documents, error: docsErr } = await docsQuery;
+      if (docsErr) return res.status(500).json({ error: 'Could not load documents.' });
+
+      let visibleDocuments = documents || [];
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: rosterRows } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).limit(1);
+        const myDepartments = rosterRows?.[0]?.departments || [];
+        visibleDocuments = visibleDocuments.filter(d => (d.departments || []).some(dep => myDepartments.includes(dep)));
+      }
+      const docIds = visibleDocuments.map(d => d.id);
+      if (docIds.length === 0) return res.status(200).json({ rows: [] });
+      const docMap = {}; visibleDocuments.forEach(d => { docMap[d.id] = d; });
+
+      const { data: assignments, error: asgErr } = await supabaseAdmin
+        .from('portal_assignments').select('*').in('document_id', docIds).order('due_at', { ascending: true, nullsFirst: false });
+      if (asgErr) return res.status(500).json({ error: 'Could not load assignments.' });
+      if (!assignments || assignments.length === 0) return res.status(200).json({ rows: [] });
+
+      const rosterIds = [...new Set(assignments.map(a => a.roster_id))];
+      const { data: rosterRows } = await supabaseAdmin.from('roster').select('id, name, active').in('id', rosterIds);
+      const rosterMap = {}; (rosterRows || []).forEach(r => { rosterMap[r.id] = r; });
+
+      // A submission satisfies the assignment when it's the same document
+      // and person, submitted any time at or after the assignment was
+      // created — there is no other link between a portal_records row and
+      // the assignment that asked for it.
+      const { data: records } = await supabaseAdmin
+        .from('portal_records').select('document_id, submitted_by_roster_id, created_at').in('document_id', docIds);
+      const submittedAt = (documentId, rosterId, since) => {
+        const hit = (records || [])
+          .filter(r => r.document_id === documentId && r.submitted_by_roster_id === rosterId && new Date(r.created_at) >= new Date(since))
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+        return hit ? hit.created_at : null;
+      };
+
+      const now = new Date();
+      const rows = assignments
+        .filter(a => rosterMap[a.roster_id]?.active)
+        .map(a => {
+          const completedAt = submittedAt(a.document_id, a.roster_id, a.created_at);
+          const status = completedAt ? 'submitted' : (a.due_at && new Date(a.due_at) < now ? 'overdue' : 'not_started');
+          return {
+            id: a.id, document_id: a.document_id, document_title: docMap[a.document_id]?.title || 'Unknown document',
+            company_id: docMap[a.document_id]?.company_id,
+            roster_id: a.roster_id, roster_name: rosterMap[a.roster_id]?.name || 'Unknown',
+            due_at: a.due_at, status, completed_at: completedAt,
+          };
+        });
+      return res.status(200).json({ rows });
     }
 
     return res.status(400).json({ error: 'Unknown action.' });

@@ -2233,6 +2233,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [portalLibraryDocs, setPortalLibraryDocs] = useState([]);
   const [loadingPortalLibrary, setLoadingPortalLibrary] = useState(false);
   const [selectedPortalRecord, setSelectedPortalRecord] = useState(null);
+  // Phase 4 — assignment rollup ("who's outstanding, due date, overdue in
+  // red"). Status is computed server-side, not stored.
+  const [portalAssignmentRows, setPortalAssignmentRows] = useState([]);
+  const [loadingPortalAssignments, setLoadingPortalAssignments] = useState(false);
   // Drives the live date/time line in the page header. Minute resolution
   // is all it shows, so a 30s tick is plenty.
   const [clockNow, setClockNow] = useState(() => Date.now());
@@ -3256,10 +3260,25 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setLoadingPortalLibrary(false);
   };
 
+  const loadPortalAssignments = async () => {
+    if (!selectedCompany) return;
+    setLoadingPortalAssignments(true);
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_assignment_rollup", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (res.ok) setPortalAssignmentRows((data.rows || []).filter(r => !isAdmin || r.company_id === selectedCompany));
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingPortalAssignments(false);
+  };
+
   useEffect(() => {
     if (activeTab !== "portal" || !selectedCompany) return;
     loadPortalRecords();
     loadPortalLibrary();
+    loadPortalAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
 
@@ -6179,6 +6198,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <button style={styles.tab(portalSubTab === "inbox")} onClick={() => setPortalSubTab("inbox")}>Inbox {portalRecords.length > 0 ? `(${portalRecords.length})` : ""}</button>
               <button style={styles.tab(portalSubTab === "library")} onClick={() => setPortalSubTab("library")}>Document Library {portalLibraryDocs.length > 0 ? `(${portalLibraryDocs.length})` : ""}</button>
+              <button style={styles.tab(portalSubTab === "assignments")} onClick={() => setPortalSubTab("assignments")}>Assignments {portalAssignmentRows.length > 0 ? `(${portalAssignmentRows.length})` : ""}</button>
             </div>
 
             {portalSubTab === "inbox" && (
@@ -6231,6 +6251,31 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     }}>{d.is_active ? "ACTIVE" : "OFF"}</span>
                   </div>
                 ))
+              )
+            )}
+
+            {portalSubTab === "assignments" && (
+              loadingPortalAssignments ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+              ) : portalAssignmentRows.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>No one has been assigned a Portal document yet.</div>
+              ) : (
+                portalAssignmentRows.map((r, i) => {
+                  const tone = r.status === "overdue" ? C.status.danger : r.status === "submitted" ? C.status.success : C.status.warning;
+                  const label = r.status === "overdue" ? "OVERDUE" : r.status === "submitted" ? "DONE" : "NOT STARTED";
+                  return (
+                    <div key={r.id} style={{ padding: "12px 4px", borderBottom: i < portalAssignmentRows.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "center", gap: 10 }}>
+                      <RowIconTile icon={FileText} color={tone.text} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.roster_name}</div>
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>
+                          {r.document_title}{r.due_at ? ` · due ${new Date(r.due_at).toLocaleDateString("en-CA")}` : ""}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 700, borderRadius: RAD.pill, padding: "3px 9px", flexShrink: 0, background: tone.bg, color: tone.text, border: `1px solid ${tone.border}` }}>{label}</span>
+                    </div>
+                  );
+                })
               )
             )}
           </div>
