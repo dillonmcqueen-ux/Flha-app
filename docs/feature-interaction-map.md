@@ -4172,6 +4172,18 @@ revenue link. `platformBusiness.js` is pure and imported only by
 `tests/unit/platform-business.test.js:157-165`). A trial-to-paid metric is absent on
 purpose because checkout has no trial. Churn is not measured (see #42 weak point 1).
 
+### Workforce-category custom documents appear in no Analytics panel, by Dillon's 2026-09-29 decision
+
+Do not file "workforce custom docs never reach Analytics" as a break, and do not
+propose a Workforce analytics view. Dillon decided 2026-09-29 to leave them out of
+every customer Analytics panel. Re-check: only two panels exist,
+`SafetyAnalyticsPanel` (`src/Analytics.jsx:132`) and `EquipmentAnalyticsPanel`
+(`:331`). `Dashboard.jsx` mounts them with `companySafetyCustomDocs` (`:6627`) and
+`companyOperationsCustomDocs` (`:6659`). `companyWorkforceCustomDocs` (`:4005`) is
+read only by the Workforce Custom Docs list tab (`:6434`). `src/analyticsUtils.js`
+takes a `customDocs` argument (`:149,158`) and never sees a category. `grep -in
+workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
+
 ---
 
 ## 6. Changelog
@@ -4260,3 +4272,4 @@ purpose because checkout has no trial. Churn is not measured (see #42 weak point
 | 2026-09-29 | branch `founder-dashboard-health`, `26d6d4f` | **Founder dashboard slice 3c placed on the map; P1 closed.** `server-lib/platformHealth.js` (pure, imported only by `platformOverview.js:19`, so it stays behind `api/admin.js`'s founder-only `platform_overview`) adds a `platformHealth` section from the last 30 days of `platform_events`: scheduled job state for the three crons, email delivery, AI success rate, estimated cost by document type, model and company (`MODEL_PRICES` opus-5 $5/$25, sonnet-5 $2/$10, haiku-4-5 $1/$5 per million, cache read 0.1x, write 1.25x, table cached 2026-09-25, unlisted model counted unpriced), recent trouble, and a not-visible-from-the-app note. Rendered as `HealthSection` (`PlatformDashboard.jsx:69`). Tests: `tests/unit/platform-health.test.js`, not re-run by this pass. **`platform_events` now has a reader**, so the `?` row in the founder-dashboard consumer table and pending link P1 are resolved; the Founder Dashboard (surface #24) and its consumer table now cover 3a, 3b and 3c. PR #162 (table plus 8 writers) merged into `main` 2026-09-29 and the table is applied live. Three breaks hunted (unmetered Anthropic call, `CRONS` vs `vercel.json`, `MODEL_PRICES` vs models in code): **none found**, all verified in code, see §4. One weak point recorded, not filed: no test ties `CRONS` or `MODEL_PRICES` to their sources. *Numbering, resolved:* `main` uses surface #23 for `platform_events` and P1 for its pending link, and the Founder Dashboard is #24 here, so the two no longer collide (the earlier merge hazard note is obsolete). Map only. |
 | 2026-09-29 | branch `founder-dashboard-health` | **#43 BUILT, closed pending merge of its PR** (same convention as #37-#42). Dillon approved it. Closes the slice 3c weak point (no test tied `CRONS` or `MODEL_PRICES` to their sources). `tests/unit/platform-health-sources.test.js` (4 tests): every `vercel.json` cron records a `cron_run` subtype that `CRONS` lists, both directions, and the counts match (`:22-34`); every `api/cron-*` file that records `cron_run` is scheduled in `vercel.json` (`:36-43`); `CRONS` cadence matches the schedule, weekly 168h, monthly 720h, else 24h (`:45-53`); `MODEL_PRICES` equals the set of `claude-*` literals in `api/` and `server-lib/`, both directions (`:55-67`). The builder shows it fails on a fake `vercel.json` cron and on a fake model string, and 529 unit tests pass, reported to this map, not re-run by this pass. Not marked merged. |
 | 2026-09-29 | branch `founder-dashboard-business`, `c1a9266` | **#42 BUILT, closed pending merge of its PR** (same convention as #37-#41). Dillon approved it. `server-lib/onboardingHelpers.js:101-103` exports `effectiveSeatCap`; `api/companydata.js` lost its own `SEAT_CAP_BY_TIER` and calls it at `:362,392,457,582`; `platformBusiness.js:105` uses it, so the Seats card reports what enforcement uses and an unknown tier is basic in both. `tests/unit/seat-cap-source.test.js` (5 tests) pins one source and the Admin Panel copy; the copy test was shown to fail with advanced changed to 60. Left on purpose: `api/admin.js:355` keeps `planSeatCap`, and `src/AdminPanel.jsx:56` stays a copy, now test-pinned. §3 planSeatCap consumer row moved from broken to fine. Not marked merged. |
+| 2026-09-29 | branch `founder-dashboard-health` | Deliberate non-connection added to §5: workforce-category custom documents appear in no Analytics panel, per Dillon (no Workforce analytics view). Re-check evidence cited there. Map only, no code touched. |
