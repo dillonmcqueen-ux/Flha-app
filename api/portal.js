@@ -25,6 +25,7 @@ import { authorRosterId } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
+import { withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate } from '../server-lib/portalFieldTypes.js';
@@ -597,7 +598,8 @@ Rules:
                 const escToAddresses = [...new Set(
                   (escRecipients || [])
                     .filter(r => (r.departments || []).includes(q.escalation_department))
-                    .map(r => r.email)
+                    .map(r => withDecryptedEmail(r).email)
+                    .filter(Boolean)
                 )];
                 if (escToAddresses.length > 0) {
                   await sendEmail({
@@ -637,7 +639,8 @@ Rules:
           const toAddresses = [...new Set(
             (recipients || [])
               .filter(r => (r.departments || []).some(dep => docRows[0].departments.includes(dep)))
-              .map(r => r.email)
+              .map(r => withDecryptedEmail(r).email)
+              .filter(Boolean)
           )];
           if (toAddresses.length > 0) {
             await sendEmail({

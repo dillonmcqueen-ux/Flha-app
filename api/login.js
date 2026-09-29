@@ -19,6 +19,7 @@ import { checkIpThrottle as sharedCheckIpThrottle } from '../server-lib/ipThrott
 import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
+import { withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
@@ -595,7 +596,7 @@ export default async function handler(req, res) {
     // gated by requireDocKey either way.
     const certs = await readDocKeySetting(supabaseAdmin, company.id, 'certifications');
     const certificationsEnabled = certs.unavailable ? null : certs.active;
-    return res.status(200).json({ session: payload, token, email: member.email || '', certificationsEnabled });
+    return res.status(200).json({ session: payload, token, email: withDecryptedEmail(member).email || '', certificationsEnabled });
   }
 
   // ── Master code, step 2: pick a company + role ──────────────────────────

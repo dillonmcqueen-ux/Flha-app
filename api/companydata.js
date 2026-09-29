@@ -17,6 +17,7 @@ import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
+import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
 
 const supabaseAdmin = createClient(
@@ -479,7 +480,7 @@ export default async function handler(req, res) {
       const { data, error } = await supabaseAdmin
         .from('roster')
         .insert({
-          company_id: companyId, name, role, email,
+          company_id: companyId, name, role, email: encryptField(email),
           employee_id: employeeId || null,
           pin_hash: hashPin(pin, salt), pin_salt: salt,
           wallet_enabled: true,
@@ -493,6 +494,9 @@ export default async function handler(req, res) {
         console.error("onboard_new_employee failed:", error.message);
         return res.status(500).json({ error: "Couldn't add to the roster. Try again." });
       }
+      // The row holds the encrypted value; hand the caller the plain address
+      // they just typed, never the ciphertext.
+      data.email = email;
 
       // Company Portal phase 4: "auto-applies to new hires".
       try { await applyRulesToNewRosterMember(supabaseAdmin, companyId, data); } catch (e) { console.error('applyRulesToNewRosterMember failed:', e.message); }
@@ -744,7 +748,7 @@ export default async function handler(req, res) {
         .select('id, company_id, name, role, active, email, phone, employee_id, wallet_enabled, last_login_at, created_at, onboarding_completed_at, departments')
         .eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
-      const member = rows[0];
+      const member = withDecryptedEmail(rows[0]);
       if (session.role === 'supervisor' && member.company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
       }
@@ -853,7 +857,7 @@ export default async function handler(req, res) {
       if ('email' in req.body) {
         const email = (req.body.email || '').trim();
         if (email && !isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
-        updates.email = email || null;
+        updates.email = encryptField(email) || null;
       }
       if ('phone' in req.body) {
         updates.phone = (req.body.phone || '').trim().slice(0, 40) || null;
@@ -887,7 +891,7 @@ export default async function handler(req, res) {
         console.error('update_worker_profile failed:', error.message);
         return res.status(500).json({ error: "Couldn't save those changes." });
       }
-      return res.status(200).json({ ok: true, member: data });
+      return res.status(200).json({ ok: true, member: withDecryptedEmail(data) });
     }
 
     // ══ SOPs ═════════════════════════════════════════════════════════
