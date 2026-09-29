@@ -16,7 +16,13 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-**2026-09-28 against the uncommitted working tree** that added the Ted
+**2026-09-29 against the uncommitted working tree** that added Company
+Portal phase 1 (Departments) — `roster.departments` (migration applied
+live), `server-lib/portalDepartments.js`, `api/companydata.js`'s
+`update_worker_profile` validation, and `src/WorkerProfileDrawer.jsx`'s
+chip picker. Placed as a new join key in §2 with its own note; producer
+side only, no consumer yet, no break filed — see the changelog. Before
+that, extended 2026-09-28 against the uncommitted working tree that added the Ted
 client-scoping pipeline (`.claude/agents/ted.md` + three specialists,
 `portal_scope_requests`, `server-lib/portalScopePricing.js`,
 `api/scope-approval.js`, and a `stripe-webhook.js` `invoice.paid` handler)
@@ -377,6 +383,54 @@ HRIS surface, so there is nothing in the product that *should* consume it
 today. Recorded here so the next session does not mistake the column's
 existence for a working sync. If an integration is ever built, the check is
 §4b's four questions, not "the column is already there".
+
+### `roster.departments` — Company Portal phase 1 (producer side only)
+New `text[]` column (`docs/schema/roster-departments-migration.sql`, applied
+live), recorded 2026-09-29. Fixed v1 list lives in
+`server-lib/portalDepartments.js` (`PORTAL_DEPARTMENTS`: `hr`, `payroll`,
+`safety`, `maintenance`, `operations_manager` — **not** `company_admin`,
+since that access already comes unconditionally from `roster.role ===
+'admin'`, the same reasoning `docKeyGate.js` uses to exempt admin sessions
+from every doc-key gate). Same producer/consumer split break #2
+(`site_id`) and `roster.employee_id` already established on this map: a
+column can ship correct and fully write-side-validated with zero
+consumers, because the consumer is a later phase of the same build, not a
+missing wire-up in this one.
+
+| Side | Where |
+|---|---|
+| Written | `api/companydata.js:862-876` (`update_worker_profile`) — only on a row whose **resulting** role is `supervisor`; a worker row is always forced to `[]` (`:864-865`), and switching a supervisor row to `worker` in the same request clears it too, so a departments array can never survive under a role that no longer justifies it |
+| Validated | `api/companydata.js:867` — every element must be in `PORTAL_DEPARTMENTS`; anything else 400s. Deduped via `[...new Set(...)]` (`:870`) |
+| Read back (list/detail only, not gated on anything) | `api/companydata.js:349` (roster list select), `:735` (single-member select), `:819` (mapped onto the worker-profile payload) |
+| UI | `src/WorkerProfileDrawer.jsx:31,38,42,51,105,116-137` — chip multi-select, shown only when the **drafted** role is `supervisor` (`:105`); clearing the draft's role away from supervisor clears `departments` in the same setter |
+
+**Nothing reads this column to gate or scope anything yet, and that is
+correct for this phase, not a break.** Per the build spec (summarized in
+CLAUDE.md's task context for this pass): phase 3 (document-level routing)
+will filter a supervisor's dashboard by matching `roster.departments`
+against a `portal_documents` row's routing department(s), and phase 4
+(assignment + compliance) will use it for rule-based assignment targeting
+("assign to everyone in Safety"). Those consuming tables
+(`portal_documents`, `portal_assignment_rules`, and whatever else phases
+2-4 introduce) **do not exist yet** — confirmed by grep, not assumed:
+`grep -rln "portal_documents\|portal_assignment_rules" api/ src/
+server-lib/` returns nothing as of this pass. File the missing read as a
+break only once a phase that's supposed to consume this column ships
+without doing so — not before its consumer exists.
+
+**Two things worth re-checking when phase 3 lands, so this doesn't quietly
+repeat an existing break shape on this page:**
+- Whether the eventual routing/assignment reads validate a client-supplied
+  department value the same way `equipment_id`/`site_id` are validated
+  against the caller's own company (§2's `equipment_id` and `site_id`
+  sections) — a `departments` match is a company-scoped roster row on one
+  side already, so the risk is smaller than a bare foreign id, but worth
+  confirming rather than assuming.
+- Whether `document_key`-style gating (§2's `document_key` section) needs
+  to apply to whatever `portal_documents`/`portal_assignment_rules` become
+  — Company Portal is not yet in `server-lib/pricing.js`'s `MODULES` or
+  `ALL_DOC_KEYS`, so a phase-3/4 surface arriving ungated would repeat
+  break #19's original shape (a feature no module sells, reachable free).
 
 ### `equipment_compliance.equipment_id` → `equipment.id`
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
@@ -3064,4 +3118,5 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-23 | `afc4b93`, `e7bd475` | **Re-anchored after two follow-up commits on the branch; no break status changed.** `afc4b93` (tenant-scope review): `fleet_activity`'s `mountedOn` is now filtered to the company's own fleet ids (`api/companydata.js:877-880`), since attachment ids come from client jsonb; and `resolveCorrectiveActionsForItems`' update carries `.eq('company_id', companyId)` next to `.in('id', ids)` (`server-lib/correctiveActions.js:345`). Both recorded in #13/#18/§3 and #17. `e7bd475` moved the `fleet_activity` block above `list_equipment`'s comment, which fixes the misplacement the previous row's report noted: the block is `:857-883` (was `:865-891`), its no-gate comment `:849-856`, queries `:863-866`, and the retired-machines comment is back directly over `list_equipment` at `:885-892`. Re-read against HEAD: everything in `companydata.js` from `list_equipment` (`:893`) down is **unchanged** — `set_equipment_pm_interval` `:1251` (guard `:1253`, refusals `:1273,1276`), the compliance guards `:1065,1114,1183,1231`, the time-clock guards `:1486,1578,1610,1638,1698`, carve-outs `:1503,1524,1543,1651,1676`, reasoning `:1473-1483`, `latestEntryAt` `:1662-1673` — so none of those needed to move. `correctiveActions.js` anchors cited by the #17 build (`:419,449,471-478,489-504,495`) re-read and still correct; three older §2 anchors (`:272-352`, `:298`, `:327`) re-anchored to `:273-356` and `:328`. #28, #29, #30 still OPEN. |
 | 2026-09-23 | `1301c76` | **#28 BUILT, not closed — closes when PR #129 merges.** Dillon approved it ("Complete 28, then merge"). "Is it towed?" is now `isTowedUnit` (`server-lib/fleetActivity.js:79-82`), by type alone — the inspection's own test — and `pmAllowedFor` (`:88-91`) delegates to it. `list_status` sets `isTowed = isTowedUnit(eq)` (`api/maintenance.js:219`), so an unflagged trailer runs the towed-KM clock (`:223-242`) instead of reading `ok` forever; a trailer already set up in **Hours** now returns `unit_mismatch` (`:231-236`, rendered by `src/Dashboard.jsx:6430`) rather than comparing KM to hours. `set_equipment_pm_interval` requires KM for any towed unit (`api/companydata.js:1276-1279`), and `attachmentStats` counts unflagged trailers (`fleetActivity.js:127-129`). Evidence: 4 new tests (`tests/unit/fleet-activity.test.js:120,126,132`, `tests/unit/timeclock-gate.test.js:242`) fail 4/35 with those files dropped into a `427895e` worktree and pass 35/35 at `1301c76`; `npm run test:unit` 419/419. Gap: no test runs `list_status` itself, so `maintenance.js:219` and the new `unit_mismatch` return are verified by reading. **Re-anchored** everything the commit shifted: `fleetActivity.js` +13 from `pmAllowedFor` down (`:75→88`, `towedDistanceSince` `:86→99`, `:95→108`, `attachmentStats` `:113→126`, filter `:114→129`); `maintenance.js` +2 from `:217` and +8 from `:229` (towed branch `:221-233→223-242`, `list_records`-area and `log_field_service` anchors); `companydata.js` +1 from `:1276` (time-clock `:1503,1524,1543,1651,1676,1698` → `:1504,1525,1544,1652,1677,1699`, reasoning `:1474-1484`, `latestEntryAt` `:1663-1674`). Changelog rows and "as found" blocks keep their original numbers. **#29 and #30 still OPEN.** |
 | 2026-09-25 | this branch (`claude/toolbox-talk-edit-notes-oz5y1u`) | **New surface reached its join key: Toolbox Talk attendee and FLHA crew (secondary) signers now pick a real roster row instead of typing a name.** New worker-facing action `list_roster_names` (`api/companydata.js:761-770`) — company-scoped, `id, name, role`, active only, no role check, same pattern as `list_sites`/`list_equipment`. `src/ToolboxTalk.jsx` adds a `rosterId` (or `rosterId: null, guest: true` for a genuine non-employee, `:275-280`) to each `attendees_json` entry; `src/App.jsx`'s FLHA crew adds `rosterId` to each `crew_signatures` entry with no guest fallback (`:502-504,526-529`) since additional crew is assumed to always be an employee. Both flows block adding a second signer at all (no free-text fallback) if the company has zero active roster members (`ToolboxTalk.jsx:612`, `App.jsx:1495`). **Placed as a refinement of the `roster_id` join key (§2), not a new key** — same target table, same shape as break #3's `submitted_by_roster_id`, but weaker: `attendees_json`/`crew_signatures` are client-submittable jsonb columns (`api/logs.js:159`, `api/flhas.js:148`) and neither submit path validates the embedded `rosterId` against the caller's own roster, unlike `site_id`/`equipment_id`, which get exactly that check. **Filed as new break #31, OPEN, not approved, not worked** — a client can currently write any `rosterId` value into either array. No `api/logs.js` or `api/flhas.js` application code touched by this pass; map only. |
+| 2026-09-29 | uncommitted working tree | **New join key: `roster.departments` — Company Portal phase 1 (Departments), producer side only.** `docs/schema/roster-departments-migration.sql` (applied live) adds `roster.departments text[] not null default '{}'`; `server-lib/portalDepartments.js` fixes the v1 list (`hr`, `payroll`, `safety`, `maintenance`, `operations_manager` — deliberately excludes `company_admin`, since that access already comes from `roster.role === 'admin'`); `api/companydata.js:862-876`'s `update_worker_profile` validates against that list, forces `[]` on any worker-tier row, and clears it when a row is demoted from supervisor in the same request; `src/WorkerProfileDrawer.jsx` gained the chip picker, shown only when the drafted role is supervisor. Read every file listed. **No consumer exists yet, and that's correct for this phase, not a break** — phase 3 (document routing) and phase 4 (assignment rules) are the named future consumers per the build spec, and their tables (`portal_documents`, `portal_assignment_rules`) don't exist yet (confirmed by grep: no hits in `api/`, `src/`, `server-lib/`). Recorded in §2 with two things to re-check once those phases land: client-side department validation, and whether the phase-3/4 surface needs `document_key`-style gating (Company Portal isn't in `pricing.js`'s `MODULES` yet, so an ungated arrival would repeat break #19's shape). No break filed. No application code beyond what's listed touched by this pass; map only. |
 | 2026-09-28 | uncommitted working tree | **Client scoping pipeline (Ted) placed on the map, kept off §1/§3 on purpose.** New agents (`.claude/agents/ted.md` + three specialists), new table `portal_scope_requests` (no `company_id` — rows exist pre-company), new pricing module `server-lib/portalScopePricing.js` (separate source of truth from `pricing.js`'s `MODULES`), new endpoint `api/scope-approval.js`, and a new `invoice.paid` handler in `api/stripe-webhook.js` (`notifyPortalScopePaid`). Read every file listed above. Not a product surface — it's sales-ops plumbing that runs before any tenant exists, same reasoning §1 already applies to `api/checkout.js`. One join key recorded in §2 (`approval_token`, same unguessable-link pattern as `onboarding_requests.edit_token`/`claim_token`) plus a note that `stripe_invoice_id` is written and uniquely indexed but never read back — the webhook keys on `invoice.metadata.portal_scope_request_id` instead, which is not a break, just worth knowing before assuming the invoice id is the join. **No new break filed.** Confirmed by reading `stripe-webhook.js:53-78` that a `paid` row does not auto-create an `onboarding_requests` or `companies` row — that's Dillon's manual pickup by design (CLAUDE.md's own description agrees), recorded as a new deliberate non-connection in §5 rather than left for a future pass to mistake for a silent gap. Worth re-opening as a real opportunity once Portal becomes a checkout-purchasable module (`portalScopePricing.js:11-13` names that as the trigger) — not proposed now since that trigger hasn't happened. No application code touched; map only. |
