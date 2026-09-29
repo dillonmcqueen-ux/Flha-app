@@ -16,6 +16,7 @@
 
 import { MODULES, MODULE_KEYS } from './pricing.js';
 import { buildBusinessMetrics } from './platformBusiness.js';
+import { buildPlatformHealth } from './platformHealth.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -48,7 +49,7 @@ export const UNMEASURED_DOC_KEYS = ['equipment_reports', 'maintenance', 'equipme
 
 const dayKey = (d) => new Date(d).toISOString().slice(0, 10);
 
-export function buildPlatformOverview({ companies = [], docs = {}, roster = [], docSettings = [], onboarding = [], truncated = false } = {}, now = new Date()) {
+export function buildPlatformOverview({ companies = [], docs = {}, roster = [], docSettings = [], onboarding = [], events = null, truncated = false } = {}, now = new Date()) {
   const t = now.getTime();
   const since = (days) => t - days * DAY;
   const liveCompanies = companies.filter((c) => !c.suspended);
@@ -188,6 +189,9 @@ export function buildPlatformOverview({ companies = [], docs = {}, roster = [], 
     modules,
     perCompany,
     business: buildBusinessMetrics({ companies, docs, roster, docSettings }, { typeByDocKey }, now),
+    // null means the telemetry table could not be read (not applied yet, or a
+    // database error), which is different from an empty table.
+    platformHealth: events === null ? { unavailable: true } : buildPlatformHealth({ events, companies }, now),
   };
 }
 
@@ -251,5 +255,17 @@ export async function loadPlatformOverview(supabaseAdmin, now = new Date(), { ro
     docs[type] = rows.map((r) => ({ company_id: companyOf.get(r[fk]) ?? null, created_at: r.created_at }));
   }
 
-  return buildPlatformOverview({ companies, docs, roster, docSettings, onboarding, truncated }, now);
+  // Platform health reads the last 30 days of platform_events. A failure here
+  // must not take the rest of the dashboard down with it.
+  let events = null;
+  try {
+    const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    events = keep(await fetchAll(() => supabaseAdmin.from('platform_events')
+      .select('event_type, status, subtype, company_id, metrics, created_at')
+      .gte('created_at', since).order('created_at', { ascending: false }), rowCap));
+  } catch (e) {
+    console.error('platform_events read failed:', e.message);
+  }
+
+  return buildPlatformOverview({ companies, docs, roster, docSettings, onboarding, events, truncated }, now);
 }

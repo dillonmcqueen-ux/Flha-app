@@ -236,7 +236,7 @@ when PR #124 merges).
 | 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:6147`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:302`) | `inspection` |
 | 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6089`) | `api/maintenance.js:415` | `maintenance` |
 | 23 | Platform events (founder telemetry; **migration written, NOT applied live**, branch `platform-events-instrumentation`) | none yet (Admin Panel, planned phase 3c) | writer `server-lib/platformEvents.js:47` (`recordPlatformEvent`); table `docs/schema/platform-events-migration.sql:19` | *(none, platform-wide, not a company feature)* |
-| 24 | Founder Dashboard (Platform tab), slices 3a and 3b | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`); 3b adds Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`, mounted `:159`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221`; 3b is `server-lib/platformBusiness.js` `buildBusinessMetrics`, called at `platformOverview.js:190` | *(none on purpose, admin-only, see §5)* |
+| 24 | Founder Dashboard (Platform tab), slices 3a, 3b and 3c | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`); 3b adds Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`, mounted `:159`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221`; 3b is `server-lib/platformBusiness.js` `buildBusinessMetrics`, called at `platformOverview.js:190`; 3c is `server-lib/platformHealth.js` `buildPlatformHealth` (`platformOverview.js:19,194`), fed by the `platform_events` read at `platformOverview.js:258-268`, rendered by `HealthSection` (`PlatformDashboard.jsx:69`). *`loadPlatformOverview` is now at `:234`; the `:221` above and the 3b card anchors were not re-swept after 3c.* | *(none on purpose, admin-only, see §5)* |
 
 **The Equipment hub, 2026-09-17, corrected 2026-09-18.** Maintenance and Fuel
 Logs stopped being top-level tabs and became sub-tabs of Equipment, and the hub
@@ -1407,7 +1407,7 @@ It produces nothing another feature reads. It consumes:
 | `roster.last_login_at` | `login.js:514` | Active workers | ⚠️ PIN logins only, #41 weak point 1 |
 | `companies`, `onboarding_requests` | `created_at`, `plan_tier`, `stripe_subscription_status`, `status` (`:225-232`) | Sign-ups, plan mix | ✅ |
 | Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | n/a, deliberate |
-| `platform_events` | none found in repo | slice 3c | `?` |
+| `platform_events` (last 30 days, `event_type, status, subtype, company_id, metrics, created_at`) | `event_type` + `subtype` to `CRONS` (`platformHealth.js:40-44`); `metrics.model` to `MODEL_PRICES` (`:28-32`, `:54-55`); `company_id` to `companies.name` (`:65,139`) | **3c, Platform health** (`PlatformDashboard.jsx:69`): job state ok / failed / overdue (1.5 cadences plus 2h, `:75`) / not observed yet, email sent / failed / skipped with failure kinds, AI success rate, estimated cost by document type, model and company (unlisted model counted unpriced, `:54-55,132`), recent trouble, and a note that storage growth, Supabase advisors and Vercel errors are not visible from the app (`:174`). Read failure yields `{unavailable:true}`, not a failed dashboard (`platformOverview.js:194,266-268`) | ✅ **P1 CLOSED by 3c**, see §4. Writers (8 producers) are on `main` via PR #162, not on this branch, verified with `git grep origin/main`. Two unguarded couplings recorded in §4, neither a break today |
 | `pricing.js` `BASE`, `MODULES`, `MODULE_KEYS`, `TIERS` | `plan_tier` + module `docKeys` (`platformBusiness.js:20,35-43`, `pricing.js:37,60-118`) | Estimated MRR: BASE plus each bought module's price for the tier | ✅ a price change flows straight into the estimate, no second price table |
 | `company_document_settings` | `is_active`, `document_key` (`platformBusiness.js:64-69`, read `platformOverview.js:238`) | "Bought" = any of a module's doc keys active (`platformBusiness.js:37`) | ⚠️ a hand-created company gets all 13 keys on (`admin.js:565`, `pricing.js:255`), so it is priced at every module, list price, in "Not billed via Stripe" |
 | `companies.stripe_subscription_status` | written `stripe-webhook.js:84` and `onboardingApproval.js:198` | Billed / not billed / payment at risk split (`platformBusiness.js:28-29,100-102,174-182`) | ⚠️ see #42 weak point 1: the webhook suspends `canceled`, `unpaid`, `incomplete_expired` (`stripe-webhook.js:46,86`) and the dashboard drops suspended companies (`platformBusiness.js:62`) |
@@ -3814,11 +3814,43 @@ designed, but the number means less than its label):
    capped at 20000 rows (`:189-199,221`), so a cap hit makes `total` and the
    older days a floor. The dashboard says so through `truncated` (`:166`).
 
-**Pending link, not a break:** `platform_events` (surface #23, pending link P1
-below) has a writer and a migration on this branch through the merge from
-`main`, but no reader yet. The founder dashboard's health slice 3c is planned
-to read it and is not on this branch's map. Distinct from the Portal-sweep P1
-(#37).
+**Pending link P1, CLOSED by slice 3c (2026-09-29, `26d6d4f`):** `platform_events`
+now has a reader. `loadPlatformOverview` selects the last 30 days
+(`server-lib/platformOverview.js:258-268`), `buildPlatformHealth` folds them
+(`platformHealth.js:63`), and the Platform tab renders them (`PlatformDashboard.jsx:69`).
+PR #162 merged into `main` 2026-09-29 and the table is applied live (RLS on, zero
+policies, per Dillon). Distinct from the Portal-sweep P1 (#37).
+
+**Slice 3c checks, all read in code 2026-09-29, none a break.** Writers were read on
+`origin/main` (`ffbcf45`), because this stacked branch predates PR #162.
+1. **Every Anthropic call site is metered.** `grep -rn "api.anthropic.com"` on `origin/main`
+   over `api/`, `server-lib/`, `src/` finds four fetches and no SDK use: `api/generate-flha.js:303`
+   (records via `record`, `:297`, plus a `rate_limited` row at `:290`), `api/portal.js:227`
+   (ok path `:248`, error `:244`), `server-lib/companyBrainSummary.js:29` (`:66,70`) and
+   `server-lib/onboardingDrafting.js:30` (`:57,61`). Each records `ai_generation` with the model.
+   The other four producers: the three crons (`cron-company-brain-summary.js:41,54`,
+   `cron-equipment-reports.js:57,120,139`, `cron-portal-reports.js:55,62`) and `sendEmail`
+   (`server-lib/email.js:27,45,50,53`). That is the 8. Nothing is unmetered today.
+2. **`CRONS` equals `vercel.json`'s crons.** `vercel.json:7-9` lists `equipment-reports`
+   (`59 23 * * 0`), `company-brain-summary` (`0 4 * * *`), `portal-reports` (`0 13 * * *`).
+   `platformHealth.js:40-44` has subtypes `equipment_reports` (168h), `company_brain_summary`
+   (24h), `portal_reports` (24h), and each cron writes exactly that subtype and cadence.
+3. **`MODEL_PRICES` covers every model in code.** Models used: `claude-opus-5` and
+   `claude-sonnet-5` (`api/generate-flha.js:153-154`, table `:156-165`, default Opus `:174`),
+   `claude-opus-5` (`api/portal.js:225`), `claude-haiku-4-5` (`companyBrainSummary.js:28`,
+   `onboardingDrafting.js:29`). All three are in `platformHealth.js:28-32`.
+
+**Former weak point, now #43 (BUILT, closed pending merge of its PR).** Nothing used to tie
+`CRONS` or `MODEL_PRICES` to their sources: a fourth cron would never have appeared on the
+dashboard (no row, no overdue alert), and a model rename would have shown as "unpriced".
+`tests/unit/platform-health-sources.test.js` now pins both, in the shape of #41's guard
+(`platform-overview.test.js:148-173`): `vercel.json` crons (`vercel.json:7-9`) against `CRONS`
+in both directions plus cadence (`platform-health-sources.test.js:22-53`), and `MODEL_PRICES`
+against every `claude-*` literal in `api/` and `server-lib/` in both directions (`:55-67`).
+The builder shows it fails on a fake cron and a fake model, reported, not re-run by this pass.
+Known limit: the model scan matches quoted `claude-*` literals only, and the cron subtype scan
+needs `eventType: 'cron_run'` followed by `subtype:` in the same object. Re-check:
+`npm run test:unit -- tests/unit/platform-health-sources.test.js`.
 
 ## Known pending links (intentional, not breaks)
 
@@ -3828,7 +3860,7 @@ condition; when it is met, promote the entry to a real break if the consumer
 is still absent.
 
 ### P1 — `platform_events` has no reader (Admin Panel, planned phase 3c)
-**Status: pending by design, recorded 2026-09-29. Not a break, not approved
+**Status: CLOSED by slice 3c (2026-09-29). The reader exists (`server-lib/platformOverview.js` `loadPlatformOverview`, `platformHealth.js` `buildPlatformHealth`, `PlatformDashboard.jsx`), see the "Pending link P1, CLOSED" note under #41.** Original status, kept for history: pending by design, recorded 2026-09-29. Not a break, not approved
 for a fix, nothing to build now.** Writers exist at eight call sites (§2,
 `platform_events` section); the migration is written and **not applied live**
 (`docs/schema/platform-events-migration.sql:36-37`), so until Dillon applies it
@@ -4226,6 +4258,18 @@ revenue link. `platformBusiness.js` is pure and imported only by
 `tests/unit/platform-business.test.js:157-165`). A trial-to-paid metric is absent on
 purpose because checkout has no trial. Churn is not measured (see #42 weak point 1).
 
+### Workforce-category custom documents appear in no Analytics panel, by Dillon's 2026-09-29 decision
+
+Do not file "workforce custom docs never reach Analytics" as a break, and do not
+propose a Workforce analytics view. Dillon decided 2026-09-29 to leave them out of
+every customer Analytics panel. Re-check: only two panels exist,
+`SafetyAnalyticsPanel` (`src/Analytics.jsx:132`) and `EquipmentAnalyticsPanel`
+(`:331`). `Dashboard.jsx` mounts them with `companySafetyCustomDocs` (`:6627`) and
+`companyOperationsCustomDocs` (`:6659`). `companyWorkforceCustomDocs` (`:4005`) is
+read only by the Workforce Custom Docs list tab (`:6434`). `src/analyticsUtils.js`
+takes a `customDocs` argument (`:149,158`) and never sees a category. `grep -in
+workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
+
 ---
 
 ## 6. Changelog
@@ -4313,4 +4357,7 @@ purpose because checkout has no trial. Churn is not measured (see #42 weak point
 | 2026-09-29 | branch `portal-parity-analytics`, `23aad0b` (after PR #161 `599ba95`) | **Break #40 FULLY BUILT, closed pending merge.** Recent Activity merged earlier in PR #161. This commit: `fieldSiteActivity` gains a 7th `extras` argument `{portal, custom}` (`analyticsUtils.js:122,138-139`), Overview Site Activity passes Portal records and custom docs of every category (`Dashboard.jsx:4278-4282`), new `portalSummary` (`analyticsUtils.js:165`) and `PortalAnalyticsPanel` (`Analytics.jsx:449`) as the Portal tab's Analytics sub-tab (`Dashboard.jsx:6567-6575`), department-scoped by the server. Safety Analytics and its PDF unchanged (no `extras`). Tests: `tests/unit/portal-analytics.test.js`. New matrix row for Portal, Custom Document row annotated. New §5 entry: Portal deliberately not in Safety Analytics or its PDF. Residual gap recorded: workforce-category custom docs appear in no Analytics panel (open, low). Map only; no application code touched. |
 | 2026-09-29 | branch `platform-events-instrumentation` (uncommitted) | **`platform_events` placed on the map.** New surface #23 in §1, new §2 join-key section, new all-`—` matrix row, and a new "Known pending links" section (P1) recording that it has no reader yet on purpose (Admin Panel, phase 3c). Migration `docs/schema/platform-events-migration.sql` written, **not applied live**. Eight producers verified in code: three crons (`cron_run`), `server-lib/email.js` (`email_send`), and four Anthropic call sites (`ai_generation`: `api/generate-flha.js:297`, `api/portal.js:248`, `server-lib/companyBrainSummary.js:70`, `server-lib/onboardingDrafting.js:61`). No break filed. **Stale Brain wording corrected:** §2's `source_type` table said daily reports and the equipment inspection "write nothing" and pointed at open break #4; it now lists all 7 source types with re-anchored lines (`flhas.js:436`, `reports.js:303`, `logs.js:442`, `logs.js:466`, `monthly.js:470`, `logs.js:484`), the "Equipment fleet" to Brain matrix cell went from `❌ #4` to `✅`, and #4's leftover "never sees equipment inspection defects" paragraph is now labelled historical. |
 | 2026-09-29 | branch `founder-dashboard-business`, `d4217e7` | **Founder dashboard slice 3b placed on the map.** New `server-lib/platformBusiness.js` (pure, imported only by `platformOverview.js:18,190`, so it stays behind `api/admin.js`'s founder-only `platform_overview`) adds a `business` section: estimated MRR, seat usage, median days to first document, per-company health score. Rendered as Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`). Tests: `tests/unit/platform-business.test.js`. New consumer rows added to §3 for `pricing.js` (good: one price source), `company_document_settings`, `stripe_subscription_status`, `planSeatCap`, `roster.last_login_at` (PIN logins only) and `created_at`. **Filed #42** (the Seats card uses `planSeatCap`, but enforcement uses a separate `SEAT_CAP_BY_TIER`, `companydata.js:219`, so the brief's claim that they cannot drift does not hold) with six recorded weak points, chiefly that the webhook suspends canceled/unpaid companies so they drop out of MRR and never show as at risk. Health thresholds are a judgment call for Dillon to tune. Tests were not re-run by this pass. Map only. |
+| 2026-09-29 | branch `founder-dashboard-health`, `26d6d4f` | **Founder dashboard slice 3c placed on the map; P1 closed.** `server-lib/platformHealth.js` (pure, imported only by `platformOverview.js:19`, so it stays behind `api/admin.js`'s founder-only `platform_overview`) adds a `platformHealth` section from the last 30 days of `platform_events`: scheduled job state for the three crons, email delivery, AI success rate, estimated cost by document type, model and company (`MODEL_PRICES` opus-5 $5/$25, sonnet-5 $2/$10, haiku-4-5 $1/$5 per million, cache read 0.1x, write 1.25x, table cached 2026-09-25, unlisted model counted unpriced), recent trouble, and a not-visible-from-the-app note. Rendered as `HealthSection` (`PlatformDashboard.jsx:69`). Tests: `tests/unit/platform-health.test.js`, not re-run by this pass. **`platform_events` now has a reader**, so the `?` row in the founder-dashboard consumer table and pending link P1 are resolved; the Founder Dashboard (surface #24) and its consumer table now cover 3a, 3b and 3c. PR #162 (table plus 8 writers) merged into `main` 2026-09-29 and the table is applied live. Three breaks hunted (unmetered Anthropic call, `CRONS` vs `vercel.json`, `MODEL_PRICES` vs models in code): **none found**, all verified in code, see §4. One weak point recorded, not filed: no test ties `CRONS` or `MODEL_PRICES` to their sources. *Numbering, resolved:* `main` uses surface #23 for `platform_events` and P1 for its pending link, and the Founder Dashboard is #24 here, so the two no longer collide (the earlier merge hazard note is obsolete). Map only. |
+| 2026-09-29 | branch `founder-dashboard-health` | **#43 BUILT, closed pending merge of its PR** (same convention as #37-#42). Dillon approved it. Closes the slice 3c weak point (no test tied `CRONS` or `MODEL_PRICES` to their sources). `tests/unit/platform-health-sources.test.js` (4 tests): every `vercel.json` cron records a `cron_run` subtype that `CRONS` lists, both directions, and the counts match (`:22-34`); every `api/cron-*` file that records `cron_run` is scheduled in `vercel.json` (`:36-43`); `CRONS` cadence matches the schedule, weekly 168h, monthly 720h, else 24h (`:45-53`); `MODEL_PRICES` equals the set of `claude-*` literals in `api/` and `server-lib/`, both directions (`:55-67`). The builder shows it fails on a fake `vercel.json` cron and on a fake model string, and 529 unit tests pass, reported to this map, not re-run by this pass. Not marked merged. |
 | 2026-09-29 | branch `founder-dashboard-business`, `c1a9266` | **#42 BUILT, closed pending merge of its PR** (same convention as #37-#41). Dillon approved it. `server-lib/onboardingHelpers.js:101-103` exports `effectiveSeatCap`; `api/companydata.js` lost its own `SEAT_CAP_BY_TIER` and calls it at `:362,392,457,582`; `platformBusiness.js:105` uses it, so the Seats card reports what enforcement uses and an unknown tier is basic in both. `tests/unit/seat-cap-source.test.js` (5 tests) pins one source and the Admin Panel copy; the copy test was shown to fail with advanced changed to 60. Left on purpose: `api/admin.js:355` keeps `planSeatCap`, and `src/AdminPanel.jsx:56` stays a copy, now test-pinned. §3 planSeatCap consumer row moved from broken to fine. Not marked merged. |
+| 2026-09-29 | branch `founder-dashboard-health` | Deliberate non-connection added to §5: workforce-category custom documents appear in no Analytics panel, per Dillon (no Workforce analytics view). Re-check evidence cited there. Map only, no code touched. |

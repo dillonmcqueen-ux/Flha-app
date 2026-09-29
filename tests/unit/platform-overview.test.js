@@ -136,7 +136,7 @@ test('a login ticket cannot reach it either', async () => {
 test('only api/admin.js imports the overview loader', () => {
   const importers = [];
   for (const dir of ['api', 'server-lib']) {
-    for (const f of readdirSync(dir).filter(x => x.endsWith('.js') && x !== 'platformOverview.js' && x !== 'platformBusiness.js')) {
+    for (const f of readdirSync(dir).filter(x => x.endsWith('.js') && x !== 'platformOverview.js' && x !== 'platformBusiness.js' && x !== 'platformHealth.js')) {
       if (readFileSync(`${dir}/${f}`, 'utf8').includes('platformOverview.js')) importers.push(`${dir}/${f}`);
     }
   }
