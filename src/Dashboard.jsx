@@ -4197,6 +4197,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     customdoc: { icon: FolderKanban, label: "Custom Document", primary: d => d.form_title || "", secondary: d => d.submitted_by || "" },
     certification: { icon: ShieldCheck, label: "Certification", primary: d => `${d.worker_name} — ${d.cert_name}`, secondary: d => d.cert_type || "" },
     onboarding: { icon: CircleCheckBig, label: "Onboarding", primary: d => `${d.name} completed onboarding`, secondary: () => "" },
+    // Company Portal (parity sweep break P4): the customer's own documents and
+    // the escalations they raise, so they show up on Overview like every
+    // other document type instead of only inside the Portal tab.
+    portal: { icon: FileText, label: "Portal", primary: d => d.document_title || "Portal document", secondary: d => d.submitted_by || "" },
+    portalescalation: { icon: AlertTriangle, label: "Escalation", primary: d => d.question_text || "Flagged answer", secondary: d => d.document_title || "" },
   };
 
   const openWeekDoc = (type, doc) => {
@@ -4211,6 +4216,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     else if (type === "customdoc") openCustomDocRecord(doc);
     else if (type === "certification" && doc.fileUrl) window.open(doc.fileUrl, "_blank");
     else if (type === "onboarding") setActiveTab("certifications");
+    else if (type === "portal") openPortalRecord(doc);
+    else if (type === "portalescalation") { setPortalSubTab("escalations"); setActiveTab("portal"); }
   };
   const openCorrectiveCount = companyMonthlyActions.filter(a => a.status !== "resolved").length;
 
@@ -4255,6 +4262,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     ...companyMonthlyRecords.map(doc => ({ type: "monthly", doc })),
     ...companyCustomDocs.map(doc => ({ type: "customdoc", doc })),
     ...walletActivity,
+    // Only loaded (and only meaningful) when Portal is on for the company.
+    // Open escalations only: an actioned one is history, not news.
+    ...(TAB_VISIBLE.portal ? [
+      ...portalRecords.map(doc => ({ type: "portal", doc })),
+      ...portalEscalations.filter(e => e.status === "open").map(doc => ({ type: "portalescalation", doc })),
+    ] : []),
   ].filter(x => x.doc.created_at)
    .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
    .slice(0, 8);
@@ -5442,6 +5455,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             if (type === "inspection" || type === "daily") return C.status.info;
             if (type === "certification") return doc.status === "expired" ? C.status.danger : doc.status === "expiring_soon" || doc.unverified ? C.status.warning : C.status.success;
             if (type === "onboarding") return C.status.success;
+            if (type === "portal") return orangeTone;
+            if (type === "portalescalation") return C.status.warning;
             return neutralTone;
           };
           return (
@@ -5614,6 +5629,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     } else if (type === "onboarding") {
                       statusLabel = "Completed";
                       statusColor = C.status.success.text;
+                    } else if (type === "portal") {
+                      statusLabel = doc.submitted_by ? `Submitted by ${doc.submitted_by}` : "Submitted";
+                      statusColor = C.text.muted;
+                    } else if (type === "portalescalation") {
+                      statusLabel = `Open, ${PORTAL_DEPARTMENT_LABELS[doc.target_department] || doc.target_department || "department"}`;
+                      statusColor = C.status.warning.text;
                     }
                     return (
                       <div
