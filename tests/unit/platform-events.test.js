@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { recordPlatformEvent, sanitizeMetrics, anthropicUsageMetrics } from '../../server-lib/platformEvents.js';
+import { recordPlatformEvent, sanitizeMetrics, ALLOWED_METRIC_KEYS, anthropicUsageMetrics } from '../../server-lib/platformEvents.js';
 
 function fakeSupabase({ throwOnInsert = false, returnError = false } = {}) {
   let inserted = null;
@@ -59,10 +59,11 @@ test('never throws, on a thrown insert or a returned error', async () => {
 
 test('metrics keep numbers, booleans and short strings, and drop content-shaped values', () => {
   const out = sanitizeMetrics({
-    n: 5, ok: true, model: 'x'.repeat(200), nested: { a: 1 }, list: [1, 2], nan: NaN, nothing: null,
+    duration_ms: 5, has_attachment: true, model: 'x'.repeat(200), nested: { a: 1 }, list: [1, 2], nan: NaN, nothing: null, subject: 'Invoice for Bob',
   });
-  assert.equal(out.n, 5);
-  assert.equal(out.ok, true);
+  assert.equal(out.duration_ms, 5);
+  assert.equal(out.has_attachment, true);
+  assert.equal('subject' in out, false);
   assert.equal(out.model.length, 80);
   assert.equal('nested' in out, false);
   assert.equal('list' in out, false);
@@ -74,8 +75,8 @@ test('metrics keep numbers, booleans and short strings, and drop content-shaped 
 
 test('metrics cap the number of keys', () => {
   const big = {};
-  for (let i = 0; i < 40; i++) big['k' + i] = i;
-  assert.equal(Object.keys(sanitizeMetrics(big)).length, 16);
+  for (const k of ALLOWED_METRIC_KEYS) big[k] = 1;
+  assert.ok(Object.keys(sanitizeMetrics(big)).length <= 16);
 });
 
 test('anthropicUsageMetrics reads tokens and never copies content', () => {
@@ -105,4 +106,11 @@ test('every writer in the repo passes a known event type', () => {
   }
   assert.ok(seen.size >= 3, 'expected cron_run, email_send and ai_generation writers');
   for (const t of seen) assert.ok(['cron_run', 'email_send', 'ai_generation'].includes(t), 'unknown event type ' + t);
+});
+
+test('a hung insert times out instead of stalling the caller', async () => {
+  const client = { from: () => ({ insert: () => new Promise(() => {}) }) };
+  const t0 = Date.now();
+  await recordPlatformEvent(client, { eventType: 'cron_run', status: 'ok' });
+  assert.ok(Date.now() - t0 < 4000);
 });

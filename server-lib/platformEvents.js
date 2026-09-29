@@ -17,6 +17,19 @@ import { createClient } from '@supabase/supabase-js';
 export const EVENT_TYPES = ['cron_run', 'email_send', 'ai_generation'];
 export const EVENT_STATUSES = ['ok', 'error', 'skipped', 'refused', 'rate_limited', 'truncated'];
 
+// Only these keys are ever stored. A length cap alone would let a future
+// caller park a name or subject fragment under a new key; an allowlist makes
+// adding one a deliberate edit here.
+export const ALLOWED_METRIC_KEYS = [
+  'model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens',
+  'stop_reason', 'latency_ms', 'http_status', 'has_attachment', 'duration_ms',
+  'companies', 'summarized', 'failed', 'skipped', 'ran',
+  'equipment_ok', 'equipment_failed', 'equipment_skipped',
+  'timeclock_ok', 'timeclock_failed', 'timeclock_skipped',
+];
+// A hung Supabase call must not stall a user-facing response after the AI
+// call already succeeded.
+const WRITE_TIMEOUT_MS = 2000;
 const MAX_METRIC_KEYS = 16;
 const MAX_STRING_LEN = 80;
 
@@ -37,6 +50,7 @@ export function sanitizeMetrics(metrics) {
   let n = 0;
   for (const [k, v] of Object.entries(metrics)) {
     if (n >= MAX_METRIC_KEYS) break;
+    if (!ALLOWED_METRIC_KEYS.includes(k)) continue;
     if (typeof v === 'number' && Number.isFinite(v)) { out[String(k).slice(0, 40)] = v; n++; }
     else if (typeof v === 'string') { out[String(k).slice(0, 40)] = v.slice(0, MAX_STRING_LEN); n++; }
     else if (typeof v === 'boolean') { out[String(k).slice(0, 40)] = v; n++; }
@@ -54,13 +68,17 @@ export async function recordPlatformEvent(supabaseAdmin, {
     }
     const client = clientOrFallback(supabaseAdmin);
     if (!client) return;
-    const { error } = await client.from('platform_events').insert({
+    const write = client.from('platform_events').insert({
       event_type: eventType,
       status,
       subtype: typeof subtype === 'string' ? subtype.slice(0, 60) : null,
       company_id: (companyId !== null && companyId !== undefined && companyId !== '' && Number.isInteger(Number(companyId))) ? Number(companyId) : null,
       metrics: sanitizeMetrics(metrics),
     });
+    let timer;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve({ error: { message: 'timed out' } }), WRITE_TIMEOUT_MS); });
+    const { error } = await Promise.race([write, timeout]);
+    clearTimeout(timer);
     if (error) console.error(`platform_events write failed for "${eventType}":`, error.message);
   } catch (e) {
     console.error(`platform_events write failed for "${eventType}":`, e.message);
