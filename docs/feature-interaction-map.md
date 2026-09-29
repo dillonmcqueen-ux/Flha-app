@@ -15,7 +15,11 @@ paying for, and nobody finds out.
 two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
-**Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
+**Status:** seeded 2026-09-16 against commit `0bd289c`; **most recent pass
+2026-09-29 on branch `portal-pdf-email` (`ba5f6ab`)** — Company Portal
+"email documents to a department" placed on the map (§2's
+`portal_report_schedules` section, breaks #35 and #36, changelog); the
+paragraph that follows describes the pass before it. Earlier extension:
 **2026-09-29 on branch `company-portal-phase-5-escalation`, PR #150** —
 Company Portal phase 5 (question-level escalation), the last of the 5
 build-order phases, placed on the map: new columns
@@ -928,6 +932,53 @@ Escalations tab), but nothing notifies the target department the way phase
 3's submission email notifies a document's own departments — an escalation
 sits silent until someone in the target department happens to open the
 Escalations tab.
+
+### `portal_report_schedules` / department email (Company Portal follow-up, step 5)
+Recorded 2026-09-29 against branch `portal-pdf-email` (`ba5f6ab`). New table
+`portal_report_schedules` (`docs/schema/portal-report-schedules-migration.sql`,
+**NOT applied live** as of this pass: until it is, `list_report_schedules`
+returns 500 (`api/portal.js:1046-1047`) and the daily cron 500s
+(`api/cron-portal-reports.js:32-34,49-50`). A deploy-order dependency, not a
+break). This feature is a pure **consumer** of four existing keys and adds
+no new key of its own.
+
+| Consumed | Producer side | Consumer side | Key agrees? |
+|---|---|---|---|
+| Department a schedule/email targets | `PORTAL_DEPARTMENTS` (`server-lib/portalDepartments.js`) | validated `api/portal.js:1058` (schedule), `:1138` (one-off) | yes, same list as `roster.departments` (`companydata.js:867`) and `portal_documents.departments` (`portal.js:309`) |
+| Which documents count as "the department's" | `portal_documents.departments` | `server-lib/portalReports.js:88-91` (`(d.departments).includes(department)`, current routing at send time, not submit time) | yes |
+| Records to send | `portal_records.pdf_url`, `created_at` (`portal.js:520-524`) | `portalReports.js:94-100` (`created_at > last_sent_at`), signed 7 days via `signRows` on `flha-reports` (`:100`) | yes; same bucket the dashboard signs (`portal.js:704`) |
+| Who receives it | `roster.email` (encrypted, written `companydata.js:483,860`, `certifications.js:396`, `onboardingApproval.js:293`), `roster.role`, `roster.departments`, `roster.active` | `portalReports.js:54-73` (`role='supervisor'`, `active`, departments intersect, `decryptField`) | yes; legacy plaintext passes through `decryptField` (`fieldCrypto.js:55`) |
+| Hand-added extras | `portal.js:1065-1077` (`encryptField(JSON.stringify(list))` into `recipients_encrypted`) | `portalReports.js:26-35` (`readRecipients`), and `presentSchedule` `portal.js:1039` | yes |
+
+Manager scoping matches the neighbouring Portal actions: an
+individually-identified supervisor only manages schedules for departments on
+their own roster row (`portal.js:1017-1034`, `:1072-1073`), missing and foreign
+ids get the same 403, shared-code supervisors have no department limit.
+Surfaces: `src/PortalReports.jsx` (Portal "Reports" sub-tab,
+`Dashboard.jsx:6271,6380-6381`) and the "Email to department" button in
+`PortalRecordCard` (`Dashboard.jsx:1610,1651`, department picker limited to
+the document's own `departments` (`:1603` in the working tree, `:1602` in `ba5f6ab` with an all-five fallback), **client-side only in `ba5f6ab`**, see #36).
+Cron registered `vercel.json:9` (`0 13 * * *`); gated only by `CRON_SECRET`
+(`cron-portal-reports.js:27`). Company Portal has no doc key or `MODULES`
+entry, so `isDocKeyActive` does not apply, same open flag as phases 1-5, not
+refiled. **Unlike its sibling `cron-equipment-reports.js:88`, this cron does
+not check `roster_enabled` or `suspended`** (the Portal UI tab rides
+`roster_enabled`): a company that is switched off keeps getting its
+schedules sent. Noted here, not filed, because the gate it would copy is
+itself UI-only for the rest of Portal.
+
+**Encryption spine this rides on** (earlier merged steps, recorded so the
+next pass doesn't re-derive it): `roster.email` is AES-256-GCM via
+`server-lib/fieldCrypto.js`, so it can't be `.eq()`-searched
+(`fieldCrypto.js:19-21`); every reader must call `withDecryptedEmail`/
+`decryptField` (`certifications.js:285`, `companydata.js:751,894`,
+`login.js:600`, `portal.js:603,644`, `portalReports.js:66`).
+`onboarding_requests.people_encrypted` is written `login.js:665,681` and
+consumed `login.js:860-868` (edit link, blanked once approved) and
+`onboardingApproval.js:276-293` (approval writes the encrypted roster
+emails). Supervisors creating assignment rules: `portal.js:797-798`
+(`admin` or `supervisor`). The Overview "Company Portal" panel in
+`Dashboard.jsx` was **not** read in this pass: `?`.
 
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
@@ -3342,6 +3393,76 @@ the escalation-insert block and the pre-existing phase-3 one below it.
 **Not the same as break #32/#33** (those are about a *worker's own* Portal
 history UI, unrelated to escalation). Distinct, new item.
 
+### #35 — A department report with nobody to send to is marked "sent" and its documents are never emailed
+
+**Severity: medium. Status: FIXED on branch `portal-pdf-email`, not closed
+until it merges.** Filed 2026-09-29 placing `portal-pdf-email` (`ba5f6ab`).
+This is a bug in the feature's own unmerged code, so it was fixed in the same
+PR rather than waiting for a sweep decision: `runSchedule` now refuses to mark
+a schedule handled whenever `sent === 0` on a non-empty run, refuses to run at
+all without `RESEND_API_KEY`, and the cron skips companies with `roster_enabled`
+off or `suspended` on (the gate noted at the end of this entry's changelog row).
+The text below is the original finding.
+
+A schedule whose department has no active supervisor with a readable email
+(and no hand-added addresses) finds records, sends to nobody, and still
+advances `last_sent_at`. `runSchedule` only refuses to mark when
+`recipientCount > 0 && sent === 0` (`server-lib/portalReports.js:143`); with
+`recipientCount === 0` it falls through to the update at `:145`. The next run
+starts from `sinceFor` = that timestamp (`:48-51`), so those documents are
+never included once someone does add a supervisor or address. Same shape via
+`departmentSupervisorEmails` swallowing a decrypt failure (`:66-70`, e.g.
+`FIELD_ENCRYPTION_KEY` missing) and via `sendEmail` returning normally when
+`RESEND_API_KEY` is unset (`server-lib/email.js:23-26`), which `sendEach`
+counts as sent (`portalReports.js:118`). The cron reports counts only in its
+HTTP response (`cron-portal-reports.js:40,47`), which nothing reads. The
+manual button does surface it ("Sent N documents to 0 addresses",
+`PortalReports.jsx` sendNow) but only when a person happens to press it.
+
+*Customer loses:* the weekly Safety digest silently skips a week of
+documents because the one Safety supervisor had no email on file.
+
+*Re-check:* `sed -n 140,146p server-lib/portalReports.js` (no branch marks
+`marked:false` when `recipientCount === 0`).
+
+*A fix would touch:* `portalReports.js:143` (also treat zero recipients as
+not-handled) and, optionally, a "no recipients" warning on the schedule row.
+Not run against a live DB; verified by reading only.
+
+### #36 — "Email to department" lets the server send a record to a department the document isn't routed to
+
+**Severity: low-medium. Status: FIX COMMITTED on `portal-pdf-email` as
+`e3c49ad`, branch not merged, so not closed.** Filed
+2026-09-29 against `ba5f6ab`; while this entry was being written someone
+else fixed it (first uncommitted, then committed as `e3c49ad`): `api/portal.js:1150-1153` now denies a non-admin whose
+target `department` is not in `doc.departments`, and `Dashboard.jsx:1603`
+no longer falls back to all five departments (button hidden when the
+document has none, `:1644`). Admin is deliberately unrestricted. Not my
+edit and not approved through this process; the text below describes
+`ba5f6ab`. Re-check:
+`grep -n "doc.departments || \[\]).includes(department)" api/portal.js`.
+
+Everywhere else in Portal, who sees a record is decided by the document's
+`departments` (`list_portal_records` `api/portal.js:689-693`). The one-off
+email lets the caller name any department: the server only checks the value
+is in `PORTAL_DEPARTMENTS` (`:1138`) and that the caller's own departments
+intersect the document's (`:1148-1149`). It never checks
+`doc.departments.includes(department)`. The picker that restricts this is
+client-side (`Dashboard.jsx:1602`). A crafted request (or a document with
+empty `departments`, where the picker falls back to all five, `:1602`) sends
+a 7-day signed PDF link (`portalReports.js:154`) to supervisors of a
+department that cannot open that record in their own dashboard. Scheduled
+digests do not have this problem, they select by the same
+`doc.departments` (`portalReports.js:91`).
+
+*Customer loses:* the routing they configured (HR documents reach HR) has a
+side door; a pay or medical document can be pushed to Operations.
+
+*Re-check:* `sed -n 1136,1150p api/portal.js` (no
+`doc.departments.includes(department)`).
+
+*A fix would touch:* one condition after `api/portal.js:1146` (that is what the working-tree change is).
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -3696,3 +3817,4 @@ Do **not** flag these. They are decisions, not gaps.
 | 2026-09-29 | branch `fix-break-34-escalation-notification` | **#34 BUILT, not closed — approved by Dillon, closes when this branch's PR merges.** (superseded by the row below once PR #152 merged) `api/portal.js`'s escalation-insert block now sends a second, best-effort `sendEmail` call after a successful `portal_escalations` insert, same recipient-query shape as the phase-3 email directly below it (`roster` filtered to `company_id`, `role: 'supervisor'`, `active: true`, non-null `email`), but filtered on `r.departments.includes(q.escalation_department)` instead of the document's `departments` array, so it reaches the escalation's own target department rather than repeating the phase-3 recipients. Gated on a local `escalationInserted` flag so it only fires once the escalation row is actually saved, and wrapped in its own try/catch that only logs on failure — a notification failure can never affect the already-saved escalation row, matching the posture of every other side effect in this handler. No schema change. `grep -n "sendEmail" api/portal.js` now returns three lines (import, the new escalation email, the phase-3 email) where it returned two before. Reviewed against `tenant-scope-reviewer`'s checklist (Agent tool unavailable in this session, applied manually per CLAUDE.md's fallback): the new query scopes on `session.companyId` (never a client-supplied value) and filters on `company_id`, identical in shape to the already-reviewed phase-3 query beside it — clean, no new tenant-boundary risk. `npx vite build` and `npm run test:unit` (446 pass) both re-run clean; no existing unit test exercises `submit_portal` itself, same as phase 3's email — verified by reading, not by a dedicated test file. |
 | 2026-09-29 | PR #151 (branch `fix-break-33-unfinished-portal-drafts`), commit `a02612d` | **Break #33 CLOSED on merge.** One-line, client-only fix: `TYPE_META.portalform` added to `src/MyDocuments.jsx:37`, so an in-progress Portal draft now shows up in Unfinished the same way every other form type does. Re-verified against the merged code (`grep -n "portalform" src/MyDocuments.jsx` → `:37`) before rewriting §4's break #33 entry from open to closed. No other application code touched by this pass; map only. |
 | 2026-09-29 | PR #152 (branch `fix-break-34-escalation-notification`), commit `582ee3d` | **Break #34 CLOSED on merge.** `api/portal.js`'s escalation-insert block (`:588-611`) now sends a second best-effort `sendEmail` to the escalation's own target department, gated on the insert actually succeeding and wrapped in its own try/catch — mirrors the phase-3 submission email's recipient shape but keyed on `escalation_department` instead of the document's `departments`. Re-verified against the merged code (`grep -n "sendEmail" api/portal.js` → import at `:27`, escalation email at `:603`, phase-3 email at `:643` — three hits, was two before the fix) before rewriting §4's break #34 entry from built-not-closed to closed. No other application code touched by this pass; map only. |
+| 2026-09-29 | branch `portal-pdf-email`, `ba5f6ab` | **Company Portal "email documents to a department" placed on the map.** New table `portal_report_schedules` (migration written, **not applied live**), `server-lib/portalReports.js`, `api/cron-portal-reports.js` (`vercel.json:9`), five `api/portal.js` actions (`:1042-1158`), `src/PortalReports.jsx`, and the Email to department button (`Dashboard.jsx:1651`). Consumes `PORTAL_DEPARTMENTS`, `roster.departments`, `portal_documents.departments`, `portal_records.pdf_url` and encrypted `roster.email`; all keys agree (table in §2). Earlier merged steps recorded in the same §2 section: `fieldCrypto` roster/onboarding encryption, `people_encrypted`, supervisor-created assignment rules. **Breaks #35** (zero-recipient run marks documents as sent, `portalReports.js:143-145`) **and #36** (one-off email doesn't check the target department against the document's routing, `portal.js:1138-1149`) opened. #35 not approved. #36 was fixed in `e3c49ad` (`portal.js:1150-1153`, `Dashboard.jsx:1603`), not closed until the branch merges. That commit also rejects recipient addresses containing `,;<>()"` (`portal.js:1067`), not mapped as a break. Noted, not filed: the cron skips no `roster_enabled`/`suspended` check, unlike `cron-equipment-reports.js:88`. Overview Company Portal panel not read (`?`). Map only; no application code touched. |

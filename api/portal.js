@@ -25,7 +25,9 @@ import { authorRosterId } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
-import { withDecryptedEmail } from '../server-lib/fieldCrypto.js';
+import { withDecryptedEmail, encryptField } from '../server-lib/fieldCrypto.js';
+import { isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate } from '../server-lib/portalFieldTypes.js';
@@ -1002,6 +1004,161 @@ Rules:
       }).eq('id', escalationId);
       if (updErr) return res.status(500).json({ error: "Couldn't update escalation." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ══ SUPERVISOR / ADMIN: department report emails ═════════════════════
+    // Step 5 of the Portal follow-up (docs/schema/portal-report-schedules-migration.sql).
+    // A supervisor sets up "email this department's completed documents"
+    // schedules (who, how often) and can also email one record on demand.
+    // Same scoping as everywhere else in this file: own company, and an
+    // individually-identified supervisor only for their own department(s);
+    // missing and foreign ids get the same 403.
+
+    async function myDepartmentList() {
+      if (session.role !== 'supervisor' || !session.userId) return null; // null = no department limit
+      const { data: me } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+      return (me && me[0] && me[0].departments) || [];
+    }
+
+    // Returns { schedule } the session may manage, or { status, error }.
+    async function loadManageableSchedule(id) {
+      const { data: rows } = await supabaseAdmin.from('portal_report_schedules').select('*').eq('id', id).limit(1);
+      const schedule = rows && rows[0];
+      const denied = { status: 403, error: 'Not allowed.' };
+      if (!schedule) return session.role === 'admin' ? { status: 404, error: 'Schedule not found.' } : denied;
+      if (session.role === 'admin') return { schedule };
+      if (schedule.company_id !== session.companyId) return denied;
+      const mine = await myDepartmentList();
+      if (mine && !mine.includes(schedule.department)) return denied;
+      return { schedule };
+    }
+
+    const presentSchedule = (row) => ({
+      id: row.id, name: row.name, department: row.department, frequency: row.frequency, weekday: row.weekday,
+      includeDepartmentSupervisors: row.include_department_supervisors, active: row.active,
+      lastSentAt: row.last_sent_at, recipients: readRecipients(row),
+    });
+
+    if (action === 'list_report_schedules') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin.from('portal_report_schedules').select('*').eq('company_id', companyId).order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: 'Could not load report schedules.' });
+      const mine = await myDepartmentList();
+      const visible = (data || []).filter(r => !mine || mine.includes(r.department));
+      return res.status(200).json({ schedules: visible.map(presentSchedule) });
+    }
+
+    if (action === 'save_report_schedule') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id, name, department, frequency, weekday, includeDepartmentSupervisors, recipients, active } = req.body;
+      const cleanName = String(name || '').trim().slice(0, 80);
+      if (!cleanName) return res.status(400).json({ error: 'Give the schedule a name.' });
+      if (!PORTAL_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Pick a department.' });
+      if (frequency !== 'daily' && frequency !== 'weekly') return res.status(400).json({ error: 'Pick daily or weekly.' });
+      let cleanWeekday = null;
+      if (frequency === 'weekly') {
+        cleanWeekday = Number(weekday);
+        if (!Number.isInteger(cleanWeekday) || cleanWeekday < 0 || cleanWeekday > 6) return res.status(400).json({ error: 'Pick a day of the week.' });
+      }
+      const list = Array.isArray(recipients) ? recipients.map(e => String(e || '').trim()).filter(Boolean) : [];
+      if (list.length > 20) return res.status(400).json({ error: 'Up to 20 extra email addresses per schedule.' });
+      const bad = list.find(e => !isValidEmail(e) || /[,;<>()"]/.test(e));
+      if (bad) return res.status(400).json({ error: `"${bad}" doesn't look like a valid email address.` });
+      const includeSupers = includeDepartmentSupervisors !== false;
+      if (!includeSupers && list.length === 0) return res.status(400).json({ error: 'Add at least one email address, or include the department\'s supervisors.' });
+
+      const mine = await myDepartmentList();
+      if (mine && !mine.includes(department)) return res.status(403).json({ error: 'Not allowed.' });
+
+      let recipientsEncrypted = null;
+      try {
+        recipientsEncrypted = list.length > 0 ? encryptField(JSON.stringify([...new Set(list)])) : null;
+      } catch (e) {
+        console.error('Could not encrypt report recipients:', e.message);
+        return res.status(500).json({ error: "Couldn't save the schedule." });
+      }
+      const fields = {
+        name: cleanName, department, frequency, weekday: cleanWeekday,
+        include_department_supervisors: includeSupers, recipients_encrypted: recipientsEncrypted,
+        active: active !== false,
+      };
+
+      if (id) {
+        const scope = await loadManageableSchedule(id);
+        if (scope.error) return res.status(scope.status).json({ error: scope.error });
+        const { data, error } = await supabaseAdmin.from('portal_report_schedules').update(fields).eq('id', id).select().single();
+        if (error) return res.status(500).json({ error: "Couldn't save the schedule." });
+        return res.status(200).json({ ok: true, schedule: presentSchedule(data) });
+      }
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const { data, error } = await supabaseAdmin.from('portal_report_schedules')
+        .insert({ ...fields, company_id: companyId, created_by_roster_id: authorRosterId(session) }).select().single();
+      if (error) return res.status(500).json({ error: "Couldn't save the schedule." });
+      return res.status(200).json({ ok: true, schedule: presentSchedule(data) });
+    }
+
+    if (action === 'delete_report_schedule') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing schedule id.' });
+      const scope = await loadManageableSchedule(id);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      const { error } = await supabaseAdmin.from('portal_report_schedules').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: "Couldn't delete the schedule." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Send a schedule right now, outside its timetable. Covers everything
+    // since it last went out, same as the cron would.
+    if (action === 'send_report_schedule_now') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing schedule id.' });
+      const scope = await loadManageableSchedule(id);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      try {
+        const result = await runSchedule(supabaseAdmin, scope.schedule);
+        return res.status(200).json({ ok: true, ...result });
+      } catch (e) {
+        console.error('send_report_schedule_now failed:', e.message);
+        return res.status(500).json({ error: "Couldn't send that report." });
+      }
+    }
+
+    // One record to one department's supervisors, from the record detail
+    // view. Recipients are always roster supervisors (no free-typed
+    // addresses here), so this can't be used to send to an outsider.
+    if (action === 'email_portal_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId, department } = req.body;
+      if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
+      if (!PORTAL_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Pick a department.' });
+
+      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, submitted_by, created_at, pdf_url').eq('id', recordId).limit(1);
+      const record = recordRows && recordRows[0];
+      const denied = () => res.status(403).json({ error: 'Not allowed.' });
+      if (!record) return session.role === 'admin' ? res.status(404).json({ error: 'Record not found.' }) : denied();
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('company_id, title, departments').eq('id', record.document_id).limit(1);
+      const doc = docRows && docRows[0];
+      if (!doc) return denied();
+      if (session.role === 'supervisor' && doc.company_id !== session.companyId) return denied();
+      const mine = await myDepartmentList();
+      if (mine && !(doc.departments || []).some(dep => mine.includes(dep))) return denied();
+      // A supervisor can only send a record to a department the document is
+      // actually routed to, so this can't be used to push a document at a
+      // department that isn't meant to see it. Admin is unrestricted.
+      if (session.role !== 'admin' && !(doc.departments || []).includes(department)) return denied();
+
+      try {
+        const result = await emailRecordToDepartment(supabaseAdmin, { companyId: doc.company_id, record, documentTitle: doc.title, department });
+        return res.status(200).json({ ok: true, ...result });
+      } catch (e) {
+        console.error('email_portal_record failed:', e.message);
+        return res.status(500).json({ error: "Couldn't send that email." });
+      }
     }
 
     return res.status(400).json({ error: 'Unknown action.' });
