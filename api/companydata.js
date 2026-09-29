@@ -1023,6 +1023,13 @@ export default async function handler(req, res) {
       const { count: customCount } = await supabaseAdmin
         .from('custom_form_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
       if (customCount) blockers.push(`${customCount} custom document${customCount === 1 ? '' : 's'}`);
+      // Company Portal records point at their site the same way (NOT NULL
+      // portal_records.site_id, no cascade), so they block it too. Without
+      // this check the delete hit the foreign key and returned the generic
+      // "Couldn't remove site." with no reason (parity sweep break P3).
+      const { count: portalCount } = await supabaseAdmin
+        .from('portal_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (portalCount) blockers.push(`${portalCount} Company Portal submission${portalCount === 1 ? '' : 's'}`);
       if (blockers.length > 0) {
         return res.status(400).json({
           error: `This site can't be removed — it has ${blockers.join(' and ')} filed against it. Those records would lose the site they belong to.`,

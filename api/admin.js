@@ -682,6 +682,21 @@ export default async function handler(req, res) {
       }
       counts['custom document submissions'] = customRecordsCount;
 
+      // Company Portal submissions, reached through portal_documents.company_id
+      // (parity sweep break P3). portal_records has no cascade to its
+      // document, so a company with any submission can't be deleted, like
+      // every other kind of submitted record above.
+      const { data: portalDocs, error: portalDocsErr } = await supabaseAdmin.from('portal_documents').select('id').eq('company_id', companyId);
+      if (portalDocsErr) return res.status(500).json({ error: 'Could not check Company Portal documents.' });
+      const portalDocIds = (portalDocs || []).map(d => d.id);
+      let portalRecordsCount = 0;
+      if (portalDocIds.length > 0) {
+        const { data: records, error: recErr } = await supabaseAdmin.from('portal_records').select('id').in('document_id', portalDocIds);
+        if (recErr) return res.status(500).json({ error: 'Could not check Company Portal submissions.' });
+        portalRecordsCount = (records || []).length;
+      }
+      counts['company portal submissions'] = portalRecordsCount;
+
       const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0);
       if (totalRecords > 0) {
         const parts = Object.entries(counts)
@@ -707,6 +722,13 @@ export default async function handler(req, res) {
           () => supabaseAdmin.from('custom_form_questions').delete().in('form_id', custFormIds),
           () => supabaseAdmin.from('custom_forms').delete().eq('company_id', companyId),
         ] : []),
+        // Portal: documents cascade to their questions, assignment rules,
+        // assignments and escalations. They must go before the roster, since
+        // assignments point at roster rows without a cascade.
+        ...(portalDocIds.length > 0 ? [
+          () => supabaseAdmin.from('portal_documents').delete().eq('company_id', companyId),
+        ] : []),
+        () => supabaseAdmin.from('portal_report_schedules').delete().eq('company_id', companyId),
         () => supabaseAdmin.from('company_document_settings').delete().eq('company_id', companyId),
         () => supabaseAdmin.from('equipment_reports').delete().eq('company_id', companyId),
         () => supabaseAdmin.from('roster').delete().eq('company_id', companyId),
