@@ -16,21 +16,40 @@ two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
-**2026-09-29 against the uncommitted working tree** that added Company
-Portal phase 2 (Document engine v2) — `portal_documents`/`portal_questions`/
-`portal_records`/`portal_answers` (migration applied live),
-`server-lib/portalFieldTypes.js`, new file `api/portal.js`,
-`src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` and
-`src/PortalDocumentBuilder.jsx`. Placed as a new join-key section in §2;
-**break #32 filed** (a worker's Portal submissions never show up in My
-Forms) and the phase-3/4/5 deferrals recorded as deliberate, not breaks —
-see the changelog. Same-day, before that, extended against the same working
-tree for Company Portal phase 1 (Departments) — `roster.departments`
-(migration applied live), `server-lib/portalDepartments.js`,
-`api/companydata.js`'s `update_worker_profile` validation, and
-`src/WorkerProfileDrawer.jsx`'s chip picker. Placed as a new join key in §2
-with its own note; producer side only, no consumer yet, no break filed —
-see the changelog. Before that, extended 2026-09-28 against the uncommitted working tree that added the Ted
+**2026-09-29 on branch `company-portal-phase-3-routing-notification`** for
+Company Portal phase 3 (document-level routing + notification) —
+`api/portal.js`'s `list_portal_records`/`get_portal_record_detail` now
+filter an individually-identified supervisor by matching their own
+`roster.departments` against a document's `portal_documents.departments`;
+`submit_portal` now emails every active, on-department supervisor a
+best-effort notification via `server-lib/email.js`; a new company-scoped
+`list_portal_documents_for_dashboard` action and a new "Portal" tab in
+`src/Dashboard.jsx` (Inbox + Document Library) give supervisors the UI
+phase 2 shipped with no consumer for. **This is `roster.departments` and
+`portal_documents.departments` finally getting their first real reader** —
+both join-key sections in §2 updated from "no consumer yet" to consumed,
+with file:line evidence. No new break filed; break #32 (Portal submissions
+missing from My Forms) is unaffected by this phase and re-confirmed still
+open. Recorded as a deliberate role-model resolution, not a gap: the build
+spec's "Company Admin" persona was **not** built — Dillon's 2026-09-29
+decision was no new role, since a supervisor row with every department
+checked already sees everything under this phase's intersection logic. See
+the changelog and the new §5 bullet. Same-day, before that, extended
+against commit `1654231` for Company Portal phase 2 (Document engine v2) —
+`portal_documents`/`portal_questions`/`portal_records`/`portal_answers`
+(migration applied live), `server-lib/portalFieldTypes.js`, new file
+`api/portal.js`, `src/generatePortalDocumentPDF.js`,
+`src/PortalDocumentForm.jsx` and `src/PortalDocumentBuilder.jsx`. Placed as
+a new join-key section in §2; **break #32 filed** (a worker's Portal
+submissions never show up in My Forms) and the phase-3/4/5 deferrals
+recorded as deliberate, not breaks — see the changelog. Same-day, before
+that, extended against commit `1eddbb0` for Company Portal phase 1
+(Departments) — `roster.departments` (migration applied live),
+`server-lib/portalDepartments.js`, `api/companydata.js`'s
+`update_worker_profile` validation, and `src/WorkerProfileDrawer.jsx`'s
+chip picker. Placed as a new join key in §2 with its own note; producer
+side only at the time, no consumer yet, no break filed — see the
+changelog. Before that, extended 2026-09-28 against the uncommitted working tree that added the Ted
 client-scoping pipeline (`.claude/agents/ted.md` + three specialists,
 `portal_scope_requests`, `server-lib/portalScopePricing.js`,
 `api/scope-approval.js`, and a `stripe-webhook.js` `invoice.paid` handler)
@@ -412,33 +431,51 @@ missing wire-up in this one.
 | Read back (list/detail only, not gated on anything) | `api/companydata.js:349` (roster list select), `:735` (single-member select), `:819` (mapped onto the worker-profile payload) |
 | UI | `src/WorkerProfileDrawer.jsx:31,38,42,51,105,116-137` — chip multi-select, shown only when the **drafted** role is `supervisor` (`:105`); clearing the draft's role away from supervisor clears `departments` in the same setter |
 
-**Nothing reads this column to gate or scope anything yet, and that is
-correct for this phase, not a break.** Per the build spec (summarized in
-CLAUDE.md's task context for this pass): phase 3 (document-level routing)
-will filter a supervisor's dashboard by matching `roster.departments`
-against a `portal_documents` row's routing department(s), and phase 4
-(assignment + compliance) will use it for rule-based assignment targeting
-("assign to everyone in Safety"). Those consuming tables
-(`portal_documents`, `portal_assignment_rules`, and whatever else phases
-2-4 introduce) **do not exist yet** — confirmed by grep, not assumed:
-`grep -rln "portal_documents\|portal_assignment_rules" api/ src/
-server-lib/` returns nothing as of this pass. File the missing read as a
-break only once a phase that's supposed to consume this column ships
-without doing so — not before its consumer exists.
+**Phase 3 (2026-09-29, branch `company-portal-phase-3-routing-notification`)
+is the first real consumer.** Read directly:
 
-**Two things worth re-checking when phase 3 lands, so this doesn't quietly
-repeat an existing break shape on this page:**
-- Whether the eventual routing/assignment reads validate a client-supplied
-  department value the same way `equipment_id`/`site_id` are validated
-  against the caller's own company (§2's `equipment_id` and `site_id`
-  sections) — a `departments` match is a company-scoped roster row on one
-  side already, so the risk is smaller than a bare foreign id, but worth
-  confirming rather than assuming.
-- Whether `document_key`-style gating (§2's `document_key` section) needs
-  to apply to whatever `portal_documents`/`portal_assignment_rules` become
-  — Company Portal is not yet in `server-lib/pricing.js`'s `MODULES` or
-  `ALL_DOC_KEYS`, so a phase-3/4 surface arriving ungated would repeat
-  break #19's original shape (a feature no module sells, reachable free).
+| Side | Where |
+|---|---|
+| Consumed — dashboard scoping | `api/portal.js:587-590` (`list_portal_records`) and `:630-635` (`get_portal_record_detail`) — only for an **individually-identified** supervisor session (`session.role === 'supervisor' && session.userId`); each looks up that caller's own `roster.departments` and keeps only `portal_documents` rows whose `departments` array intersects it (`.some(dep => myDepartments.includes(dep))`) |
+| Consumed — submission email | `api/portal.js`'s `submit_portal` — queries `roster` for `company_id`-scoped, active, `role: 'supervisor'` rows with an email on file, then filters to those whose `departments` intersect the submitted document's `departments`, and emails only that set |
+| Fallback (not a bug) | A **shared-code** supervisor session (no `session.userId` — a pre-cutover company login) has no individual roster row to scope by, so both read actions fall back to unfiltered-within-company, same as every other document type already shows a shared-code supervisor |
+
+This closes the "no consumer yet" note phase 1 recorded above. The two
+re-check items flagged at that time are now answered:
+- **Department-value validation:** confirmed safe by construction, not by
+  an explicit check — the read side never takes a client-supplied
+  department value at all; it always reads the caller's own
+  `roster.departments` row server-side (`api/portal.js:588,631`) and
+  intersects it against `portal_documents.departments`, which was already
+  validated against `PORTAL_DEPARTMENTS` at write time (phase 1,
+  `api/companydata.js:867`, and phase 2, `api/portal.js:309`). There is no
+  bare foreign id on this join for a caller to forge.
+- **`document_key`-style gating:** still not applied. Company Portal is
+  still absent from `server-lib/pricing.js`'s `MODULES` (confirmed:
+  `grep -n "portal" server-lib/pricing.js` → no hits), and the new
+  `src/Dashboard.jsx` Portal tab is gated on the same `roster_enabled`
+  boolean the Roster tab uses (`Dashboard.jsx`'s `TAB_VISIBLE.portal`), not
+  on a doc key or a `MODULES` entry. This is the same open flag carried
+  from the phase-1 and phase-2 entries, not a new break — filed once, not
+  refiled with each phase that touches it.
+
+**Role-model note, Dillon's 2026-09-29 decision, mid-build:** the build
+spec's "Company Admin" persona — a customer-facing admin role distinct
+from worker/supervisor — was **not** built here, and should not be assumed
+to exist by a future pass. This codebase has exactly two customer-facing
+roster roles, `worker` and `supervisor` (`server-lib/docKeyGate.js`'s
+`admin`-exemption comment already establishes founder-only `admin` is
+never a customer role). The spec's "Company Admin sees everything"
+requirement is satisfied instead by a supervisor-tier roster row with
+every one of the 5 `PORTAL_DEPARTMENTS` checked — under the intersection
+logic above, that row's departments superset any document's routing, so it
+sees every document unfiltered. No `company_admin` role, column, or check
+exists anywhere in `api/portal.js` or `roster` — do not go looking for one.
+
+Phase 4 (assignment rules, rule-based targeting like "assign to everyone in
+Safety") remains unbuilt — `portal_assignment_rules` still does not exist
+(`grep -rln "portal_assignment_rules" api/ src/ server-lib/` → no hits as of
+this pass).
 
 ### `equipment_compliance.equipment_id` → `equipment.id`
 Per-machine CVIP / registration / insurance expiry dates. Written and read by
@@ -658,22 +695,34 @@ app (`server-lib/uploadUrls.js`), never a client-supplied path taken at
 face value.
 
 **Deliberately not built in this phase (per the spec, confirmed by grep —
-not assumed):**
-- **`portal_documents.departments`/`.category` have no reader yet.**
-  Written and validated (`api/portal.js:124-126,309`), but nothing filters
-  a worker's document list or a supervisor's dashboard by department, and
-  nothing rolls categories into Platform Analytics — `get_worker_portal_documents`
-  (`api/portal.js:384-394`) shows every active document in the company to
-  every worker, full stop. Phase 3 (document-level routing) is the named
-  consumer. Same §4b shape as `roster.departments` in the phase-1 entry
-  above — correct for this phase, not a break, because the consuming
-  behavior is scoped to a later phase, not silently dropped from this one.
-- **`list_portal_records`/`get_portal_record_detail` have no UI.**
-  `api/portal.js:508-563` — confirmed by `grep -rn "list_portal_records\|get_portal_record_detail" src/` returning only the two definitions' call sites nowhere in `src/`. Phase 3's dashboard-filtering work is the named consumer.
+not assumed), and updated by the phase-3 pass below:**
+- **`portal_documents.departments`/`.category` had no reader as of phase
+  2 — now consumed by phase 3.** Written and validated
+  (`api/portal.js:124-126,309`); as of the `company-portal-phase-3-routing-notification`
+  branch, `departments` gates a supervisor's dashboard (see §2's
+  `roster.departments` entry above for the file:line evidence) and gates
+  the submission-notification email. **`category` still has no reader** —
+  nothing rolls it into Platform Analytics or groups the new Document
+  Library by it (`src/Dashboard.jsx`'s Portal tab shows `category` as a
+  label only, `d.category || "No category"`, not as a filter or grouping
+  key). Worker-side, `get_worker_portal_documents` (`api/portal.js:384-394`)
+  is unchanged by phase 3 and still shows every active document in the
+  company to every worker regardless of department — department scoping
+  landed for the supervisor dashboard only, not the worker's own document
+  list. Not a break: the build spec scopes phase 3 to supervisor/admin
+  dashboards, and a worker has no `roster.departments` value to scope by
+  in the first place (phase 1 only ever populates it on a supervisor-tier
+  row, `api/companydata.js:864-865`).
+- **`list_portal_records`/`get_portal_record_detail` had no UI as of phase
+  2 — now wired.** `api/portal.js:508-563` (original code, lines shifted by
+  phase 3's edits) is called from `src/Dashboard.jsx`'s new Portal tab
+  (`loadPortalRecords`/`openPortalRecord`, wired to `activeTab === "portal"`)
+  as of the phase-3 branch. Confirmed: `grep -n "list_portal_records\|get_portal_record_detail" src/Dashboard.jsx`
+  now returns hits, where the phase-2 pass's grep returned none.
 - **Escalation is phase 5, not built.** `escalation_department`/
   `escalation_condition` on `portal_questions`, and a `portal_escalations`
   table, are absent from the migration on purpose (migration comment,
-  `company-portal-phase2-migration.sql:12-17`).
+  `company-portal-phase2-migration.sql:12-17`), and untouched by phase 3.
 - **Company Portal is still not in `server-lib/pricing.js`'s `MODULES`.**
   Confirmed: `grep -n "portal" server-lib/pricing.js` → no hits. `api/portal.js`
   calls neither `requireDocKey` nor `docKeyGate` anywhere (confirmed by
