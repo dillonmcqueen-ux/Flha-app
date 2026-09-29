@@ -33,5 +33,6 @@ create index if not exists platform_events_company_created_idx on public.platfor
 -- key in api/*.js is the real access boundary; there are no policies.
 alter table public.platform_events enable row level security;
 
--- NOT YET APPLIED to the live FORA Supabase project. Apply only on Dillon's
--- explicit yes, via mcp__Supabase__apply_migration.
+-- APPLIED to the live FORA Supabase project (wzyvbtzxxdcxgvbkcqmt) via
+-- mcp__Supabase__apply_migration, migration name "platform_events", on 2026-09-29,
+-- after Dillon's explicit yes. Verified: RLS on, zero policies.
