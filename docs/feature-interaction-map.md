@@ -3565,7 +3565,18 @@ api/companydata.js api/admin.js`.
 
 ### #40 (P4) — Portal submissions and escalations are absent from Overview Recent Activity, Site Activity and Analytics
 
-**Severity: low-medium. Status: OPEN, not approved.** `recentActivityList`
+**Severity: low-medium. Status: PARTLY FIXED on branch `fix-portal-p4`,
+approved by Dillon; stays open until its PR merges, and Site Activity and
+Analytics are still open.** The Recent Activity half is built: Portal
+submissions (`type: "portal"`) and open escalations (`type:
+"portalescalation"`) are merged into `recentActivityList` only when
+`TAB_VISIBLE.portal` is on, with `DOC_TYPE_META` entries, a tone in
+`feedTone`, a status line in the row renderer, and click-through in
+`openWeekDoc` (a submission opens the record card, an escalation opens the
+Portal Escalations sub-tab). Not done: `siteActivity` and `src/Analytics.jsx`
+(a bigger change, and custom documents share the same gap, so it wants one
+decision for both). The text below is the original finding, written before the
+fix. `recentActivityList`
 (`src/Dashboard.jsx:4248-4257`) merges eight built-in lists plus
 `walletActivity` and no Portal source. `siteActivity` (`:4262`) is fed
 `fieldSiteActivity(companyFlhas, companyToolbox, companyDaily,
