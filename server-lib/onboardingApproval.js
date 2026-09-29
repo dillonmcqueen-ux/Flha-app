@@ -35,6 +35,7 @@ import { parseSiteLines, parseUserLines, randomToken } from './onboardingHelpers
 import { runOnboardingDrafts } from './onboardingDrafting.js';
 import { sendEmail, siteOrigin } from './email.js';
 import { allDocumentSettingsOn, documentSettingsFor } from './pricing.js';
+import { encryptField, decryptField } from './fieldCrypto.js';
 
 export const CLAIM_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
@@ -266,13 +267,31 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   }
 
   const { roster: parsedRoster, skippedUserLines } = parseUserLines(request.users_list);
+  // Emails the submitter gave on the structured roster form, keyed by
+  // lowercase name. They travel encrypted (people_encrypted) and go into
+  // roster.email encrypted again; a request from before the form change has
+  // none, and a person simply gets no email on file.
+  const emailByName = new Map();
+  try {
+    if (request.people_encrypted) {
+      for (const p of JSON.parse(decryptField(request.people_encrypted))) {
+        if (p && p.name && p.email) emailByName.set(String(p.name).trim().toLowerCase(), p.email);
+      }
+    }
+  } catch (e) {
+    console.error('Could not read onboarding people, roster emails skipped:', e.message);
+  }
   const roster = parsedRoster.map(({ name, role }) => {
     const salt = genSalt();
     // Randomly generated and never surfaced anywhere below — this row
     // only exists so the company has an active roster from minute one;
     // the actual PIN a person will use is whatever the contact sets for
     // them on the claim-link page.
-    return { company_id: companyId, name, role, pin_hash: hashPin(genPin(), salt), pin_salt: salt, active: true };
+    const email = emailByName.get(name.toLowerCase());
+    return {
+      company_id: companyId, name, role, pin_hash: hashPin(genPin(), salt), pin_salt: salt, active: true,
+      email: email ? encryptField(email) : null,
+    };
   });
   if (roster.length > 0) {
     const { error: rosterErr } = await supabaseAdmin.from('roster').insert(roster);

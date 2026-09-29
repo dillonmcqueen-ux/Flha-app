@@ -340,6 +340,7 @@ export default async function handler(req, res) {
 
         return {
           ...r,
+          people_encrypted: undefined, // ciphertext has no use in the browser
           sop_file_urls,
           siteCount: siteNames.length,
           seatCount,

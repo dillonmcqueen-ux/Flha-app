@@ -9,15 +9,40 @@ import {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USER_LINE_RE = /^(.+?)\s*[—-]\s*(worker|supervisor)$/i;
 
-// Same parser api/admin.js uses when a company is actually created — kept
-// in sync here so a submitter sees exactly which lines will/won't parse
-// before they ever submit, instead of finding out from an admin later.
-function skippedUserLines(usersList) {
-  return (usersList || "")
+// Turns a saved "Name - role" list back into form rows, for an edit link
+// on a request that predates the structured roster (no emails on file).
+function personRowsFromUsersList(usersList) {
+  const rows = (usersList || "")
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter((line) => !USER_LINE_RE.test(line));
+    .map((line) => {
+      const m = line.match(USER_LINE_RE);
+      return m ? { name: m[1].trim(), role: m[2].toLowerCase(), email: "" } : null;
+    })
+    .filter(Boolean);
+  return rows.length ? rows : [{ name: "", role: "worker", email: "" }];
+}
+
+const blankPerson = () => ({ name: "", role: "worker", email: "" });
+
+// Same rules as normalizePeople in server-lib/onboardingHelpers.js, so a
+// submitter hears about a problem before uploading anything. Returns the
+// first problem as a sentence, or "" when the roster is fine.
+function peopleProblem(people) {
+  const filled = people.filter((p) => p.name.trim() || p.email.trim());
+  if (filled.length === 0) return "Add at least one person to your team.";
+  const seen = new Set();
+  for (const p of filled) {
+    const name = p.name.trim();
+    const email = p.email.trim();
+    if (!name) return "Every person needs a name.";
+    if (p.role === "supervisor" && !email) return `${name} is a supervisor, so an email address is required.`;
+    if (email && !EMAIL_RE.test(email)) return `The email for ${name} doesn't look valid.`;
+    if (seen.has(name.toLowerCase())) return `${name} is listed twice. Add a last initial to tell them apart.`;
+    seen.add(name.toLowerCase());
+  }
+  return "";
 }
 
 // Public onboarding intake — no login required. A brand-new customer lands
@@ -95,7 +120,7 @@ const styles = {
 
 const emptyForm = {
   companyName: "", contactName: "", contactEmail: "", contactPhone: "", address: "",
-  sitesList: "", unitsList: "", usersList: "", customRequest: "",
+  sitesList: "", unitsList: "", customRequest: "",
 };
 
 // Small header used by every state of this screen (loading / already
@@ -173,6 +198,7 @@ export default function Onboarding() {
   const [alreadyApproved, setAlreadyApproved] = useState(false);
   const [adminNote, setAdminNote] = useState("");
   const [savedEditToken, setSavedEditToken] = useState("");
+  const [people, setPeople] = useState([blankPerson()]);
 
   // Self-serve edit: a submitter returning via their emailed edit link (or
   // one an admin sent after flagging something with update_onboarding_status)
@@ -196,8 +222,12 @@ export default function Onboarding() {
           companyName: r.company_name || "", contactName: r.contact_name || "",
           contactEmail: r.contact_email || "", contactPhone: r.contact_phone || "",
           address: r.address || "", sitesList: r.sites_list || "", unitsList: r.units_list || "",
-          usersList: r.users_list || "", customRequest: r.custom_request || "",
+          customRequest: r.custom_request || "",
         });
+        setPeople(Array.isArray(r.people) && r.people.length
+          ? r.people.map((p) => ({ name: p.name || "", role: p.role === "supervisor" ? "supervisor" : "worker", email: p.email || "" }))
+          : personRowsFromUsersList(r.users_list));
+        if (r.peopleUnreadable) setError("We couldn't load the email addresses you gave us. Please re-enter them before saving.");
         setAdminNote(r.admin_note || "");
         setAgreed(true); // already agreed once, at original submission
       } catch (e) {
@@ -210,7 +240,13 @@ export default function Onboarding() {
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const siteLines = form.sitesList.split("\n").map((s) => s.trim()).filter(Boolean);
-  const badUserLines = skippedUserLines(form.usersList);
+  const setPerson = (i, key) => (e) => {
+    const value = e.target.value;
+    setPeople((rows) => rows.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
+  };
+  const addPerson = () => setPeople((rows) => [...rows, blankPerson()]);
+  const removePerson = (i) => setPeople((rows) => (rows.length > 1 ? rows.filter((_, j) => j !== i) : [blankPerson()]));
+  const rosterProblem = peopleProblem(people);
   const emailLooksValid = !form.contactEmail.trim() || EMAIL_RE.test(form.contactEmail.trim());
 
   const handleFiles = (e) => {
@@ -282,8 +318,8 @@ export default function Onboarding() {
       setError("List at least one site, yard, or location — one per line.");
       return;
     }
-    if (form.usersList.trim().split("\n").map((s) => s.trim()).filter(Boolean).length === 0) {
-      setError('List at least one person — one per line, e.g. "Mike Reyes — worker".');
+    if (rosterProblem) {
+      setError(rosterProblem);
       return;
     }
 
@@ -313,7 +349,9 @@ export default function Onboarding() {
           address: form.address.trim(),
           sitesList: form.sitesList.trim(),
           unitsList: form.unitsList.trim(),
-          usersList: form.usersList.trim(),
+          people: people
+            .filter((p) => p.name.trim() || p.email.trim())
+            .map((p) => ({ name: p.name.trim(), role: p.role, email: p.email.trim() })),
           customRequest: form.customRequest.trim(),
           sopFilePaths,
           sopPathTokens,
@@ -482,13 +520,30 @@ export default function Onboarding() {
               <div style={styles.sectionTitle}>Your team</div>
             </div>
 
-            <div style={styles.label}>Users <span style={styles.required}>*</span></div>
-            <div style={styles.hint}>One per line — name and role, e.g. "Mike Reyes — worker" or "Sarah Kaur — supervisor". At least one is required.</div>
-            <textarea style={styles.textarea} value={form.usersList} onChange={set("usersList")} placeholder={"Mike Reyes — worker\nSarah Kaur — supervisor"} />
-            {badUserLines.length > 0 && (
-              <div style={styles.fieldError}>
-                These lines won't be recognized — use "Name — worker" or "Name — supervisor": {badUserLines.join("; ")}
+            <div style={styles.label}>People <span style={styles.required}>*</span></div>
+            <div style={styles.hint}>
+              Everyone who will use FORA. Supervisors need an email address, since that is where document notifications and reports go. A worker's email is optional. Emails are stored encrypted.
+            </div>
+            {people.map((p, i) => (
+              <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "center" }}>
+                <input style={{ ...styles.input, flex: "1 1 160px", width: "auto" }} value={p.name} onChange={setPerson(i, "name")} placeholder="Full name" aria-label={`Name, person ${i + 1}`} />
+                <select style={{ ...styles.input, flex: "0 0 130px", width: "130px" }} value={p.role} onChange={setPerson(i, "role")} aria-label={`Role, person ${i + 1}`}>
+                  <option value="worker">Worker</option>
+                  <option value="supervisor">Supervisor</option>
+                </select>
+                <input style={{ ...styles.input, flex: "2 1 200px", width: "auto" }} type="email" value={p.email} onChange={setPerson(i, "email")}
+                  placeholder={p.role === "supervisor" ? "Email (required)" : "Email (optional)"} aria-label={`Email, person ${i + 1}`} />
+                <button type="button" onClick={() => removePerson(i)} aria-label={`Remove person ${i + 1}`}
+                  style={{ ...styles.input, flex: "0 0 44px", width: 44, padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <X size={16} />
+                </button>
               </div>
+            ))}
+            <button type="button" onClick={addPerson} style={{ ...styles.fileBtn, width: "auto", marginTop: 4 }}>
+              + Add another person
+            </button>
+            {rosterProblem && people.some((p) => p.name.trim() || p.email.trim()) && (
+              <div style={styles.fieldError}>{rosterProblem}</div>
             )}
             <div style={{ marginBottom: 6 }} />
           </div>
