@@ -731,11 +731,18 @@ not assumed), and updated by the phase-3 pass below:**
   (`api/portal.js:390,407,452-454`); a document's mere existence as an
   active row is what currently gates a company having Portal at all — same
   shape break #19 was before Fleet Overview/Compliance got sorted into BASE
-  vs. a real module. Flagged already at the phase-1 entry above; not
-  refiled as a new break, since it is the same open item, not a new one.
+  vs. a real module. Flagged already at the phase-1 entry above; **still
+  true as of phase 3** — the new `src/Dashboard.jsx` Portal tab is gated on
+  `roster_enabled`, not a doc key or a `MODULES` entry (see the
+  `roster.departments` section above) — not refiled as a new break, since
+  it is the same open item, not a new one.
 
-**Break #32, filed by this pass:** Portal submissions don't show up in a
-worker's own document history. See below.
+**Break #32, filed at the phase-2 pass:** Portal submissions don't show up
+in a worker's own document history. See below. **Re-confirmed still open
+as of the phase-3 pass** — phase 3 only touches supervisor/admin dashboard
+reads and the submission-notification email; it does not add anything to
+`api/customforms.js`'s `get_my_documents`. Re-check: `grep -n "portal"
+api/customforms.js src/MyDocuments.jsx` → still no hits in either file.
 
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
@@ -2956,10 +2963,15 @@ addition).
 
 ### #32 — A worker's own Portal submissions don't show up in My Forms
 
-**Severity: medium. Status: open, not approved, not worked.** Filed by
-this pass, distinct from the phase-3/4/5 items recorded above — those are
-deferrals the build spec names on purpose; this one is not planned in any
-future phase, so it will not fix itself when a later phase ships.
+**Severity: medium. Status: open, not approved, not worked.** Filed at the
+phase-2 pass, distinct from the phase-3/4/5 items recorded above — those
+are deferrals the build spec names on purpose; this one is not planned in
+any future phase, so it will not fix itself when a later phase ships.
+**Re-confirmed still open at the phase-3 pass (2026-09-29,
+`company-portal-phase-3-routing-notification`)** — that phase built
+supervisor/admin dashboard reads and a submission-notification email, both
+unrelated to the worker's own document history; it does not touch
+`api/customforms.js` or `src/MyDocuments.jsx` at all.
 
 `src/MyDocuments.jsx` ("My Forms") is a worker's history of everything
 they've submitted, resumed via `api/customforms.js`'s `get_my_documents`
