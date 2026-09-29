@@ -616,6 +616,70 @@ rides along" pattern but **are** validated against the caller's company on
 submit (`equipmentScope.js`, comments at `logs.js:154-157,161-163`). The
 attendee/crew `rosterId` skips that step entirely.
 
+### `portal_documents.id` → `portal_questions`/`portal_records`/`portal_answers` (Company Portal phase 2 — Document engine v2)
+New tables, recorded 2026-09-29 against the uncommitted working tree that
+added `docs/schema/company-portal-phase2-migration.sql` (applied live),
+`server-lib/portalFieldTypes.js` (the 8 field types: `yesno`, `short_text`,
+`number`, `date`, `dropdown`, `multiselect`, `signature`, `file_upload` —
+generalizing `custom_form_questions`' yes/no-only shape), `api/portal.js`
+(new file, admin builder + worker submit + supervisor/admin view actions),
+`src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` (worker
+submission, registered in `WorkerMenu.jsx:38`'s `RESUBMIT_HANDLERS` as
+`portalform`), and `src/PortalDocumentBuilder.jsx` (admin builder, wired
+into `AdminPanel.jsx:1407` as a founder-only "Document Builder" tab,
+`:31`). This is phase 1's `roster.departments` finally getting a table on
+the other side of it — but that table isn't the consumer yet either; see
+below.
+
+| Table | Join | Where |
+|---|---|---|
+| `portal_documents.id` | → `portal_questions.document_id` (cascade delete) | `api/portal.js:293-294` (read), `:305-353` (`publish_document` — wholesale question replace on edit, insert on create) |
+| `portal_documents.id` | → `portal_records.document_id` | `api/portal.js:448-470` (submit, company-scope-checked at `:449`) |
+| `portal_records.id` | → `portal_answers.record_id` (cascade delete) | `api/portal.js:485-497` — only an answer whose `question_id` belongs to the submitted document is accepted (`questionById` map, `:482-487`), same guard shape as `api/customforms.js`'s `submit_custom` |
+| `portal_records.site_id` → `sites.id` | validated against caller's company | `api/portal.js:444-447`, `:401-404` (`get_active_portal_document`) |
+| `portal_records.submitted_by_roster_id` | stamped server-side via `authorRosterId(session)` | `api/portal.js:466` — same unforgeable pattern as break #3's `submitted_by_roster_id` on the nine original document tables, not the client-asserted shape break #31 found on toolbox/FLHA secondary signers |
+| `portal_records.client_submission_id` | idempotency key for the offline-drain retry path | `api/portal.js:456-460,472-476` — same shape as `custom_form_records.client_submission_id` |
+
+**Read every file listed above.** Two new private Supabase Storage buckets
+back this: `portal-sources` (admin-uploaded source documents for
+`ai_draft_document`'s vision/document call — a real Anthropic vision block,
+`api/portal.js:179-182`, not a stub) and `portal-attachments` (worker
+per-question signature/file_upload answers, `api/portal.js:492`). Both go
+through the same signed-upload-receipt model as every other bucket in this
+app (`server-lib/uploadUrls.js`), never a client-supplied path taken at
+face value.
+
+**Deliberately not built in this phase (per the spec, confirmed by grep —
+not assumed):**
+- **`portal_documents.departments`/`.category` have no reader yet.**
+  Written and validated (`api/portal.js:124-126,309`), but nothing filters
+  a worker's document list or a supervisor's dashboard by department, and
+  nothing rolls categories into Platform Analytics — `get_worker_portal_documents`
+  (`api/portal.js:384-394`) shows every active document in the company to
+  every worker, full stop. Phase 3 (document-level routing) is the named
+  consumer. Same §4b shape as `roster.departments` in the phase-1 entry
+  above — correct for this phase, not a break, because the consuming
+  behavior is scoped to a later phase, not silently dropped from this one.
+- **`list_portal_records`/`get_portal_record_detail` have no UI.**
+  `api/portal.js:508-563` — confirmed by `grep -rn "list_portal_records\|get_portal_record_detail" src/` returning only the two definitions' call sites nowhere in `src/`. Phase 3's dashboard-filtering work is the named consumer.
+- **Escalation is phase 5, not built.** `escalation_department`/
+  `escalation_condition` on `portal_questions`, and a `portal_escalations`
+  table, are absent from the migration on purpose (migration comment,
+  `company-portal-phase2-migration.sql:12-17`).
+- **Company Portal is still not in `server-lib/pricing.js`'s `MODULES`.**
+  Confirmed: `grep -n "portal" server-lib/pricing.js` → no hits. `api/portal.js`
+  calls neither `requireDocKey` nor `docKeyGate` anywhere (confirmed by
+  grep — no hits in the file). `portal_documents.is_active` is the only gate
+  a submission or a worker's document list passes through
+  (`api/portal.js:390,407,452-454`); a document's mere existence as an
+  active row is what currently gates a company having Portal at all — same
+  shape break #19 was before Fleet Overview/Compliance got sorted into BASE
+  vs. a real module. Flagged already at the phase-1 entry above; not
+  refiled as a new break, since it is the same open item, not a new one.
+
+**Break #32, filed by this pass:** Portal submissions don't show up in a
+worker's own document history. See below.
+
 ### `portal_scope_requests.approval_token` (the Ted pipeline's one join key)
 Recorded 2026-09-28 against the uncommitted working tree that added
 `api/scope-approval.js`, `server-lib/portalScopePricing.js`,
@@ -2832,6 +2896,51 @@ company before insert, the same shape `equipmentScope.js` already provides
 for `equipment_id`. No migration; no schema change (`rosterId` is already
 free-form inside jsonb, so tightening is a server-side check, not a column
 addition).
+
+### #32 — A worker's own Portal submissions don't show up in My Forms
+
+**Severity: medium. Status: open, not approved, not worked.** Filed by
+this pass, distinct from the phase-3/4/5 items recorded above — those are
+deferrals the build spec names on purpose; this one is not planned in any
+future phase, so it will not fix itself when a later phase ships.
+
+`src/MyDocuments.jsx` ("My Forms") is a worker's history of everything
+they've submitted, resumed via `api/customforms.js`'s `get_my_documents`
+action. Read the handler directly:
+
+```
+grep -n "portal" api/customforms.js src/MyDocuments.jsx
+→ no matches in either file
+```
+
+`get_my_documents` (`api/customforms.js:405-445`) queries `flhas`,
+`inspections`, `toolbox_talks`, `daily_reports`, `incidents`,
+`near_misses`, `inspection_records` (via `inspection_forms`) and
+`custom_form_records` (via `custom_forms`) — eight sources, all matched by
+`submitted_by`/`worker_name`/`presenter_name`/`reporter_name` against the
+logged-in session's name. `portal_records` is not one of them, and nothing
+elsewhere in either file references it.
+
+**Consequence:** a worker who fills out a Portal document has no screen to
+find it again. They can't pull up their own signed PDF, can't see it was
+received, and can't resume a Portal draft the way `WorkerMenu.jsx:38`'s
+`RESUBMIT_HANDLERS.portalform` lets them resume a Portal submission stuck
+in the *offline queue* — that's a different, narrower recovery path
+(client-side, pre-submit) than "see my past submissions" (server-side,
+post-submit), and only the first one exists for Portal today. Every other
+document type in the product gets both.
+
+*The fix would touch:* `api/customforms.js`'s `get_my_documents` — add a
+`portal_records` query (joined through `portal_documents` for the title/
+icon the way monthly inspections join through `inspection_forms` at
+`:433-439`, and matched on `submitted_by_roster_id` the way the nine
+break-#3 tables already can be, rather than a name-string match, since
+`portal_records.submitted_by_roster_id` is stamped server-side and
+therefore trustworthy) — and `src/MyDocuments.jsx`'s render/type-mapping
+list. No schema change; the column data already exists.
+
+*Re-check:* `grep -n "portal" api/customforms.js src/MyDocuments.jsx` — an
+empty result means the gap is still open.
 
 ## 4b. The recurring shape: a key written and never read
 
