@@ -436,7 +436,7 @@ is the first real consumer.** Read directly:
 
 | Side | Where |
 |---|---|
-| Consumed — dashboard scoping | `api/portal.js:587-590` (`list_portal_records`) and `:630-635` (`get_portal_record_detail`) — only for an **individually-identified** supervisor session (`session.role === 'supervisor' && session.userId`); each looks up that caller's own `roster.departments` and keeps only `portal_documents` rows whose `departments` array intersects it (`.some(dep => myDepartments.includes(dep))`) |
+| Consumed — dashboard scoping | `api/portal.js:587-590` (`list_portal_records`) and `:634-637` (`get_portal_record_detail`) — only for an **individually-identified** supervisor session (`session.role === 'supervisor' && session.userId`); each looks up that caller's own `roster.departments` and keeps only `portal_documents` rows whose `departments` array intersects it (`.some(dep => myDepartments.includes(dep))`) |
 | Consumed — submission email | `api/portal.js`'s `submit_portal` — queries `roster` for `company_id`-scoped, active, `role: 'supervisor'` rows with an email on file, then filters to those whose `departments` intersect the submitted document's `departments`, and emails only that set |
 | Fallback (not a bug) | A **shared-code** supervisor session (no `session.userId` — a pre-cutover company login) has no individual roster row to scope by, so both read actions fall back to unfiltered-within-company, same as every other document type already shows a shared-code supervisor |
 
@@ -445,7 +445,7 @@ re-check items flagged at that time are now answered:
 - **Department-value validation:** confirmed safe by construction, not by
   an explicit check — the read side never takes a client-supplied
   department value at all; it always reads the caller's own
-  `roster.departments` row server-side (`api/portal.js:588,631`) and
+  `roster.departments` row server-side (`api/portal.js:588,635`) and
   intersects it against `portal_documents.departments`, which was already
   validated against `PORTAL_DEPARTMENTS` at write time (phase 1,
   `api/companydata.js:867`, and phase 2, `api/portal.js:309`). There is no
