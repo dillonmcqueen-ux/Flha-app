@@ -7,6 +7,8 @@
 // server-lib/uploadUrls.js) so it doesn't count against Vercel's
 // per-function budget.
 
+import { recordPlatformEvent } from './platformEvents.js';
+
 // `attachments` (optional) is Resend's own shape: [{ filename, content }]
 // where content is a base64 string — used by Gatehouse's daily report
 // email (api/gatehouse.js) to attach the generated PDF directly rather
@@ -22,22 +24,33 @@
 export async function sendEmail({ to, subject, text, from = 'FORA <notifications@reports.forafieldsolutions.com>', attachments }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn(`sendEmail skipped (RESEND_API_KEY not set): "${subject}" to ${to}`);
+    await recordPlatformEvent(null, { eventType: 'email_send', status: 'skipped', subtype: 'no_api_key' });
     return;
   }
   const body = { from, to, subject, text };
   if (attachments && attachments.length > 0) body.attachments = attachments;
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
+  // Telemetry records the outcome only: never the address, subject or body.
+  const startedAt = Date.now();
+  let res;
+  try {
+    res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    await recordPlatformEvent(null, { eventType: 'email_send', status: 'error', subtype: 'network', metrics: { latency_ms: Date.now() - startedAt } });
+    throw e;
+  }
   if (!res.ok) {
     const body2 = await res.text();
+    await recordPlatformEvent(null, { eventType: 'email_send', status: 'error', subtype: 'http_' + res.status, metrics: { http_status: res.status, latency_ms: Date.now() - startedAt, has_attachment: !!(attachments && attachments.length) } });
     throw new Error(`Resend API error: ${res.status} ${body2}`);
   }
+  await recordPlatformEvent(null, { eventType: 'email_send', status: 'ok', metrics: { latency_ms: Date.now() - startedAt, has_attachment: !!(attachments && attachments.length) } });
 }
 
 // Best-effort origin resolution for links embedded in emails — prefers the
