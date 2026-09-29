@@ -28,6 +28,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 // see the header of server-lib/compliance.js for why it lives outside src/.
 import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, COMPLIANCE_DOC_TYPES, complianceDocLabel } from "../server-lib/compliance.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
+import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
@@ -2236,6 +2237,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // Phase 4 — assignment rollup ("who's outstanding, due date, overdue in
   // red"). Status is computed server-side, not stored.
   const [portalAssignmentRows, setPortalAssignmentRows] = useState([]);
+  const [assignDocId, setAssignDocId] = useState("");
   const [loadingPortalAssignments, setLoadingPortalAssignments] = useState(false);
   // Phase 5 — question-level escalation. Deliberately a separate list from
   // the Inbox above: an escalation can route to a different department
@@ -6290,6 +6292,30 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   </div>
                 ))
               )
+            )}
+
+            {portalSubTab === "assignments" && (
+              <div style={{ background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary, marginBottom: 4 }}>Assign a document</div>
+                {portalLibraryDocs.length === 0 ? (
+                  <div style={{ fontSize: 13, color: C.text.faint }}>No Portal documents yet.</div>
+                ) : (
+                  <>
+                    <select
+                      value={assignDocId}
+                      onChange={e => setAssignDocId(e.target.value)}
+                      aria-label="Document to assign"
+                      style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: RAD.sm, border: `1.5px solid ${C.line}`, background: C.panel, color: C.text.primary, fontSize: 13.5, marginBottom: 12 }}
+                    >
+                      <option value="">Choose a document...</option>
+                      {portalLibraryDocs.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}
+                    </select>
+                    {assignDocId && (
+                      <PortalAssignmentRules key={assignDocId} token={token} companyId={selectedCompany} documentId={assignDocId} onChanged={loadPortalAssignments} />
+                    )}
+                  </>
+                )}
+              </div>
             )}
 
             {portalSubTab === "assignments" && (
