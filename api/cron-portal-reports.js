@@ -10,6 +10,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { isDue, runSchedule } from '../server-lib/portalReports.js';
+import { recordPlatformEvent } from '../server-lib/platformEvents.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -28,6 +29,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized.' });
   }
 
+  const startedAt = Date.now();
   try {
     const { data: schedules, error } = await supabaseAdmin
       .from('portal_report_schedules').select('*').eq('active', true);
@@ -49,9 +51,15 @@ export default async function handler(req, res) {
         results.push({ id: schedule.id, error: true });
       }
     }
+    const failed = results.filter((r) => r.error).length;
+    await recordPlatformEvent(supabaseAdmin, {
+      eventType: 'cron_run', subtype: 'portal_reports', status: failed > 0 ? 'error' : 'ok',
+      metrics: { ran: results.length, failed, duration_ms: Date.now() - startedAt },
+    });
     return res.status(200).json({ ran: results.length, results });
   } catch (e) {
     console.error('cron-portal-reports failed:', e.message);
+    await recordPlatformEvent(supabaseAdmin, { eventType: 'cron_run', subtype: 'portal_reports', status: 'error', metrics: { duration_ms: Date.now() - startedAt } });
     return res.status(500).json({ error: 'Portal report run failed.' });
   }
 }
