@@ -1600,7 +1600,7 @@ function PortalRecordCard({ data, onClose, token }) {
   if (!data) return null;
   const { record, document, site, items } = data;
   const accent = C.orange;
-  const routeDepartments = (document?.departments || []).length ? document.departments : PORTAL_DEPARTMENTS;
+  const routeDepartments = document?.departments || [];
   const chosenDept = emailDept || routeDepartments[0];
   const emailToDepartment = async () => {
     setEmailState({ busy: true, text: "", bad: false });
@@ -1641,7 +1641,7 @@ function PortalRecordCard({ data, onClose, token }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+        {routeDepartments.length > 0 && <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
           <select value={chosenDept} onChange={e => setEmailDept(e.target.value)} aria-label="Department to email"
             style={{ background: "#1D1D1D", color: "#E4E4E7", border: "1px solid #242424", borderRadius: 8, padding: "7px 10px", fontSize: 13 }}>
             {routeDepartments.map(d => <option key={d} value={d}>{PORTAL_DEPARTMENT_LABELS[d] || d}</option>)}
@@ -1651,7 +1651,7 @@ function PortalRecordCard({ data, onClose, token }) {
             {emailState.busy ? "Sending..." : "Email to department"}
           </button>
           {emailState.text && <span style={{ fontSize: 12.5, color: emailState.bad ? "#F87171" : "#4ADE80" }}>{emailState.text}</span>}
-        </div>
+        </div>}
 
         {record.ai_summary && (
           <div style={{ background: "#1A1A1A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>

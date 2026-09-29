@@ -1064,7 +1064,7 @@ Rules:
       }
       const list = Array.isArray(recipients) ? recipients.map(e => String(e || '').trim()).filter(Boolean) : [];
       if (list.length > 20) return res.status(400).json({ error: 'Up to 20 extra email addresses per schedule.' });
-      const bad = list.find(e => !isValidEmail(e));
+      const bad = list.find(e => !isValidEmail(e) || /[,;<>()"]/.test(e));
       if (bad) return res.status(400).json({ error: `"${bad}" doesn't look like a valid email address.` });
       const includeSupers = includeDepartmentSupervisors !== false;
       if (!includeSupers && list.length === 0) return res.status(400).json({ error: 'Add at least one email address, or include the department\'s supervisors.' });
@@ -1147,6 +1147,10 @@ Rules:
       if (session.role === 'supervisor' && doc.company_id !== session.companyId) return denied();
       const mine = await myDepartmentList();
       if (mine && !(doc.departments || []).some(dep => mine.includes(dep))) return denied();
+      // A supervisor can only send a record to a department the document is
+      // actually routed to, so this can't be used to push a document at a
+      // department that isn't meant to see it. Admin is unrestricted.
+      if (session.role !== 'admin' && !(doc.departments || []).includes(department)) return denied();
 
       try {
         const result = await emailRecordToDepartment(supabaseAdmin, { companyId: doc.company_id, record, documentTitle: doc.title, department });
