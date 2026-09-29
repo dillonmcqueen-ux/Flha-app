@@ -7,7 +7,7 @@ import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { generateAndUploadDaily } from "./generateDailyPDF";
 import { generateAndUploadMonthlyInspection } from "./generateMonthlyInspectionPDF";
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
-import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel } from "./Analytics";
+import { SafetyAnalyticsPanel, EquipmentAnalyticsPanel, PortalAnalyticsPanel } from "./Analytics";
 import CollapsibleGroup from "./CollapsibleGroup";
 import Sidebar from "./Sidebar";
 import TimeClockMap from "./TimeClockMap";
@@ -4272,8 +4272,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
    .sort((a, b) => new Date(b.doc.created_at) - new Date(a.doc.created_at))
    .slice(0, 8);
 
-  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents, siteNamesById)
-    .map(s => ({ ...s, total: s.flhas + s.toolbox + s.daily + s.nearMisses + s.incidents, needsAttention: s.nearMisses + s.incidents > 0 }))
+  // Map break #40: Portal submissions and every custom document family join
+  // Site Activity through the one `extras` argument, so this card counts the
+  // same paperwork as Recent Activity above it.
+  const siteActivity = fieldSiteActivity(companyFlhas, companyToolbox, companyDaily, companyNearMisses, companyIncidents, siteNamesById, {
+    portal: TAB_VISIBLE.portal ? portalRecords : [],
+    custom: companyCustomDocs,
+  })
+    .map(s => ({ ...s, total: s.flhas + s.toolbox + s.daily + s.portal + s.custom + s.nearMisses + s.incidents, needsAttention: s.nearMisses + s.incidents > 0 }))
     .filter(s => s.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 5);
@@ -6440,7 +6446,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               title={`${company?.name || ""} — Portal`}
               subtitle={portalSubTab === "inbox"
                 ? "Documents and escalations routed to your department(s). Company Portal documents — the customer's own paperwork, built by FORA."
-                : "Every Portal document built for this company. View only — changes go through FORA's document builder."}
+                : portalSubTab === "analytics"
+                  ? "Submission, escalation and assignment trends for the documents routed to your department(s)."
+                  : "Every Portal document built for this company. View only — changes go through FORA's document builder."}
             />
 
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -6451,6 +6459,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <button style={styles.tab(portalSubTab === "escalations")} onClick={() => setPortalSubTab("escalations")}>
                 Escalations {portalEscalations.filter(e => e.status === "open").length > 0 ? `(${portalEscalations.filter(e => e.status === "open").length})` : ""}
               </button>
+              <button style={styles.tab(portalSubTab === "analytics")} onClick={() => setPortalSubTab("analytics")}>Analytics</button>
             </div>
 
             {portalSubTab === "inbox" && (
@@ -6553,6 +6562,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   );
                 })
               )
+            )}
+
+            {portalSubTab === "analytics" && (
+              <PortalAnalyticsPanel
+                companyName={company?.name}
+                records={portalRecords}
+                escalations={portalEscalations}
+                assignmentRows={portalAssignmentRows}
+                siteNames={siteNamesById}
+              />
             )}
 
             {portalSubTab === "reports" && (
