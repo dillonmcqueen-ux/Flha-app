@@ -29,6 +29,8 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, COMPLIANCE_DOC_TYPES, complianceDocLabel } from "../server-lib/compliance.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
+import PortalReports from "./PortalReports.jsx";
+import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
@@ -1592,10 +1594,29 @@ function CustomDocCard({ data, onClose, onSave }) {
 // upload), unlike CustomDocCard's single boolean shape, and there is no
 // edit path for a Portal submission yet (phase 3 is dashboard viewing
 // only; editing would need its own field-type-aware form, not built here).
-function PortalRecordCard({ data, onClose }) {
+function PortalRecordCard({ data, onClose, token }) {
+  const [emailDept, setEmailDept] = useState("");
+  const [emailState, setEmailState] = useState({ busy: false, text: "", bad: false });
   if (!data) return null;
   const { record, document, site, items } = data;
   const accent = C.orange;
+  const routeDepartments = (document?.departments || []).length ? document.departments : PORTAL_DEPARTMENTS;
+  const chosenDept = emailDept || routeDepartments[0];
+  const emailToDepartment = async () => {
+    setEmailState({ busy: true, text: "", bad: false });
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "email_portal_record", token, recordId: record.id, department: chosenDept }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || "Couldn't send that email.");
+      setEmailState({
+        busy: false, bad: out.recipientCount === 0 || out.sent === 0,
+        text: out.recipientCount === 0 ? "No supervisors with an email on file in that department." : `Sent to ${out.sent} address${out.sent === 1 ? "" : "es"}.`,
+      });
+    } catch (e) { setEmailState({ busy: false, text: e.message, bad: true }); }
+  };
 
   const renderValue = (it) => {
     if (it.field_type === "yesno") return it.value_text === "yes" ? "YES" : "NO";
@@ -1618,6 +1639,18 @@ function PortalRecordCard({ data, onClose }) {
             {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: accent, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+          <select value={chosenDept} onChange={e => setEmailDept(e.target.value)} aria-label="Department to email"
+            style={{ background: "#1D1D1D", color: "#E4E4E7", border: "1px solid #242424", borderRadius: 8, padding: "7px 10px", fontSize: 13 }}>
+            {routeDepartments.map(d => <option key={d} value={d}>{PORTAL_DEPARTMENT_LABELS[d] || d}</option>)}
+          </select>
+          <button onClick={emailToDepartment} disabled={emailState.busy}
+            style={{ background: "#1D1D1D", color: "#E4E4E7", border: "1px solid #242424", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            {emailState.busy ? "Sending..." : "Email to department"}
+          </button>
+          {emailState.text && <span style={{ fontSize: 12.5, color: emailState.bad ? "#F87171" : "#4ADE80" }}>{emailState.text}</span>}
         </div>
 
         {record.ai_summary && (
@@ -5042,7 +5075,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       {selectedEquipmentReport && <EquipmentReportCard data={selectedEquipmentReport} onClose={() => { setSelectedEquipmentReport(null); setEquipmentPdfError(""); }} error={equipmentPdfError} />}
       {selectedTimeClockReport && <TimeClockReportCard data={selectedTimeClockReport} onClose={() => { setSelectedTimeClockReport(null); setTimeClockPdfError(""); }} error={timeClockPdfError} />}
       {selectedCustomDocRecord && <CustomDocCard data={selectedCustomDocRecord} onClose={() => setSelectedCustomDocRecord(null)} onSave={saveCustomDocRecordEdit} />}
-      {selectedPortalRecord && <PortalRecordCard data={selectedPortalRecord} onClose={() => setSelectedPortalRecord(null)} />}
+      {selectedPortalRecord && <PortalRecordCard data={selectedPortalRecord} token={token} onClose={() => setSelectedPortalRecord(null)} />}
       {showThisWeekModal && (
         <ThisWeekDocsCard docs={docsThisWeekList} meta={DOC_TYPE_META} certifications={companyCertifications} onOpen={openWeekDoc} onClose={() => setShowThisWeekModal(false)} />
       )}
@@ -6235,6 +6268,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
               <button style={styles.tab(portalSubTab === "inbox")} onClick={() => setPortalSubTab("inbox")}>Inbox {portalRecords.length > 0 ? `(${portalRecords.length})` : ""}</button>
               <button style={styles.tab(portalSubTab === "library")} onClick={() => setPortalSubTab("library")}>Document Library {portalLibraryDocs.length > 0 ? `(${portalLibraryDocs.length})` : ""}</button>
+              <button style={styles.tab(portalSubTab === "reports")} onClick={() => setPortalSubTab("reports")}>Reports</button>
               <button style={styles.tab(portalSubTab === "assignments")} onClick={() => setPortalSubTab("assignments")}>Assignments {portalAssignmentRows.length > 0 ? `(${portalAssignmentRows.length})` : ""}</button>
               <button style={styles.tab(portalSubTab === "escalations")} onClick={() => setPortalSubTab("escalations")}>
                 Escalations {portalEscalations.filter(e => e.status === "open").length > 0 ? `(${portalEscalations.filter(e => e.status === "open").length})` : ""}
@@ -6341,6 +6375,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   );
                 })
               )
+            )}
+
+            {portalSubTab === "reports" && (
+              <PortalReports key={selectedCompany} token={token} companyId={selectedCompany} />
             )}
 
             {portalSubTab === "escalations" && (
