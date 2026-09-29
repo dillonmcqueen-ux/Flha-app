@@ -768,7 +768,9 @@ Rules:
       const { data: docRows } = await supabaseAdmin
         .from('portal_documents').select('id, company_id, departments').eq('id', documentId).limit(1);
       const doc = docRows && docRows[0];
-      if (!doc) return { status: 404, error: 'Document not found.' };
+      // A supervisor gets the same answer for "no such document" and "not
+      // yours", so probing ids can't reveal what exists in another company.
+      if (!doc) return session.role === 'admin' ? { status: 404, error: 'Document not found.' } : { status: 403, error: 'Not allowed.' };
       if (session.role === 'admin') return { doc };
       if (doc.company_id !== session.companyId) return { status: 403, error: 'Not allowed.' };
       if (session.userId) {
@@ -843,7 +845,9 @@ Rules:
       const { ruleId } = req.body;
       if (!ruleId) return res.status(400).json({ error: 'Missing rule id.' });
       const { data: ruleRows } = await supabaseAdmin.from('portal_assignment_rules').select('document_id').eq('id', ruleId).limit(1);
-      if (!ruleRows || !ruleRows[0]) return res.status(404).json({ error: 'Rule not found.' });
+      if (!ruleRows || !ruleRows[0]) {
+        return session.role === 'admin' ? res.status(404).json({ error: 'Rule not found.' }) : res.status(403).json({ error: 'Not allowed.' });
+      }
       const scope = await loadManageableDocument(ruleRows[0].document_id);
       if (scope.error) return res.status(scope.status).json({ error: scope.error });
       // Deleting a rule does not retract assignments it already created —
