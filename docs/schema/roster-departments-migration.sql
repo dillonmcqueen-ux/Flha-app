@@ -1,0 +1,43 @@
+-- docs/schema/roster-departments-migration.sql
+--
+-- Company Portal phase 1 (FORA Company Portal — Build Spec, "Build order").
+-- A department tag on supervisor-tier roster rows — HR, Payroll, Safety,
+-- Maintenance, or Operations Manager — used from phase 3 onward to scope a
+-- supervisor's Portal dashboard to the department(s) their own login holds.
+--
+-- Array, not a single text column with a check constraint: the spec's "Open
+-- decisions, resolved" section calls out that the fixed list should leave
+-- room for a 7th+ department later without a schema migration, and a
+-- supervisor can already legitimately hold more than one (the spec's own
+-- example: "a working supervisor who is also the safety lead"). The fixed
+-- list itself is enforced in application code (api/companydata.js), the
+-- same way custom_forms.category is validated against CATEGORIES rather
+-- than a DB constraint — extending the list later is then a one-line code
+-- change, not a migration.
+--
+-- Company Admin is deliberately NOT one of the values this column holds.
+-- The spec's Permissions table lists "Company Admin" as a department-scope
+-- row, but that access already comes unconditionally from roster.role =
+-- 'admin' (server-lib/docKeyGate.js's requireDocKey treats admin the same
+-- way — implicitly all, never gated by a company-scoped setting). Adding it
+-- here as a selectable tag would be redundant with the role check and would
+-- let a worker or supervisor row be tagged with a department they cannot
+-- actually act as.
+--
+-- Worker rows get no departments (department scoping is a Portal-only,
+-- supervisor-tier concept per the spec), so the default is an empty array
+-- rather than NULL — nothing has to special-case NULL vs. empty when
+-- checking membership later (`departments && ARRAY['safety']` or, from
+-- the application, `.includes()`).
+alter table public.roster
+  add column if not exists departments text[] not null default '{}';
+
+-- ── Verification ─────────────────────────────────────────────────────────
+--
+-- select column_name, data_type, is_nullable, column_default
+-- from information_schema.columns
+-- where table_schema = 'public' and table_name = 'roster'
+--   and column_name = 'departments';
+--
+-- ── Rollback ─────────────────────────────────────────────────────────────
+-- alter table public.roster drop column if exists departments;

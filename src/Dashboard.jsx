@@ -3194,7 +3194,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_worker_profile", token, id: profileRosterId, email: draft.email, phone: draft.phone, role: draft.role }),
+        body: JSON.stringify({ action: "update_worker_profile", token, id: profileRosterId, email: draft.email, phone: draft.phone, role: draft.role, departments: draft.departments }),
       });
       const data = await res.json();
       if (!res.ok) { setProfileSaveError(data.error || "Couldn't save those changes."); setSavingProfile(false); return; }

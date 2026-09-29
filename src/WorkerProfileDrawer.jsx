@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { X, Mail, Phone, HardHat, CircleUserRound, ShieldCheck, MapPin } from "lucide-react";
+import { X, Mail, Phone, HardHat, CircleUserRound, ShieldCheck, MapPin, Building2 } from "lucide-react";
 import TimeClockMap from "./TimeClockMap";
 import CollapsibleGroup from "./CollapsibleGroup";
 import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
+import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
 
 const DOC_LABEL = {
   flha: "FLHA", inspection: "Equipment Inspection", toolbox: "Toolbox Talk",
@@ -27,20 +28,30 @@ export default function WorkerProfileDrawer({
   open, loading, error, profile, certifications, certsModuleActive,
   onClose, onSave, saving, saveError, onToggleActive, togglingActive,
 }) {
-  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker" });
+  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", departments: [] });
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (profile?.member) {
-      setDraft({ email: profile.member.email || "", phone: profile.member.phone || "", role: profile.member.role });
+      setDraft({
+        email: profile.member.email || "", phone: profile.member.phone || "", role: profile.member.role,
+        departments: profile.member.departments || [],
+      });
       setDirty(false);
     }
-  }, [profile?.member?.id, profile?.member?.email, profile?.member?.phone, profile?.member?.role]);
+  }, [profile?.member?.id, profile?.member?.email, profile?.member?.phone, profile?.member?.role, profile?.member?.departments]);
 
   if (!open) return null;
 
   const member = profile?.member;
   const set = (field) => (e) => { setDraft(d => ({ ...d, [field]: e.target.value })); setDirty(true); };
+  const toggleDepartment = (dept) => {
+    setDraft(d => ({
+      ...d,
+      departments: d.departments.includes(dept) ? d.departments.filter(x => x !== dept) : [...d.departments, dept],
+    }));
+    setDirty(true);
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 200, display: "flex", justifyContent: "flex-end" }} onClick={onClose}>
@@ -86,10 +97,46 @@ export default function WorkerProfileDrawer({
               <input style={{ ...inputStyle, marginBottom: 10 }} type="tel" value={draft.phone} onChange={set("phone")} placeholder="No phone on file" />
 
               <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}>Role</label>
-              <select style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }} value={draft.role} onChange={set("role")}>
+              <select
+                style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }}
+                value={draft.role}
+                onChange={(e) => {
+                  const role = e.target.value;
+                  setDraft(d => ({ ...d, role, departments: role === "supervisor" ? d.departments : [] }));
+                  setDirty(true);
+                }}
+              >
                 <option value="worker">Worker</option>
                 <option value="supervisor">Supervisor</option>
               </select>
+
+              {draft.role === "supervisor" && (
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 6 }}>
+                    <Building2 size={12} />Portal departments
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {PORTAL_DEPARTMENTS.map(dept => {
+                      const selected = draft.departments.includes(dept);
+                      return (
+                        <button
+                          key={dept}
+                          type="button"
+                          onClick={() => toggleDepartment(dept)}
+                          style={{
+                            padding: "6px 12px", borderRadius: RAD.pill, cursor: "pointer",
+                            fontSize: 12, fontWeight: 700,
+                            background: selected ? C.status.success.bg : C.panelInset,
+                            color: selected ? C.status.success.text : C.text.muted,
+                            border: `1px solid ${selected ? C.status.success.border : C.line}`,
+                          }}
+                        >{selected ? "✓ " : ""}{PORTAL_DEPARTMENT_LABELS[dept]}</button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.text.faint, marginTop: 6 }}>Scopes this login's Portal dashboard to the departments selected here. Pick none for no Portal access.</div>
+                </div>
+              )}
 
               {member.employeeId && <div style={{ fontSize: 12, color: C.text.faint, marginBottom: 10 }}>Employee ID: <strong style={{ color: C.text.body }}>{member.employeeId}</strong></div>}
 
