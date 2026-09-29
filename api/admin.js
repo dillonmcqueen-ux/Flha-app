@@ -125,6 +125,11 @@ export default async function handler(req, res) {
     // handler because everything above already rejected any session that is
     // not the global ADMIN_CODE login (role 'admin').
     if (action === 'platform_overview') {
+      // The ADMIN_CODE login carries no userId. Requiring that here means a
+      // roster-backed session can never read cross-company data, even if a
+      // roster row's role were ever set to 'admin' (the live table's CHECK
+      // constraint already forbids it; this is the second lock).
+      if (session.userId) return res.status(403).json({ error: 'Not allowed.' });
       try {
         return res.status(200).json(await loadPlatformOverview(supabaseAdmin));
       } catch (e) {
