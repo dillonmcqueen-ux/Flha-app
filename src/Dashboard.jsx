@@ -2237,6 +2237,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // red"). Status is computed server-side, not stored.
   const [portalAssignmentRows, setPortalAssignmentRows] = useState([]);
   const [loadingPortalAssignments, setLoadingPortalAssignments] = useState(false);
+  // Phase 5 — question-level escalation. Deliberately a separate list from
+  // the Inbox above: an escalation can route to a different department
+  // than the document it came from, and only carries the flagged
+  // question/answer, not the whole submission (api/portal.js's
+  // list_escalations / the phase 5 migration's portal_escalations table).
+  const [portalEscalations, setPortalEscalations] = useState([]);
+  const [loadingPortalEscalations, setLoadingPortalEscalations] = useState(false);
+  const [actioningEscalationId, setActioningEscalationId] = useState(null);
   // Drives the live date/time line in the page header. Minute resolution
   // is all it shows, so a 30s tick is plenty.
   const [clockNow, setClockNow] = useState(() => Date.now());
@@ -3274,11 +3282,38 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setLoadingPortalAssignments(false);
   };
 
+  const loadPortalEscalations = async () => {
+    if (!selectedCompany) return;
+    setLoadingPortalEscalations(true);
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_escalations", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setPortalEscalations((data.escalations || []).filter(e => !isAdmin || e.company_id === selectedCompany));
+    } catch (e) { /* leave as-is if the request fails */ }
+    setLoadingPortalEscalations(false);
+  };
+
+  const actionEscalation = async (escalationId) => {
+    setActioningEscalationId(escalationId);
+    try {
+      await fetch("/api/portal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "action_escalation", token, escalationId }),
+      });
+      await loadPortalEscalations();
+    } catch (e) { /* leave as-is if the request fails */ }
+    setActioningEscalationId(null);
+  };
+
   useEffect(() => {
     if (activeTab !== "portal" || !selectedCompany) return;
     loadPortalRecords();
     loadPortalLibrary();
     loadPortalAssignments();
+    loadPortalEscalations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
 
@@ -6195,10 +6230,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 : "Every Portal document built for this company. View only — changes go through FORA's document builder."}
             />
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
               <button style={styles.tab(portalSubTab === "inbox")} onClick={() => setPortalSubTab("inbox")}>Inbox {portalRecords.length > 0 ? `(${portalRecords.length})` : ""}</button>
               <button style={styles.tab(portalSubTab === "library")} onClick={() => setPortalSubTab("library")}>Document Library {portalLibraryDocs.length > 0 ? `(${portalLibraryDocs.length})` : ""}</button>
               <button style={styles.tab(portalSubTab === "assignments")} onClick={() => setPortalSubTab("assignments")}>Assignments {portalAssignmentRows.length > 0 ? `(${portalAssignmentRows.length})` : ""}</button>
+              <button style={styles.tab(portalSubTab === "escalations")} onClick={() => setPortalSubTab("escalations")}>
+                Escalations {portalEscalations.filter(e => e.status === "open").length > 0 ? `(${portalEscalations.filter(e => e.status === "open").length})` : ""}
+              </button>
             </div>
 
             {portalSubTab === "inbox" && (
@@ -6273,6 +6311,41 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         </div>
                       </div>
                       <span style={{ fontSize: 10, fontWeight: 700, borderRadius: RAD.pill, padding: "3px 9px", flexShrink: 0, background: tone.bg, color: tone.text, border: `1px solid ${tone.border}` }}>{label}</span>
+                    </div>
+                  );
+                })
+              )
+            )}
+
+            {portalSubTab === "escalations" && (
+              loadingPortalEscalations ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
+              ) : portalEscalations.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>No escalations routed to your department(s).</div>
+              ) : (
+                portalEscalations.map((e, i) => {
+                  const tone = e.status === "open" ? C.status.danger : C.status.success;
+                  return (
+                    <div key={e.id} style={{ padding: "12px 4px", borderBottom: i < portalEscalations.length - 1 ? `1px solid ${C.line}` : "none", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                      <RowIconTile icon={AlertTriangle} color={tone.text} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{e.document_icon} {e.document_title}</div>
+                        <div style={{ fontSize: 13, color: C.text.body, marginTop: 2 }}>{e.question_text}: <strong>{e.answer_value}</strong></div>
+                        <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                          <MapPin size={11} />{e.site_name} · {e.submitted_by} · {e.submitted_at ? new Date(e.submitted_at).toLocaleDateString("en-CA") : ""}
+                        </div>
+                      </div>
+                      {e.status === "open" ? (
+                        <button
+                          style={{ ...styles.tab(false), flexShrink: 0, fontSize: 11 }}
+                          disabled={actioningEscalationId === e.id}
+                          onClick={() => actionEscalation(e.id)}
+                        >
+                          {actioningEscalationId === e.id ? "…" : "Mark actioned"}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 10, fontWeight: 700, borderRadius: RAD.pill, padding: "3px 9px", flexShrink: 0, background: tone.bg, color: tone.text, border: `1px solid ${tone.border}` }}>ACTIONED</span>
+                      )}
                     </div>
                   );
                 })

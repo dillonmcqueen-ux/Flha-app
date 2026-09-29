@@ -28,3 +28,16 @@ export const PORTAL_FIELD_TYPE_LABELS = Object.fromEntries(PORTAL_FIELD_TYPES.ma
 export function fieldTypeNeedsOptions(fieldType) {
   return PORTAL_FIELD_TYPES.some(t => t.key === fieldType && t.needsOptions);
 }
+
+// Phase 5 (question-level escalation): the field types where a submitted
+// answer has a single discrete "flagged" value worth comparing against —
+// yesno's fixed yes/no, or one option out of a dropdown/multiselect's fixed
+// list. short_text/number/date/signature/file_upload have no fixed
+// "flagged" value to configure ahead of time, so escalation is never
+// offered on them — enforced here so the builder UI and api/portal.js's
+// validation can't drift apart on which types allow it.
+export const ESCALATABLE_FIELD_TYPES = ['yesno', 'dropdown', 'multiselect'];
+
+export function fieldTypeCanEscalate(fieldType) {
+  return ESCALATABLE_FIELD_TYPES.includes(fieldType);
+}

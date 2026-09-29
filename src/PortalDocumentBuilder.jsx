@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { colors as T, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
-import { PORTAL_FIELD_TYPES, fieldTypeNeedsOptions } from "../server-lib/portalFieldTypes";
+import { PORTAL_FIELD_TYPES, fieldTypeNeedsOptions, fieldTypeCanEscalate } from "../server-lib/portalFieldTypes";
 import { Upload, Plus, Trash2, Loader2, FileText, CheckCircle2, AlertTriangle } from "lucide-react";
 
 const C = {
@@ -25,7 +25,7 @@ const s = {
   }),
 };
 
-const emptyQuestion = () => ({ questionText: "", fieldType: "short_text", options: [] });
+const emptyQuestion = () => ({ questionText: "", fieldType: "short_text", options: [], escalationDepartment: null, escalationTriggerValue: null });
 
 export default function PortalDocumentBuilder({ companies, token }) {
   const [companyId, setCompanyId] = useState("");
@@ -141,7 +141,10 @@ export default function PortalDocumentBuilder({ companies, token }) {
       setDraft({
         title: data.document.title, icon: data.document.icon || "📄", category: data.document.category || "",
         departments: data.document.departments || [],
-        questions: (data.questions || []).map(q => ({ questionText: q.question_text, fieldType: q.field_type, options: q.options || [] })),
+        questions: (data.questions || []).map(q => ({
+          questionText: q.question_text, fieldType: q.field_type, options: q.options || [],
+          escalationDepartment: q.escalation_department || null, escalationTriggerValue: q.escalation_trigger_value || null,
+        })),
       });
       setDraftDocumentId(doc.id);
     } catch (e) {
@@ -327,11 +330,43 @@ export default function PortalDocumentBuilder({ companies, token }) {
                   />
                 )}
               </div>
-              <select style={{ ...s.input, width: 150, flexShrink: 0 }} value={q.fieldType} onChange={e => updateQuestion(i, { fieldType: e.target.value, options: fieldTypeNeedsOptions(e.target.value) ? q.options : [] })}>
+              <select
+                style={{ ...s.input, width: 150, flexShrink: 0 }} value={q.fieldType}
+                onChange={e => updateQuestion(i, {
+                  fieldType: e.target.value, options: fieldTypeNeedsOptions(e.target.value) ? q.options : [],
+                  escalationDepartment: fieldTypeCanEscalate(e.target.value) ? q.escalationDepartment : null,
+                  escalationTriggerValue: fieldTypeCanEscalate(e.target.value) ? q.escalationTriggerValue : null,
+                })}
+              >
                 {PORTAL_FIELD_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
               <button onClick={() => removeQuestion(i)} style={{ background: "transparent", border: "none", color: C.status.danger.text, cursor: "pointer", padding: 8, flexShrink: 0 }}><Trash2 size={16} /></button>
             </div>
+
+            {fieldTypeCanEscalate(q.fieldType) && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.line}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <AlertTriangle size={14} color={C.status.danger.text} />
+                <span style={{ fontSize: 12, color: C.muted, fontWeight: 700 }}>Escalate if answer is</span>
+                <select
+                  style={{ ...s.input, width: 160 }}
+                  value={q.escalationTriggerValue || ""}
+                  onChange={e => updateQuestion(i, { escalationTriggerValue: e.target.value || null, escalationDepartment: e.target.value ? (q.escalationDepartment || PORTAL_DEPARTMENTS[0]) : null })}
+                >
+                  <option value="">— none —</option>
+                  {(q.fieldType === "yesno" ? ["yes", "no"] : (q.options || []).filter(o => o.trim())).map(v => (
+                    <option key={v} value={v}>{q.fieldType === "yesno" ? (v === "yes" ? "Yes" : "No") : v}</option>
+                  ))}
+                </select>
+                {q.escalationTriggerValue && (
+                  <>
+                    <span style={{ fontSize: 12, color: C.muted, fontWeight: 700 }}>send to</span>
+                    <select style={{ ...s.input, width: 170 }} value={q.escalationDepartment || ""} onChange={e => updateQuestion(i, { escalationDepartment: e.target.value })}>
+                      {PORTAL_DEPARTMENTS.map(dept => <option key={dept} value={dept}>{PORTAL_DEPARTMENT_LABELS[dept]}</option>)}
+                    </select>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         ))}
 
