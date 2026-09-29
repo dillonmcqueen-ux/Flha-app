@@ -1320,7 +1320,7 @@ It produces nothing another feature reads. It consumes:
 | `company_document_settings` + `pricing.js` `MODULES` | `document_key` (`:121-126,137-147`) | Modules bought vs used | ⚠️ **#41**: the doc-type list joining them is a second copy |
 | `roster.last_login_at` | `login.js:514` | Active workers | ⚠️ PIN logins only, #41 weak point 1 |
 | `companies`, `onboarding_requests` | `created_at`, `plan_tier`, `stripe_subscription_status`, `status` (`:225-232`) | Sign-ups, plan mix | ✅ |
-| Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | — deliberate |
+| Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | n/a, deliberate |
 | `platform_events` | none found in repo | slice 3c | `?` |
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
@@ -3606,7 +3606,7 @@ documents sees a quiet Recent Activity. *A fix would touch:*
 `src/Analytics.jsx`. Re-check: `grep -n "portalRecords" src/Dashboard.jsx`
 between `:4248` and `:4270` returns nothing.
 
-### #41 — The founder dashboard's document-type list is a second copy nothing checks against the modules
+### #41: The founder dashboard's document-type list is a second copy nothing checks against the modules
 **Severity: low** (founder-facing, no customer loses anything), but it fails silently.
 **Status: OPEN, not approved, no code touched.** Opened 2026-09-29 against `cb9908a`.
 
