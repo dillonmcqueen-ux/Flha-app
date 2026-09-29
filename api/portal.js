@@ -717,12 +717,16 @@ Rules:
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
 
       const { data: recordRows, error: recErr } = await supabaseAdmin.from('portal_records').select('*').eq('id', recordId).limit(1);
-      if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
+      // A supervisor gets the same 403 for "no such record" as for "not
+      // yours", so probing ids can't reveal what exists in another company.
+      if (recErr || !recordRows || recordRows.length === 0) {
+        return session.role === 'admin' ? res.status(404).json({ error: 'Record not found.' }) : res.status(403).json({ error: 'Not allowed.' });
+      }
       const record = { ...recordRows[0], pdf_url: await signStoredUrl(recordRows[0].pdf_url, 'flha-reports') };
 
       const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, title, icon, departments').eq('id', record.document_id).limit(1);
       const document = docRows && docRows[0];
-      if (!document) return res.status(404).json({ error: 'Document not found.' });
+      if (!document) return session.role === 'admin' ? res.status(404).json({ error: 'Document not found.' }) : res.status(403).json({ error: 'Not allowed.' });
       if (session.role === 'supervisor' && document.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
       // Same department scoping as list_portal_records — a saved link must
       // not reach into a record outside a supervisor's own department(s).
@@ -1034,6 +1038,7 @@ Rules:
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { recordId, answers, pdfUrl } = req.body;
       if (!recordId || !Array.isArray(answers)) return res.status(400).json({ error: 'Missing details.' });
+      if (answers.length > 200) return res.status(400).json({ error: 'Too many answers in one request.' });
       const scope = await loadManageableRecord(recordId);
       if (scope.error) return res.status(scope.status).json({ error: scope.error });
 
@@ -1083,9 +1088,28 @@ Rules:
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
       const scope = await loadManageableRecord(recordId);
       if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      // Note the files this record points at BEFORE the rows go, so a real
+      // delete also removes the PDF and any signature/upload attachments
+      // from their private buckets instead of leaving them unreachable.
+      const [{ data: recRows }, { data: ansRows }] = await Promise.all([
+        supabaseAdmin.from('portal_records').select('pdf_url').eq('id', recordId).limit(1),
+        supabaseAdmin.from('portal_answers').select('file_url').eq('record_id', recordId),
+      ]);
+      const pdfPath = pathFromStoredUrl(recRows && recRows[0] && recRows[0].pdf_url, 'flha-reports');
+      const attachmentPaths = (ansRows || []).map(a => pathFromStoredUrl(a.file_url, 'portal-attachments')).filter(Boolean);
+
       // Answers and escalations for this record go with it (both cascade).
       const { error } = await supabaseAdmin.from('portal_records').delete().eq('id', recordId);
       if (error) return res.status(500).json({ error: "Couldn't delete that record." });
+
+      // Best-effort: the record is already gone either way, so a storage
+      // hiccup is logged, not surfaced.
+      try {
+        if (pdfPath) await supabaseAdmin.storage.from('flha-reports').remove([pdfPath]);
+        if (attachmentPaths.length) await supabaseAdmin.storage.from('portal-attachments').remove(attachmentPaths);
+      } catch (e) {
+        console.error('portal record file cleanup failed:', e.message);
+      }
       return res.status(200).json({ ok: true });
     }
 

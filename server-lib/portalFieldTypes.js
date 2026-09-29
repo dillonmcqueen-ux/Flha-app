@@ -50,10 +50,14 @@ export function validateEditedPortalAnswer(fieldType, questionOptions, value) {
   switch (fieldType) {
     case 'yesno': return value === 'yes' || value === 'no' ? null : 'Yes/No answers must be yes or no.';
     case 'short_text': return typeof value === 'string' && value.length <= 2000 ? null : 'Text is too long.';
-    case 'number': return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)) ? null : 'Enter a number.';
-    case 'date': return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : 'Enter a valid date.';
+    case 'number': return typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim()) ? null : 'Enter a number.';
+    case 'date': {
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'Enter a valid date.';
+      const d = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value ? null : 'Enter a valid date.';
+    }
     case 'dropdown': return options.includes(value) ? null : 'Pick one of the listed options.';
-    case 'multiselect': return Array.isArray(value) && value.every(v => options.includes(v)) ? null : 'Pick from the listed options.';
+    case 'multiselect': return Array.isArray(value) && new Set(value).size === value.length && value.every(v => options.includes(v)) ? null : 'Pick from the listed options.';
     default: return "That answer can't be edited.";
   }
 }

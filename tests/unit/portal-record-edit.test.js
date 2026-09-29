@@ -34,3 +34,13 @@ test('signatures and uploads cannot be edited', () => {
   assert.ok(v('file_upload', [], 'x'));
   assert.ok(v('unknown', [], 'x'));
 });
+
+test('stricter number, date and multiselect checks', () => {
+  assert.ok(v('number', [], '0x1F'));
+  assert.ok(v('number', [], '1e5'));
+  assert.equal(v('number', [], '-3.25'), null);
+  assert.ok(v('date', [], '2026-99-99'));
+  assert.ok(v('date', [], '2026-02-30'));
+  assert.equal(v('date', [], '2028-02-29'), null);
+  assert.ok(v('multiselect', ['A', 'B'], ['A', 'A']));
+});
