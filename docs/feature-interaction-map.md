@@ -17,12 +17,20 @@ line that proves it, so it can be re-verified rather than trusted.
 
 **Status:** seeded 2026-09-16 against commit `0bd289c`; last extended
 **2026-09-29 against the uncommitted working tree** that added Company
-Portal phase 1 (Departments) — `roster.departments` (migration applied
-live), `server-lib/portalDepartments.js`, `api/companydata.js`'s
-`update_worker_profile` validation, and `src/WorkerProfileDrawer.jsx`'s
-chip picker. Placed as a new join key in §2 with its own note; producer
-side only, no consumer yet, no break filed — see the changelog. Before
-that, extended 2026-09-28 against the uncommitted working tree that added the Ted
+Portal phase 2 (Document engine v2) — `portal_documents`/`portal_questions`/
+`portal_records`/`portal_answers` (migration applied live),
+`server-lib/portalFieldTypes.js`, new file `api/portal.js`,
+`src/generatePortalDocumentPDF.js`, `src/PortalDocumentForm.jsx` and
+`src/PortalDocumentBuilder.jsx`. Placed as a new join-key section in §2;
+**break #32 filed** (a worker's Portal submissions never show up in My
+Forms) and the phase-3/4/5 deferrals recorded as deliberate, not breaks —
+see the changelog. Same-day, before that, extended against the same working
+tree for Company Portal phase 1 (Departments) — `roster.departments`
+(migration applied live), `server-lib/portalDepartments.js`,
+`api/companydata.js`'s `update_worker_profile` validation, and
+`src/WorkerProfileDrawer.jsx`'s chip picker. Placed as a new join key in §2
+with its own note; producer side only, no consumer yet, no break filed —
+see the changelog. Before that, extended 2026-09-28 against the uncommitted working tree that added the Ted
 client-scoping pipeline (`.claude/agents/ted.md` + three specialists,
 `portal_scope_requests`, `server-lib/portalScopePricing.js`,
 `api/scope-approval.js`, and a `stripe-webhook.js` `invoice.paid` handler)
