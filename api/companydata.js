@@ -17,6 +17,7 @@ import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
+import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -420,6 +421,11 @@ export default async function handler(req, res) {
         console.error("roster add failed:", error.message);
         return res.status(500).json({ error: "Couldn't add to the roster. Try again." });
       }
+      // Company Portal phase 4: "auto-applies to new hires". Best-effort —
+      // see server-lib/portalAssignments.js's header for why a failure here
+      // must never undo the roster row that already saved.
+      try { await applyRulesToNewRosterMember(supabaseAdmin, companyId, data); } catch (e) { console.error('applyRulesToNewRosterMember failed:', e.message); }
+
       return res.status(200).json({ ok: true, member: data, pin });
     }
 
@@ -487,6 +493,9 @@ export default async function handler(req, res) {
         console.error("onboard_new_employee failed:", error.message);
         return res.status(500).json({ error: "Couldn't add to the roster. Try again." });
       }
+
+      // Company Portal phase 4: "auto-applies to new hires".
+      try { await applyRulesToNewRosterMember(supabaseAdmin, companyId, data); } catch (e) { console.error('applyRulesToNewRosterMember failed:', e.message); }
 
       const inviteUrl = `${siteOrigin(req)}/wallet?token=${inviteToken}`;
       let emailSent = false;
