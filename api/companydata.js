@@ -16,6 +16,7 @@ import { siteOrigin, sendEmail } from '../server-lib/email.js';
 import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
+import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -345,7 +346,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -731,7 +732,7 @@ export default async function handler(req, res) {
 
       const { data: rows, error: findErr } = await supabaseAdmin
         .from('roster')
-        .select('id, company_id, name, role, active, email, phone, employee_id, wallet_enabled, last_login_at, created_at, onboarding_completed_at')
+        .select('id, company_id, name, role, active, email, phone, employee_id, wallet_enabled, last_login_at, created_at, onboarding_completed_at, departments')
         .eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       const member = rows[0];
@@ -815,6 +816,7 @@ export default async function handler(req, res) {
           email: member.email, phone: member.phone, employeeId: member.employee_id,
           walletEnabled: member.wallet_enabled, lastLoginAt: member.last_login_at,
           createdAt: member.created_at, onboardingCompletedAt: member.onboarding_completed_at,
+          departments: member.departments || [],
         },
         documents: signedDocuments,
         timeClockEntries,
@@ -832,7 +834,7 @@ export default async function handler(req, res) {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
@@ -851,10 +853,27 @@ export default async function handler(req, res) {
         if (req.body.role !== 'worker' && req.body.role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
         updates.role = req.body.role;
       }
+      // Company Portal phase 1: department scoping is a supervisor-tier
+      // concept (FORA Company Portal — Build Spec, Permissions model) — a
+      // worker row's departments stays '{}' regardless of what's sent, same
+      // as the effective role after this update, not the role on the row
+      // before it, so switching someone to worker in the same request also
+      // clears any departments they held as a supervisor.
+      if ('departments' in req.body) {
+        const effectiveRole = updates.role || rows[0].role;
+        if (effectiveRole !== 'supervisor') {
+          updates.departments = [];
+        } else {
+          if (!Array.isArray(req.body.departments) || req.body.departments.some(d => !PORTAL_DEPARTMENTS.includes(d))) {
+            return res.status(400).json({ error: 'Invalid department.' });
+          }
+          updates.departments = [...new Set(req.body.departments)];
+        }
+      }
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
 
       const { data, error } = await supabaseAdmin.from('roster').update(updates).eq('id', id)
-        .select('id, name, role, email, phone').single();
+        .select('id, name, role, email, phone, departments').single();
       if (error) {
         console.error('update_worker_profile failed:', error.message);
         return res.status(500).json({ error: "Couldn't save those changes." });
