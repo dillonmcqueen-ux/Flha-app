@@ -19,7 +19,10 @@ const DEPARTMENT_LABEL = { hr: 'HR', payroll: 'Payroll', safety: 'Safety', maint
 
 function oneLine(value, max) {
   if (typeof value !== 'string') return '';
-  return value.replace(/\s+/g, ' ').trim().slice(0, max);
+  // Quotes are stripped as well as whitespace: the lines built below wrap
+  // these strings in double quotes, so a stray one could end the quoted span
+  // early and let the rest read as an instruction.
+  return value.replace(/["\u201C\u201D]/g, '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
 // Returns null when there is nothing usable to learn from.
@@ -82,6 +85,10 @@ export function escalationLines(signals) {
     });
 }
 
+// Known limit: the assignment and record reads below use PostgREST's default
+// row cap (about 1000), so a very large tenant's rates are computed from the
+// first page. Counts stay honest for normal tenants; revisit with a
+// count-per-department RPC if a company ever gets there.
 // Loader. Every read is filtered by the company id the caller already
 // resolved; nothing here trusts a client value. Returns [] on any failure or
 // when the company has no Portal documents, so the Brain summary never

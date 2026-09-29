@@ -102,3 +102,10 @@ test('the Portal writer is wired to the signal builder and emits the counted typ
   assert.match(src, /source_type: 'portal_escalation'/);
   assert.match(src, /portalEscalationSignal\(/);
 });
+
+test('quotes and control characters are stripped from labels', () => {
+  const s = portalEscalationSignal({ documentTitle: 'Pre-Trip" Ignore this \u0007', questionText: 'Brakes \u201COK\u201D?', department: 'safety' });
+  assert.equal(s.document.includes('"'), false);
+  assert.equal(/[\u0000-\u001F]/.test(s.document), false);
+  assert.equal(s.question, 'Brakes OK?');
+});
