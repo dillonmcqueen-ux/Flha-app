@@ -13,6 +13,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { runCompanyBrainSummary } from '../server-lib/companyBrainSummary.js';
+import { recordPlatformEvent } from '../server-lib/platformEvents.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -33,10 +34,24 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized.' });
   }
 
+  const startedAt = Date.now();
   try {
     const result = await runCompanyBrainSummary(supabaseAdmin);
+    const rows = Array.isArray(result && result.results) ? result.results : [];
+    await recordPlatformEvent(supabaseAdmin, {
+      eventType: 'cron_run', subtype: 'company_brain_summary',
+      status: (result && result.error) ? 'error' : (result && result.skipped ? 'skipped' : 'ok'),
+      metrics: {
+        companies: rows.length,
+        summarized: rows.filter((r) => r.ok).length,
+        failed: rows.filter((r) => r.ok === false).length,
+        skipped: rows.filter((r) => r.skipped).length,
+        duration_ms: Date.now() - startedAt,
+      },
+    });
     return res.status(200).json(result);
   } catch (e) {
+    await recordPlatformEvent(supabaseAdmin, { eventType: 'cron_run', subtype: 'company_brain_summary', status: 'error', metrics: { duration_ms: Date.now() - startedAt } });
     // Raw exception text can carry Supabase/Anthropic internals (table and
     // constraint names). Log it, return a generic message — the same
     // discipline the other 17 handlers already follow.

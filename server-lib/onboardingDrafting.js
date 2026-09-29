@@ -25,6 +25,8 @@
 // equipment can still be added by hand later. Nothing here ever blocks
 // account creation or credential delivery.
 
+import { recordPlatformEvent, anthropicUsageMetrics } from './platformEvents.js';
+
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5';
 
@@ -37,6 +39,7 @@ const SUPPORTED_SOP_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'imag
 
 async function callAnthropic(content, maxTokens) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
+  const startedAt = Date.now();
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -50,8 +53,12 @@ async function callAnthropic(content, maxTokens) {
       messages: [{ role: 'user', content }],
     }),
   });
-  if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
+  if (!res.ok) {
+    await recordPlatformEvent(null, { eventType: 'ai_generation', status: 'error', subtype: 'onboarding_drafts', metrics: { model: MODEL, http_status: res.status } });
+    throw new Error(`Anthropic API error: ${res.status}`);
+  }
   const data = await res.json();
+  await recordPlatformEvent(null, { eventType: 'ai_generation', status: data.stop_reason === 'max_tokens' ? 'truncated' : 'ok', subtype: 'onboarding_drafts', metrics: anthropicUsageMetrics(data, { model: MODEL, startedAt }) });
   return data?.content?.[0]?.text || '';
 }
 

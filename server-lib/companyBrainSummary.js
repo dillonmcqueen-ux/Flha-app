@@ -24,6 +24,8 @@
 // trusted as instructions, and the model's own output is re-validated
 // into a fixed shape before it's stored.
 
+import { recordPlatformEvent, anthropicUsageMetrics } from './platformEvents.js';
+
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5';
 
@@ -46,6 +48,7 @@ const MAX_SIGNALS_PER_COMPANY_IN_PROMPT = 80;
 
 async function callAnthropic(prompt, maxTokens) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
+  const startedAt = Date.now();
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -59,8 +62,12 @@ async function callAnthropic(prompt, maxTokens) {
       messages: [{ role: 'user', content: prompt }],
     }),
   });
-  if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
+  if (!res.ok) {
+    await recordPlatformEvent(null, { eventType: 'ai_generation', status: 'error', subtype: 'brain_summary', metrics: { model: MODEL, http_status: res.status } });
+    throw new Error(`Anthropic API error: ${res.status}`);
+  }
   const data = await res.json();
+  await recordPlatformEvent(null, { eventType: 'ai_generation', status: data.stop_reason === 'max_tokens' ? 'truncated' : 'ok', subtype: 'brain_summary', metrics: anthropicUsageMetrics(data, { model: MODEL, startedAt }) });
   return data?.content?.[0]?.text || '';
 }
 
