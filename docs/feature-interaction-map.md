@@ -225,6 +225,7 @@ when PR #124 merges).
 | 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:6208`) | `api/companydata.js:1063-1241` | `equipment_compliance` — module `compliance` (`pricing.js:98-103`), added `2560819` |
 | 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:6147`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:302`) | `inspection` |
 | 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6089`) | `api/maintenance.js:415` | `maintenance` |
+| 23 | Founder Dashboard (Platform tab), slice 3a | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221` | *(none on purpose, admin-only, see §5)* |
 
 **The Equipment hub, 2026-09-17, corrected 2026-09-18.** Maintenance and Fuel
 Logs stopped being top-level tabs and became sub-tabs of Equipment, and the hub
@@ -1308,6 +1309,19 @@ supervisor/admin, company-scoped action (`api/companydata.js:857-883`,
 And one new join into PM: **Equipment Inspection → PM for a trailer**, via
 `linked_inspection_id` and the pre-trip's attachment list
 (`maintenance.js:163` → `fleetActivity.js:99-119`). See §2's reading table.
+
+**The founder dashboard as a consumer, 2026-09-29 (`cb9908a`, surface #23).**
+It produces nothing another feature reads. It consumes:
+
+| From ↓ | Join | Shown as | State |
+|---|---|---|---|
+| Nine document tables (`flhas`, `toolbox_talks`, `incidents`, `near_misses`, `daily_reports`, `inspections`, `fuel_logs`, `time_clock_entries`, `worker_certifications`) | `company_id`, `created_at` (`platformOverview.js:201-211,236`) | Documents per day and per type, per-company activity | ✅ |
+| Monthly, Custom, Portal records | `form_id`/`document_id` → parent's `company_id` (`:215-219,238-243`) | Same | ✅ *(a record whose parent was deleted counts in the daily total but credits no company, `:73-75`)* |
+| `company_document_settings` + `pricing.js` `MODULES` | `document_key` (`:121-126,137-147`) | Modules bought vs used | ⚠️ **#41**: the doc-type list joining them is a second copy |
+| `roster.last_login_at` | `login.js:514` | Active workers | ⚠️ PIN logins only, #41 weak point 1 |
+| `companies`, `onboarding_requests` | `created_at`, `plan_tier`, `stripe_subscription_status`, `status` (`:225-232`) | Sign-ups, plan mix | ✅ |
+| Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | — deliberate |
+| `platform_events` | none found in repo | slice 3c | `?` |
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
 join exists in code; it does not say the company can reach it. A company with no
@@ -3592,6 +3606,65 @@ documents sees a quiet Recent Activity. *A fix would touch:*
 `src/Analytics.jsx`. Re-check: `grep -n "portalRecords" src/Dashboard.jsx`
 between `:4248` and `:4270` returns nothing.
 
+### #41 — The founder dashboard's document-type list is a second copy nothing checks against the modules
+**Severity: low** (founder-facing, no customer loses anything), but it fails silently.
+**Status: OPEN, not approved, no code touched.** Opened 2026-09-29 against `cb9908a`.
+
+The dashboard decides what "used" means from its own hand-written list,
+`DOC_TYPES` (`server-lib/platformOverview.js:26-39`), plus a table list
+`DOC_SOURCES` (`:201-211`) and `VIA_PARENT` (`:215-219`). It decides what
+"bought" means from `company_document_settings` rows (`:121-126`). It joins the
+two through `pricing.js` `MODULES[k].docKeys` (`:137-147`, `pricing.js:60-116`).
+Break #6's test (`tests/unit/doc-key-module-invariant.test.js`) keeps
+`BUILTIN_DOC_KEYS` (`api/customforms.js:120`) and `MODULES` in agreement.
+Nothing keeps `DOC_TYPES` in agreement with either:
+`tests/unit/platform-overview.test.js` never references `DOC_TYPES` or
+`MODULES` (grep returned no match).
+
+In product terms: Dillon reads adoption to decide who is getting value and who
+might churn, and it can be wrong without saying so.
+
+- **New doc key added to an existing module** that already has a measurable
+  key: filings under the new key are in no `DOC_TYPES` row, so `filedIn30`
+  (`:131-135`) never sees them and `used` undercounts. No error, no `null`.
+- **New doc key with no module** (the #6 mistake): the module loop
+  (`:137-148`) is driven by `MODULE_KEYS`, so the key appears nowhere on the
+  dashboard at all.
+- **New module whose keys are all new**: this one is *not* silent.
+  `measurable` is false (`:139`) and the row renders `not measurable`
+  (`PlatformDashboard.jsx:149`). Recorded so it is not re-filed.
+
+Today the lists agree. `DOC_TYPES` carries ten doc keys (`:27-36`), and the
+only `MODULES` keys it does not carry are `equipment_reports` (measured through
+its module's `inspection` key), `maintenance` and `equipment_compliance` (no
+filing of their own, the deliberate `not measurable` cases).
+
+**A fix would touch:** one unit test asserting every `docKey` in `MODULES` is
+either a `DOC_TYPES.docKey` or on an explicit "not measurable" list. No
+application code. Same shape as #6's fix.
+**Re-check:** `grep -n "docKey:" server-lib/platformOverview.js` against
+`grep -n "docKeys:" server-lib/pricing.js`.
+
+**Weak points on the same surface, recorded, not filed** (each works as
+designed, but the number means less than its label):
+1. **"Active workers" is PIN logins in the window, not activity.**
+   `roster.last_login_at` is written in exactly one place, `api/login.js:514`
+   (repo-wide grep). The wallet-invite redemption mints a worker session
+   (`:581-591`) without setting it, and a worker on an existing session who
+   never re-enters a PIN does not move it. Read: `platformOverview.js:87`.
+2. **Mixed denominators.** `activeCompanies7/30` are built from every
+   document including a suspended company's (`:67-79`) while `live` and
+   `byTier` exclude suspended companies (`:46,114`) and `bySubscription`
+   includes them (`:116`). Small until a suspended company keeps filing.
+3. **Truncation drops the oldest.** Each table is read newest-first and
+   capped at 20000 rows (`:189-199,221`), so a cap hit makes `total` and the
+   older days a floor. The dashboard says so through `truncated` (`:166`).
+
+**Pending link, not a break:** `platform_events` (task label P1) has no
+reader, and `grep -rn platform_events` across the repo, excluding this map,
+returns nothing at all, so there is no table, writer or reader to verify. `?`
+until slice 3c lands. Distinct from the Portal-sweep P1 (#37).
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -3875,6 +3948,27 @@ Do **not** flag these. They are decisions, not gaps.
   by grep: no `company_admin` string anywhere in `api/portal.js`. A future
   pass should not assume a `company_admin` role was built somewhere else
   in this phase or a later one just because the build spec names one.
+
+### The founder dashboard (Admin Panel > Platform) is deliberately not gated by a company doc key
+
+Verified 2026-09-29 against `cb9908a`. `platform_overview` has no
+`requireDocKey`/`docKeyGate` call (`api/admin.js` never references the gate;
+the action sits at `:127-134` behind the handler-level check at `:112`, which
+answers 403 to anything but a `role: 'admin'` session, minted only for the
+`ADMIN_CODE` login, `api/login.js:1030-1036`). A company must not be able to
+switch off the founder's own view of the platform, so a missing
+`company_document_settings` row here is data to count, not a gate to obey.
+`tests/unit/platform-overview.test.js:121-127` pins the 403 for worker,
+supervisor, missing and garbage tokens, and `:138` pins that no other
+`server-lib` file imports `platformOverview.js` (it takes a service-role client
+and reads across companies). Do not file "ungated surface" against it. Also
+deliberate: Preventative Maintenance and Equipment Compliance report `not
+measurable` (`platformOverview.js:22-25,139,147`, rendered
+`PlatformDashboard.jsx:149`) because they read other documents and file none
+of their own; Custom Document and Company Portal filings count toward activity
+(`:37-38`) but toward no module (`docKey: null`), consistent with Portal not
+being in `pricing.js`. MRR, churn, seat usage and health scores are slice 3b,
+not missing links.
 
 ---
 
