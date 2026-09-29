@@ -446,6 +446,19 @@ export default async function handler(req, res) {
             .in('form_id', customFormIds).order('created_at', { ascending: false }).limit(FETCH_LIMIT)
         : { data: [] };
 
+      // Break #32 — Company Portal submissions (portal_records) have no
+      // company_id column of their own either, scoped through their parent
+      // portal_documents row, same pattern as custom_form_records above.
+      // Not filtered to is_active: a document switched off after a worker
+      // submitted to it should still show up in their own history.
+      const { data: portalDocs } = await supabaseAdmin.from('portal_documents').select('id, title').eq('company_id', session.companyId);
+      const portalDocIds = (portalDocs || []).map(d => d.id);
+      const portalDocMap = {}; (portalDocs || []).forEach(d => { portalDocMap[d.id] = d.title; });
+      const { data: portalRows } = portalDocIds.length
+        ? await supabaseAdmin.from('portal_records').select('id, submitted_by, created_at, pdf_url, document_id')
+            .in('document_id', portalDocIds).order('created_at', { ascending: false }).limit(FETCH_LIMIT)
+        : { data: [] };
+
       const documents = [
         ...(flhaRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...(inspectionRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
@@ -455,6 +468,7 @@ export default async function handler(req, res) {
         ...(nearMissRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...(monthlyRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...(customRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...(portalRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'portalform', title: portalDocMap[r.document_id] || 'Portal Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
       ];
 
       documents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
