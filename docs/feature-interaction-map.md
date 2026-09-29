@@ -225,7 +225,7 @@ when PR #124 merges).
 | 20 | Equipment Compliance | Equipment ▸ Compliance (`Dashboard.jsx:6208`) | `api/companydata.js:1063-1241` | `equipment_compliance` — module `compliance` (`pricing.js:98-103`), added `2560819` |
 | 21 | Weekly Hours | Equipment ▸ Weekly Hours (`Dashboard.jsx:6147`) | `api/equipmentreports.js` (`foldWeeklyUsage`, `:302`) | `inspection` |
 | 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6089`) | `api/maintenance.js:415` | `maintenance` |
-| 23 | Founder Dashboard (Platform tab), slice 3a | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221` | *(none on purpose, admin-only, see §5)* |
+| 23 | Founder Dashboard (Platform tab), slices 3a and 3b | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`); 3b adds Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`, mounted `:159`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221`; 3b is `server-lib/platformBusiness.js` `buildBusinessMetrics`, called at `platformOverview.js:190` | *(none on purpose, admin-only, see §5)* |
 
 **The Equipment hub, 2026-09-17, corrected 2026-09-18.** Maintenance and Fuel
 Logs stopped being top-level tabs and became sub-tabs of Equipment, and the hub
@@ -1322,6 +1322,12 @@ It produces nothing another feature reads. It consumes:
 | `companies`, `onboarding_requests` | `created_at`, `plan_tier`, `stripe_subscription_status`, `status` (`:225-232`) | Sign-ups, plan mix | ✅ |
 | Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | n/a, deliberate |
 | `platform_events` | none found in repo | slice 3c | `?` |
+| `pricing.js` `BASE`, `MODULES`, `MODULE_KEYS`, `TIERS` | `plan_tier` + module `docKeys` (`platformBusiness.js:20,35-43`, `pricing.js:37,60-118`) | Estimated MRR: BASE plus each bought module's price for the tier | ✅ a price change flows straight into the estimate, no second price table |
+| `company_document_settings` | `is_active`, `document_key` (`platformBusiness.js:64-69`, read `platformOverview.js:238`) | "Bought" = any of a module's doc keys active (`platformBusiness.js:37`) | ⚠️ a hand-created company gets all 13 keys on (`admin.js:565`, `pricing.js:255`), so it is priced at every module, list price, in "Not billed via Stripe" |
+| `companies.stripe_subscription_status` | written `stripe-webhook.js:84` and `onboardingApproval.js:198` | Billed / not billed / payment at risk split (`platformBusiness.js:28-29,100-102,174-182`) | ⚠️ see #42 weak point 1: the webhook suspends `canceled`, `unpaid`, `incomplete_expired` (`stripe-webhook.js:46,86`) and the dashboard drops suspended companies (`platformBusiness.js:62`) |
+| `planSeatCap` (`onboardingHelpers.js:90-94`) | `plan_tier` | Seat usage, near cap at 80 percent (`platformBusiness.js:33,104-106,160`) | ❌ **#42**: not the copy that enforces the cap |
+| `roster.last_login_at` | `login.js:514` (same single writer) | Worker logins this week, 30 of the 100 health points (`platformBusiness.js:88-95,138`) | ⚠️ PIN logins only, same weak point as Active workers (#41 weak point 1); a worker on a live session scores as not logged in |
+| `companies.created_at` + first document | `created_at` (`platformBusiness.js:73-79,108-110,171`) | Median days to first document, and the under-14-days "new" band (`:32,125`) | ✅ |
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
 join exists in code; it does not say the company can reach it. A company with no
@@ -3674,6 +3680,56 @@ reader, and `grep -rn platform_events` across the repo, excluding this map,
 returns nothing at all, so there is no table, writer or reader to verify. `?`
 until slice 3c lands. Distinct from the Portal-sweep P1 (#37).
 
+### #42: The dashboard's seat cap is not the copy that enforces the cap
+**Severity: low** (founder-facing, no customer loses anything today, values agree). Opened
+2026-09-29 against `d4217e7` on `founder-dashboard-business`. Needs Dillon's yes before
+any code changes.
+
+The Seats card judges "near cap" with `planSeatCap` (`server-lib/platformBusiness.js:21,105`,
+defined `server-lib/onboardingHelpers.js:90-94`). The cap that actually blocks a company
+adding people is a different constant, `SEAT_CAP_BY_TIER` (`api/companydata.js:219`), read
+at `:362,392,457,582`. Nothing imports one from the other (repo grep: `planSeatCap` is used
+only by `api/admin.js:355` and `platformBusiness.js`). Both say `basic: 10, advanced: 50`
+today, so nothing is wrong. Change one and the dashboard tells the founder a company is or
+is not near a cap it does not hit, silently. They also disagree on an unknown tier:
+enforcement falls back to the basic cap (`companydata.js:362`), the dashboard reports no cap
+(`onboardingHelpers.js:93`, null, so never "near cap").
+
+The slice 3b brief said the seat cap and the dashboard cannot drift. Read against the code,
+that holds only against the onboarding preview's copy, not the enforcing one.
+
+**What a fix would touch:** `api/companydata.js` importing `planSeatCap`/`PLAN_SEAT_CAPS`
+instead of its own constant, plus a test pinning one source. Not done.
+
+**Re-check:** `grep -n "SEAT_CAP_BY_TIER\|PLAN_SEAT_CAPS" api/*.js server-lib/*.js` shows
+two definitions.
+
+**Weak points on slice 3b, recorded, not filed** (each works as coded, the number means less
+than its label):
+1. **"Payment at risk" mostly cannot fire for the worst statuses.** `canceled`, `unpaid` and
+   `incomplete_expired` all set `suspended = true` (`api/stripe-webhook.js:46,86`) and
+   `buildBusinessMetrics` drops suspended companies before anything is summed
+   (`platformBusiness.js:62`). The card says "past due, unpaid or canceled"
+   (`PlatformDashboard.jsx:79`), but in practice only `past_due` and `incomplete` land there
+   unless someone un-suspended the company by hand. A cancellation removes the company
+   from MRR without ever showing as at risk. Churn is not measured here.
+2. **Hand-created companies inflate the estimate.** `create_company` turns all 13 doc keys on
+   (`api/admin.js:565`), so every one counts as owning every module at list price and lands
+   in "Not billed via Stripe" (`platformBusiness.js:177`).
+3. **Logins are PIN logins only**, same source as #41 weak point 1 (`login.js:514`), and
+   they drive 30 of 100 points (`platformBusiness.js:138`).
+4. **Health thresholds are a judgment call, not measured against churn.** Document
+   recency cutoffs 7/14/30 days worth 40/30/15/0 (`:129-132`), logins as the share of active
+   workers seen in 7 days times 30 (`:138`), adoption times 20 with 10 when nothing is
+   measurable (`:142-145`), payment 10 billed, 5 no subscription, 0 at risk (`:148-150`),
+   bands 70/40 (`:52-56`), under 14 days unscored (`:32`), near cap 80 percent (`:33`).
+   Dillon should tune these against real accounts. Companies with no `plan_tier` are unpriced
+   and counted separately (`:166,180`).
+5. **Trial to paid is deliberately absent.** Checkout has no trial. `trialing` counts as
+   billed (`:28`) only because Stripe can report it.
+6. **Truncation** carries over from #41 weak point 3: rows come through the same 20000-row cap
+   (`platformOverview.js:235-238`).
+
 ## 4b. The recurring shape: a key written and never read
 
 Three of the breaks closed in PRs #119 and #120 turned out to have the same
@@ -3976,8 +4032,14 @@ measurable` (`platformOverview.js:22-25,46,146,154`, rendered
 `PlatformDashboard.jsx:149`) because they read other documents and file none
 of their own; Custom Document and Company Portal filings count toward activity
 (`:37-38`) but toward no module (`docKey: null`), consistent with Portal not
-being in `pricing.js`. MRR, churn, seat usage and health scores are slice 3b,
-not missing links.
+being in `pricing.js`. Slice 3b (`d4217e7`) has since added MRR, seat usage and
+health scores. Its MRR deliberately excludes Company Portal engagements, Custom
+Builds and Gatehouse, which are priced outside `pricing.js`
+(`platformBusiness.js:9-11`, note string `:181`); do not file that as a missing
+revenue link. `platformBusiness.js` is pure and imported only by
+`platformOverview.js` (`platformOverview.js:18`, pinned by
+`tests/unit/platform-business.test.js:157-165`). A trial-to-paid metric is absent on
+purpose because checkout has no trial. Churn is not measured (see #42 weak point 1).
 
 ---
 
@@ -4062,3 +4124,4 @@ not missing links.
 | 2026-09-29 | branch `fix-portal-p3` (`b97b231`), PRs #157, #158, #159 | **Company Portal parity sweep, plus everything merged since the last pass.** PR #158 merged (department report emails; `portal_report_schedules` reported applied live by Dillon, not verifiable from code): **#35 and #36 CLOSED**, cron now gated on `companies.roster_enabled`/`suspended` (`cron-portal-reports.js:36-39`), `runSchedule` refuses without `RESEND_API_KEY` (`portalReports.js:128`). PR #157 merged: Overview "Company Portal" panel read (`Dashboard.jsx:5502-5508`), the standing `?` cleared. Sweep filed four breaks: **#37** (Resume on a Portal draft, `WorkerMenu.jsx:221`) CLOSED, PR #159; **#38** (edit, regenerate, delete a submitted Portal record: `update_portal_record` `portal.js:1037`, `delete_portal_record` `:1085`, `validateEditedPortalAnswer` `portalFieldTypes.js:48`, `PortalRecordCard` edit UI, delete also removes stored PDF and attachments) CLOSED, PR #159; **#39** (`delete_site` `companydata.js:1027-1032`, `delete_company` `admin.js:685-731` ignored Portal) approved and FIXED on this branch, closes when its PR merges; **#40** (Portal absent from Overview Recent Activity, Site Activity, Analytics, `Dashboard.jsx:4248-4262`) OPEN, not approved. **#33 amended:** its Unfinished-list fix (PR #151) was incomplete until #37, since Resume went nowhere. `get_portal_record_detail` now returns one generic 403 for missing versus foreign record for non-admin (`portal.js:721-729`). Known, unchanged, now in §5: Portal not in `pricing.js`; Portal answers emit no Brain signals. Map only; no application code touched. |
 | 2026-09-29 | branch `founder-dashboard-activity`, `cb9908a` | **Founder dashboard slice 3a placed on the map.** New surface #23 (Admin Panel > Platform): `api/admin.js:127-134` `platform_overview` → `server-lib/platformOverview.js:221` `loadPlatformOverview`, rendered by `src/PlatformDashboard.jsx` (`AdminPanel.jsx:1408-1409`). Aggregates only, no new table, not gated by a company doc key on purpose (§5). It is a **new consumer** of the doc-key/module invariant (#6) and of `company_document_settings`, `roster.last_login_at`, `companies.created_at`/`plan_tier`/`stripe_subscription_status` and `onboarding_requests`. All nine document tables, the three via-parent tables and the four join names read from resolve against the code (`platformOverview.js:201-219`). **Break #41 opened** (the dashboard's own document-type list is a second copy of the doc-key list and nothing ties it to `pricing.js`, so adoption can undercount silently), not approved, no code touched. Two weak points recorded, not filed: "active workers" counts PIN logins only (`login.js:514` is the only `last_login_at` write; invite-link sessions at `:581-591` never set it), and the totals mix live-only and all-company denominators (`platformOverview.js:67-79` vs `:114-116`). `platform_events` (pending link P1 as named in the task) has **zero** references anywhere in the repo, so it is `?` here: no table, writer or reader can be verified from code. Not to be confused with the existing Portal-sweep P1 (#37). Slices 3b (MRR, churn, seat usage, health scores) and 3c (`platform_events` health) are not built and not mapped. Map only; no application code touched. |
 | 2026-09-29 | branch `founder-dashboard-activity`, `8502cb2` | **#41 BUILT, closed pending merge of its PR** (same convention as #37-#40). Dillon approved it. `server-lib/platformOverview.js` exports `UNMEASURED_DOC_KEYS` (`:46`) and `tests/unit/platform-overview.test.js:148-173` has four guard tests requiring `DOC_TYPES` plus that list to cover `pricing.js` `ALL_DOC_KEYS` (`:124`) exactly, with no stray and no double-listed keys. Read all three files. The builder reported a fake doc key made the test fail clearly, then restored `pricing.js`; this pass did not re-run that. §3 consumer table cell for the module join moved from warning to fine. The dashboard is now the **second consumer of the doc-key/module invariant with its own guard**, alongside #6's `doc-key-module-invariant.test.js`. `UNMEASURED_DOC_KEYS` is three keys, and the export added 8 lines to `platformOverview.js`, so the anchors below line 47 in the #41 entry and §3 table were re-cited (`DOC_SOURCES` `:208-218`, `VIA_PARENT` `:222-226`, module loop `:144-155`, settings read `:126-133`). Other `platformOverview.js` line cites elsewhere in the map (the surface #23 row `:221`, weak points 2 and 3 in #41) were not swept and may sit about 8 lines low. Map only. |
+| 2026-09-29 | branch `founder-dashboard-business`, `d4217e7` | **Founder dashboard slice 3b placed on the map.** New `server-lib/platformBusiness.js` (pure, imported only by `platformOverview.js:18,190`, so it stays behind `api/admin.js`'s founder-only `platform_overview`) adds a `business` section: estimated MRR, seat usage, median days to first document, per-company health score. Rendered as Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`). Tests: `tests/unit/platform-business.test.js`. New consumer rows added to §3 for `pricing.js` (good: one price source), `company_document_settings`, `stripe_subscription_status`, `planSeatCap`, `roster.last_login_at` (PIN logins only) and `created_at`. **Filed #42** (the Seats card uses `planSeatCap`, but enforcement uses a separate `SEAT_CAP_BY_TIER`, `companydata.js:219`, so the brief's claim that they cannot drift does not hold) with six recorded weak points, chiefly that the webhook suspends canceled/unpaid companies so they drop out of MRR and never show as at risk. Health thresholds are a judgment call for Dillon to tune. Tests were not re-run by this pass. Map only. |
