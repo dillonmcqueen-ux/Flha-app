@@ -30,7 +30,7 @@ import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
-import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate } from '../server-lib/portalFieldTypes.js';
+import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -743,11 +743,11 @@ Rules:
       if (ansErr) return res.status(500).json({ error: 'Could not load answers.' });
       const signedAnswers = await signRows(supabaseAdmin, answers, [{ key: 'file_url', bucket: 'portal-attachments' }]);
 
-      const { data: questions } = await supabaseAdmin.from('portal_questions').select('id, question_text, field_type, sort_order').eq('document_id', record.document_id).order('sort_order', { ascending: true });
+      const { data: questions } = await supabaseAdmin.from('portal_questions').select('id, question_text, field_type, sort_order, options').eq('document_id', record.document_id).order('sort_order', { ascending: true });
       const questionMap = {}; (questions || []).forEach(q => { questionMap[q.id] = q; });
 
       const items = signedAnswers
-        .map(a => ({ ...a, question_text: questionMap[a.question_id]?.question_text || 'Unknown question', field_type: questionMap[a.question_id]?.field_type, sort_order: questionMap[a.question_id]?.sort_order ?? 0 }))
+        .map(a => ({ ...a, question_text: questionMap[a.question_id]?.question_text || 'Unknown question', field_type: questionMap[a.question_id]?.field_type, sort_order: questionMap[a.question_id]?.sort_order ?? 0, options: questionMap[a.question_id]?.options || [] }))
         .sort((a, b) => a.sort_order - b.sort_order);
 
       return res.status(200).json({ record, document, site: siteRows && siteRows[0], items });
@@ -1003,6 +1003,89 @@ Rules:
         status: 'actioned', actioned_by_roster_id: authorRosterId(session), actioned_at: new Date().toISOString(),
       }).eq('id', escalationId);
       if (updErr) return res.status(500).json({ error: "Couldn't update escalation." });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ══ SUPERVISOR / ADMIN: correct or remove a submitted record ═════════
+    // Break P2 from the 2026-09-29 parity sweep: the built-in forms all let a
+    // supervisor fix a wrong answer, re-link a regenerated PDF, and delete a
+    // record; Portal had none of the three. Scope is exactly
+    // get_portal_record_detail's: own company, and for an individually-
+    // identified supervisor only documents routed to their department(s),
+    // with one generic 403 for missing/foreign/out-of-department.
+    async function loadManageableRecord(recordId) {
+      const denied = { status: 403, error: 'Not allowed.' };
+      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id').eq('id', recordId).limit(1);
+      const record = recordRows && recordRows[0];
+      if (!record) return session.role === 'admin' ? { status: 404, error: 'Record not found.' } : denied;
+      const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, departments').eq('id', record.document_id).limit(1);
+      const document = docRows && docRows[0];
+      if (!document) return denied;
+      if (session.role === 'supervisor' && document.company_id !== session.companyId) return denied;
+      if (session.role === 'supervisor' && session.userId) {
+        const { data: me } = await supabaseAdmin.from('roster').select('departments').eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+        const mine = (me && me[0] && me[0].departments) || [];
+        if (!(document.departments || []).some(dep => mine.includes(dep))) return denied;
+      }
+      return { record, document };
+    }
+
+    if (action === 'update_portal_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId, answers, pdfUrl } = req.body;
+      if (!recordId || !Array.isArray(answers)) return res.status(400).json({ error: 'Missing details.' });
+      const scope = await loadManageableRecord(recordId);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+
+      // Only ever touch answers that belong to THIS record, and check each
+      // value against its question's field type before writing anything.
+      const [{ data: existing }, { data: questions }] = await Promise.all([
+        supabaseAdmin.from('portal_answers').select('id, question_id').eq('record_id', recordId),
+        supabaseAdmin.from('portal_questions').select('id, field_type, options').eq('document_id', scope.record.document_id),
+      ]);
+      const answerById = new Map((existing || []).map(a => [String(a.id), a]));
+      const questionById = new Map((questions || []).map(q => [String(q.id), q]));
+      const updates = [];
+      for (const a of answers) {
+        const row = a && answerById.get(String(a.id));
+        if (!row) return res.status(400).json({ error: 'One of those answers isn\'t part of this record.' });
+        const q = questionById.get(String(row.question_id));
+        if (!q) return res.status(400).json({ error: 'That question no longer exists.' });
+        const problem = validateEditedPortalAnswer(q.field_type, q.options, a.value);
+        if (problem) return res.status(400).json({ error: problem });
+        updates.push({
+          id: row.id,
+          patch: q.field_type === 'multiselect'
+            ? { value_json: a.value }
+            : { value_text: String(a.value).slice(0, 2000), ...(q.field_type === 'yesno' ? { notes: a.value === 'no' ? (String(a.note || '').slice(0, 2000) || null) : null } : {}) },
+        });
+      }
+      // Escalations already raised are deliberately left alone: they are
+      // snapshots of what was flagged at submission time (see the phase 5
+      // migration), not live views of the answer.
+      for (const u of updates) {
+        const { error } = await supabaseAdmin.from('portal_answers').update(u.patch).eq('id', u.id).eq('record_id', recordId);
+        if (error) return res.status(500).json({ error: "Couldn't save those changes." });
+      }
+
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
+      if (resolvedPdfUrl) {
+        const { error } = await supabaseAdmin.from('portal_records').update({ pdf_url: resolvedPdfUrl }).eq('id', recordId);
+        if (error) return res.status(500).json({ error: "Couldn't save those changes." });
+      }
+      return res.status(200).json({ ok: true, pdfLinked, updated: updates.length });
+    }
+
+    if (action === 'delete_portal_record') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { recordId } = req.body;
+      if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
+      const scope = await loadManageableRecord(recordId);
+      if (scope.error) return res.status(scope.status).json({ error: scope.error });
+      // Answers and escalations for this record go with it (both cascade).
+      const { error } = await supabaseAdmin.from('portal_records').delete().eq('id', recordId);
+      if (error) return res.status(500).json({ error: "Couldn't delete that record." });
       return res.status(200).json({ ok: true });
     }
 

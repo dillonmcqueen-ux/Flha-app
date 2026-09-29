@@ -41,3 +41,19 @@ export const ESCALATABLE_FIELD_TYPES = ['yesno', 'dropdown', 'multiselect'];
 export function fieldTypeCanEscalate(fieldType) {
   return ESCALATABLE_FIELD_TYPES.includes(fieldType);
 }
+
+// Checks one edited answer value against its question's field type. Returns
+// an error string, or null when the value is fine. Signature and file
+// answers are not editable (nothing sensible to type into them).
+export function validateEditedPortalAnswer(fieldType, questionOptions, value) {
+  const options = Array.isArray(questionOptions) ? questionOptions : [];
+  switch (fieldType) {
+    case 'yesno': return value === 'yes' || value === 'no' ? null : 'Yes/No answers must be yes or no.';
+    case 'short_text': return typeof value === 'string' && value.length <= 2000 ? null : 'Text is too long.';
+    case 'number': return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)) ? null : 'Enter a number.';
+    case 'date': return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : 'Enter a valid date.';
+    case 'dropdown': return options.includes(value) ? null : 'Pick one of the listed options.';
+    case 'multiselect': return Array.isArray(value) && value.every(v => options.includes(v)) ? null : 'Pick from the listed options.';
+    default: return "That answer can't be edited.";
+  }
+}
