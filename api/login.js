@@ -19,7 +19,7 @@ import { checkIpThrottle as sharedCheckIpThrottle } from '../server-lib/ipThrott
 import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
-import { withDecryptedEmail } from '../server-lib/fieldCrypto.js';
+import { withDecryptedEmail, encryptField, decryptField } from '../server-lib/fieldCrypto.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
@@ -647,12 +647,26 @@ export default async function handler(req, res) {
 
     const {
       companyName, contactName, contactEmail, contactPhone, address,
-      sitesList, unitsList, usersList, customRequest, sopFilePaths, sopPathTokens, logoUrl,
+      sitesList, unitsList, usersList: rawUsersList, people: rawPeople, customRequest, sopFilePaths, sopPathTokens, logoUrl,
       stripeSessionId, editToken,
     } = req.body;
 
-    const { errors, skippedUserLines } = validateOnboardingIntake({ companyName, contactEmail, sitesList, usersList });
+    const { errors, skippedUserLines, people, usersList } = validateOnboardingIntake({
+      companyName, contactEmail, sitesList, usersList: rawUsersList, people: rawPeople,
+    });
     if (errors.length > 0) return res.status(400).json({ error: errors[0], errors });
+
+    // Personal data: the roster emails are stored encrypted (see
+    // server-lib/fieldCrypto.js), never in the plain-text users_list.
+    let peopleEncrypted = null;
+    if (people && people.length > 0) {
+      try {
+        peopleEncrypted = encryptField(JSON.stringify(people));
+      } catch (e) {
+        console.error('Could not encrypt onboarding people:', e.message);
+        return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
+      }
+    }
 
     const record = {
       company_name: companyName,
@@ -663,6 +677,7 @@ export default async function handler(req, res) {
       sites_list: sitesList || null,
       units_list: unitsList || null,
       users_list: usersList || null,
+      people_encrypted: peopleEncrypted,
       custom_request: customRequest || null,
       // Only paths this submission's own create_onboarding_upload_url
       // calls actually issued survive here — anything else (a guessed or
@@ -823,12 +838,22 @@ export default async function handler(req, res) {
     if (!editToken) return res.status(400).json({ error: 'Missing edit link.' });
     const { data: rows, error } = await supabaseAdmin
       .from('onboarding_requests')
-      .select('company_name, contact_name, contact_email, contact_phone, address, sites_list, units_list, users_list, custom_request, sop_file_paths, logo_url, status, admin_note, created_company_id')
+      .select('company_name, contact_name, contact_email, contact_phone, address, sites_list, units_list, users_list, people_encrypted, custom_request, sop_file_paths, logo_url, status, admin_note, created_company_id')
       .eq('edit_token', editToken)
       .limit(1);
     if (error) return res.status(500).json({ error: 'Could not load your submission.' });
     const request = rows && rows[0];
     if (!request) return res.status(404).json({ error: "That edit link isn't valid." });
+    // Hand the form back its structured rows; the ciphertext itself never
+    // leaves the server. A row that can't be decrypted falls back to the
+    // plain users_list text, which the form already knows how to show.
+    try {
+      request.people = request.people_encrypted ? JSON.parse(decryptField(request.people_encrypted)) : null;
+    } catch (e) {
+      console.error('Could not decrypt onboarding people:', e.message);
+      request.people = null;
+    }
+    delete request.people_encrypted;
     return res.status(200).json({ request });
   }
 
