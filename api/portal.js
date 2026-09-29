@@ -683,6 +683,18 @@ Rules:
       if (targetType === 'individual' && !targetRosterId) {
         return res.status(400).json({ error: 'Pick a person.' });
       }
+      // Not a tenant-isolation gap (applyRuleToExistingRoster below always
+      // re-scopes to the document's own company, so a mismatched id just
+      // matches nobody) — but worth catching here so a rule naming the
+      // wrong company's roster row fails loudly instead of silently never
+      // assigning anyone (tenant-scope-reviewer finding, 2026-09-29).
+      if (targetType === 'individual') {
+        const { data: docForRoster } = await supabaseAdmin.from('portal_documents').select('company_id').eq('id', documentId).limit(1);
+        const { data: rosterForRule } = await supabaseAdmin.from('roster').select('company_id').eq('id', targetRosterId).limit(1);
+        if (!docForRoster?.[0] || !rosterForRule?.[0] || docForRoster[0].company_id !== rosterForRule[0].company_id) {
+          return res.status(400).json({ error: 'That person is not on this document\'s company roster.' });
+        }
+      }
       const { data: rule, error } = await supabaseAdmin
         .from('portal_assignment_rules')
         .insert({
