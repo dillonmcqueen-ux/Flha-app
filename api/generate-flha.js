@@ -3,6 +3,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { recordPlatformEvent, anthropicUsageMetrics } from '../server-lib/platformEvents.js';
 
 // Vercel function timeout. 30s was sized for claude-haiku-4-5; this endpoint
 // now runs claude-opus-5 with extended thinking (see MODEL below), which
@@ -184,6 +185,15 @@ function logSafeDocumentType(documentType) {
   return JSON.stringify(documentType.slice(0, 40));
 }
 
+// Same reasoning as logSafeDocumentType, for the telemetry column: only a
+// known document type is stored, anything else is bucketed as 'other' so a
+// client-supplied string can never become a row value.
+function logSafeSubtype(documentType) {
+  return typeof documentType === 'string' && Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType)
+    ? documentType
+    : 'other';
+}
+
 export function modelForDocumentType(documentType) {
   if (typeof documentType !== 'string') return DEFAULT_MODEL;
   return Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType)
@@ -277,10 +287,17 @@ export default async function handler(req, res) {
   const rateLimitKey = session.userId ? `user:${session.userId}` : `company:${session.companyId}`;
   const allowed = await checkRateLimit(rateLimitKey);
   if (!allowed) {
+    await recordPlatformEvent(supabaseAdmin, { eventType: 'ai_generation', status: 'rate_limited', subtype: logSafeSubtype(documentType), companyId: session.companyId });
     return res.status(429).json({ error: "Too many AI requests. Please wait a few minutes and try again." });
   }
 
   const model = modelForDocumentType(documentType);
+  const startedAt = Date.now();
+  // Telemetry only: outcome, tokens, latency. Never the prompt or the output.
+  const record = (status, data, extra) => recordPlatformEvent(supabaseAdmin, {
+    eventType: 'ai_generation', status, subtype: logSafeSubtype(documentType), companyId: session.companyId,
+    metrics: { ...anthropicUsageMetrics(data, { model, startedAt }), ...(extra || {}) },
+  });
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -312,6 +329,7 @@ export default async function handler(req, res) {
     if (!response.ok) {
       const errText = await response.text();
       console.error(`Anthropic API error: ${response.status} ${errText}`);
+      await record('error', null, { http_status: response.status });
       return res.status(500).json({ error: 'AI generation failed. Try again.' });
     }
 
@@ -329,6 +347,7 @@ export default async function handler(req, res) {
     // makes a refusal distinguishable from an outage afterwards.
     if (data.stop_reason === "refusal") {
       console.error("Anthropic declined the request:", JSON.stringify(data.stop_details || null));
+      await record('refused', data);
       return res.status(200).json({ error: "The AI declined to write this one. Fill it in manually — every field on the next screen is editable." });
     }
 
@@ -349,9 +368,11 @@ export default async function handler(req, res) {
     // blocks the way all eight callers do.
     console.log("Response text length:", (data.content || []).map(b => b.text || "").join("").length);
 
+    await record(data.stop_reason === "max_tokens" ? 'truncated' : 'ok', data);
     res.status(200).json(data);
   } catch (err) {
     console.error('generate-flha handler failed:', err.message);
+    await record('error', null, { http_status: 0 });
     res.status(500).json({ error: 'AI generation failed. Try again.' });
   }
 }
