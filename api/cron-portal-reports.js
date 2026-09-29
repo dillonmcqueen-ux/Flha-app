@@ -33,9 +33,14 @@ export default async function handler(req, res) {
       .from('portal_report_schedules').select('*').eq('active', true);
     if (error) throw new Error(error.message);
 
+    // Same gate as the equipment report cron: a company that is suspended or
+    // has the roster (and so Portal) switched off gets nothing.
+    const { data: companies } = await supabaseAdmin.from('companies').select('id, roster_enabled, suspended');
+    const live = new Set((companies || []).filter((c) => c.roster_enabled && !c.suspended).map((c) => c.id));
+
     const now = new Date();
     const results = [];
-    for (const schedule of (schedules || []).filter((s) => isDue(s, now))) {
+    for (const schedule of (schedules || []).filter((s) => live.has(s.company_id) && isDue(s, now))) {
       try {
         results.push({ id: schedule.id, ...(await runSchedule(supabaseAdmin, schedule, now)) });
       } catch (e) {

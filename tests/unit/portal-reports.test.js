@@ -49,3 +49,56 @@ test('readRecipients survives an unreadable value', () => {
     assert.deepEqual(readRecipients({ id: 2, recipients_encrypted: null }), []);
   } finally { console.error = orig; }
 });
+
+// ── runSchedule: a report nobody can receive must not be marked as sent ──
+import { runSchedule } from '../../server-lib/portalReports.js';
+
+function fakeDb(tables) {
+  const updates = [];
+  const db = {
+    updates,
+    storage: { from: () => ({ createSignedUrls: async () => ({ data: [], error: null }) }) },
+    from(name) {
+      const state = { name, isUpdate: false };
+      const b = {
+        select: () => b, eq: () => b, in: () => b, gt: () => b, not: () => b, order: () => b, limit: () => b,
+        update: (v) => { state.isUpdate = true; updates.push({ table: name, values: v }); return b; },
+        then: (res) => res({ data: state.isUpdate ? null : (tables[name] || []), error: null }),
+      };
+      return b;
+    },
+  };
+  return db;
+}
+
+test('runSchedule leaves last_sent_at alone when there is nobody to send to', async () => {
+  process.env.RESEND_API_KEY = 'test';
+  const db = fakeDb({
+    companies: [{ name: 'Acme' }],
+    portal_documents: [{ id: 1, title: 'Pre-Trip', departments: ['safety'] }],
+    portal_records: [{ id: 9, document_id: 1, submitted_by: 'Mike', created_at: '2026-09-30T10:00:00Z', pdf_url: null }],
+    roster: [], // no supervisors with an email
+  });
+  const r = await runSchedule(db, { id: 5, company_id: 1, name: 'x', department: 'safety', frequency: 'daily', include_department_supervisors: true, recipients_encrypted: null, last_sent_at: null });
+  assert.equal(r.recordCount, 1);
+  assert.equal(r.sent, 0);
+  assert.equal(r.marked, false);
+  assert.equal(db.updates.length, 0);
+});
+
+test('runSchedule marks a quiet day as handled', async () => {
+  process.env.RESEND_API_KEY = 'test';
+  const db = fakeDb({ companies: [{ name: 'Acme' }], portal_documents: [], portal_records: [], roster: [] });
+  const r = await runSchedule(db, { id: 5, company_id: 1, name: 'x', department: 'safety', frequency: 'daily', include_department_supervisors: true, recipients_encrypted: null, last_sent_at: null });
+  assert.equal(r.recordCount, 0);
+  assert.equal(r.marked, true);
+  assert.equal(db.updates.length, 1);
+});
+
+test('runSchedule refuses to run without an email key', async () => {
+  delete process.env.RESEND_API_KEY;
+  const db = fakeDb({});
+  const r = await runSchedule(db, { id: 5, company_id: 1, department: 'safety', frequency: 'daily', last_sent_at: null });
+  assert.equal(r.reason, 'email_not_configured');
+  assert.equal(db.updates.length, 0);
+});

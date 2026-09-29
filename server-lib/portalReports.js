@@ -123,6 +123,9 @@ async function sendEach(addresses, subject, text) {
 // Runs one schedule. `now` is injectable for tests. With nothing new it sends
 // nothing but still marks the schedule as handled for today.
 export async function runSchedule(supabaseAdmin, schedule, now = new Date()) {
+  // sendEmail() silently does nothing without a Resend key, which would look
+  // like success. Refuse to run instead, and leave the schedule untouched.
+  if (!process.env.RESEND_API_KEY) return { recordCount: 0, recipientCount: 0, sent: 0, marked: false, reason: 'email_not_configured' };
   const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', schedule.company_id).limit(1);
   const companyName = (coRows && coRows[0] && coRows[0].name) || 'Your company';
   const records = await gatherRecords(supabaseAdmin, schedule.company_id, schedule.department, sinceFor(schedule, now));
@@ -138,9 +141,11 @@ export async function runSchedule(supabaseAdmin, schedule, now = new Date()) {
     recipientCount = addresses.length;
     const subject = `${companyName}: ${records.length} new ${departmentLabel(schedule.department)} document${records.length === 1 ? '' : 's'}`;
     sent = await sendEach(addresses, subject, digestText({ companyName, scheduleName: schedule.name, department: schedule.department, records }));
-    // Every send failed (or nobody to send to): leave last_sent_at alone so
+    // Nobody to send to, or every send failed: leave last_sent_at alone so
     // the next run tries the same records again instead of dropping them.
-    if (recipientCount > 0 && sent === 0) return { recordCount: records.length, recipientCount, sent, marked: false };
+    // (Marking it handled here once meant a department with no supervisor
+    // email on file lost its documents for good.)
+    if (sent === 0) return { recordCount: records.length, recipientCount, sent, marked: false };
   }
   await supabaseAdmin.from('portal_report_schedules').update({ last_sent_at: now.toISOString() }).eq('id', schedule.id);
   return { recordCount: records.length, recipientCount, sent, marked: true };

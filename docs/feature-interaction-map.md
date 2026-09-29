@@ -3395,8 +3395,14 @@ history UI, unrelated to escalation). Distinct, new item.
 
 ### #35 — A department report with nobody to send to is marked "sent" and its documents are never emailed
 
-**Severity: medium. Status: OPEN, not approved, not worked.** Filed
-2026-09-29 placing `portal-pdf-email` (`ba5f6ab`).
+**Severity: medium. Status: FIXED on branch `portal-pdf-email`, not closed
+until it merges.** Filed 2026-09-29 placing `portal-pdf-email` (`ba5f6ab`).
+This is a bug in the feature's own unmerged code, so it was fixed in the same
+PR rather than waiting for a sweep decision: `runSchedule` now refuses to mark
+a schedule handled whenever `sent === 0` on a non-empty run, refuses to run at
+all without `RESEND_API_KEY`, and the cron skips companies with `roster_enabled`
+off or `suspended` on (the gate noted at the end of this entry's changelog row).
+The text below is the original finding.
 
 A schedule whose department has no active supervisor with a readable email
 (and no hand-added addresses) finds records, sends to nobody, and still

@@ -74,7 +74,13 @@ export default function PortalReports({ token, companyId }) {
     setSendingId(id);
     try {
       const r = await post({ action: "send_report_schedule_now", token, id });
-      setMsg({ text: r.recordCount === 0 ? "Nothing new to send since the last report." : `Sent ${r.recordCount} document${r.recordCount === 1 ? "" : "s"} to ${r.sent} address${r.sent === 1 ? "" : "es"}.`, bad: r.recordCount > 0 && r.sent === 0 });
+      const text = r.reason === "email_not_configured"
+        ? "Email isn't set up on this server yet, so nothing was sent."
+        : r.recordCount > 0 && !r.marked
+          ? "Nothing was sent. Nobody has an email address to receive it. Add an email or give a supervisor in this department an email address. These documents will go out on the next run."
+          : r.recordCount === 0 ? "Nothing new to send since the last report."
+            : `Sent ${r.recordCount} document${r.recordCount === 1 ? "" : "s"} to ${r.sent} address${r.sent === 1 ? "" : "es"}.`;
+      setMsg({ text, bad: r.reason === "email_not_configured" || (r.recordCount > 0 && !r.marked) });
       await load();
     } catch (e) { setMsg({ text: e.message, bad: true }); }
     setSendingId(null);
