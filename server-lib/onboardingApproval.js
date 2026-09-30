@@ -149,7 +149,7 @@ export async function canAutoApprove(supabaseAdmin, stripe, request, skippedUser
 // `rosterPlan` has the plaintext email; `insertedRoster` has the new row ids.
 async function sendOwnerPinLink({ supabaseAdmin, sendEmail, companyName, rosterPlan, insertedRoster }) {
   const owner = rosterPlan.find((p) => p.isOwner && p.email);
-  const member = owner && insertedRoster.find((r) => String(r.name).toLowerCase() === String(owner.name).toLowerCase());
+  const member = owner && insertedRoster.find((r) => r.is_owner === true);
   if (!member) return { sent: 0, failed: 0 };
   const r = await issueAndEmailPinLink({
     supabaseAdmin, sendEmail, member, email: owner.email, companyName,
