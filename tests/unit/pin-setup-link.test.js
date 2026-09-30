@@ -200,3 +200,10 @@ test('the email carries the link and never a PIN, and says what comes next', () 
   assert.ok(!/authenticator/i.test(plain.text));
   assert.ok(/authenticator/i.test(strong.text));
 });
+
+test('typed names cannot turn the email into a long or multi-line message', () => {
+  const e = pinSetupEmail({ name: 'Jo\r\nBcc: x@y.com', companyName: 'A'.repeat(300), url: 'https://x/wallet?token=t', needsAuthenticator: false });
+  assert.ok(!/Hi Jo\r?\n/.test(e.text));
+  assert.ok(e.subject.length < 140);
+  assert.ok(!e.subject.includes('\n'));
+});

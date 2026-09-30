@@ -81,7 +81,15 @@ export async function issuePinSetupLink(supabaseAdmin, { id, company_id }) {
   return { url: `${setupOrigin()}/wallet?token=${encodeURIComponent(ticket)}` };
 }
 
-export function pinSetupEmail({ name, companyName, url, needsAuthenticator }) {
+// Names and company names are typed by other people and land in an email sent
+// from FORA's own domain, so keep them to one short plain line.
+function plainLine(value, max) {
+  return String(value || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+export function pinSetupEmail({ name: rawName, companyName: rawCompany, url, needsAuthenticator }) {
+  const name = plainLine(rawName, 60);
+  const companyName = plainLine(rawCompany, 80) || 'your employer';
   const next = needsAuthenticator
     ? 'You will pick your own 6-digit PIN, then set up an authenticator app on your phone. It takes a few minutes.'
     : 'You will pick your own 6-digit PIN. It takes about a minute.';

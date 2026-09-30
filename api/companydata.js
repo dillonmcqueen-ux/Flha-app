@@ -485,6 +485,11 @@ export default async function handler(req, res) {
         if (clash) return res.status(409).json({ error: `Employee ID ${employeeId} already belongs to ${clash}.` });
       }
 
+      // Every add sends a branded email, and the seat cap only counts active
+      // rows, so add-then-deactivate could otherwise send without limit.
+      const addAllowed = await checkIpThrottle(supabaseAdmin, `addhire:${companyId}`, 30, 60 * 60 * 1000);
+      if (!addAllowed) return res.status(429).json({ error: 'Too many people added this hour. Try again later.' });
+
       const salt = genSalt();
       const pin = genPin(); // placeholder: the new hire chooses their own PIN through the emailed link, this one is never shown or sent
       const { data, error } = await supabaseAdmin
@@ -602,7 +607,7 @@ export default async function handler(req, res) {
 
       const updates = activating
         ? { active: true, deactivated_at: null, failed_pin_attempts: 0, pin_locked_until: null }
-        : { active: false, deactivated_at: new Date().toISOString() };
+        : { active: false, deactivated_at: new Date().toISOString(), pin_link_jti_hash: null, pin_link_expires_at: null }; // a link issued before deactivation must not revive on reactivation
       const { error } = await supabaseAdmin.from('roster').update(updates).eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't update." });
       return res.status(200).json({ ok: true });
