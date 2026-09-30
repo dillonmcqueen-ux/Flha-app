@@ -603,10 +603,16 @@ export default async function handler(req, res) {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
+      }
+      // Same pyramid as reset_roster_mfa: a supervisor resets workers (or
+      // their own PIN), never a peer supervisor's. A new PIN plus a reset
+      // authenticator is a full account takeover.
+      if (session.role === 'supervisor' && rows[0].role !== 'worker' && String(rows[0].id) !== String(session.userId)) {
+        return res.status(403).json({ error: "Only the account owner can reset a supervisor's PIN." });
       }
 
       const salt = genSalt();
@@ -923,6 +929,15 @@ export default async function handler(req, res) {
       }
       if ('role' in req.body) {
         if (req.body.role !== 'worker' && req.body.role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+        // Rank is part of the reset pyramid (server-lib/rosterMfa.js
+        // canResetMfa): a supervisor cannot promote anyone to supervisor or
+        // change a supervisor's role. Otherwise a supervisor demotes a peer,
+        // resets their authenticator and PIN as if they were a worker, then
+        // promotes them back and signs in as them. Only the founder (and the
+        // Account Owner, once that role exists) changes supervisor rank.
+        if (session.role === 'supervisor' && req.body.role !== rows[0].role && (req.body.role === 'supervisor' || rows[0].role === 'supervisor')) {
+          return res.status(403).json({ error: "Only the account owner can change a supervisor's role." });
+        }
         updates.role = req.body.role;
       }
       // Company Portal phase 1: department scoping is a supervisor-tier

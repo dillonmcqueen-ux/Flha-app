@@ -597,6 +597,17 @@ export default async function handler(req, res) {
     if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
     const member = rows && rows[0];
     if (!member || !member.active) return res.status(403).json({ error: 'This account is no longer active. Contact your administrator.' });
+    // The ticket was minted after a correct PIN, up to 10 minutes ago. Honour
+    // anything that changed since: a PIN lockout, or a suspension.
+    if (member.pin_locked_until && new Date(member.pin_locked_until) > new Date()) {
+      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in a few minutes.' });
+    }
+    {
+      const { data: coRows0 } = await supabaseAdmin.from('companies').select('suspended').eq('id', enroll.companyId).limit(1);
+      if (coRows0 && coRows0[0] && coRows0[0].suspended && member.role === 'worker') {
+        return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
+      }
+    }
 
     if (action === 'mfa_enroll_start') {
       const result = await startEnrollment(supabaseAdmin, member);
