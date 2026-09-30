@@ -171,7 +171,7 @@ export default function ClaimAccount() {
           <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
           <div style={{ fontSize: 20, fontWeight: 700, color: "#F97316", marginBottom: 8 }}>You're all set</div>
           <div style={{ fontSize: 14, color: "#9CA3AF", lineHeight: 1.6 }}>
-            Your team can log in now with company code <span style={styles.code}>{company?.company_code}</span> and the PINs you set.
+            Your team can log in now with company code <span style={styles.code}>{company?.company_code}</span> and the PINs they set.
             This link still works if you need to come back and finish anything.
           </div>
         </div>
@@ -179,7 +179,10 @@ export default function ClaimAccount() {
     );
   }
 
-  const allPinsSet = roster.length === 0 || roster.every((m) => pinSaved[m.id]);
+  // A person with an email on file was sent a link to choose their own PIN, so
+  // only people the link could not reach need a PIN typed here.
+  const needsTypedPin = (m) => !m.hasEmail || (!m.linkSent && !m.pinSet);
+  const allPinsSet = roster.length === 0 || roster.every((m) => pinSaved[m.id] || m.pinSet || m.linkSent);
 
   return (
     <div style={styles.wrap}>
@@ -190,26 +193,35 @@ export default function ClaimAccount() {
             Company code: <span style={styles.code}>{company?.company_code}</span>
           </div>
           <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 10 }}>
-            Finish setup below — none of this was emailed to you as plaintext credentials, so this is the only place PINs get set.
+            Finish setup below. No PIN is ever emailed. Everyone with an email address on file was sent a link to choose their own PIN.
           </div>
         </div>
 
         {roster.length > 0 && (
           <div style={styles.card}>
-            <div style={styles.h2}>Assign PINs to your team</div>
-            <div style={styles.hint}>Give each person a 6-digit PIN — they'll use their name + this PIN to log in.</div>
+            <div style={styles.h2}>Your team's PINs</div>
+            <div style={styles.hint}>People with an email address chose their own PIN from the link we sent. Anyone without one needs a 6-digit PIN from you. They sign in with their name and that PIN.</div>
             {roster.map((m) => (
               <div key={m.id} style={styles.row}>
                 <div style={{ width: 200, color: "#fff", fontSize: 14 }}>{m.name} <span style={{ color: "#9CA3AF", fontSize: 12 }}>({m.role})</span></div>
-                <input
-                  style={{ ...styles.input, width: 110 }} inputMode="numeric" maxLength={6}
-                  placeholder="123456"
-                  value={pins[m.id] || ""}
-                  onChange={(e) => setPins((p) => ({ ...p, [m.id]: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                />
-                <button style={styles.primaryBtn} disabled={pinSaving === m.id} onClick={() => savePin(m.id)}>
-                  {pinSaved[m.id] ? "✓ Saved — change" : pinSaving === m.id ? "Saving…" : "Save PIN"}
-                </button>
+                {needsTypedPin(m) ? (
+                  <>
+                    <input
+                      style={{ ...styles.input, width: 110 }} inputMode="numeric" maxLength={6}
+                      placeholder="123456"
+                      value={pins[m.id] || ""}
+                      onChange={(e) => setPins((p) => ({ ...p, [m.id]: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                    />
+                    <button style={styles.primaryBtn} disabled={pinSaving === m.id} onClick={() => savePin(m.id)}>
+                      {pinSaved[m.id] ? "✓ Saved, change" : pinSaving === m.id ? "Saving…" : "Save PIN"}
+                    </button>
+                    {m.hasEmail && <span style={{ fontSize: 12, color: "#FDBA74" }}>Setup link not sent. You can resend it from the roster in the app.</span>}
+                  </>
+                ) : (
+                  <span style={{ fontSize: 13, color: m.pinSet ? "#86EFAC" : "#9CA3AF" }}>
+                    {m.pinSet ? "✓ Chose their own PIN" : "Setup link emailed. Waiting for them."}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -271,7 +283,7 @@ export default function ClaimAccount() {
 
         <div style={{ textAlign: "center", marginBottom: 40 }}>
           <button style={{ ...styles.primaryBtn, opacity: allPinsSet ? 1 : 0.6 }} onClick={finish}>
-            {allPinsSet ? "Finish" : "Finish (some PINs not set yet)"}
+            {allPinsSet ? "Finish" : "Finish (some people have no PIN yet)"}
           </button>
         </div>
       </div>

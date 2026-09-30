@@ -37,6 +37,8 @@ import { runOnboardingDrafts } from './onboardingDrafting.js';
 import { sendEmail, siteOrigin } from './email.js';
 import { allDocumentSettingsOn, documentSettingsFor } from './pricing.js';
 import { encryptField, decryptField } from './fieldCrypto.js';
+import { issueAndEmailPinLink, MAX_LINKS_AT_PROVISION } from './setupLinks.js';
+import { requiresMfa } from './rosterMfa.js';
 
 export const CLAIM_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
@@ -138,9 +140,36 @@ export async function canAutoApprove(supabaseAdmin, stripe, request, skippedUser
   return true;
 }
 
+// Emails each planned person (Owner first) their own set-your-PIN link.
+// `rosterPlan` has the plaintext emails; `insertedRoster` has the new row ids.
+// Matched by name, which is unique within a fresh roster.
+async function sendPinLinksForPlan({ supabaseAdmin, sendEmail, companyName, rosterPlan, insertedRoster }) {
+  const rowByName = new Map(insertedRoster.map((r) => [String(r.name).toLowerCase(), r]));
+  const targets = rosterPlan
+    .filter((p) => p.email && rowByName.has(String(p.name).toLowerCase()))
+    .sort((a, b) => Number(b.isOwner) - Number(a.isOwner))
+    .slice(0, MAX_LINKS_AT_PROVISION);
+  let sent = 0;
+  let failed = 0;
+  const queue = [...targets];
+  const worker = async () => {
+    for (let p = queue.shift(); p; p = queue.shift()) {
+      const member = rowByName.get(String(p.name).toLowerCase());
+      const r = await issueAndEmailPinLink({
+        supabaseAdmin, sendEmail, member, email: p.email, companyName,
+        needsAuthenticator: requiresMfa(member),
+      });
+      if (r.sent) sent++; else failed++;
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  return { sent, failed };
+}
+
 // Creates the company from an onboarding_requests row — company +
-// account number, sites, a placeholder roster (real PINs are assigned by
-// the contact on the claim-link page, never generated/emailed here), the
+// account number, sites, a placeholder roster (each person with an email
+// is emailed a link to set their own PIN; the claim page types PINs only for
+// people with none, and no PIN is ever emailed), the
 // claim token, and a best-effort claim-link email. Never auto-creates
 // equipment or SOPs — those stay AI-drafted-but-unsaved until the contact
 // confirms them (see runOnboardingDrafts / claim_confirm_equipment /
@@ -319,11 +348,22 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
       default_site_id: siteId || null,
     };
   });
+  let insertedRoster = [];
   if (roster.length > 0) {
-    const { error: rosterErr } = await supabaseAdmin.from('roster').insert(roster);
-    if (!rosterErr) await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
-    else console.error('Could not create the onboarding roster (no Owner row exists for this company):', rosterErr.message);
+    const { data: inserted, error: rosterErr } = await supabaseAdmin.from('roster').insert(roster).select('id, company_id, name, role, is_owner, departments, totp_enabled');
+    if (!rosterErr) {
+      insertedRoster = inserted || [];
+      await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
+    } else console.error('Could not create the onboarding roster (no Owner row exists for this company):', rosterErr.message);
   }
+
+  // Everyone with an email gets a link to set their own PIN, so the contact
+  // never types PINs for people who can do it themselves. Owner first, capped
+  // (see MAX_LINKS_AT_PROVISION); the rest, and any failure, are a "Send setup
+  // link" click on the roster. Best-effort: the company exists either way.
+  const pinLinks = await sendPinLinksForPlan({
+    supabaseAdmin, sendEmail, companyName: request.company_name.trim(), rosterPlan, insertedRoster,
+  });
 
   const claimToken = randomToken();
   const claimTokenExpiresAt = new Date(Date.now() + CLAIM_TOKEN_TTL_MS).toISOString();
@@ -347,7 +387,7 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
         text: [
           `Your company code: ${companyCode}`,
           '',
-          `Finish setup — assign PINs to your team, and review the equipment/SOPs we drafted from what you sent:`,
+          `Finish setup: review the equipment and SOPs we drafted from what you sent. Everyone with an email address on file was sent a link to set their own PIN. Anyone without one needs a PIN typed for them on this page:`,
           `${siteOrigin(req)}/claim?token=${claimToken}`,
           '',
           'This link works for the next 14 days.',
@@ -379,6 +419,8 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
     companyCode,
     sitesCreated: siteNames.length,
     rosterCreated: roster.length,
+    pinLinksSent: pinLinks.sent,
+    pinLinksFailed: pinLinks.failed,
     skippedUserLines,
     claimEmailSent,
   };

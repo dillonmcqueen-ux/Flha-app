@@ -7,7 +7,8 @@
 // photo, tapped "Add ticket", and only then learned the plan does not
 // include it. Dillon's call (2026-09-23): the invite carries the flag.
 //
-// redeem_wallet_invite now answers certificationsEnabled: true / false, or
+// The set-your-PIN link (pin_link_set_pin, which replaced redeem_wallet_invite)
+// answers certificationsEnabled: true / false, or
 // null when the settings lookup failed. The screen hides the card only on an
 // explicit false, so a lookup blip never hides a feature the company paid
 // for (the server still refuses the upload either way).
@@ -19,9 +20,11 @@ import http from 'node:http';
 process.env.SESSION_SECRET = 'test-session-secret-for-signing-only';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
-// Invite token encodes the company: 'invite-7' belongs to company 7.
+// The link's ticket names the company. A plain worker gets a session straight
+// after choosing a PIN, and that response is what carries the flag.
 // Company 7 has certifications on, 8 has it off, 9 has no row, 10's lookup fails.
 const SETTINGS = { 7: true, 8: false };
+const JTI = 'test-jti';
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -32,10 +35,12 @@ const server = http.createServer(async (req, res) => {
 
   if (table === 'roster') {
     if (req.method === 'PATCH') return send(200, [{ id: 1 }]);
-    const companyId = Number(eq('wallet_invite_token').replace('invite-', ''));
+    const companyId = Number(eq('company_id'));
     return send(200, [{
       id: 1, name: 'New Hire', email: '', role: 'worker', company_id: companyId, active: true, wallet_enabled: true,
-      wallet_invite_token_expires_at: new Date(Date.now() + 86400000).toISOString(),
+      departments: [], totp_enabled: false,
+      pin_link_jti_hash: hashJti(JTI),
+      pin_link_expires_at: new Date(Date.now() + 86400000).toISOString(),
     }]);
   }
   if (table === 'companies') return send(200, [{ id: Number(eq('id')), name: 'Test Co', app_type: 'safety', suspended: false }]);
@@ -51,23 +56,24 @@ process.env.SUPABASE_URL = `http://127.0.0.1:${server.address().port}`;
 test.after(() => new Promise(r => server.close(r)));
 
 const { default: handler } = await import('../../api/login.js');
+const { hashJti, signPinLinkTicket } = await import('../../server-lib/setupLinks.js');
 
 async function redeem(companyId) {
   const out = { statusCode: null, body: null };
-  await handler({ method: 'POST', body: { action: 'redeem_wallet_invite', inviteToken: `invite-${companyId}` }, headers: {} }, {
+  await handler({ method: 'POST', body: { action: 'pin_link_set_pin', linkToken: signPinLinkTicket({ rosterId: 1, companyId, jti: JTI }), pin: '482913' }, headers: {} }, {
     status(code) { out.statusCode = code; return this; },
     json(payload) { out.body = payload; return this; },
   });
   return out;
 }
 
-test('a company WITH Certification Tracking: the invite says so', async () => {
+test('a company WITH Certification Tracking: the response says so', async () => {
   const out = await redeem(7);
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
   assert.equal(out.body.certificationsEnabled, true);
 });
 
-test('a company with it switched OFF: the invite says false', async () => {
+test('a company with it switched OFF: the response says false', async () => {
   const out = await redeem(8);
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
   assert.equal(out.body.certificationsEnabled, false);
@@ -78,7 +84,7 @@ test('a company with NO settings row: false, same deny-by-default as the upload 
   assert.equal(out.body.certificationsEnabled, false);
 });
 
-test('a failed lookup answers null, not false, and the invite still redeems', async () => {
+test('a failed lookup answers null, not false, and the PIN is still saved', async () => {
   const out = await redeem(10);
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
   assert.equal(out.body.certificationsEnabled, null);

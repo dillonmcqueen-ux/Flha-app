@@ -9,10 +9,10 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { renderTimeClockReportPdf, timeClockReportFilename } from '../server-lib/reportPdfs.js';
 import { buildTimeClockReportForCompanyWeek } from './timeclockreports.js';
-import { randomToken, isValidEmail, effectiveSeatCap } from '../server-lib/onboardingHelpers.js';
+import { isValidEmail, effectiveSeatCap } from '../server-lib/onboardingHelpers.js';
 import { EXPIRY_WARNING_DAYS, expiryStatus } from '../server-lib/compliance.js';
 import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equipmentScope.js';
-import { siteOrigin, sendEmail } from '../server-lib/email.js';
+import { sendEmail } from '../server-lib/email.js';
 import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
@@ -23,6 +23,8 @@ import {
 } from '../server-lib/companyStructure.js';
 import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
+import { issueAndEmailPinLink, issuePinSetupLink } from '../server-lib/setupLinks.js';
+import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 
@@ -32,7 +34,6 @@ const supabaseAdmin = createClient(
 );
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const WALLET_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — matches SESSION_TTL_MS since redeeming just mints an ordinary session
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -354,7 +355,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled, is_owner, title, divisions, default_site_id')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled, is_owner, title, divisions, default_site_id, pin_set_at, pin_link_sent_at')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -439,15 +440,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, member: data, pin });
     }
 
-    // ── Onboarding wallet (Phase 4): a supervisor/admin creates the roster
-    // row and emails the new hire a wallet-invite link directly — same seat
-    // cap / name-collision checks as add_roster_member, plus an email
-    // address and an auto-generated initial PIN the new hire replaces with
-    // their own during onboarding (never emailed in plaintext). Delivery is
+    // ── Add a person and email them a link to set their own PIN. Same seat
+    // cap / name-collision checks as add_roster_member, plus a required email
+    // address. The initial PIN is random and never shown or sent: the person
+    // chooses their own through the link (server-lib/setupLinks.js), and is
+    // taken on into an authenticator setup if their role needs one. Delivery is
     // best-effort: sendEmail() is a no-op if RESEND_API_KEY isn't set, and a
-    // send failure doesn't undo the roster row already created — the
-    // supervisor can still fall back to the existing Admin Panel "Invite"
-    // button for that person.
+    // send failure doesn't undo the roster row already created. The row then
+    // shows as waiting, and "Send setup link" on the roster tries again.
     if (action === 'onboard_new_employee') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const companyId = resolveCompanyId(session, req.body.companyId);
@@ -486,8 +486,7 @@ export default async function handler(req, res) {
       }
 
       const salt = genSalt();
-      const pin = genPin(); // replaced by the new hire's own PIN during onboarding — never sent in this email
-      const inviteToken = randomToken();
+      const pin = genPin(); // placeholder: the new hire chooses their own PIN through the emailed link, this one is never shown or sent
       const { data, error } = await supabaseAdmin
         .from('roster')
         .insert({
@@ -495,10 +494,8 @@ export default async function handler(req, res) {
           employee_id: employeeId || null,
           pin_hash: hashPin(pin, salt), pin_salt: salt,
           wallet_enabled: true,
-          wallet_invite_token: inviteToken,
-          wallet_invite_token_expires_at: new Date(Date.now() + WALLET_INVITE_TTL_MS).toISOString(),
         })
-        .select('id, name, role, email, created_at, employee_id')
+        .select('id, company_id, name, role, is_owner, departments, totp_enabled, email, created_at, employee_id')
         .single();
       if (error) {
         if (isUniqueViolation(error)) return res.status(409).json({ error: `Employee ID ${employeeId} is already in use on this roster.` });
@@ -512,20 +509,15 @@ export default async function handler(req, res) {
       // Company Portal phase 4: "auto-applies to new hires".
       try { await applyRulesToNewRosterMember(supabaseAdmin, companyId, data); } catch (e) { console.error('applyRulesToNewRosterMember failed:', e.message); }
 
-      const inviteUrl = `${siteOrigin(req)}/wallet?token=${inviteToken}`;
-      let emailSent = false;
-      try {
-        await sendEmail({
-          to: email,
-          subject: `Welcome to ${companyName} — let's get you set up with FORA`,
-          text: `Hi ${name},\n\nWelcome to ${companyName}! Tap the link below to confirm your details and set up your own PIN — takes about a minute. You can add your safety tickets and a profile photo now, or anytime later.\n\nClick here to get started: ${inviteUrl}\n\nThis link is single-use and just for you. It doesn't require a password.\n\n— ${companyName}, via FORA`,
-        });
-        emailSent = true;
-      } catch (e) {
-        console.error('onboard_new_employee email failed:', e.message);
-      }
-
-      return res.status(200).json({ ok: true, member: data, inviteUrl, emailSent });
+      const sentLink = await issueAndEmailPinLink({
+        supabaseAdmin, sendEmail, member: data, email, companyName, needsAuthenticator: requiresMfa(data),
+      });
+      const { company_id: _c, is_owner: _o, departments: _d, totp_enabled: _t, ...memberOut } = data;
+      // A link handed back to the caller lets the caller choose that person's
+      // PIN, so only a worker's comes back (a supervisor already resets worker
+      // PINs). A supervisor's goes to their own inbox only.
+      const inviteUrl = sentLink.url && (role === 'worker' || isFounder(session)) ? sentLink.url : null;
+      return res.status(200).json({ ok: true, member: memberOut, inviteUrl, emailSent: sentLink.sent });
     }
 
     // Set or clear one person's employee number after the fact. This is the
@@ -638,7 +630,7 @@ export default async function handler(req, res) {
       const pin = genPin();
       const { error } = await supabaseAdmin
         .from('roster')
-        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null })
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null })
         .eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
       return res.status(200).json({ ok: true, pin });
@@ -719,34 +711,43 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ── Generate a single-use onboarding-wallet invite link for one roster
-    // member — same raw-token-stored-on-the-row pattern as
-    // onboarding_requests.claim_token (see api/admin.js's get_claim_link).
-    // The admin/supervisor copies and sends this themselves (roster has no
-    // email address on file to send it to automatically); opening it
-    // redeems the token for an ordinary session (api/login.js's
-    // redeem_wallet_invite), same as if they'd typed their PIN.
-    if (action === 'create_wallet_invite') {
+    // ── Send (or resend) one person's set-your-PIN link. A new link replaces
+    // any earlier one. Same pyramid as reset_roster_pin: a link lets its holder
+    // choose the PIN, so it is only offered to someone who could reset that
+    // PIN anyway, plus the person themselves. It is emailed to the address on
+    // file. It is handed back to the caller only for a worker (or to the
+    // founder), so a supervisor's link never passes through someone else.
+    if (action === 'send_pin_setup_link') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, active, wallet_enabled').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin
+        .from('roster').select('id, company_id, name, role, is_owner, departments, totp_enabled, active, email').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       const member = rows[0];
-      if (session.role === 'supervisor' && member.company_id !== session.companyId) {
-        return res.status(403).json({ error: 'Not allowed.' });
-      }
+      const self = !!session.userId && String(session.userId) === String(member.id) && session.companyId === member.company_id;
+      if (!self && !canResetMfa(session, member)) return res.status(403).json({ error: "You can't send that person a setup link." });
       if (!member.active) return res.status(400).json({ error: 'This person is deactivated.' });
-      if (!member.wallet_enabled) return res.status(400).json({ error: 'Turn on the wallet for this person first.' });
 
-      const inviteToken = randomToken();
-      const { error } = await supabaseAdmin.from('roster').update({
-        wallet_invite_token: inviteToken,
-        wallet_invite_token_expires_at: new Date(Date.now() + WALLET_INVITE_TTL_MS).toISOString(),
-      }).eq('id', id);
-      if (error) return res.status(500).json({ error: "Couldn't create the invite link." });
-      return res.status(200).json({ ok: true, inviteUrl: `${siteOrigin(req)}/wallet?token=${inviteToken}` });
+      const email = (withDecryptedEmail(member).email || '').trim();
+      const handBack = isFounder(session) || member.role === 'worker';
+      if (!email && !handBack) return res.status(400).json({ error: 'Add an email address for this person first. A supervisor setup link is only ever sent to their own inbox.' });
+
+      const allowed = await checkIpThrottle(supabaseAdmin, `pinlinkmail:${member.id}`, 5, 60 * 60 * 1000);
+      if (!allowed) return res.status(429).json({ error: 'A setup link was already sent a few times this hour. Try again later.' });
+
+      const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', member.company_id).limit(1);
+      const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';
+
+      if (!email) {
+        const issued = await issuePinSetupLink(supabaseAdmin, member);
+        if (issued.error) return res.status(500).json({ error: issued.error });
+        return res.status(200).json({ ok: true, emailSent: false, inviteUrl: issued.url });
+      }
+      const sent = await issueAndEmailPinLink({ supabaseAdmin, sendEmail, member, email, companyName, needsAuthenticator: requiresMfa(member) && !member.totp_enabled });
+      if (sent.error && !sent.url) return res.status(500).json({ error: sent.error });
+      return res.status(200).json({ ok: true, emailSent: sent.sent, inviteUrl: handBack ? sent.url : null });
     }
 
     // Admin-only: regenerate every active roster member's PIN in one shot
@@ -774,7 +775,7 @@ export default async function handler(req, res) {
         const pin = genPin();
         const { error } = await supabaseAdmin
           .from('roster')
-          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null })
+          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null })
           .eq('id', m.id);
         if (error) return res.status(500).json({ error: `Couldn't regenerate the PIN for ${m.name}.` });
         roster.push({ id: m.id, name: m.name, role: m.role, pin });
@@ -966,6 +967,8 @@ export default async function handler(req, res) {
         updates.email = encryptField(email) || null;
         updates.mfa_setup_jti_hash = null;
         updates.mfa_setup_expires_at = null;
+        updates.pin_link_jti_hash = null;
+        updates.pin_link_expires_at = null;
       }
       if ('phone' in req.body) {
         if (!manager && target.role !== 'worker' && String(target.id) !== String(session.userId)) {

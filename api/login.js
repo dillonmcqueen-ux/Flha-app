@@ -16,7 +16,7 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { checkIpThrottle as sharedCheckIpThrottle } from '../server-lib/ipThrottle.js';
-import { validateOnboardingIntake, randomToken } from '../server-lib/onboardingHelpers.js';
+import { validateOnboardingIntake, randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
 import { withDecryptedEmail, encryptField, decryptField } from '../server-lib/fieldCrypto.js';
@@ -24,6 +24,7 @@ import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
+import { verifyPinLinkTicket, hashJti, setupOrigin } from '../server-lib/setupLinks.js';
 import { requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode } from '../server-lib/rosterMfa.js';
 
 const supabaseAdmin = createClient(
@@ -222,15 +223,10 @@ function signEnrollTicket(member, ticket, jti) {
   });
 }
 const MFA_EMAIL_MAX_PER_HOUR = 3;
+const PIN_LINK_MAX_PER_WINDOW = 30;
+const PIN_LINK_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
 
-// The link carries a token, so its origin must never come from a request
-// header a caller can set. Production uses the fixed portal host; previews use
-// the deployment's own host from Vercel's environment.
-function enrollOrigin() {
-  if (process.env.VERCEL_ENV === 'production') return 'https://portal.forafieldsolutions.com';
-  const host = process.env.VERCEL_BRANCH_URL || process.env.VERCEL_URL;
-  return host ? `https://${host}` : 'https://portal.forafieldsolutions.com';
-}
+const enrollOrigin = setupOrigin; // the link carries a token, so its origin is fixed server-side (server-lib/setupLinks.js)
 
 function maskEmail(email) {
   const [user, domain] = String(email).split('@');
@@ -683,82 +679,100 @@ export default async function handler(req, res) {
     return res.status(200).json({ ...minted, backupCodes: result.backupCodes });
   }
 
-  // ── Onboarding wallet (Phase 2): redeem a single-use invite link ────────
-  // Opening the unique link a supervisor/admin generated and shared
-  // (api/companydata.js's create_wallet_invite) is treated as proof of
-  // identity, same as typing the right PIN — it mints an ordinary session,
-  // scoped to the roster row the token belongs to, never to anything the
-  // client itself sends. The token is single-use: cleared the moment it's
-  // redeemed, so re-sharing the link after first use does nothing further.
-  if (action === 'redeem_wallet_invite') {
-    const { inviteToken } = req.body;
-    if (!inviteToken) return res.status(400).json({ error: 'Missing invite link.' });
+  // ── Emailed "set your own PIN" link ─────────────────────────────────────
+  // The one way a new person gets a PIN of their own: company creation, an
+  // Owner adding someone, or a resend all email this link (server-lib/
+  // setupLinks.js). Opening it proves the mailbox, the same thing the
+  // emailed authenticator link proves, so there is no second email:
+  //   - someone who must use an authenticator goes straight into enrollment
+  //     (the existing mfa_enroll_* actions), and gets a session only after it;
+  //   - everyone else is signed in as soon as the PIN is saved;
+  //   - someone who already has an authenticator only gets their PIN reset and
+  //     signs in normally. A link replaces a PIN, never the second factor.
+  // Single-use: the set-PIN UPDATE checks and clears the stored jti hash in one
+  // statement, so two parallel submits cannot both win.
+  if (action === 'pin_link_open' || action === 'pin_link_set_pin') {
+    const allowed = await checkIpThrottle(`pinlink:${clientIp(req)}`, PIN_LINK_MAX_PER_WINDOW, PIN_LINK_THROTTLE_WINDOW_MS);
+    if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+
+    const link = verifyPinLinkTicket(req.body.linkToken);
+    if (!link) return res.status(400).json({ error: "That setup link isn't valid or has expired. Ask your employer to send a new one." });
 
     const { data: rows, error } = await supabaseAdmin
-      .from('roster')
-      .select('id, name, email, role, company_id, active, wallet_enabled, wallet_invite_token_expires_at, departments, totp_enabled')
-      .eq('wallet_invite_token', inviteToken)
-      .limit(1);
+      .from('roster').select('*').eq('id', link.rosterId).eq('company_id', link.companyId).limit(1);
     if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
     const member = rows && rows[0];
-    if (!member) return res.status(404).json({ error: "That invite link isn't valid." });
-    if (!member.active || !member.wallet_enabled) {
-      return res.status(403).json({ error: 'This invite is no longer active. Contact your employer for a new one.' });
+    if (!member || !member.active) return res.status(403).json({ error: 'This link is no longer active. Contact your employer for a new one.' });
+    if (!member.pin_link_jti_hash || member.pin_link_jti_hash !== hashJti(link.jti)) {
+      return res.status(400).json({ error: 'This setup link was already used or replaced. Ask your employer to send a new one, or sign in with your PIN.' });
     }
-    if (!member.wallet_invite_token_expires_at || new Date(member.wallet_invite_token_expires_at) < new Date()) {
-      return res.status(400).json({ error: 'This invite link has expired — ask your employer to send a new one.' });
+    if (!member.pin_link_expires_at || new Date(member.pin_link_expires_at) < new Date()) {
+      return res.status(400).json({ error: 'This setup link has expired. Ask your employer to send a new one.' });
     }
-
     const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type, suspended').eq('id', member.company_id).limit(1);
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
-    // An invite link is a substitute for the PIN, not for the authenticator.
-    // Anyone who uses one (or must) signs in from the normal login page.
-    // Checked before the token is consumed so the link is not burned.
-    if (member.totp_enabled || requiresMfa(member)) {
-      return res.status(403).json({ error: 'This account uses an authenticator app. Sign in from the normal login page instead.' });
-    }
-    // Same suspension gate as roster_login: a suspended company's workers
-    // don't get in even with a valid, unexpired invite link.
     if (company.suspended && member.role === 'worker') {
       return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
     }
 
-    // Conditioned on the token still matching (not just the row's id), so
-    // two near-simultaneous redemptions of the same link can't both pass —
-    // whichever request's update actually clears a row wins the race; the
-    // loser's returned row is empty and it's rejected below instead of also
-    // minting a session.
-    const { data: cleared, error: clearError } = await supabaseAdmin
-      .from('roster')
-      .update({ wallet_invite_token: null, wallet_invite_token_expires_at: null })
-      .eq('id', member.id)
-      .eq('wallet_invite_token', inviteToken)
-      .select('id');
-    if (clearError || !cleared || cleared.length === 0) {
-      return res.status(400).json({ error: 'This invite link was already used.' });
+    const onFileEmail = (withDecryptedEmail(member).email || '').trim();
+    const mfaNeeded = requiresMfa(member) && !member.totp_enabled;
+
+    if (action === 'pin_link_open') {
+      return res.status(200).json({
+        name: member.name,
+        companyName: company.name,
+        emailOnFile: !!onFileEmail,
+        emailHint: onFileEmail ? maskEmail(onFileEmail) : '',
+        mfaRequired: requiresMfa(member),
+        hasAuthenticator: !!member.totp_enabled,
+      });
     }
 
-    const payload = {
-      role: member.role,
-      companyId: company.id,
-      companyName: company.name,
-      appType: company.app_type || 'safety',
-      userId: member.id,
-      userName: member.name,
-      suspended: !!company.suspended,
-      issuedAt: Date.now(),
-    };
-    const token = signSession(payload);
-    // Break #24: the invite screen holds an invite token, not a full
-    // session, and has no other way to know whether the company has
-    // Certification Tracking. Without this it offered a ticket upload the
-    // server then refused. null (not false) when the lookup fails, so the
-    // screen falls back to showing the card; the upload itself is still
-    // gated by requireDocKey either way.
+    const pin = String(req.body.pin || '');
+    if (!/^\d{6}$/.test(pin)) return res.status(400).json({ error: 'Choose a 6-digit PIN.' });
+    // The address is only taken from the page when none is on file. Changing
+    // an existing one stays with the people who can already edit the roster.
+    let newEmail = '';
+    if (!onFileEmail) {
+      newEmail = String(req.body.email || '').trim();
+      if (newEmail && (newEmail.length > 254 || !isValidEmail(newEmail))) return res.status(400).json({ error: 'Enter a valid email address.' });
+      if (mfaNeeded && !newEmail) return res.status(400).json({ error: 'Enter your email address. FORA tells you by email when an authenticator is set up on your account.' });
+    }
+
+    const jti = mfaNeeded ? crypto.randomBytes(24).toString('base64url') : null;
+    const salt = crypto.randomBytes(16).toString('hex');
+    const { data: consumed, error: setErr } = await supabaseAdmin
+      .from('roster')
+      .update({
+        pin_hash: hashPin(pin, salt),
+        pin_salt: salt,
+        failed_pin_attempts: 0,
+        pin_locked_until: null,
+        pin_set_at: new Date().toISOString(),
+        pin_link_jti_hash: null,
+        pin_link_expires_at: null,
+        mfa_setup_jti_hash: jti ? crypto.createHash('sha256').update(jti).digest('hex') : null,
+        mfa_setup_expires_at: jti ? new Date(Date.now() + MFA_ENROLL_TTL_MS).toISOString() : null,
+        ...(newEmail ? { email: encryptField(newEmail) } : {}),
+      })
+      .eq('id', member.id)
+      .eq('company_id', member.company_id)
+      .eq('active', true)
+      .eq('pin_link_jti_hash', member.pin_link_jti_hash)
+      .select('id');
+    if (setErr) return res.status(500).json({ error: "Couldn't save your PIN. Try again." });
+    if (!consumed || consumed.length === 0) return res.status(400).json({ error: 'This setup link was already used.' });
+
+    const ticket = { companyId: company.id, companyName: company.name, appType: company.app_type };
+    if (member.totp_enabled) return res.status(200).json({ stage: 'signin' });
+    if (mfaNeeded) {
+      return res.status(200).json({ stage: 'enroll', enrollTicket: signEnrollTicket(member, ticket, jti) });
+    }
+    const minted = await mintRosterSession(member, ticket, !!company.suspended);
     const certs = await readDocKeySetting(supabaseAdmin, company.id, 'certifications');
-    const certificationsEnabled = certs.unavailable ? null : certs.active;
-    return res.status(200).json({ session: payload, token, email: withDecryptedEmail(member).email || '', certificationsEnabled });
+    return res.status(200).json({ stage: 'session', ...minted, certificationsEnabled: certs.unavailable ? null : certs.active });
   }
 
   // ── Master code, step 2: pick a company + role ──────────────────────────
@@ -1084,14 +1098,21 @@ export default async function handler(req, res) {
 
     const { data: roster } = await supabaseAdmin
       .from('roster')
-      .select('id, name, role')
+      .select('id, name, role, email, pin_link_sent_at, pin_set_at')
       .eq('company_id', company.id)
       .order('role', { ascending: true })
       .order('name', { ascending: true });
 
     return res.status(200).json({
       company,
-      roster: roster || [],
+      // Never the address itself: the page only needs to know whether a setup
+      // link went out, or whether this person still needs a PIN typed for them.
+      roster: (roster || []).map((m) => ({
+        id: m.id, name: m.name, role: m.role,
+        hasEmail: !!(withDecryptedEmail(m).email || '').trim(),
+        linkSent: !!m.pin_link_sent_at,
+        pinSet: !!m.pin_set_at,
+      })),
       equipmentDraft: request2.equipment_draft || [],
       sopDrafts: request2.sop_drafts || [],
       draftStatus: request2.draft_status || 'pending',

@@ -137,7 +137,7 @@ five agents that actively build UI/UX changes (`tools:` includes `Edit`,
 |---|---|
 | `visual-identity-builder` | Designs and builds a fresh visual identity for the logged-in app — real typography, a deliberate color system, a real icon set (replacing emoji), and real charts for `Analytics.jsx` — starting with `Dashboard.jsx`. Owns `src/theme.js`. |
 | `design-token-builder` | Consolidates the hand-copied hex colors duplicated across every component's inline `styles` object into a shared token module. |
-| `onboarding-automation-builder` | Automates FORA's company onboarding/setup flow (`Onboarding.jsx` → `submit_onboarding_intake` → `approve_onboarding_request`) up to — but not past — the admin's human approval checkpoint on creating a new tenant. |
+| `onboarding-automation-builder` | Automates FORA's company onboarding/setup flow (`Onboarding.jsx` → `submit_onboarding_intake` → `approve_onboarding_request`) as far as the payment and data-quality gate: a clean, paid request is auto-approved with no human click, and anything that fails a check goes to the admin's manual approve/reject queue. |
 | `field-usability-builder` | Improves mobile/field usability of worker-facing forms (touch targets, input types, connectivity resilience) — the components actually used on a jobsite. |
 | `accessibility-builder` | Color contrast, form labeling, and keyboard navigation across the dark-themed frontend. |
 | `ui-backlog-builder` | Reads `TODO.md` and picks the next tractable UI/UX item to build, deferring items the backlog itself says aren't scoped yet. This is the driver for open-ended "keep developing the UI" work. |
@@ -148,10 +148,14 @@ this repo — these touch a live app with paying customers, so a human
 reviews before merge. "Continuous development" means continuously
 producing reviewable PRs, not continuously deploying unreviewed changes.
 
-`onboarding-automation-builder` in particular should automate everything
-up to the admin's approve/reject decision on a new company, not remove
-that decision — see the agent file for why that boundary is deliberate,
-not a gap to be closed.
+`onboarding-automation-builder` in particular owns a gate, not a checkpoint.
+Auto-approving a clean, paid onboarding request is intended (Dillon, 2026-09-30),
+so an earlier version of this file that called the human approval step a
+deliberate boundary is out of date. What stays: every auto-approve criterion
+in `server-lib/onboardingApproval.js` (no custom request, users parsed cleanly,
+Stripe subscription active, paid by the submitter, one company per Stripe
+customer) must hold, and a request that fails any of them still lands in the
+manual queue. Do not build a path that skips those checks.
 
 `visual-identity-builder` and `design-token-builder` are sequenced, not
 redundant: `visual-identity-builder` defines what the new system *is*

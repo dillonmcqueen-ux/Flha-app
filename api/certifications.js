@@ -396,7 +396,7 @@ export default async function handler(req, res) {
       if (!name) return res.status(400).json({ error: 'Enter a name.' });
       // FORA mails security links to this address, so it must be one plain address.
       if (email && (email.length > 254 || !isValidEmail(email))) return res.status(400).json({ error: 'Enter a valid email address.' });
-      const { error } = await supabaseAdmin.from('roster').update({ name, email: encryptField(email) || null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null }).eq('id', session.userId).eq('company_id', session.companyId);
+      const { error } = await supabaseAdmin.from('roster').update({ name, email: encryptField(email) || null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null }).eq('id', session.userId).eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your details.' });
       return res.status(200).json({ ok: true });
     }
@@ -408,7 +408,7 @@ export default async function handler(req, res) {
       const salt = genSalt();
       const { error } = await supabaseAdmin
         .from('roster')
-        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_link_jti_hash: null, pin_link_expires_at: null })
         .eq('id', session.userId)
         .eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your PIN.' });
