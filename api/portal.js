@@ -381,7 +381,14 @@ Rules:
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { documentId, companyId, title, icon, category, departments, questions } = req.body;
       if (!title || !String(title).trim()) return res.status(400).json({ error: 'Give this document a title.' });
-      const deptSet = await deptSetFor(session, companyId);
+      // Validate against the company the document actually belongs to when it
+      // already exists, not whichever companyId the request names.
+      let scopeCompanyId = companyId;
+      if (documentId) {
+        const { data: owning } = await supabaseAdmin.from('portal_documents').select('company_id').eq('id', documentId).limit(1);
+        if (owning && owning[0]) scopeCompanyId = owning[0].company_id;
+      }
+      const deptSet = await deptSetFor(session, scopeCompanyId);
       if (!validDepartments(departments, deptSet)) return res.status(400).json({ error: 'Invalid department.' });
       const qErrorMsg = validateQuestions(questions, deptSet);
       if (qErrorMsg) return res.status(400).json({ error: qErrorMsg });
@@ -1292,7 +1299,7 @@ Rules:
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { recordId, department } = req.body;
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
-      if (!(await deptSetFor(session, req.body.companyId)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
+      if (typeof department !== 'string' || !department) return res.status(400).json({ error: 'Pick a department.' });
 
       const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, submitted_by, created_at, pdf_url').eq('id', recordId).limit(1);
       const record = recordRows && recordRows[0];
@@ -1302,6 +1309,8 @@ Rules:
       const doc = docRows && docRows[0];
       if (!doc) return denied();
       if (session.role === 'supervisor' && doc.company_id !== session.companyId) return denied();
+      // The department must be one of the DOCUMENT's company's departments.
+      if (!(await validDepartmentKeys(supabaseAdmin, doc.company_id)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
       const mine = await myDepartmentList();
       if (mine && !(doc.departments || []).some(dep => mine.includes(dep))) return denied();
       // A supervisor can only send a record to a department the document is

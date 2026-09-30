@@ -292,10 +292,13 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
 
   // Divisions are company-defined: create each distinct one the people named.
   const divisionIdByName = new Map();
-  const divisionNames = [...new Set(rosterPlan.map((p) => p.division).filter(Boolean))];
+  // De-duplicated case-insensitively: the table's unique index is on lower(name),
+  // so "Yard" and "yard" in one insert would fail the whole batch.
+  const divisionNames = [...new Map(rosterPlan.map((p) => p.division).filter(Boolean).map((n) => [n.toLowerCase(), n])).values()];
   if (divisionNames.length > 0) {
-    const { data: divRows } = await supabaseAdmin.from('company_divisions')
+    const { data: divRows, error: divErr } = await supabaseAdmin.from('company_divisions')
       .insert(divisionNames.map((name) => ({ company_id: companyId, name }))).select('id, name');
+    if (divErr) console.error('Could not create onboarding divisions, people get none:', divErr.message);
     (divRows || []).forEach((r) => divisionIdByName.set(String(r.name).toLowerCase(), r.id));
   }
 
@@ -319,6 +322,7 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   if (roster.length > 0) {
     const { error: rosterErr } = await supabaseAdmin.from('roster').insert(roster);
     if (!rosterErr) await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
+    else console.error('Could not create the onboarding roster (no Owner row exists for this company):', rosterErr.message);
   }
 
   const claimToken = randomToken();

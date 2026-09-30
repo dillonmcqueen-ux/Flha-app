@@ -26,7 +26,7 @@ test('the contact is matched to a listed person by email and becomes the owner',
 
 test('a contact listed as a worker is promoted to supervisor when made owner', () => {
   const plan = planRoster(roster, details, { name: 'Sam Roe', email: 'sam@acme.ca' });
-  const sam = plan.find((p) => p.name === 'Sam Roe');
+  const sam = plan.find((p) => p.name === "Sam Roe");
   assert.equal(sam.isOwner, true);
   assert.equal(sam.role, 'supervisor');
   assert.equal(sam.email, 'sam@acme.ca');
@@ -74,4 +74,16 @@ test('custom department keys are prefixed so they never equal a built-in', () =>
   assert.equal(prettifyDepartmentKey('c_yard_crew'), 'Yard Crew');
   assert.equal(cleanLabel('  a   b  '), 'a b');
   assert.equal(cleanTitle('x'.repeat(200)).length, 80);
+});
+
+test('a same-name person with a different email does not become the owner', () => {
+  const plan = planRoster(
+    [{ name: 'Bob Stone', role: 'supervisor' }],
+    new Map([['bob stone', { email: 'bob@x.ca' }]]),
+    { name: 'Bob Stone', email: 'contact@y.ca' },
+  );
+  assert.equal(plan.length, 2);
+  assert.equal(plan[0].isOwner, false);
+  assert.equal(plan[1].isOwner, true);
+  assert.equal(plan[1].email, 'contact@y.ca');
 });

@@ -589,12 +589,10 @@ export default async function handler(req, res) {
       if (!canManageCompany(session) && member.role !== 'worker') {
         return res.status(403).json({ error: 'Only the account owner can deactivate a supervisor.' });
       }
+      // Only the founder switches an owner off. A co-owner could otherwise
+      // deactivate a peer owner, then reset and take over the account.
       if (action === 'deactivate_roster_member' && member.is_owner && !isFounder(session)) {
-        const { data: otherOwners } = await supabaseAdmin.from('roster').select('id')
-          .eq('company_id', member.company_id).eq('is_owner', true).eq('active', true).neq('id', member.id).limit(1);
-        if (!otherOwners || otherOwners.length === 0) {
-          return res.status(400).json({ error: 'This is the only owner. Make someone else an owner first.' });
-        }
+        return res.status(403).json({ error: 'Only FORA support can deactivate an owner.' });
       }
 
       const activating = action === 'reactivate_roster_member';
@@ -970,6 +968,9 @@ export default async function handler(req, res) {
         updates.mfa_setup_expires_at = null;
       }
       if ('phone' in req.body) {
+        if (!manager && target.role !== 'worker' && String(target.id) !== String(session.userId)) {
+          return res.status(403).json({ error: "Only the account owner can change a supervisor's phone number." });
+        }
         updates.phone = (req.body.phone || '').trim().slice(0, 40) || null;
       }
 
@@ -987,6 +988,13 @@ export default async function handler(req, res) {
       if ('isOwner' in req.body) {
         const makeOwner = req.body.isOwner === true;
         if (makeOwner && effectiveRole !== 'supervisor') return res.status(400).json({ error: 'An owner must be a supervisor.' });
+        // Ownership is taken away by the founder, or given up by the owner
+        // themselves. A co-owner cannot demote another owner: that would make
+        // them an ordinary supervisor, open to the PIN and authenticator
+        // resets that only the founder may do to an owner.
+        if (!makeOwner && target.is_owner && !isFounder(session) && String(target.id) !== String(session.userId)) {
+          return res.status(403).json({ error: 'Only FORA support can remove another owner.' });
+        }
         if (!makeOwner && target.is_owner && !isFounder(session)) {
           const { data: otherOwners } = await supabaseAdmin.from('roster').select('id')
             .eq('company_id', target.company_id).eq('is_owner', true).eq('active', true).neq('id', target.id).limit(1);
@@ -1157,6 +1165,22 @@ export default async function handler(req, res) {
         // Only custom departments can go. Built-ins are fixed for everyone.
         const key = String(req.body.key || '');
         if (!key.startsWith('c_')) return res.status(400).json({ error: "Built-in departments can't be removed." });
+        // Refuse while anything still routes to it: a document, an escalation
+        // rule or a report schedule pointing at a deleted department would
+        // email nobody, silently.
+        const { data: docsUsing } = await supabaseAdmin.from('portal_documents').select('id, title')
+          .eq('company_id', companyId).contains('departments', [key]).limit(5);
+        const { data: schedulesUsing } = await supabaseAdmin.from('portal_report_schedules').select('id')
+          .eq('company_id', companyId).eq('department', key).limit(1);
+        const { data: companyDocs } = await supabaseAdmin.from('portal_documents').select('id').eq('company_id', companyId);
+        const docIds = (companyDocs || []).map(d => d.id);
+        const { data: questionsUsing } = docIds.length
+          ? await supabaseAdmin.from('portal_questions').select('id').in('document_id', docIds).eq('escalation_department', key).limit(1)
+          : { data: [] };
+        if ((docsUsing || []).length || (schedulesUsing || []).length || (questionsUsing || []).length) {
+          const names = (docsUsing || []).map(d => `"${d.title}"`).join(', ');
+          return res.status(409).json({ error: `This department is still used by ${names || 'a Portal report schedule or escalation'}. Remove it there first.` });
+        }
         const { data: gone, error } = await supabaseAdmin.from('company_departments').delete().eq('company_id', companyId).eq('key', key).select('key');
         if (error) return res.status(500).json({ error: "Couldn't remove the department." });
         if (!gone || gone.length === 0) return res.status(404).json({ error: 'Not found.' });
