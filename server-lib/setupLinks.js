@@ -12,11 +12,19 @@
 // Lives outside api/ for the same reason as server-lib/uploadUrls.js.
 
 import crypto from 'crypto';
+import { requiresMfa } from './rosterMfa.js';
 
 export const PIN_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-// Most links one company creation sends. The rest are a "Send setup link"
-// click away, so a large roster cannot stall the approval on email latency.
-export const MAX_LINKS_AT_PROVISION = 25;
+// Anyone who must use an authenticator (supervisors, the Owner, Safety/HR/Payroll)
+// gets a short link, because for them the mailbox is the only thing standing
+// between a forwarded email and a new authenticator on their account.
+export const PIN_LINK_MFA_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export function pinLinkTtlMs(member) {
+  return requiresMfa(member) ? PIN_LINK_MFA_TTL_MS : PIN_LINK_TTL_MS;
+}
+// Most links one "send to everyone" click sends, so a large roster cannot run
+// past the function's time limit. Anyone left over is one more click away.
+export const MAX_LINKS_PER_BATCH = 50;
 
 // The link carries a token, so its origin must never come from a request
 // header a caller can set. Production uses the fixed portal host; previews use
@@ -63,14 +71,16 @@ export function verifyPinLinkTicket(ticket) {
 
 // Mints a fresh link for one roster row and stores its hash, replacing any
 // earlier link. Returns { url } or { error }.
-export async function issuePinSetupLink(supabaseAdmin, { id, company_id }) {
+export async function issuePinSetupLink(supabaseAdmin, member) {
+  const { id, company_id } = member;
+  const ttlMs = pinLinkTtlMs(member);
   const jti = crypto.randomBytes(24).toString('base64url');
   const now = Date.now();
   const { data, error } = await supabaseAdmin
     .from('roster')
     .update({
       pin_link_jti_hash: hashJti(jti),
-      pin_link_expires_at: new Date(now + PIN_LINK_TTL_MS).toISOString(),
+      pin_link_expires_at: new Date(now + ttlMs).toISOString(),
       pin_link_sent_at: new Date(now).toISOString(),
     })
     .eq('id', id)
@@ -78,7 +88,7 @@ export async function issuePinSetupLink(supabaseAdmin, { id, company_id }) {
     .select('id');
   if (error || !data || data.length === 0) return { error: "Couldn't create the setup link." };
   const ticket = signPinLinkTicket({ rosterId: id, companyId: company_id, jti });
-  return { url: `${setupOrigin()}/wallet?token=${encodeURIComponent(ticket)}` };
+  return { url: `${setupOrigin()}/wallet?token=${encodeURIComponent(ticket)}`, ttlMs };
 }
 
 // Names and company names are typed by other people and land in an email sent
@@ -87,7 +97,7 @@ function plainLine(value, max) {
   return String(value || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-export function pinSetupEmail({ name: rawName, companyName: rawCompany, url, needsAuthenticator }) {
+export function pinSetupEmail({ name: rawName, companyName: rawCompany, url, needsAuthenticator, ttlMs = PIN_LINK_TTL_MS }) {
   const name = plainLine(rawName, 60);
   const companyName = plainLine(rawCompany, 80) || 'your employer';
   const next = needsAuthenticator
@@ -104,7 +114,7 @@ export function pinSetupEmail({ name: rawName, companyName: rawCompany, url, nee
       '',
       next,
       '',
-      'The link works once and expires in 7 days. It is just for you, so do not forward it. If you were not expecting this, ignore the email.',
+      `The link works once and expires in ${ttlMs <= PIN_LINK_MFA_TTL_MS ? '24 hours' : '7 days'}. It is just for you, so do not forward it. If you were not expecting this, ignore the email.`,
       '',
       'FORA Field Solutions',
     ].join('\n'),
@@ -118,7 +128,7 @@ export async function issueAndEmailPinLink({ supabaseAdmin, sendEmail, member, e
   const issued = await issuePinSetupLink(supabaseAdmin, member);
   if (issued.error) return { sent: false, error: issued.error };
   try {
-    await sendEmail({ to: email, ...pinSetupEmail({ name: member.name, companyName, url: issued.url, needsAuthenticator }) });
+    await sendEmail({ to: email, ...pinSetupEmail({ name: member.name, companyName, url: issued.url, needsAuthenticator, ttlMs: issued.ttlMs }) });
     return { sent: true, url: issued.url };
   } catch (e) {
     console.error('PIN setup email failed:', e.message);

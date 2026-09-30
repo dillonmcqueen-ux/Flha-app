@@ -23,7 +23,7 @@ import {
 } from '../server-lib/companyStructure.js';
 import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
-import { issueAndEmailPinLink, issuePinSetupLink } from '../server-lib/setupLinks.js';
+import { issueAndEmailPinLink, issuePinSetupLink, MAX_LINKS_PER_BATCH } from '../server-lib/setupLinks.js';
 import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
@@ -714,6 +714,53 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin.from('roster').update({ wallet_enabled: !!enabled }).eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't update." });
       return res.status(200).json({ ok: true });
+    }
+
+    // ── "Send setup links": emails a set-your-PIN link to everyone in the
+    // company who has an email on file and has never chosen a PIN or signed in.
+    // Owner or founder only. Each link goes to that person's own inbox and is
+    // never handed back, so this cannot be used to take anyone's account. This
+    // is where the rest of a new company's people get theirs; approval only
+    // emails the Owner. Capped per click and per hour.
+    if (action === 'send_pin_setup_links_all') {
+      if (!canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can send setup links to everyone.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      const allowed = await checkIpThrottle(supabaseAdmin, `pinlinkbulk:${companyId}`, 3, 60 * 60 * 1000);
+      if (!allowed) return res.status(429).json({ error: 'Setup links were already sent to everyone a few times this hour. Try again later.' });
+
+      const { data: people, error: listErr } = await supabaseAdmin
+        .from('roster')
+        .select('id, company_id, name, role, is_owner, departments, totp_enabled, email, pin_set_at, last_login_at, pin_link_sent_at')
+        .eq('company_id', companyId)
+        .eq('active', true);
+      if (listErr) return res.status(500).json({ error: 'Could not load the roster.' });
+
+      const waiting = (people || []).filter((m) => !m.pin_set_at && !m.last_login_at);
+      const withEmail = waiting.filter((m) => (withDecryptedEmail(m).email || '').trim());
+      const skippedNoEmail = waiting.length - withEmail.length;
+      // Never-sent first, then the longest since their last link.
+      withEmail.sort((a, b) => (a.pin_link_sent_at ? new Date(a.pin_link_sent_at).getTime() : 0) - (b.pin_link_sent_at ? new Date(b.pin_link_sent_at).getTime() : 0));
+      const batch = withEmail.slice(0, MAX_LINKS_PER_BATCH);
+
+      const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
+      const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';
+
+      let sent = 0;
+      let failed = 0;
+      const queue = [...batch];
+      const worker = async () => {
+        for (let m = queue.shift(); m; m = queue.shift()) {
+          const r = await issueAndEmailPinLink({
+            supabaseAdmin, sendEmail, member: m, email: (withDecryptedEmail(m).email || '').trim(), companyName,
+            needsAuthenticator: requiresMfa(m) && !m.totp_enabled,
+          });
+          if (r.sent) sent++; else failed++;
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      return res.status(200).json({ ok: true, sent, failed, skippedNoEmail, remaining: withEmail.length - batch.length });
     }
 
     // ── Send (or resend) one person's set-your-PIN link. A new link replaces

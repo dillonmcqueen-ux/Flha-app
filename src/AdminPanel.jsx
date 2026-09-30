@@ -232,6 +232,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [rosterCounts, setRosterCounts] = useState({});
   const [cutoverSaving, setCutoverSaving] = useState(false);
   const [regeneratingAll, setRegeneratingAll] = useState(false);
+  const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
   const [allPinsResult, setAllPinsResult] = useState(null); // { roster: [{name, role, pin}], companyName, companyCode }
 
   const loadRoster = async (companyId) => {
@@ -347,6 +348,27 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       setWalletInviteLink({ name, url: data.inviteUrl, emailed: !!data.emailSent });
       await loadRoster(activeId);
     } catch (e) { setMsg("Couldn't send the setup link. Try again."); }
+  };
+
+  const sendAllSetupLinks = async () => {
+    setMsg("");
+    setBulkLinkBusy(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_pin_setup_links_all", token, companyId: activeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't send the setup links."); setBulkLinkBusy(false); return; }
+      const parts = [`Sent ${data.sent} setup link${data.sent === 1 ? "" : "s"}.`];
+      if (data.failed) parts.push(`${data.failed} failed to send, try again.`);
+      if (data.skippedNoEmail) parts.push(`${data.skippedNoEmail} ${data.skippedNoEmail === 1 ? "person has" : "people have"} no email on file.`);
+      if (data.remaining) parts.push(`${data.remaining} more waiting, click again to send the next batch.`);
+      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Everyone already has a PIN.");
+      setMsg(parts.join(" "));
+      await loadRoster(activeId);
+    } catch (e) { setMsg("Couldn't send the setup links. Try again."); }
+    setBulkLinkBusy(false);
   };
 
   const regenerateAllPins = async () => {
@@ -2274,7 +2296,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <div style={{ ...st.card, background: C.status.warning.bg, border: `1.5px solid ${C.amber}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.amberDark, marginBottom: 4 }}>
                   {walletInviteLink.emailed ? `Setup link emailed to ${walletInviteLink.name}.` : `Couldn't email ${walletInviteLink.name}.`}
-                  {walletInviteLink.url ? " It works once and expires in 7 days." : ""}
+                  {walletInviteLink.url ? " It works once (24 hours for a supervisor, 7 days for everyone else)." : ""}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   {walletInviteLink.url && <span style={{ ...st.code, fontSize: 12, wordBreak: "break-all" }} onClick={() => copyText(walletInviteLink.url)}>{walletInviteLink.url}</span>}
@@ -2301,6 +2323,16 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                 </div>
               </div>
             )}
+
+            <div style={st.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Send setup links</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
+                Emails everyone with an email on file who has not chosen a PIN yet a link to set their own. Each link goes to that person's own inbox. Supervisor links last 24 hours, everyone else's 7 days.
+              </div>
+              <button style={{ ...st.darkBtn, width: "100%", opacity: (bulkLinkBusy || rosterActiveCount === 0) ? 0.6 : 1 }} onClick={sendAllSetupLinks} disabled={bulkLinkBusy || rosterActiveCount === 0}>
+                {bulkLinkBusy ? "Sending…" : "Send setup links"}
+              </button>
+            </div>
 
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Regenerate all PINs</div>

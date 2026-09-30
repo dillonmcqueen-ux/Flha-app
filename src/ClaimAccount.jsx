@@ -179,10 +179,11 @@ export default function ClaimAccount() {
     );
   }
 
-  // A person with an email on file was sent a link to choose their own PIN, so
-  // only people the link could not reach need a PIN typed here.
-  const needsTypedPin = (m) => !m.hasEmail || (!m.linkSent && !m.pinSet);
-  const allPinsSet = roster.length === 0 || roster.every((m) => pinSaved[m.id] || m.pinSet || m.linkSent);
+  // Anyone with an email on file chooses their own PIN from an emailed link (the
+  // Owner's went out at approval, the rest when the Owner clicks "Send setup
+  // links" on the roster), so only people with no email need a PIN typed here.
+  const needsTypedPin = (m) => !m.hasEmail;
+  const allPinsSet = roster.length === 0 || roster.every((m) => pinSaved[m.id] || m.pinSet || m.linkSent || m.hasEmail);
 
   return (
     <div style={styles.wrap}>
@@ -193,14 +194,14 @@ export default function ClaimAccount() {
             Company code: <span style={styles.code}>{company?.company_code}</span>
           </div>
           <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 10 }}>
-            Finish setup below. No PIN is ever emailed. Everyone with an email address on file was sent a link to choose their own PIN.
+            Finish setup below. No PIN is ever emailed. You were sent a link to choose your own PIN. Everyone else with an email address gets theirs when you click Send setup links on the roster in the app.
           </div>
         </div>
 
         {roster.length > 0 && (
           <div style={styles.card}>
             <div style={styles.h2}>Your team's PINs</div>
-            <div style={styles.hint}>People with an email address chose their own PIN from the link we sent. Anyone without one needs a 6-digit PIN from you. They sign in with their name and that PIN.</div>
+            <div style={styles.hint}>People with an email address choose their own PIN from a link you send from the roster in the app. Anyone without an email needs a 6-digit PIN from you here. They sign in with their name and that PIN.</div>
             {roster.map((m) => (
               <div key={m.id} style={styles.row}>
                 <div style={{ width: 200, color: "#fff", fontSize: 14 }}>{m.name} <span style={{ color: "#9CA3AF", fontSize: 12 }}>({m.role})</span></div>
@@ -215,11 +216,10 @@ export default function ClaimAccount() {
                     <button style={styles.primaryBtn} disabled={pinSaving === m.id} onClick={() => savePin(m.id)}>
                       {pinSaved[m.id] ? "✓ Saved, change" : pinSaving === m.id ? "Saving…" : "Save PIN"}
                     </button>
-                    {m.hasEmail && <span style={{ fontSize: 12, color: "#FDBA74" }}>Setup link not sent. You can resend it from the roster in the app.</span>}
                   </>
                 ) : (
                   <span style={{ fontSize: 13, color: m.pinSet ? "#86EFAC" : "#9CA3AF" }}>
-                    {m.pinSet ? "✓ Chose their own PIN" : "Setup link emailed. Waiting for them."}
+                    {m.pinSet ? "✓ Chose their own PIN" : m.linkSent ? "Setup link emailed. Waiting for them." : "Has an email. Send their link from the roster in the app."}
                   </span>
                 )}
               </div>

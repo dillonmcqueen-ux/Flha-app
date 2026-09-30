@@ -24,7 +24,7 @@ import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
-import { verifyPinLinkTicket, hashJti, setupOrigin } from '../server-lib/setupLinks.js';
+import { verifyPinLinkTicket, hashJti, setupOrigin, PIN_LINK_MFA_TTL_MS } from '../server-lib/setupLinks.js';
 import { requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode } from '../server-lib/rosterMfa.js';
 
 const supabaseAdmin = createClient(
@@ -707,6 +707,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'This setup link was already used or replaced. Ask your employer to send a new one, or sign in with your PIN.' });
     }
     if (!member.pin_link_expires_at || new Date(member.pin_link_expires_at) < new Date()) {
+      return res.status(400).json({ error: 'This setup link has expired. Ask your employer to send a new one.' });
+    }
+    // Judged on who they are now: someone promoted to supervisor after a 7 day
+    // link went out does not keep the long window.
+    if (requiresMfa(member) && Date.now() - link.issuedAt > PIN_LINK_MFA_TTL_MS) {
       return res.status(400).json({ error: 'This setup link has expired. Ask your employer to send a new one.' });
     }
     const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type, suspended').eq('id', member.company_id).limit(1);

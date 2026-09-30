@@ -2315,6 +2315,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [resettingRosterId, setResettingRosterId] = useState(null);
   const [togglingWalletId, setTogglingWalletId] = useState(null);
   const [rosterInviteLink, setRosterInviteLink] = useState(null); // { name, url }
+  const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
+  const [bulkLinkMsg, setBulkLinkMsg] = useState("");
 
   // ── Worker profile drawer: click a name in the Roster tab ───────────────
   const [profileRosterId, setProfileRosterId] = useState(null);
@@ -3628,6 +3630,27 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       setRosterInviteLink({ name, url: data.inviteUrl, emailed: !!data.emailSent });
       await loadRosterList();
     } catch (e) { alert("Couldn't send the setup link. Try again."); }
+  };
+
+  const sendAllSetupLinks = async () => {
+    setBulkLinkMsg("");
+    setBulkLinkBusy(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_pin_setup_links_all", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setBulkLinkMsg(data.error || "Couldn't send the setup links."); setBulkLinkBusy(false); return; }
+      const parts = [`Sent ${data.sent} setup link${data.sent === 1 ? "" : "s"}.`];
+      if (data.failed) parts.push(`${data.failed} failed to send, try again.`);
+      if (data.skippedNoEmail) parts.push(`${data.skippedNoEmail} ${data.skippedNoEmail === 1 ? "person has" : "people have"} no email on file.`);
+      if (data.remaining) parts.push(`${data.remaining} more waiting, click again to send the next batch.`);
+      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Everyone already has a PIN.");
+      setBulkLinkMsg(parts.join(" "));
+      await loadRosterList();
+    } catch (e) { setBulkLinkMsg("Couldn't send the setup links. Try again."); }
+    setBulkLinkBusy(false);
   };
 
   const onboardNewEmployee = async () => {
@@ -7728,7 +7751,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             {onboardResult && (
               <div style={{ ...styles.card, background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.status.success.text, marginBottom: 4 }}>
-                  {onboardResult.emailSent ? `Setup link sent to ${onboardResult.email}. They choose their own PIN from it.` : onboardResult.inviteUrl ? `Couldn't send the email to ${onboardResult.email}. Share this link with them directly.` : `Couldn't send the email to ${onboardResult.email}. Use "Send setup link" on their row to try again.`}
+                  {onboardResult.emailSent ? `Setup link sent to ${onboardResult.email}. They choose their own PIN from it (24 hours for a supervisor, 7 days for everyone else).` : onboardResult.inviteUrl ? `Couldn't send the email to ${onboardResult.email}. Share this link with them directly.` : `Couldn't send the email to ${onboardResult.email}. Use "Send setup link" on their row to try again.`}
                 </div>
                 {!onboardResult.emailSent && onboardResult.inviteUrl && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
@@ -7744,7 +7767,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               <div style={{ ...styles.card, background: C.status.warning.bg, border: `1.5px solid ${C.status.warning.border}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.status.warning.text, marginBottom: 4 }}>
                   {rosterInviteLink.emailed ? `Setup link emailed to ${rosterInviteLink.name}.` : `Couldn't email ${rosterInviteLink.name}.`}
-                  {rosterInviteLink.url ? " It works once and expires in 7 days. You can also send it to them yourself:" : ""}
+                  {rosterInviteLink.url ? " It works once (24 hours for a supervisor, 7 days for everyone else). You can also send it to them yourself:" : ""}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   {rosterInviteLink.url && <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text.body, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 10px", wordBreak: "break-all" }}>{rosterInviteLink.url}</span>}
@@ -7803,6 +7826,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   </button>
                 )}
               />
+
+              {canManageCompany && (
+                <div style={{ ...styles.card, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.text.body }}>Send setup links</div>
+                    <div style={{ fontSize: 12, color: C.text.faint }}>
+                      Emails everyone with an email on file who has not chosen a PIN yet a link to set their own. Supervisor links last 24 hours, everyone else's 7 days.
+                    </div>
+                    {bulkLinkMsg && <div style={{ fontSize: 12, fontWeight: 700, color: C.text.body, marginTop: 6 }}>{bulkLinkMsg}</div>}
+                  </div>
+                  <button onClick={sendAllSetupLinks} disabled={bulkLinkBusy} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: bulkLinkBusy ? 0.6 : 1 }}>
+                    {bulkLinkBusy ? "Sending…" : "Send setup links"}
+                  </button>
+                </div>
+              )}
 
               {rosterList.length > 0 && (
                 <StatStrip items={[

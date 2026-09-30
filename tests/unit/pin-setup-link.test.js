@@ -44,7 +44,7 @@ process.env.SUPABASE_URL = `http://127.0.0.1:${server.address().port}`;
 test.after(() => new Promise(r => server.close(r)));
 
 const { default: handler } = await import('../../api/login.js');
-const { hashJti, signPinLinkTicket, verifyPinLinkTicket, pinSetupEmail, PIN_LINK_TTL_MS } = await import('../../server-lib/setupLinks.js');
+const { hashJti, signPinLinkTicket, verifyPinLinkTicket, pinSetupEmail, pinLinkTtlMs, PIN_LINK_TTL_MS, PIN_LINK_MFA_TTL_MS } = await import('../../server-lib/setupLinks.js');
 
 const JTI = 'the-live-jti';
 const ticket = (over = {}) => signPinLinkTicket({ rosterId: 1, companyId: 7, jti: JTI, ...over });
@@ -206,4 +206,36 @@ test('typed names cannot turn the email into a long or multi-line message', () =
   assert.ok(!/Hi Jo\r?\n/.test(e.text));
   assert.ok(e.subject.length < 140);
   assert.ok(!e.subject.includes('\n'));
+});
+
+test('lifetime: 24 hours for anyone who must use an authenticator, 7 days for the rest', () => {
+  assert.equal(pinLinkTtlMs({ role: 'supervisor', departments: [] }), PIN_LINK_MFA_TTL_MS);
+  assert.equal(pinLinkTtlMs({ role: 'worker', is_owner: true, departments: [] }), PIN_LINK_MFA_TTL_MS);
+  assert.equal(pinLinkTtlMs({ role: 'worker', departments: ['hr'] }), PIN_LINK_MFA_TTL_MS);
+  assert.equal(pinLinkTtlMs({ role: 'worker', departments: ['maintenance'] }), PIN_LINK_TTL_MS);
+  assert.equal(PIN_LINK_MFA_TTL_MS, 24 * 60 * 60 * 1000);
+});
+
+test('the email states the lifetime that applies', () => {
+  const short = pinSetupEmail({ name: 'Jo', companyName: 'Acme', url: 'u', needsAuthenticator: true, ttlMs: PIN_LINK_MFA_TTL_MS });
+  const long = pinSetupEmail({ name: 'Jo', companyName: 'Acme', url: 'u', needsAuthenticator: false, ttlMs: PIN_LINK_TTL_MS });
+  assert.match(short.text, /24 hours/);
+  assert.match(long.text, /7 days/);
+});
+
+test('a 7 day link held by someone who now needs an authenticator is refused after 24 hours', async () => {
+  // Promoted to supervisor after a long link went out: judged on who they are now.
+  row = freshRow({ role: 'supervisor', email: 'enc-ignored' });
+  const old = signPinLinkTicket({ rosterId: 1, companyId: 7, jti: JTI });
+  const payload = JSON.parse(Buffer.from(old.split('.')[0], 'base64url').toString());
+  payload.issuedAt = Date.now() - 25 * 60 * 60 * 1000;
+  const d = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const aged = `${d}.${crypto.createHmac('sha256', process.env.SESSION_SECRET).update(d).digest('base64url')}`;
+  const out = await setPin({}, aged);
+  assert.equal(out.statusCode, 400);
+  assert.match(out.body.error, /expired/i);
+  assert.equal(pinPatch(), null);
+  // The same age is fine for a plain worker.
+  row = freshRow();
+  assert.equal((await setPin({}, aged)).statusCode, 200);
 });
