@@ -32,6 +32,7 @@
 
 import crypto from 'crypto';
 import { parseSiteLines, parseUserLines, randomToken } from './onboardingHelpers.js';
+import { planRoster } from './onboardingRoster.js';
 import { runOnboardingDrafts } from './onboardingDrafting.js';
 import { sendEmail, siteOrigin } from './email.js';
 import { allDocumentSettingsOn, documentSettingsFor } from './pricing.js';
@@ -262,35 +263,57 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   }
 
   const siteNames = parseSiteLines(request.sites_list);
+  const siteIdByName = new Map();
   if (siteNames.length > 0) {
-    await supabaseAdmin.from('sites').insert(siteNames.map(name => ({ company_id: companyId, name })));
+    const { data: siteRows } = await supabaseAdmin.from('sites').insert(siteNames.map(name => ({ company_id: companyId, name }))).select('id, name');
+    (siteRows || []).forEach((r) => siteIdByName.set(String(r.name).trim().toLowerCase(), r.id));
   }
 
   const { roster: parsedRoster, skippedUserLines } = parseUserLines(request.users_list);
-  // Emails the submitter gave on the structured roster form, keyed by
-  // lowercase name. They travel encrypted (people_encrypted) and go into
-  // roster.email encrypted again; a request from before the form change has
-  // none, and a person simply gets no email on file.
-  const emailByName = new Map();
+  // Per-person details the submitter gave on the structured roster form
+  // (email, title, departments, division, default site), keyed by lowercase
+  // name. They travel encrypted (people_encrypted); a request from before the
+  // form change has none, and a person simply gets a bare roster row.
+  const detailsByName = new Map();
   try {
     if (request.people_encrypted) {
       for (const p of JSON.parse(decryptField(request.people_encrypted))) {
-        if (p && p.name && p.email) emailByName.set(String(p.name).trim().toLowerCase(), p.email);
+        if (p && p.name) detailsByName.set(String(p.name).trim().toLowerCase(), p);
       }
     }
   } catch (e) {
-    console.error('Could not read onboarding people, roster emails skipped:', e.message);
+    console.error('Could not read onboarding people, roster details skipped:', e.message);
   }
-  const roster = parsedRoster.map(({ name, role }) => {
+
+  // The contact becomes the company's Account Owner (every company has at
+  // least one); the rest of the plan is each person's title, departments,
+  // division and default site. See server-lib/onboardingRoster.js.
+  const rosterPlan = planRoster(parsedRoster, detailsByName, { name: request.contact_name, email: request.contact_email });
+
+  // Divisions are company-defined: create each distinct one the people named.
+  const divisionIdByName = new Map();
+  const divisionNames = [...new Set(rosterPlan.map((p) => p.division).filter(Boolean))];
+  if (divisionNames.length > 0) {
+    const { data: divRows } = await supabaseAdmin.from('company_divisions')
+      .insert(divisionNames.map((name) => ({ company_id: companyId, name }))).select('id, name');
+    (divRows || []).forEach((r) => divisionIdByName.set(String(r.name).toLowerCase(), r.id));
+  }
+
+  const roster = rosterPlan.map((p) => {
     const salt = genSalt();
-    // Randomly generated and never surfaced anywhere below — this row
-    // only exists so the company has an active roster from minute one;
-    // the actual PIN a person will use is whatever the contact sets for
-    // them on the claim-link page.
-    const email = emailByName.get(name.toLowerCase());
+    // Randomly generated and never surfaced anywhere below; the actual PIN a
+    // person will use is whatever the contact sets for them on the claim-link
+    // page.
+    const divisionId = p.division ? divisionIdByName.get(p.division.toLowerCase()) : null;
+    const siteId = p.site ? siteIdByName.get(p.site.trim().toLowerCase()) : null;
     return {
-      company_id: companyId, name, role, pin_hash: hashPin(genPin(), salt), pin_salt: salt, active: true,
-      email: email ? encryptField(email) : null,
+      company_id: companyId, name: p.name, role: p.role, pin_hash: hashPin(genPin(), salt), pin_salt: salt, active: true,
+      email: p.email ? encryptField(p.email) : null,
+      is_owner: p.isOwner === true,
+      title: p.title || null,
+      departments: p.departments || [],
+      divisions: divisionId ? [divisionId] : [],
+      default_site_id: siteId || null,
     };
   });
   if (roster.length > 0) {

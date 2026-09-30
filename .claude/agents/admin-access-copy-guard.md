@@ -12,10 +12,16 @@ at all.
 
 ## The actual facts (verify against the code, not from memory)
 
-- There are exactly two customer-facing logins: **worker** and
-  **supervisor**. See the role picker in `src/Login.jsx` and the roster
-  role groups in `src/AdminPanel.jsx` (`["supervisor", "worker"]`) — there
-  is no customer "admin" role and never has been.
+- There are three kinds of customer-facing people: **worker**,
+  **supervisor**, and the **account owner**. The account owner is a
+  supervisor login flagged as owner (`roster.is_owner`, see
+  `server-lib/ownerAccess.js`); every company has at least one, matched
+  to the onboarding contact. The owner manages the roster, roles,
+  departments, divisions and setup **inside the normal app** (the
+  supervisor dashboard), not in the Admin Panel. Customer copy may say
+  "account owner". It must never say "admin" for any customer role. See
+  the role picker in `src/Login.jsx` and the roster role groups in
+  `src/AdminPanel.jsx` (`["supervisor", "worker"]`).
 - The **admin** login is a single global code checked against
   `process.env.ADMIN_CODE` in `api/login.js` (`role === 'admin'`,
   `companyId: null`) — it belongs to the FORA founder only, is not
@@ -52,7 +58,11 @@ recurring.
    self-service, in-app access for the Customer**, rather than "a PDF
    snapshot is available on request."
 4. **Any listing of customer account roles that includes "admin"** — the
-   only two customer roles are worker and supervisor.
+   customer roles are worker, supervisor and account owner (never "admin").
+5. **Any claim that the account owner can open the Admin Panel** or do
+   anything only the founder can (cross-company actions, resetting another
+   owner's authenticator, onboarding approval). The owner's reach is their
+   own company's roster and setup, inside the normal app.
 
 ## What's out of scope
 

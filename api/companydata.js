@@ -16,7 +16,11 @@ import { siteOrigin, sendEmail } from '../server-lib/email.js';
 import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
-import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
+import { isFounder, canManageCompany } from '../server-lib/ownerAccess.js';
+import {
+  listDepartments, listDivisions, sanitizeDepartments, sanitizeDivisionIds, sanitizeDefaultSite,
+  departmentKeyFromLabel, cleanLabel, cleanTitle, MAX_CUSTOM_DEPARTMENTS, MAX_DIVISIONS,
+} from '../server-lib/companyStructure.js';
 import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
@@ -88,12 +92,12 @@ async function verifySession(token) {
   // retire_equipment records who took a machine out of the fleet.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id, name')
+    .select('active, role, company_id, name, is_owner')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role, name: rows[0].name };
+  return { ...payload, role: rows[0].role, name: rows[0].name, isOwner: rows[0].is_owner === true };
 }
 
 // For any read/write scoped to a company: admins may act on any company
@@ -350,7 +354,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled, is_owner, title, divisions, default_site_id')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -388,6 +392,8 @@ export default async function handler(req, res) {
       const role = req.body.role;
       if (!name) return res.status(400).json({ error: 'Enter a name.' });
       if (role !== 'worker' && role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+      // Adding a supervisor is granting authority: Owner or founder only.
+      if (role === 'supervisor' && !canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can add a supervisor.' });
 
       const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', companyId).limit(1);
       if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
@@ -451,6 +457,8 @@ export default async function handler(req, res) {
       const email = (req.body.email || '').trim();
       if (!name) return res.status(400).json({ error: 'Enter a name.' });
       if (role !== 'worker' && role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+      // Adding a supervisor is granting authority: Owner or founder only.
+      if (role === 'supervisor' && !canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can add a supervisor.' });
       if (!isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
 
       const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('name, plan_tier').eq('id', companyId).limit(1);
@@ -570,11 +578,23 @@ export default async function handler(req, res) {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role, is_owner').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       const member = rows[0];
       if (session.role === 'supervisor' && member.company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
+      }
+      // A supervisor manages workers; switching a peer supervisor or an Owner
+      // off is Owner or founder territory.
+      if (!canManageCompany(session) && member.role !== 'worker') {
+        return res.status(403).json({ error: 'Only the account owner can deactivate a supervisor.' });
+      }
+      if (action === 'deactivate_roster_member' && member.is_owner && !isFounder(session)) {
+        const { data: otherOwners } = await supabaseAdmin.from('roster').select('id')
+          .eq('company_id', member.company_id).eq('is_owner', true).eq('active', true).neq('id', member.id).limit(1);
+        if (!otherOwners || otherOwners.length === 0) {
+          return res.status(400).json({ error: 'This is the only owner. Make someone else an owner first.' });
+        }
       }
 
       const activating = action === 'reactivate_roster_member';
@@ -603,16 +623,17 @@ export default async function handler(req, res) {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role, is_owner').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
       }
-      // Same pyramid as reset_roster_mfa: a supervisor resets workers (or
-      // their own PIN), never a peer supervisor's. A new PIN plus a reset
-      // authenticator is a full account takeover.
-      if (session.role === 'supervisor' && rows[0].role !== 'worker' && String(rows[0].id) !== String(session.userId)) {
-        return res.status(403).json({ error: "Only the account owner can reset a supervisor's PIN." });
+      // Same pyramid as reset_roster_mfa: a supervisor resets workers, an Owner
+      // resets supervisors and workers, the founder resets anyone. Your own PIN
+      // is always yours to reset. A new PIN plus a reset authenticator is a
+      // full account takeover, so a peer never gets this.
+      if (String(rows[0].id) !== String(session.userId) && !canResetMfa(session, rows[0])) {
+        return res.status(403).json({ error: "You can't reset that person's PIN." });
       }
 
       const salt = genSalt();
@@ -661,14 +682,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // Reset pyramid: founder resets anyone, an Owner resets supervisors and
-    // workers (role arrives in step 3), a supervisor resets workers. The
-    // person re-enrolls at their next login.
+    // Reset pyramid: founder resets anyone (only the founder resets an Owner),
+    // an Owner resets supervisors and workers, a supervisor resets workers.
+    // The person re-enrolls at their next login.
     if (action === 'reset_roster_mfa') {
-      if (session.role !== 'admin' && session.role !== 'supervisor' && session.role !== 'owner') return res.status(403).json({ error: 'Not allowed.' });
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role, is_owner').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       if (!canResetMfa(session, rows[0])) return res.status(403).json({ error: 'Not allowed.' });
       const { error } = await resetMfa(supabaseAdmin, id);
@@ -810,7 +831,7 @@ export default async function handler(req, res) {
 
       const { data: rows, error: findErr } = await supabaseAdmin
         .from('roster')
-        .select('id, company_id, name, role, active, email, phone, employee_id, wallet_enabled, last_login_at, created_at, onboarding_completed_at, departments')
+        .select('id, company_id, name, role, active, email, phone, employee_id, wallet_enabled, last_login_at, created_at, onboarding_completed_at, departments, is_owner, title, divisions, default_site_id, totp_enabled')
         .eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       const member = withDecryptedEmail(rows[0]);
@@ -895,6 +916,9 @@ export default async function handler(req, res) {
           walletEnabled: member.wallet_enabled, lastLoginAt: member.last_login_at,
           createdAt: member.created_at, onboardingCompletedAt: member.onboarding_completed_at,
           departments: member.departments || [],
+          isOwner: member.is_owner === true, title: member.title || '',
+          divisions: member.divisions || [], defaultSiteId: member.default_site_id || null,
+          mfaEnabled: member.totp_enabled === true,
         },
         documents: signedDocuments,
         timeClockEntries,
@@ -907,15 +931,28 @@ export default async function handler(req, res) {
     // clash-checking on the Roster row via set_roster_employee_id) and
     // active (already has its own seat-cap-checked toggle via
     // deactivate_roster_member/reactivate_roster_member).
+    //
+    // Two tiers. Contact fields (email, phone) stay with supervisors for
+    // workers. Structural fields (role, owner, title, departments,
+    // divisions, default site) are the Account Owner's and the founder's
+    // alone. Departments and divisions are routing tags: changing them never
+    // widens what someone can open, it only changes where documents are
+    // routed and how reports are filtered.
     if (action === 'update_worker_profile') {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role, is_owner, active').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
       if (session.role === 'supervisor' && rows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
+      }
+      const target = rows[0];
+      const manager = canManageCompany(session);
+      const structural = ['role', 'isOwner', 'title', 'departments', 'divisions', 'defaultSiteId'].filter(k => k in req.body);
+      if (structural.length > 0 && !manager) {
+        return res.status(403).json({ error: 'Only the account owner can change roles, titles, departments, divisions or default sites.' });
       }
 
       const updates = {};
@@ -923,7 +960,7 @@ export default async function handler(req, res) {
         // The emailed authenticator setup link goes to this address, so whoever
         // can change a supervisor's email can take the account over. Same rank
         // rule as role and PIN: a supervisor edits workers (or themselves).
-        if (session.role === 'supervisor' && rows[0].role !== 'worker' && String(rows[0].id) !== String(session.userId)) {
+        if (!manager && target.role !== 'worker' && String(target.id) !== String(session.userId)) {
           return res.status(403).json({ error: "Only the account owner can change a supervisor's email." });
         }
         const email = (req.body.email || '').trim();
@@ -935,43 +972,58 @@ export default async function handler(req, res) {
       if ('phone' in req.body) {
         updates.phone = (req.body.phone || '').trim().slice(0, 40) || null;
       }
+
+      const effectiveRole = 'role' in req.body ? req.body.role : target.role;
       if ('role' in req.body) {
         if (req.body.role !== 'worker' && req.body.role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
-        // Rank is part of the reset pyramid (server-lib/rosterMfa.js
-        // canResetMfa): a supervisor cannot promote anyone to supervisor or
-        // change a supervisor's role. Otherwise a supervisor demotes a peer,
-        // resets their authenticator and PIN as if they were a worker, then
-        // promotes them back and signs in as them. Only the founder (and the
-        // Account Owner, once that role exists) changes supervisor rank.
-        if (session.role === 'supervisor' && req.body.role !== rows[0].role && (req.body.role === 'supervisor' || rows[0].role === 'supervisor')) {
-          return res.status(403).json({ error: "Only the account owner can change a supervisor's role." });
+        // Demoting an Owner would leave an Owner who is not a supervisor, which
+        // the gates do not recognise. Remove ownership first.
+        const staysOwner = 'isOwner' in req.body ? req.body.isOwner === true : target.is_owner === true;
+        if (req.body.role === 'worker' && staysOwner) {
+          return res.status(400).json({ error: 'Remove ownership before changing an owner to a worker.' });
         }
         updates.role = req.body.role;
       }
-      // Company Portal phase 1: department scoping is a supervisor-tier
-      // concept (FORA Company Portal — Build Spec, Permissions model) — a
-      // worker row's departments stays '{}' regardless of what's sent, same
-      // as the effective role after this update, not the role on the row
-      // before it, so switching someone to worker in the same request also
-      // clears any departments they held as a supervisor.
-      if ('departments' in req.body) {
-        const effectiveRole = updates.role || rows[0].role;
-        if (effectiveRole !== 'supervisor') {
-          updates.departments = [];
-        } else {
-          if (!Array.isArray(req.body.departments) || req.body.departments.some(d => !PORTAL_DEPARTMENTS.includes(d))) {
-            return res.status(400).json({ error: 'Invalid department.' });
-          }
-          updates.departments = [...new Set(req.body.departments)];
+      if ('isOwner' in req.body) {
+        const makeOwner = req.body.isOwner === true;
+        if (makeOwner && effectiveRole !== 'supervisor') return res.status(400).json({ error: 'An owner must be a supervisor.' });
+        if (!makeOwner && target.is_owner && !isFounder(session)) {
+          const { data: otherOwners } = await supabaseAdmin.from('roster').select('id')
+            .eq('company_id', target.company_id).eq('is_owner', true).eq('active', true).neq('id', target.id).limit(1);
+          if (!otherOwners || otherOwners.length === 0) return res.status(400).json({ error: 'A company needs at least one owner. Make someone else an owner first.' });
         }
+        if (makeOwner && !target.active) return res.status(400).json({ error: 'Reactivate this person before making them an owner.' });
+        updates.is_owner = makeOwner;
+      }
+      if ('title' in req.body) updates.title = cleanTitle(req.body.title) || null;
+      if ('departments' in req.body) {
+        const departments = await sanitizeDepartments(supabaseAdmin, target.company_id, req.body.departments);
+        if (!departments) return res.status(400).json({ error: 'Invalid department.' });
+        updates.departments = departments;
+      }
+      if ('divisions' in req.body) {
+        const divisions = await sanitizeDivisionIds(supabaseAdmin, target.company_id, req.body.divisions);
+        if (!divisions) return res.status(400).json({ error: 'Invalid division.' });
+        updates.divisions = divisions;
+      }
+      if ('defaultSiteId' in req.body) {
+        const siteId = await sanitizeDefaultSite(supabaseAdmin, target.company_id, req.body.defaultSiteId);
+        if (siteId === false) return res.status(403).json({ error: 'Not allowed for this site.' });
+        updates.default_site_id = siteId;
       }
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
 
       const { data, error } = await supabaseAdmin.from('roster').update(updates).eq('id', id)
-        .select('id, name, role, email, phone, departments').single();
+        .select('id, name, role, email, phone, departments, is_owner, title, divisions, default_site_id').single();
       if (error) {
         console.error('update_worker_profile failed:', error.message);
         return res.status(500).json({ error: "Couldn't save those changes." });
+      }
+      if (structural.length > 0) {
+        await logAuditEvent(supabaseAdmin, {
+          actorRole: session.role, action: 'update_worker_profile', companyId: target.company_id,
+          targetType: 'roster', targetId: id, details: { fields: structural, by_roster_id: session.userId || null },
+        });
       }
       return res.status(200).json({ ok: true, member: withDecryptedEmail(data) });
     }
@@ -1045,7 +1097,137 @@ export default async function handler(req, res) {
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { data, error } = await supabaseAdmin.from('sites').select('id, name').eq('company_id', companyId).order('name');
       if (error) return res.status(500).json({ error: 'Could not load sites.' });
-      return res.status(200).json({ sites: data || [] });
+      // The signed-in person's own default site, so forms can preselect it.
+      // Only ever their own row in their own company.
+      let defaultSiteId = null;
+      if (session.userId && String(companyId) === String(session.companyId)) {
+        const { data: me } = await supabaseAdmin.from('roster').select('default_site_id').eq('id', session.userId).limit(1);
+        defaultSiteId = (me && me[0] && me[0].default_site_id) || null;
+      }
+      return res.status(200).json({ sites: data || [], defaultSiteId });
+    }
+
+    // ══ DEPARTMENTS, DIVISIONS AND THE SIGNED-IN PERSON'S PROFILE ════════
+    // Tags for routing, filtering and reporting. Reading is open to anyone
+    // in the company (forms and filters need the lists); changing them is
+    // the Account Owner's and the founder's.
+
+    if (action === 'list_departments') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      try {
+        return res.status(200).json({ departments: await listDepartments(supabaseAdmin, companyId) });
+      } catch (e) {
+        console.error('list_departments failed:', e.message);
+        return res.status(500).json({ error: 'Could not load departments.' });
+      }
+    }
+
+    if (action === 'list_divisions') {
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      try {
+        return res.status(200).json({ divisions: await listDivisions(supabaseAdmin, companyId) });
+      } catch (e) {
+        console.error('list_divisions failed:', e.message);
+        return res.status(500).json({ error: 'Could not load divisions.' });
+      }
+    }
+
+    if (action === 'add_department' || action === 'delete_department'
+        || action === 'add_division' || action === 'rename_division' || action === 'delete_division') {
+      if (!canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can change departments and divisions.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+
+      if (action === 'add_department') {
+        const label = cleanLabel(req.body.label);
+        const key = departmentKeyFromLabel(label);
+        if (!label || !key) return res.status(400).json({ error: 'Enter a department name.' });
+        const existing = await listDepartments(supabaseAdmin, companyId);
+        if (existing.some(d => d.key === key || d.label.toLowerCase() === label.toLowerCase())) return res.status(409).json({ error: `"${label}" already exists.` });
+        if (existing.filter(d => !d.builtin).length >= MAX_CUSTOM_DEPARTMENTS) return res.status(400).json({ error: 'Department limit reached.' });
+        const { error } = await supabaseAdmin.from('company_departments').insert({ company_id: companyId, key, label });
+        if (error) return res.status(500).json({ error: "Couldn't add the department." });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'add_department', companyId, targetType: 'department', targetId: key, details: { by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true, departments: await listDepartments(supabaseAdmin, companyId) });
+      }
+
+      if (action === 'delete_department') {
+        // Only custom departments can go. Built-ins are fixed for everyone.
+        const key = String(req.body.key || '');
+        if (!key.startsWith('c_')) return res.status(400).json({ error: "Built-in departments can't be removed." });
+        const { data: gone, error } = await supabaseAdmin.from('company_departments').delete().eq('company_id', companyId).eq('key', key).select('key');
+        if (error) return res.status(500).json({ error: "Couldn't remove the department." });
+        if (!gone || gone.length === 0) return res.status(404).json({ error: 'Not found.' });
+        // Drop the tag from everyone who held it so no row keeps a dead key.
+        const { data: holders } = await supabaseAdmin.from('roster').select('id, departments').eq('company_id', companyId).contains('departments', [key]);
+        for (const h of holders || []) {
+          await supabaseAdmin.from('roster').update({ departments: (h.departments || []).filter(d => d !== key) }).eq('id', h.id).eq('company_id', companyId);
+        }
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'delete_department', companyId, targetType: 'department', targetId: key, details: { by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true, departments: await listDepartments(supabaseAdmin, companyId) });
+      }
+
+      if (action === 'add_division') {
+        const name = cleanLabel(req.body.name);
+        if (!name) return res.status(400).json({ error: 'Enter a division name.' });
+        const existing = await listDivisions(supabaseAdmin, companyId);
+        if (existing.some(d => d.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: `"${name}" already exists.` });
+        if (existing.length >= MAX_DIVISIONS) return res.status(400).json({ error: 'Division limit reached.' });
+        const { error } = await supabaseAdmin.from('company_divisions').insert({ company_id: companyId, name });
+        if (error) return res.status(500).json({ error: "Couldn't add the division." });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'add_division', companyId, targetType: 'division', targetId: name, details: { by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true, divisions: await listDivisions(supabaseAdmin, companyId) });
+      }
+
+      if (action === 'rename_division') {
+        const name = cleanLabel(req.body.name);
+        const divisionId = Number(req.body.id);
+        if (!name || !Number.isInteger(divisionId)) return res.status(400).json({ error: 'Enter a division name.' });
+        const existing = await listDivisions(supabaseAdmin, companyId);
+        if (!existing.some(d => d.id === divisionId)) return res.status(404).json({ error: 'Not found.' });
+        if (existing.some(d => d.id !== divisionId && d.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: `"${name}" already exists.` });
+        const { error } = await supabaseAdmin.from('company_divisions').update({ name }).eq('id', divisionId).eq('company_id', companyId);
+        if (error) return res.status(500).json({ error: "Couldn't rename the division." });
+        return res.status(200).json({ ok: true, divisions: await listDivisions(supabaseAdmin, companyId) });
+      }
+
+      // delete_division
+      const divisionId = Number(req.body.id);
+      if (!Number.isInteger(divisionId)) return res.status(400).json({ error: 'Missing id.' });
+      const { data: gone, error } = await supabaseAdmin.from('company_divisions').delete().eq('id', divisionId).eq('company_id', companyId).select('id');
+      if (error) return res.status(500).json({ error: "Couldn't remove the division." });
+      if (!gone || gone.length === 0) return res.status(404).json({ error: 'Not found.' });
+      const { data: holders } = await supabaseAdmin.from('roster').select('id, divisions').eq('company_id', companyId).contains('divisions', [divisionId]);
+      for (const h of holders || []) {
+        await supabaseAdmin.from('roster').update({ divisions: (h.divisions || []).filter(d => d !== divisionId) }).eq('id', h.id).eq('company_id', companyId);
+      }
+      await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'delete_division', companyId, targetType: 'division', targetId: divisionId, details: { by_roster_id: session.userId || null } });
+      return res.status(200).json({ ok: true, divisions: await listDivisions(supabaseAdmin, companyId) });
+    }
+
+    // The signed-in person's own profile, for auto-filling forms and showing
+    // "Filling in as" details. Their own row only; no id accepted.
+    if (action === 'get_my_profile') {
+      if (!session.userId) return res.status(200).json({ applicable: false });
+      const { data: me, error } = await supabaseAdmin
+        .from('roster')
+        .select('id, name, role, is_owner, title, departments, divisions, default_site_id')
+        .eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+      if (error || !me || !me[0]) return res.status(403).json({ error: 'Not allowed.' });
+      const [departments, divisions] = await Promise.all([
+        listDepartments(supabaseAdmin, session.companyId), listDivisions(supabaseAdmin, session.companyId),
+      ]);
+      const deptLabel = new Map(departments.map(d => [d.key, d.label]));
+      const divName = new Map(divisions.map(d => [d.id, d.name]));
+      return res.status(200).json({
+        applicable: true,
+        name: me[0].name, role: me[0].role, isOwner: me[0].is_owner === true, title: me[0].title || '',
+        departments: (me[0].departments || []).map(k => ({ key: k, label: deptLabel.get(k) || k })),
+        divisions: (me[0].divisions || []).map(id => ({ id, name: divName.get(id) || '' })).filter(d => d.name),
+        defaultSiteId: me[0].default_site_id || null,
+      });
     }
 
     // Admins can add a site to any company. Workers/supervisors can add a

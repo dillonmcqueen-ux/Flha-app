@@ -32,6 +32,7 @@ import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
+import { validDepartmentKeys } from '../server-lib/companyStructure.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 
 export const config = {
@@ -91,6 +92,13 @@ function resolveCompanyId(session, requestedCompanyId) {
   return session.companyId;
 }
 
+// The department keys valid for this company: the five built-ins plus any the
+// Account Owner added (server-lib/companyStructure.js).
+async function deptSetFor(session, requestedCompanyId) {
+  const companyId = resolveCompanyId(session, requestedCompanyId);
+  return companyId ? validDepartmentKeys(supabaseAdmin, companyId) : new Set(PORTAL_DEPARTMENTS);
+}
+
 function pathFromStoredUrl(url, bucket) {
   if (!url) return null;
   const marker = `/storage/v1/object/public/${bucket}/`;
@@ -113,7 +121,7 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
 // Validates a builder-submitted question list against the field-type
 // engine before anything is written. Returns an error string, or null if
 // the list is well-formed.
-function validateQuestions(questions) {
+function validateQuestions(questions, deptSet) {
   if (!Array.isArray(questions) || questions.length === 0) return 'Add at least one question.';
   for (const q of questions) {
     if (!q || typeof q.questionText !== 'string' || !q.questionText.trim()) return 'Every question needs text.';
@@ -127,7 +135,7 @@ function validateQuestions(questions) {
     // a trigger value, on a field type that has a fixed set of possible
     // answers to compare against — see server-lib/portalFieldTypes.js.
     if (q.escalationDepartment) {
-      if (!PORTAL_DEPARTMENTS.includes(q.escalationDepartment)) return `Invalid escalation department for "${q.questionText}".`;
+      if (!deptSet.has(q.escalationDepartment)) return `Invalid escalation department for "${q.questionText}".`;
       if (!fieldTypeCanEscalate(q.fieldType)) return `"${q.questionText}" can't escalate — only Yes/No, Dropdown, or Multi-select questions can.`;
       if (!q.escalationTriggerValue || !String(q.escalationTriggerValue).trim()) return `"${q.questionText}" needs a value that triggers the escalation.`;
       if (q.fieldType !== 'yesno' && !(q.options || []).includes(q.escalationTriggerValue)) {
@@ -138,8 +146,8 @@ function validateQuestions(questions) {
   return null;
 }
 
-function validDepartments(departments) {
-  return Array.isArray(departments) && departments.every(d => PORTAL_DEPARTMENTS.includes(d));
+function validDepartments(departments, deptSet) {
+  return Array.isArray(departments) && departments.every(d => deptSet.has(d));
 }
 
 export default async function handler(req, res) {
@@ -268,7 +276,8 @@ Rules:
       // Sanitize the model's output against the same rules publish_document
       // will enforce, so the builder never shows a draft it can't actually
       // publish unedited.
-      const departments = Array.isArray(draft.departments) ? draft.departments.filter(d => PORTAL_DEPARTMENTS.includes(d)) : [];
+      const deptSet = await deptSetFor(session, companyId);
+      const departments = Array.isArray(draft.departments) ? draft.departments.filter(d => deptSet.has(d)) : [];
       const questions = Array.isArray(draft.questions) ? draft.questions
         .filter(q => q && typeof q.questionText === 'string' && q.questionText.trim())
         .map(q => {
@@ -280,7 +289,7 @@ Rules:
           // that wouldn't survive it rather than showing it and having
           // Publish reject it later.
           let escalationDepartment = null, escalationTriggerValue = null;
-          if (typeof q.escalationDepartment === 'string' && PORTAL_DEPARTMENTS.includes(q.escalationDepartment) && fieldTypeCanEscalate(fieldType)) {
+          if (typeof q.escalationDepartment === 'string' && deptSet.has(q.escalationDepartment) && fieldTypeCanEscalate(fieldType)) {
             const trigger = typeof q.escalationTriggerValue === 'string' ? q.escalationTriggerValue.trim() : '';
             if (trigger && (fieldType === 'yesno' ? (trigger === 'yes' || trigger === 'no') : options.includes(trigger))) {
               escalationDepartment = q.escalationDepartment;
@@ -372,8 +381,9 @@ Rules:
       if (session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { documentId, companyId, title, icon, category, departments, questions } = req.body;
       if (!title || !String(title).trim()) return res.status(400).json({ error: 'Give this document a title.' });
-      if (!validDepartments(departments)) return res.status(400).json({ error: 'Invalid department.' });
-      const qErrorMsg = validateQuestions(questions);
+      const deptSet = await deptSetFor(session, companyId);
+      if (!validDepartments(departments, deptSet)) return res.status(400).json({ error: 'Invalid department.' });
+      const qErrorMsg = validateQuestions(questions, deptSet);
       if (qErrorMsg) return res.status(400).json({ error: qErrorMsg });
 
       let docId = documentId;
@@ -1202,7 +1212,7 @@ Rules:
       const { id, name, department, frequency, weekday, includeDepartmentSupervisors, recipients, active } = req.body;
       const cleanName = String(name || '').trim().slice(0, 80);
       if (!cleanName) return res.status(400).json({ error: 'Give the schedule a name.' });
-      if (!PORTAL_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Pick a department.' });
+      if (!(await deptSetFor(session, req.body.companyId)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
       if (frequency !== 'daily' && frequency !== 'weekly') return res.status(400).json({ error: 'Pick daily or weekly.' });
       let cleanWeekday = null;
       if (frequency === 'weekly') {
@@ -1282,7 +1292,7 @@ Rules:
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const { recordId, department } = req.body;
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
-      if (!PORTAL_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Pick a department.' });
+      if (!(await deptSetFor(session, req.body.companyId)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
 
       const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, submitted_by, created_at, pdf_url').eq('id', recordId).limit(1);
       const record = recordRows && recordRows[0];

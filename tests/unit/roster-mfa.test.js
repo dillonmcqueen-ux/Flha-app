@@ -12,6 +12,7 @@ test('supervisors and sensitive departments must use an authenticator', () => {
   assert.equal(requiresMfa({ role: 'worker', departments: ['maintenance'] }), false);
   assert.equal(requiresMfa({ role: 'worker', departments: null }), false);
   assert.equal(requiresMfa(null), false);
+  assert.equal(requiresMfa({ role: 'worker', is_owner: true, departments: [] }), true);
 });
 
 test('status never carries the secret or backup codes', () => {
@@ -22,15 +23,20 @@ test('status never carries the secret or backup codes', () => {
 test('reset pyramid: founder > owner > supervisor > worker, never yourself', () => {
   const founder = { role: 'admin' };
   const sup = { role: 'supervisor', userId: 2, companyId: 10 };
-  const owner = { role: 'owner', userId: 3, companyId: 10 };
+  const owner = { role: 'supervisor', isOwner: true, userId: 3, companyId: 10 };
   const worker = { id: 9, role: 'worker', company_id: 10 };
   const otherSup = { id: 8, role: 'supervisor', company_id: 10 };
+  const ownerRow = { id: 3, role: 'supervisor', is_owner: true, company_id: 10 };
 
   assert.equal(canResetMfa(founder, otherSup), true);
+  assert.equal(canResetMfa(founder, ownerRow), true); // only the founder resets an Owner
   assert.equal(canResetMfa(sup, worker), true);
   assert.equal(canResetMfa(sup, otherSup), false); // supervisors cannot reset supervisors
+  assert.equal(canResetMfa(sup, ownerRow), false);
   assert.equal(canResetMfa(owner, otherSup), true);
   assert.equal(canResetMfa(owner, worker), true);
+  assert.equal(canResetMfa(owner, { ...ownerRow, id: 4 }), false); // not another Owner
+  assert.equal(canResetMfa(owner, ownerRow), false); // not yourself
   assert.equal(canResetMfa(sup, { ...worker, company_id: 11 }), false); // other company
   assert.equal(canResetMfa(sup, { id: 2, role: 'worker', company_id: 10 }), false); // self
   assert.equal(canResetMfa({ role: 'worker', userId: 5, companyId: 10 }, worker), false);

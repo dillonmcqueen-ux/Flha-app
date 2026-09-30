@@ -23,3 +23,12 @@ export const PORTAL_DEPARTMENT_LABELS = {
   maintenance: 'Maintenance',
   operations_manager: 'Operations Manager',
 };
+
+// A readable name for a department key that has no built-in label, i.e. one
+// the company's Owner added ("c_yard_crew" -> "Yard Crew"). Used where only
+// the key is at hand (emails, PDFs); screens that fetch the company's list
+// show the exact label the Owner typed.
+export function prettifyDepartmentKey(key) {
+  const raw = String(key || '').replace(/^c_/, '').replace(/_+/g, ' ').trim();
+  return raw.replace(/\b\w/g, (c) => c.toUpperCase()) || String(key || '');
+}

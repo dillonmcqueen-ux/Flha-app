@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { X, Mail, Phone, HardHat, CircleUserRound, ShieldCheck, MapPin, Building2 } from "lucide-react";
+import { X, Mail, Phone, HardHat, CircleUserRound, ShieldCheck, MapPin, Building2, Crown } from "lucide-react";
 import TimeClockMap from "./TimeClockMap";
 import CollapsibleGroup from "./CollapsibleGroup";
 import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
-import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
+import { SUGGESTED_JOB_TITLES } from "../server-lib/jobTitles";
 
 const DOC_LABEL = {
   flha: "FLHA", inspection: "Equipment Inspection", toolbox: "Toolbox Talk",
@@ -27,31 +27,44 @@ const rowBtn = (tone) => ({
 export default function WorkerProfileDrawer({
   open, loading, error, profile, certifications, certsModuleActive,
   onClose, onSave, saving, saveError, onToggleActive, togglingActive,
+  // Owner or founder. Everyone else sees the structural fields read-only.
+  canManage = false, departments = [], divisions = [], sites = [],
 }) {
-  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", departments: [] });
+  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", isOwner: false, title: "", departments: [], divisions: [], defaultSiteId: "" });
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (profile?.member) {
+      const m = profile.member;
       setDraft({
-        email: profile.member.email || "", phone: profile.member.phone || "", role: profile.member.role,
-        departments: profile.member.departments || [],
+        email: m.email || "", phone: m.phone || "", role: m.role, isOwner: m.isOwner === true,
+        title: m.title || "", departments: m.departments || [], divisions: m.divisions || [],
+        defaultSiteId: m.defaultSiteId || "",
       });
       setDirty(false);
     }
-  }, [profile?.member?.id, profile?.member?.email, profile?.member?.phone, profile?.member?.role, profile?.member?.departments]);
+  }, [profile?.member]);
 
   if (!open) return null;
 
   const member = profile?.member;
   const set = (field) => (e) => { setDraft(d => ({ ...d, [field]: e.target.value })); setDirty(true); };
-  const toggleDepartment = (dept) => {
+  const toggleIn = (field, value) => {
     setDraft(d => ({
       ...d,
-      departments: d.departments.includes(dept) ? d.departments.filter(x => x !== dept) : [...d.departments, dept],
+      [field]: d[field].includes(value) ? d[field].filter(x => x !== value) : [...d[field], value],
     }));
     setDirty(true);
   };
+  const deptLabel = (key) => departments.find(d => d.key === key)?.label || key;
+  const divName = (id) => divisions.find(d => d.id === id)?.name || "";
+  const siteName = (id) => sites.find(x => x.id === id)?.name || "";
+  const chipStyle = (selected) => ({
+    padding: "6px 12px", borderRadius: RAD.pill, cursor: "pointer", fontSize: 12, fontWeight: 700,
+    background: selected ? C.status.success.bg : C.panelInset,
+    color: selected ? C.status.success.text : C.text.muted,
+    border: `1px solid ${selected ? C.status.success.border : C.line}`,
+  });
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 200, display: "flex", justifyContent: "flex-end" }} onClick={onClose}>
@@ -66,6 +79,8 @@ export default function WorkerProfileDrawer({
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                 {member.role === "supervisor" ? <HardHat size={13} color={C.text.muted} /> : <CircleUserRound size={13} color={C.text.muted} />}
                 <span style={{ fontSize: 12, color: C.text.muted, textTransform: "capitalize" }}>{member.role}</span>
+                {member.isOwner && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: C.orange }}><Crown size={11} />OWNER</span>}
+                {member.title && <span style={{ fontSize: 12, color: C.text.faint }}>{member.title}</span>}
                 <span style={{
                   fontSize: 10, fontWeight: 700, borderRadius: RAD.pill, padding: "1px 8px", marginLeft: 4,
                   background: member.active ? C.status.success.bg : C.status.danger.bg,
@@ -96,45 +111,70 @@ export default function WorkerProfileDrawer({
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}><Phone size={12} />Phone</label>
               <input style={{ ...inputStyle, marginBottom: 10 }} type="tel" value={draft.phone} onChange={set("phone")} placeholder="No phone on file" />
 
-              <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}>Role</label>
-              <select
-                style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }}
-                value={draft.role}
-                onChange={(e) => {
-                  const role = e.target.value;
-                  setDraft(d => ({ ...d, role, departments: role === "supervisor" ? d.departments : [] }));
-                  setDirty(true);
-                }}
-              >
-                <option value="worker">Worker</option>
-                <option value="supervisor">Supervisor</option>
-              </select>
+              {canManage ? (
+                <>
+                  <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}>Access level</label>
+                  <select
+                    style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }}
+                    value={draft.role}
+                    onChange={(e) => { const role = e.target.value; setDraft(d => ({ ...d, role, isOwner: role === "supervisor" ? d.isOwner : false })); setDirty(true); }}
+                  >
+                    <option value="worker">Worker</option>
+                    <option value="supervisor">Supervisor</option>
+                  </select>
 
-              {draft.role === "supervisor" && (
-                <div style={{ marginBottom: 10 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 6 }}>
-                    <Building2 size={12} />Portal departments
-                  </label>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {PORTAL_DEPARTMENTS.map(dept => {
-                      const selected = draft.departments.includes(dept);
-                      return (
-                        <button
-                          key={dept}
-                          type="button"
-                          onClick={() => toggleDepartment(dept)}
-                          style={{
-                            padding: "6px 12px", borderRadius: RAD.pill, cursor: "pointer",
-                            fontSize: 12, fontWeight: 700,
-                            background: selected ? C.status.success.bg : C.panelInset,
-                            color: selected ? C.status.success.text : C.text.muted,
-                            border: `1px solid ${selected ? C.status.success.border : C.line}`,
-                          }}
-                        >{selected ? "✓ " : ""}{PORTAL_DEPARTMENT_LABELS[dept]}</button>
-                      );
-                    })}
+                  {draft.role === "supervisor" && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: C.text.body, marginBottom: 10, cursor: "pointer" }}>
+                      <input type="checkbox" checked={draft.isOwner} onChange={e => { setDraft(d => ({ ...d, isOwner: e.target.checked })); setDirty(true); }} />
+                      <Crown size={13} color={C.orange} /> Account owner
+                    </label>
+                  )}
+
+                  <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}>Job title</label>
+                  <input style={{ ...inputStyle, marginBottom: 10 }} list="profile-job-titles" value={draft.title} onChange={set("title")} placeholder="e.g. Foreman" />
+                  <datalist id="profile-job-titles">{SUGGESTED_JOB_TITLES.map(t => <option key={t} value={t} />)}</datalist>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 6 }}>
+                      <Building2 size={12} />Departments
+                    </label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {departments.map(d => {
+                        const selected = draft.departments.includes(d.key);
+                        return <button key={d.key} type="button" onClick={() => toggleIn("departments", d.key)} style={chipStyle(selected)}>{selected ? "✓ " : ""}{d.label}</button>;
+                      })}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.text.faint, marginTop: 6 }}>Tags for routing and filtering. A supervisor's Portal dashboard is scoped to the departments picked here.</div>
                   </div>
-                  <div style={{ fontSize: 11, color: C.text.faint, marginTop: 6 }}>Scopes this login's Portal dashboard to the departments selected here. Pick none for no Portal access.</div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 6 }}>Divisions</label>
+                    {divisions.length === 0 ? (
+                      <div style={{ fontSize: 11.5, color: C.text.faint }}>No divisions yet. Add them under Departments and divisions.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {divisions.map(d => {
+                          const selected = draft.divisions.includes(d.id);
+                          return <button key={d.id} type="button" onClick={() => toggleIn("divisions", d.id)} style={chipStyle(selected)}>{selected ? "✓ " : ""}{d.name}</button>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}>Default site</label>
+                  <select style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }} value={draft.defaultSiteId} onChange={set("defaultSiteId")}>
+                    <option value="">None</option>
+                    {sites.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                </>
+              ) : (
+                <div style={{ fontSize: 12.5, color: C.text.body, lineHeight: 1.7, marginBottom: 10 }}>
+                  <div><span style={{ color: C.text.faint }}>Access level:</span> <strong style={{ textTransform: "capitalize" }}>{member.role}{member.isOwner ? " (owner)" : ""}</strong></div>
+                  {member.title && <div><span style={{ color: C.text.faint }}>Title:</span> {member.title}</div>}
+                  <div><span style={{ color: C.text.faint }}>Departments:</span> {(member.departments || []).length ? member.departments.map(deptLabel).join(", ") : "None"}</div>
+                  <div><span style={{ color: C.text.faint }}>Divisions:</span> {(member.divisions || []).length ? member.divisions.map(divName).filter(Boolean).join(", ") : "None"}</div>
+                  <div><span style={{ color: C.text.faint }}>Default site:</span> {member.defaultSiteId ? siteName(member.defaultSiteId) || "Set" : "None"}</div>
+                  <div style={{ fontSize: 11, color: C.text.faint, marginTop: 4 }}>Only the account owner can change these.</div>
                 </div>
               )}
 

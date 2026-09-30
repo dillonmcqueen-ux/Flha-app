@@ -48,13 +48,15 @@ export function parseUserLines(usersList) {
   return { roster, skippedUserLines };
 }
 
-// Structured roster rows from the intake form: [{ name, role, email }].
+// Structured roster rows from the intake form:
+// [{ name, role, email, title, division, site, departments }].
 // Supervisors need an email (they receive Company Portal notifications and
 // scheduled reports); a worker's email is optional but must be valid if
 // given. Returns cleaned rows plus user-facing errors, the same shape the
 // other validators here use. Emails are trimmed but NOT lowercased, so what
 // the submitter typed is what gets stored.
 export const MAX_ONBOARDING_PEOPLE = 200;
+const ONBOARDING_DEPARTMENTS = ['hr', 'payroll', 'safety', 'maintenance', 'operations_manager'];
 
 export function normalizePeople(people) {
   const errors = [];
@@ -76,7 +78,17 @@ export function normalizePeople(people) {
     const key = name.toLowerCase();
     if (seen.has(key)) { errors.push(`${name} is listed twice. Add a last initial to tell them apart.`); continue; }
     seen.add(key);
-    clean.push({ name, role, email: email || null });
+    // Optional profile fields. They ride along encrypted with the rest of the
+    // person (people_encrypted) and seed the roster when the company is
+    // created. Departments are limited to the built-in keys here because the
+    // company does not exist yet to have added its own.
+    const title = String((raw && raw.title) || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const division = String((raw && raw.division) || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const site = String((raw && raw.site) || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+    const departments = Array.isArray(raw && raw.departments)
+      ? [...new Set(raw.departments.filter((d) => typeof d === 'string' && ONBOARDING_DEPARTMENTS.includes(d)))]
+      : [];
+    clean.push({ name, role, email: email || null, title: title || null, division: division || null, site: site || null, departments });
   }
   if (clean.length === 0 && errors.length === 0) errors.push('List at least one person.');
   return { people: clean, errors };
