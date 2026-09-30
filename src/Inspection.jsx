@@ -210,7 +210,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       if (draft.selectedEq) setSelectedEq(draft.selectedEq);
       if (draft.selectedEqId) setSelectedEqId(draft.selectedEqId);
       if (draft.freeEq) setFreeEq(draft.freeEq);
-      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.workerName && !loginUserName) setWorkerName(draft.workerName);
       if (Array.isArray(draft.pickedAttachments)) setPickedAttachments(draft.pickedAttachments);
       // A draft saved before attachments went plural holds the old two
       // fields. Restoring them as one attachment is exactly what they meant.
@@ -810,13 +810,19 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           <div style={s.card}>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4, color: C.text.primary }}>Inspector</div>
             <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 16 }}>Inspecting: <strong>{equipmentLabel()}</strong></div>
-            <label style={s.label}>Your name</label>
+            {loginUserName ? (
+              <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+            ) : (
+              <>
+              <label style={s.label}>Your name</label>
             <input
               style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
               placeholder="e.g. John Smith" value={workerName}
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
             />
+              </>
+            )}
 
             {!isTrailer && (
               <>
@@ -1142,13 +1148,19 @@ export default function Inspection({ companyId, companyName, userName: loginUser
           )}
 
           <div style={s.card}>
-            <label style={s.label}>Your name</label>
+            {loginUserName ? (
+              <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+            ) : (
+              <>
+              <label style={s.label}>Your name</label>
             <input
               style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
               placeholder="e.g. John Smith" value={workerName}
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
             />
+              </>
+            )}
             {!isTrailer && (
               <>
                 <label style={s.label}>Ending reading ({openPretrip.reading_unit || readingUnit})</label>

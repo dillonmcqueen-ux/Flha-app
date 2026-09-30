@@ -2,6 +2,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { loadJsPDF } from "./loadJsPDF.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 import { getForaLogoDataUrl } from "./foraLogo.js";
+import { formatOccurredAt } from "./occurredAt.js";
 
 function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   const lines = doc.splitTextToSize(text || "", maxW);
@@ -38,11 +39,11 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   doc.setTextColor(180, 83, 9); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("REPORTED BY", margin + 4, y + 7); doc.text("SITE", margin + 70, y + 7); doc.text("WHEN", margin + 130, y + 7);
   doc.setTextColor(30, 41, 59); doc.setFontSize(10);
-  doc.text(reporter || "—", margin + 4, y + 15, { maxWidth: 60 });
-  doc.text(site || "—", margin + 70, y + 15, { maxWidth: 55 });
-  doc.text(occurredAt || "—", margin + 130, y + 15, { maxWidth: 60 });
+  doc.text(reporter || "N/A", margin + 4, y + 15, { maxWidth: 60 });
+  doc.text(site || "N/A", margin + 70, y + 15, { maxWidth: 55 });
+  doc.text(formatOccurredAt(occurredAt) || "N/A", margin + 130, y + 15, { maxWidth: 60 });
   doc.setTextColor(100, 116, 139); doc.setFontSize(8); doc.setFont("helvetica", "normal");
-  doc.text(`Involved: ${involved || "—"}`, margin + 4, y + 23, { maxWidth: contentW - 8 });
+  doc.text(`Involved: ${involved || "N/A"}`, margin + 4, y + 23, { maxWidth: contentW - 8 });
   y += 36;
 
   // severity banner
@@ -84,9 +85,9 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
     y += 6;
   };
 
-  section("What Happened", report?.whatHappened || "—");
+  section("What Happened", report?.whatHappened || "N/A");
   section("Contributing Factors", report?.contributingFactors || []);
-  section("Potential Outcome", report?.potentialOutcome || "—");
+  section("Potential Outcome", report?.potentialOutcome || "N/A");
   section("Immediate Actions Taken", report?.immediateActions || []);
   section("Recommended Next Steps", report?.nextSteps || []);
 

@@ -32,6 +32,7 @@ import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
 import PortalReports from "./PortalReports.jsx";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
+import { formatOccurredAt, isLocalInput } from "./occurredAt.js";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
@@ -958,7 +959,7 @@ function ReportRow({ rec, last, onClick, kind }) {
             <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{rec.site}</div>
           </div>
           <div style={{ fontSize: 13, color: C.text.body }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
-          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{who}{rec.occurred_at ? ` · ${rec.occurred_at}` : ""}</div>
+          <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{who}{rec.occurred_at ? ` · ${formatOccurredAt(rec.occurred_at)}` : ""}</div>
           {rec.reviewed && <div style={{ fontSize: 11, color: C.status.success.text, fontWeight: 700, marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}><ShieldCheck size={11} />Reviewed by {rec.reviewed_by}</div>}
         </div>
         <div style={{ fontSize: 11, color: rec.pdf_url ? C.text.muted : C.text.faint, flexShrink: 0, display: "flex", alignItems: "center", gap: 3 }}>
@@ -1069,7 +1070,7 @@ function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewer
               <label htmlFor="nmAnon" style={{ fontSize: 12, color: "#D4D4D8" }}>Reported anonymously</label>
             </div>
             <EditField label="Site"><input style={EDIT_INPUT_STYLE} value={editSite} onChange={e => setEditSite(e.target.value)} /></EditField>
-            <EditField label="When it occurred"><input style={EDIT_INPUT_STYLE} value={editOccurredAt} onChange={e => setEditOccurredAt(e.target.value)} /></EditField>
+            <EditField label="When it occurred"><input type={isLocalInput(editOccurredAt) ? "datetime-local" : "text"} style={EDIT_INPUT_STYLE} value={editOccurredAt} onChange={e => setEditOccurredAt(e.target.value)} /></EditField>
             <EditField label="Who / what was involved"><input style={EDIT_INPUT_STYLE} value={editInvolved} onChange={e => setEditInvolved(e.target.value)} /></EditField>
             <EditField label="What Happened"><textarea style={EDIT_TEXTAREA_STYLE} value={editWhatHappened} onChange={e => setEditWhatHappened(e.target.value)} /></EditField>
             <EditField label="Potential Outcome"><textarea style={EDIT_TEXTAREA_STYLE} value={editPotentialOutcome} onChange={e => setEditPotentialOutcome(e.target.value)} /></EditField>
@@ -1086,7 +1087,7 @@ function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewer
 
         <div style={{ background: "rgba(245,158,11,0.14)", border: "1px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, color: "#D4D4D8" }}>Reported by: <strong>{nm.is_anonymous ? "Anonymous" : nm.reporter_name}</strong></div>
-          {nm.occurred_at && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>When: {nm.occurred_at}</div>}
+          {nm.occurred_at && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>When: {formatOccurredAt(nm.occurred_at)}</div>}
           {nm.involved && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Involved: {nm.involved}</div>}
         </div>
 
@@ -1239,7 +1240,7 @@ function IncidentCard({ inc, onClose, onDelete, onReview, onSave, defaultReviewe
           <EditPanel title="Edit Incident Report" onCancel={() => setEditing(false)} onSave={saveEdit} saving={saving}>
             <EditField label="Reported by"><input style={EDIT_INPUT_STYLE} value={editReporterName} onChange={e => setEditReporterName(e.target.value)} /></EditField>
             <EditField label="Site"><input style={EDIT_INPUT_STYLE} value={editSite} onChange={e => setEditSite(e.target.value)} /></EditField>
-            <EditField label="When it occurred"><input style={EDIT_INPUT_STYLE} value={editOccurredAt} onChange={e => setEditOccurredAt(e.target.value)} /></EditField>
+            <EditField label="When it occurred"><input type={isLocalInput(editOccurredAt) ? "datetime-local" : "text"} style={EDIT_INPUT_STYLE} value={editOccurredAt} onChange={e => setEditOccurredAt(e.target.value)} /></EditField>
             <EditField label="Incident Type"><input style={EDIT_INPUT_STYLE} value={editIncidentType} onChange={e => setEditIncidentType(e.target.value)} /></EditField>
             <EditField label="Injured Person"><input style={EDIT_INPUT_STYLE} value={editInjuredPerson} onChange={e => setEditInjuredPerson(e.target.value)} /></EditField>
             <EditField label="Body Part"><input style={EDIT_INPUT_STYLE} value={editBodyPart} onChange={e => setEditBodyPart(e.target.value)} /></EditField>
@@ -1263,7 +1264,7 @@ function IncidentCard({ inc, onClose, onDelete, onReview, onSave, defaultReviewe
 
         <div style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 13, color: "#D4D4D8" }}>Reported by: <strong>{inc.reporter_name}</strong></div>
-          {inc.occurred_at && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>When: {inc.occurred_at}</div>}
+          {inc.occurred_at && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>When: {formatOccurredAt(inc.occurred_at)}</div>}
           {inc.injured_person && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Injured: {inc.injured_person}{inc.body_part ? ` (${inc.body_part})` : ""}</div>}
           {inc.medical_attention && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Medical: {inc.medical_attention}</div>}
           {inc.treatment && <div style={{ fontSize: 12, color: "#A1A1AA", marginTop: 2 }}>Treatment: {inc.treatment}</div>}
@@ -1461,7 +1462,7 @@ function MonthlyRecordCard({ data, onClose, onSave }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: "#4338CA" }}>{form?.title}</div>
-            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{site?.name} · {record.period_month}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{site?.name} · {correctiveWhen(record.period_month)}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {record.pdf_url && <a href={record.pdf_url} target="_blank" rel="noreferrer" style={{ background: "#4338CA", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>⬇ PDF</a>}
@@ -6393,7 +6394,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flex: 1, minWidth: 0 }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{r.form_title}</div>
-                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {r.period_month}</div>
+                            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} />{r.site_name} · {correctiveWhen(r.period_month)}</div>
                             <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{r.submitted_by}</div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>

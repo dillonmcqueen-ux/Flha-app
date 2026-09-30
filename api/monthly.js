@@ -4,7 +4,7 @@
 // tracking.
 
 import { createClient } from '@supabase/supabase-js';
-import { authorRosterId } from '../server-lib/authorStamp.js';
+import { authorRosterId, sessionDisplayName } from '../server-lib/authorStamp.js';
 import { openCorrectiveActions } from '../server-lib/correctiveActions.js';
 import { annotateRecurrence, patternsByEquipment, RECURRENCE_THRESHOLD, RECURRENCE_WINDOW_DAYS } from '../server-lib/recurrence.js';
 import crypto from 'crypto';
@@ -72,12 +72,12 @@ async function verifySession(token) {
   // instead of waiting out the token's TTL.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 // flha-reports is a private bucket — the DB still stores a "public"-shaped
@@ -286,7 +286,10 @@ export default async function handler(req, res) {
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, formId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId, periodMonth } = req.body;
+      const { siteId, formId, answers, submittedBy: submittedByTyped, aiSummary, aiAssisted, pdfUrl, clientSubmissionId, periodMonth } = req.body;
+      // The name on the document is the signed-in person's; the typed one only
+      // counts for a session with no individual identity (founder/admin).
+      const submittedBy = sessionDisplayName(session) || submittedByTyped;
       // Resolved up here so the response can tell the browser whether the
       // PDF actually attached, rather than the drop only reaching a log.
       const resolvedSubmitPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);

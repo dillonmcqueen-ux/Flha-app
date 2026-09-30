@@ -57,7 +57,7 @@ export async function generateEquipmentAnalyticsPDF({
       { key: "defective", label: "Defective", align: "right", width: 26 },
       { key: "monitor", label: "Monitor", align: "right", width: 26 },
       { key: "inspectionCount", label: "Inspections", align: "right", width: 26 },
-      { key: "lastFlaggedAt", label: "Last Flagged", align: "right", width: 38, render: r => r.lastFlaggedAt ? new Date(r.lastFlaggedAt).toLocaleDateString("en-CA") : "—" },
+      { key: "lastFlaggedAt", label: "Last Flagged", align: "right", width: 38, render: r => r.lastFlaggedAt ? new Date(r.lastFlaggedAt).toLocaleDateString("en-CA") : "N/A" },
     ],
     rows: equipStats,
   }, redrawHeader);
@@ -71,8 +71,8 @@ export async function generateEquipmentAnalyticsPDF({
         { key: "label", label: "Equipment", width: 50 },
         { key: "count", label: "Fuel-Ups", align: "right", width: 22 },
         { key: "cost", label: "Cost", align: "right", width: 24, render: r => `$${r.cost.toFixed(2)}` },
-        { key: "avgBurnRate", label: "Avg Rate", align: "right", width: 26, render: r => r.avgBurnRate != null ? r.avgBurnRate.toFixed(2) : "—" },
-        { key: "latestBurnRate", label: "Latest Rate", align: "right", width: 30, render: r => r.latestBurnRate != null ? r.latestBurnRate.toFixed(2) : "—" },
+        { key: "avgBurnRate", label: "Avg Rate", align: "right", width: 26, render: r => r.avgBurnRate != null ? r.avgBurnRate.toFixed(2) : "N/A" },
+        { key: "latestBurnRate", label: "Latest Rate", align: "right", width: 30, render: r => r.latestBurnRate != null ? r.latestBurnRate.toFixed(2) : "N/A" },
       ],
       rows: fuel.equipmentSummary,
     }, redrawHeader);

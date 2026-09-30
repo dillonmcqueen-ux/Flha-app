@@ -44,7 +44,7 @@ function drawAnswer(doc, item, y, margin, contentW, W) {
 
   // short_text, number, date, dropdown, multiselect all render the same way:
   // label, then the value (joined with commas for multiselect's array).
-  const displayValue = Array.isArray(value) ? (value.length ? value.join(", ") : "—") : (value || "—");
+  const displayValue = Array.isArray(value) ? (value.length ? value.join(", ") : "N/A") : (value || "N/A");
   doc.text(question_text, margin, y, { maxWidth: contentW - 4 });
   y += 5;
   doc.setTextColor(15, 23, 42); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
@@ -60,7 +60,7 @@ export async function generateAndUploadPortalDocument({
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
   let y = 20;
-  const accent = hexToRgb("#F97316"); // FORA orange — Portal documents don't carry a per-form accent color
+  const accent = hexToRgb("#F97316"); // FORA orange: Portal documents don't carry a per-form accent color
 
   let logoDataUrl = null;
   if (companyLogo) {
@@ -83,10 +83,10 @@ export async function generateAndUploadPortalDocument({
   doc.setTextColor(...accent); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("SITE", margin + 4, y + 7); doc.text("COMPANY", margin + 90, y + 7); doc.text("SUBMITTED BY", margin + 140, y + 7);
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-  doc.text(siteName || "—", margin + 4, y + 15, { maxWidth: 82 });
+  doc.text(siteName || "N/A", margin + 4, y + 15, { maxWidth: 82 });
   doc.setFontSize(9);
-  doc.text(companyName || "—", margin + 90, y + 15, { maxWidth: 45 });
-  doc.text(submittedBy || "—", margin + 140, y + 15, { maxWidth: 50 });
+  doc.text(companyName || "N/A", margin + 90, y + 15, { maxWidth: 45 });
+  doc.text(submittedBy || "N/A", margin + 140, y + 15, { maxWidth: 50 });
   y += 32;
 
   if (aiSummary) {

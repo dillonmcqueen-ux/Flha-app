@@ -5,17 +5,28 @@
 // queue or a service worker. Pure localStorage, no network involved.
 //
 // Scoped per form type + a caller-supplied scope id (typically
-// companyId), not per individual worker — most companies don't have a
-// strong per-person identity on shared-code logins, so this can't do
-// better than "per device" anyway. A device shared between crew members
-// could show a previous worker's unsent draft; that's the same
-// limitation the existing window.name/localStorage session already has.
+// companyId) + the signed-in roster member (setDraftUser, called from
+// Login.jsx whenever the session changes). Without the user part, a phone
+// shared between crew members restored the previous worker's unsent draft,
+// including their name. A session with no roster id (founder/admin) gets
+// the old per-device key.
 import { useEffect, useRef } from "react";
 
 const DEBOUNCE_MS = 800;
 
+let draftUser = "";
+
+// Called by Login.jsx with the session's roster id (or null on logout).
+export function setDraftUser(userId) {
+  draftUser = userId ? String(userId) : "";
+}
+
+export function draftUserSuffix() {
+  return draftUser ? `@u${draftUser}` : "";
+}
+
 function draftKey(formType, scopeId) {
-  return `fora_draft_${formType}_${scopeId || "anon"}`;
+  return `fora_draft_${formType}_${scopeId || "anon"}${draftUserSuffix()}`;
 }
 
 // Returns the previously-saved draft's `data` payload, or null if there

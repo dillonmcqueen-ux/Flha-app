@@ -80,7 +80,7 @@ export function drawCustomFieldsPDF(doc, entries, { margin, contentW, y, accent 
     doc.setTextColor(30, 41, 59);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.text(String(f.value || "—"), x, cy + 4.5, { maxWidth: contentW / 2 - 8 });
+    doc.text(String(f.value || "N/A"), x, cy + 4.5, { maxWidth: contentW / 2 - 8 });
     col++;
     if (col > 1) { col = 0; cy += 9; }
   });

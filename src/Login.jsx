@@ -6,6 +6,7 @@ import WorkerMenu from "./WorkerMenu.jsx";
 import MfaSetup from "./MfaSetup.jsx";
 import { HardHat, ClipboardList, KeyRound, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
+import { setDraftUser } from "./useDraftAutosave.js";
 
 // Session storage — split by role. window.name survives a reload but not a
 // fully closed-and-reopened tab, which is exactly the case that matters most
@@ -318,6 +319,8 @@ export default function Login() {
   };
 
   // ── Authenticated views ──────────────────────────────────
+  // Drafts are keyed per signed-in user; set before any child form mounts.
+  setDraftUser(session ? session.userId : null);
   if (session) {
     if (session.role === "worker") {
       return <WorkerMenu companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} userId={session.userId || null} onLogout={logout} token={session.token} />;

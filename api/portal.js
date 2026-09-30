@@ -21,7 +21,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { authorRosterId } from '../server-lib/authorStamp.js';
+import { authorRosterId, sessionDisplayName } from '../server-lib/authorStamp.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
@@ -78,12 +78,12 @@ async function verifySession(token) {
   if (payload.role === 'admin' || !payload.userId) return payload;
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 function resolveCompanyId(session, requestedCompanyId) {
@@ -502,7 +502,10 @@ Rules:
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
       }
-      const { siteId, documentId, answers, submittedBy, aiSummary, aiAssisted, pdfUrl, clientSubmissionId } = req.body;
+      const { siteId, documentId, answers, submittedBy: submittedByTyped, aiSummary, aiAssisted, pdfUrl, clientSubmissionId } = req.body;
+      // The name on the document is the signed-in person's; the typed one only
+      // counts for a session with no individual identity (founder/admin).
+      const submittedBy = sessionDisplayName(session) || submittedByTyped;
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
       if (!siteId || !documentId || !Array.isArray(answers) || !submittedBy) {

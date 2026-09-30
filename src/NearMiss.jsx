@@ -9,6 +9,7 @@ import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
 import { ArrowLeft, AlertTriangle, Loader2, CheckCircle2, WifiOff, PenLine, Plus, Trash2, Check } from "lucide-react";
+import { nowLocalInput, isLocalInput, formatOccurredAt } from "./occurredAt.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -101,7 +102,7 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
   const [siteMode, setSiteMode] = useState("list");
-  const [occurredAt, setOccurredAt] = useState("");
+  const [occurredAt, setOccurredAt] = useState(nowLocalInput());
   const [involved, setInvolved] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
@@ -166,7 +167,7 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
     if (!companyId) return;
     const draft = loadDraft("nearmiss", companyId);
     if (draft && draft.step && draft.step !== "done") {
-      if (draft.reporter) setReporter(draft.reporter);
+      if (draft.reporter && !loginUserName) setReporter(draft.reporter);
       if (draft.anonymous) setAnonymous(draft.anonymous);
       if (draft.site) setSite(draft.site);
       if (draft.siteMode) setSiteMode(draft.siteMode);
@@ -205,7 +206,7 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
 
 Company: ${companyName}
 Site: ${site}
-When it occurred: ${occurredAt || "not specified"}
+When it occurred: ${formatOccurredAt(occurredAt) || "not specified"}
 Who/what was involved: ${involved || "not specified"}
 Worker's description of what happened: "${description}"
 
@@ -346,13 +347,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
           {!anonymous && (
             <>
-              <label style={s.label}>Your name</label>
+              {loginUserName ? (
+                <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+              ) : (
+                <>
+                <label style={s.label}>Your name</label>
               <input
                 style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
                 placeholder="Reporter name" value={reporter}
                 onChange={e => setReporter(e.target.value)}
                 readOnly={!!loginUserName}
               />
+                </>
+              )}
             </>
           )}
 
@@ -368,7 +375,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           )}
 
           <label style={s.label}>When did it happen?</label>
-          <input style={s.input} placeholder="e.g. This morning around 9am" value={occurredAt} onChange={e => setOccurredAt(e.target.value)} />
+          <input type="datetime-local" style={s.input} max={nowLocalInput()} value={isLocalInput(occurredAt) ? occurredAt : ""} onChange={e => setOccurredAt(e.target.value)} />
 
           <label style={s.label}>Who / what was involved?</label>
           <input style={s.input} placeholder="e.g. Excavator and a ground worker" value={involved} onChange={e => setInvolved(e.target.value)} />
@@ -414,7 +421,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>Near Miss Incident Report</div>
-            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{reporterLabel()} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{reporterLabel()} · {site}{occurredAt ? ` · ${formatOccurredAt(occurredAt)}` : ""}</div>
           </div>
 
           {/* Severity index */}

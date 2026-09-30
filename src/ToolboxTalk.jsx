@@ -164,7 +164,7 @@ export default function ToolboxTalk({ companyId, companyName, userName: loginUse
     if (!companyId) return;
     const draft = loadDraft("toolbox", companyId);
     if (draft && draft.step && RESTORABLE_STEPS.includes(draft.step)) {
-      if (draft.presenter) setPresenter(draft.presenter);
+      if (draft.presenter && !loginUserName) setPresenter(draft.presenter);
       if (draft.meetingType) setMeetingType(draft.meetingType);
       if (draft.site) setSite(draft.site);
       if (draft.siteMode) setSiteMode(draft.siteMode);
@@ -425,13 +425,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
       {step === "setup" && (
         <div style={s.card}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Meeting details</div>
-          <label style={s.label}>Presenter name</label>
+          {loginUserName ? (
+            <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+          ) : (
+            <>
+            <label style={s.label}>Presenter name</label>
           <input
             style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Who is leading the talk?" value={presenter}
             onChange={e => setPresenter(e.target.value)}
             readOnly={!!loginUserName}
           />
+            </>
+          )}
 
           <label style={s.label}>Meeting type</label>
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
@@ -715,13 +721,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ background: C.panelInset, borderRadius: RAD.md, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: C.text.body }}>{lateSignTarget.record.talking_points_json.summary}</div>
           )}
 
-          <label style={s.label}>Your name</label>
+          {loginUserName ? (
+            <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+          ) : (
+            <>
+            <label style={s.label}>Your name</label>
           <input
             style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Your full name" value={lateName}
             onChange={e => setLateName(e.target.value)}
             readOnly={!!loginUserName}
           />
+            </>
+          )}
 
           <label style={s.label}>Signature</label>
           <div style={{ fontSize: 11, color: C.text.faint, marginBottom: 6, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document — FORA is not liable for any errors or omissions.</div>
