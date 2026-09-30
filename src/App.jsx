@@ -641,7 +641,7 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
     if (!forcedCompanyId) return;
     const draft = loadDraft("flha", forcedCompanyId);
     if (draft && draft.step && draft.step !== "done" && draft.step !== "company") {
-      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.workerName && !loginUserName) setWorkerName(draft.workerName);
       if (draft.jobSite) setJobSite(draft.jobSite);
       if (draft.siteMode) setSiteMode(draft.siteMode);
       if (draft.taskDesc) setTaskDesc(draft.taskDesc);
@@ -666,7 +666,7 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   const resumeTodaysFLHA = async () => {
     setResumeError("");
     setResumeChoices([]);
-    const name = resumeName.trim();
+    const name = loginUserName || resumeName.trim();
     if (!name) { setResumeError("Enter your name."); return; }
 
     try {
@@ -1078,13 +1078,19 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
           <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 17, color: C.text.primary, marginBottom: 4 }}>Site & Worker Info</div>
           <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 18 }}>Pre-loaded with <strong style={{ color: C.text.body }}>{sopData.company}</strong> SOPs ({sopData.policies.length} policies)</div>
 
-          <label style={styles.label}>Worker Name</label>
+          {loginUserName ? (
+            <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+          ) : (
+            <>
+            <label style={styles.label}>Worker Name</label>
           <input
             style={{ ...styles.input, marginBottom: 14, ...(loginUserName ? { background: C.panelInset, color: C.text.muted, opacity: 0.8 } : {}) }}
             placeholder="e.g. John Smith" value={workerName}
             onChange={e => setWorkerName(e.target.value)}
             readOnly={!!loginUserName}
           />
+            </>
+          )}
 
           <label style={styles.label}>Job Site / Location</label>
           {sites.length > 0 && siteMode === "list" ? (
@@ -1184,8 +1190,8 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
 
           <div style={{ marginTop: 20, paddingTop: 18, borderTop: `1px solid ${C.line}` }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: C.text.primary }}>Already started an FLHA today?</div>
-            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 10 }}>Enter your name to reopen today's FLHA and add a task to it.</div>
-            <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Your name (as entered earlier)" value={resumeName} onChange={e => setResumeName(e.target.value)} />
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 10 }}>{loginUserName ? "Reopen today's FLHA and add a task to it." : "Enter your name to reopen today's FLHA and add a task to it."}</div>
+            {!loginUserName && <input style={{ ...styles.input, marginBottom: 8 }} placeholder="Your name (as entered earlier)" value={resumeName} onChange={e => setResumeName(e.target.value)} />}
             {resumeError && <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "8px 12px", marginBottom: 8, fontSize: 13, color: C.status.danger.text }}>{resumeError}</div>}
             {resumeChoices.length > 0 && (
               <div style={{ marginBottom: 8 }}>

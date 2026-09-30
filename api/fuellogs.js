@@ -4,7 +4,7 @@
 // protected endpoints (api/logs.js is the closest sibling).
 
 import { createClient } from '@supabase/supabase-js';
-import { authorRosterId } from '../server-lib/authorStamp.js';
+import { authorRosterId, stampAuthorName } from '../server-lib/authorStamp.js';
 import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
@@ -213,6 +213,7 @@ export default async function handler(req, res) {
       }
 
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS);
+      stampAuthorName(session, recordToInsert, ['worker_name']);
       if (clientSubmissionId) {
         recordToInsert.meta_json = { ...(recordToInsert.meta_json || {}), client_submission_id: clientSubmissionId };
       }

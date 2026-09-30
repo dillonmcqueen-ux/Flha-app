@@ -122,7 +122,7 @@ export default function MonthlyInspection({ companyId, companyName, userName: lo
       if (draft.siteId) setSiteId(draft.siteId);
       if (draft.form) setForm(draft.form);
       if (draft.questions) setQuestions(draft.questions);
-      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.workerName && !loginUserName) setWorkerName(draft.workerName);
       if (draft.answers) setAnswers(draft.answers);
       if (draft.aiSummary) setAiSummary(draft.aiSummary);
       if (typeof draft.aiAssisted === "boolean") setAiAssisted(draft.aiAssisted);
@@ -381,13 +381,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={s.card}>
             <div style={{ fontWeight: 800, fontSize: 17, color: C.text.primary }}>{form.title}</div>
             <div style={{ fontSize: 13, color: C.text.muted, marginTop: 2 }}>{siteName()}</div>
-            <label style={{ ...s.label, marginTop: 14 }}>Your name</label>
+            {loginUserName ? (
+              <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+            ) : (
+              <>
+              <label style={{ ...s.label, marginTop: 14 }}>Your name</label>
             <input
               style={{ ...s.input, marginBottom: 0, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
               placeholder="e.g. John Smith" value={workerName}
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
             />
+              </>
+            )}
           </div>
 
           {questions.map((q, i) => {

@@ -109,7 +109,7 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
       if (draft.eqMode) setEqMode(draft.eqMode);
       if (draft.selectedEqId) setSelectedEqId(draft.selectedEqId);
       if (draft.freeEqLabel) setFreeEqLabel(draft.freeEqLabel);
-      if (draft.workerName) setWorkerName(draft.workerName);
+      if (draft.workerName && !loginUserName) setWorkerName(draft.workerName);
       if (draft.readingUnit) setReadingUnit(draft.readingUnit);
       if (draft.quantityUnit) setQuantityUnit(draft.quantityUnit);
       if (draft.siteId) setSiteId(draft.siteId);
@@ -232,13 +232,19 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
           </div>
 
           <div style={s.card}>
-            <label style={s.label}>Your name</label>
+            {loginUserName ? (
+              <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+            ) : (
+              <>
+              <label style={s.label}>Your name</label>
             <input
               style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
               placeholder="e.g. John Smith" value={workerName}
               onChange={e => setWorkerName(e.target.value)}
               readOnly={!!loginUserName}
             />
+              </>
+            )}
 
             <label style={s.label}>Reading type</label>
             <div style={{ display: "flex", gap: 6, marginBottom: 11 }}>

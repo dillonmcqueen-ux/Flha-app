@@ -726,7 +726,7 @@ One concept, **three column shapes across ten features**:
 |---|---|
 | Time Clock | ✅ FK `roster_id` |
 | Certifications | ✅ FK, path-namespaced `certifications.js:130` |
-| Every document form (primary signer) | ✅ `submitted_by_roster_id`, stamped server-side from the session (#3, fixed PR #118) |
+| Every document form (primary signer) | ✅ `submitted_by_roster_id`, stamped server-side from the session (#3, fixed PR #118; **FLHA only from branch `claude/step1-autofill-name-stamp`, `api/flhas.js:428`**, it was missing before) |
 | Toolbox Talk attendee / FLHA crew (secondary signer) | ⚠️ **new as of this branch — client-asserted, not server-validated.** See below. |
 
 **The primary-signer link is break #3, closed.** The new secondary-signer link
@@ -1576,6 +1576,33 @@ stamped from the session, which is authoritative rather than inferred.
 Two of three companies are on shared logins with no roster rows, so their
 records stay text-only — the same graceful degradation as #2's "other site"
 path, which is why the column is nullable.
+
+**Correction, 2026-09-30 (branch `claude/step1-autofill-name-stamp`): the
+"all nine document tables" claim above was wrong for FLHA until this branch.**
+`api/flhas.js`'s insert wrote `company_id` only and never
+`submitted_by_roster_id`; `authorRosterId` was not even imported there (diff
+vs `origin/main`: the import at `api/flhas.js:10` and the stamp at `:426` are
+both new). So every FLHA filed before this branch is text-only with a NULL
+author, and the Team Member page's per-person document list
+(`api/companydata.js:765-775`, `.eq('submitted_by_roster_id', id)`) could not
+have shown an FLHA authored by that person by id. Now stamped:
+`api/flhas.js:428` (`authorRosterId(session)`). Not backfilled in this
+branch (unknown whether a migration exists; `?`).
+
+**Name stamp, same branch.** The free-text name columns are now overwritten
+server-side with the roster name via `stampAuthorName`
+(`server-lib/authorStamp.js:57-63`; it skips when `isAnonymous` or when the
+session has no name, i.e. founder/admin): `api/flhas.js:389`
+(`worker_name`, `signed_by`), `api/fuellogs.js:216` (`worker_name`),
+`api/logs.js:379` via `AUTHOR_NAME_FIELDS` (`:156-160`: inspection, toolbox,
+daily), `api/reports.js:243` (`reporter_name`, `signed_by`; anonymous near
+miss keeps its label, so the #3 promise holds). Monthly inspection, custom
+form and Portal submits use `sessionDisplayName(session) || typed`
+(`api/monthly.js:292`, `api/customforms.js:519`, `api/portal.js:508`). This
+works because each `verifySession` now selects and returns roster `name`
+(e.g. `api/reports.js:75,80`). Effect on joins: the name-string matches
+that still exist (see #32) now agree with the roster name for roster
+logins. Founder/admin sessions still submit typed names.
 
 Original finding: Roster login exists precisely so a person is a real
 record, but every submitted document stores a name string. Per-worker
@@ -4361,3 +4388,4 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-09-29 | branch `founder-dashboard-business`, `c1a9266` | **#42 BUILT, closed pending merge of its PR** (same convention as #37-#41). Dillon approved it. `server-lib/onboardingHelpers.js:101-103` exports `effectiveSeatCap`; `api/companydata.js` lost its own `SEAT_CAP_BY_TIER` and calls it at `:362,392,457,582`; `platformBusiness.js:105` uses it, so the Seats card reports what enforcement uses and an unknown tier is basic in both. `tests/unit/seat-cap-source.test.js` (5 tests) pins one source and the Admin Panel copy; the copy test was shown to fail with advanced changed to 60. Left on purpose: `api/admin.js:355` keeps `planSeatCap`, and `src/AdminPanel.jsx:56` stays a copy, now test-pinned. §3 planSeatCap consumer row moved from broken to fine. Not marked merged. |
 | 2026-09-29 | branch `founder-dashboard-health` | Deliberate non-connection added to §5: workforce-category custom documents appear in no Analytics panel, per Dillon (no Workforce analytics view). Re-check evidence cited there. Map only, no code touched. |
 | 2026-09-30 | branch `claude/fora-document-assignment-review-a0j8z7` | Gatehouse removed entirely by Dillon's decision (separate project): `api/gatehouse.js`, `src/GatehouseBooth.jsx`, `src/GatehouseDashboard.jsx`, `server-lib/gatehousePdf.js`, `docs/schema/gatehouse-migration.sql`, the Login routing, the Admin Panel Pricing tab and the `gatehouse-uploads` upload entry are deleted. Live `gatehouse_*` tables and the bucket are dropped after merge. Map: surface #18 retired (23 surfaces now, was 24 rows), its §5 non-connection rewritten, offline-queue producer count 11 to 10, MRR note trimmed. Archive artifact: https://claude.ai/artifact/JHsEaSAYpED6ZwymGNAXX4, code recoverable at commit `023b9bb`. Map only, no code touched here. |
+| 2026-09-30 | branch `claude/step1-autofill-name-stamp` | **Break #3 coverage corrected for FLHA; name stamp placed.** The map said `submitted_by_roster_id` was on all nine document tables since PR #118, but `api/flhas.js` never wrote it until this branch (`:426`, import `:10`). Also new: `stampAuthorName` overwrites free-text name columns with the roster name on every submit handler (`server-lib/authorStamp.js:57-63`; call sites listed under #3). `incidents`/`near_misses` `occurred_at` is now a datetime-local string for new rows (`src/occurredAt.js`, column stays text; `api/reports.js:173-174` allowlist unchanged), so old and new rows differ in shape: a consumer that parses it must tolerate both (no consumer of `occurred_at` for date math verified, `?`). No new break filed. Map only, no code touched. |

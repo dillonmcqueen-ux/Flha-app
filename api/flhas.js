@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { sanitizeSignerRosterIds } from '../server-lib/rosterSignerScope.js';
+import { authorRosterId, stampAuthorName } from '../server-lib/authorStamp.js';
 import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
@@ -312,6 +313,8 @@ export default async function handler(req, res) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
         const amendUpdate = pickAllowed(record, SUBMITTABLE_FIELDS);
+        // An amendment must not be able to rename the author either.
+        stampAuthorName(session, amendUpdate, ['worker_name', 'signed_by'].filter(k => Object.prototype.hasOwnProperty.call(amendUpdate, k)));
 
         // Break #2 — a client-supplied site_id is a tenancy question:
         // unchecked, a worker could file their own company's FLHA against
@@ -382,6 +385,8 @@ export default async function handler(req, res) {
           }
         }
         const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS);
+        // The name on the FLHA is the signed-in person's, not the request's.
+        stampAuthorName(session, recordToInsert, ['worker_name', 'signed_by']);
 
         // Break #2 — a client-supplied site_id is a tenancy question:
         // unchecked, a worker could file their own company's FLHA against
@@ -418,7 +423,9 @@ export default async function handler(req, res) {
         recordToInsert.status = deriveFlhaStatus(recordToInsert.hazards_json);
         const { data, error } = await supabaseAdmin
           .from('flhas')
-          .insert({ ...recordToInsert, company_id: session.companyId })
+          // Break #3 — author from the session, never the request. FLHA was
+          // the one document type still missing it.
+          .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session) })
           .select('id, status')
           .limit(1);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });

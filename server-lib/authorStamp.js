@@ -36,3 +36,28 @@ export function authorRosterId(session, { isAnonymous = false } = {}) {
   if (isAnonymous === true) return null;
   return (session && session.userId) || null;
 }
+
+/**
+ * Overwrites the free-text name columns on a record about to be inserted
+ * with the signed-in person's name, so the name on a document always
+ * matches the roster member who submitted it.
+ *
+ * The client shows the name read-only for a roster login, but nothing
+ * stopped a request from carrying a different one. Like the roster id
+ * above, the name is stamped server-side. A session with no individual
+ * identity (founder/admin) has no name to stamp, so the submitted text is
+ * left alone: that is the one case where the form still asks for a name.
+ *
+ * `isAnonymous` skips the stamp entirely (anonymous near miss).
+ */
+export function sessionDisplayName(session) {
+  return String((session && (session.name || session.userName)) || '').trim();
+}
+
+export function stampAuthorName(session, record, fields, { isAnonymous = false } = {}) {
+  if (isAnonymous === true || !record) return record;
+  const name = sessionDisplayName(session);
+  if (!name) return record;
+  for (const f of fields) record[f] = name;
+  return record;
+}

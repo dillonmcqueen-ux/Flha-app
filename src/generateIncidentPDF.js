@@ -2,6 +2,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { loadJsPDF } from "./loadJsPDF.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 import { getForaLogoDataUrl } from "./foraLogo.js";
+import { formatOccurredAt } from "./occurredAt.js";
 
 function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   const lines = doc.splitTextToSize(text || "", maxW);
@@ -88,7 +89,7 @@ export async function generateAndUploadIncident(data) {
   doc.setTextColor(153, 27, 27); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
   doc.text("WHEN", L, y + 19); doc.text("MEDICAL ATTENTION", R, y + 19);
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-  doc.text(occurredAt || "—", L, y + 24, { maxWidth: contentW / 2 - 8 }); doc.text(medicalAttention || "None", R, y + 24, { maxWidth: contentW / 2 - 8 });
+  doc.text(formatOccurredAt(occurredAt) || "—", L, y + 24, { maxWidth: contentW / 2 - 8 }); doc.text(medicalAttention || "None", R, y + 24, { maxWidth: contentW / 2 - 8 });
   doc.setTextColor(153, 27, 27); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
   doc.text("INJURED PERSON", L, y + 31); doc.text("BODY PART", R, y + 31);
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(9);
