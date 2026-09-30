@@ -727,9 +727,6 @@ export default async function handler(req, res) {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
-      const allowed = await checkIpThrottle(supabaseAdmin, `pinlinkbulk:${companyId}`, 3, 60 * 60 * 1000);
-      if (!allowed) return res.status(429).json({ error: 'Setup links were already sent to everyone a few times this hour. Try again later.' });
-
       const { data: people, error: listErr } = await supabaseAdmin
         .from('roster')
         .select('id, company_id, name, role, is_owner, departments, totp_enabled, email, pin_set_at, last_login_at, pin_link_sent_at')
@@ -737,12 +734,23 @@ export default async function handler(req, res) {
         .eq('active', true);
       if (listErr) return res.status(500).json({ error: 'Could not load the roster.' });
 
-      const waiting = (people || []).filter((m) => !m.pin_set_at && !m.last_login_at);
+      // Same pyramid as the single send: an Owner reaches workers and supervisors,
+      // never another Owner (only the founder does). Someone emailed in the last
+      // hour is left alone, so a second click cannot kill a link still in flight.
+      const recentlySent = Date.now() - 60 * 60 * 1000;
+      const waiting = (people || []).filter((m) => !m.pin_set_at && !m.last_login_at
+        && canResetMfa(session, m)
+        && !(m.pin_link_sent_at && new Date(m.pin_link_sent_at).getTime() > recentlySent));
       const withEmail = waiting.filter((m) => (withDecryptedEmail(m).email || '').trim());
       const skippedNoEmail = waiting.length - withEmail.length;
       // Never-sent first, then the longest since their last link.
       withEmail.sort((a, b) => (a.pin_link_sent_at ? new Date(a.pin_link_sent_at).getTime() : 0) - (b.pin_link_sent_at ? new Date(b.pin_link_sent_at).getTime() : 0));
       const batch = withEmail.slice(0, MAX_LINKS_PER_BATCH);
+      if (batch.length === 0) return res.status(200).json({ ok: true, sent: 0, failed: 0, skippedNoEmail, remaining: 0 });
+
+      // Counted only once there is something to send, so an empty click costs nothing.
+      const allowed = await checkIpThrottle(supabaseAdmin, `pinlinkbulk:${companyId}`, 3, 60 * 60 * 1000);
+      if (!allowed) return res.status(429).json({ error: 'Setup links were already sent to everyone a few times this hour. Try again later.' });
 
       const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
       const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';

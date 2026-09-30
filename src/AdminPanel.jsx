@@ -364,7 +364,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       if (data.failed) parts.push(`${data.failed} failed to send, try again.`);
       if (data.skippedNoEmail) parts.push(`${data.skippedNoEmail} ${data.skippedNoEmail === 1 ? "person has" : "people have"} no email on file.`);
       if (data.remaining) parts.push(`${data.remaining} more waiting, click again to send the next batch.`);
-      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Everyone already has a PIN.");
+      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Nobody needs one right now. Everyone has a PIN or was sent a link in the last hour.");
       setMsg(parts.join(" "));
       await loadRoster(activeId);
     } catch (e) { setMsg("Couldn't send the setup links. Try again."); }
@@ -2327,7 +2327,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={st.card}>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Send setup links</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>
-                Emails everyone with an email on file who has not chosen a PIN yet a link to set their own. Each link goes to that person's own inbox. Supervisor links last 24 hours, everyone else's 7 days.
+                Emails everyone with an email on file who has not chosen a PIN yet (and was not sent a link in the last hour) a link to set their own. Another Owner is never included. Each link goes to that person's own inbox. Supervisor links last 24 hours, everyone else's 7 days.
               </div>
               <button style={{ ...st.darkBtn, width: "100%", opacity: (bulkLinkBusy || rosterActiveCount === 0) ? 0.6 : 1 }} onClick={sendAllSetupLinks} disabled={bulkLinkBusy || rosterActiveCount === 0}>
                 {bulkLinkBusy ? "Sending…" : "Send setup links"}

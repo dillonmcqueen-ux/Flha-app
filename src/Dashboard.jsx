@@ -3646,7 +3646,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       if (data.failed) parts.push(`${data.failed} failed to send, try again.`);
       if (data.skippedNoEmail) parts.push(`${data.skippedNoEmail} ${data.skippedNoEmail === 1 ? "person has" : "people have"} no email on file.`);
       if (data.remaining) parts.push(`${data.remaining} more waiting, click again to send the next batch.`);
-      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Everyone already has a PIN.");
+      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Nobody needs one right now. Everyone has a PIN or was sent a link in the last hour.");
       setBulkLinkMsg(parts.join(" "));
       await loadRosterList();
     } catch (e) { setBulkLinkMsg("Couldn't send the setup links. Try again."); }
@@ -7832,7 +7832,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   <div style={{ flex: 1, minWidth: 220 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: C.text.body }}>Send setup links</div>
                     <div style={{ fontSize: 12, color: C.text.faint }}>
-                      Emails everyone with an email on file who has not chosen a PIN yet a link to set their own. Supervisor links last 24 hours, everyone else's 7 days.
+                      Emails everyone with an email on file who has not chosen a PIN yet (and was not sent a link in the last hour) a link to set their own. Another Owner is never included. Supervisor links last 24 hours, everyone else's 7 days.
                     </div>
                     {bulkLinkMsg && <div style={{ fontSize: 12, fontWeight: 700, color: C.text.body, marginTop: 6 }}>{bulkLinkMsg}</div>}
                   </div>
