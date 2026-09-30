@@ -11,14 +11,14 @@
 import { decryptField } from './fieldCrypto.js';
 import { signRows } from './signedUrls.js';
 import { sendEmail } from './email.js';
-import { PORTAL_DEPARTMENT_LABELS } from './portalDepartments.js';
+import { PORTAL_DEPARTMENT_LABELS, prettifyDepartmentKey } from './portalDepartments.js';
 
 export const LINK_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_LISTED = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function departmentLabel(dep) {
-  return PORTAL_DEPARTMENT_LABELS[dep] || dep;
+  return PORTAL_DEPARTMENT_LABELS[dep] || prettifyDepartmentKey(dep);
 }
 
 // Decrypts a schedule's hand-added recipient list. A row that can't be read

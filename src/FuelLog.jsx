@@ -91,7 +91,11 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
           if (!eqData.equipment || eqData.equipment.length === 0) setEqMode("other");
         } else setEqMode("other");
         const siteData = await siteRes.json();
-        if (siteRes.ok) setSites(siteData.sites || []);
+        if (siteRes.ok) {
+          setSites(siteData.sites || []);
+          // The person's default site, from their profile (never overrides a choice or draft).
+          if (siteData.defaultSiteId) setSiteId(prev => prev || String(siteData.defaultSiteId));
+        }
       } catch (e) {
         setEqMode("other");
       }

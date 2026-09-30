@@ -12,6 +12,7 @@
 
 import QRCode from 'qrcode';
 import { encryptField, decryptField } from './fieldCrypto.js';
+import { isFounder, isOwner } from './ownerAccess.js';
 import {
   generateTotpSecret,
   totpEnrollmentUri,
@@ -20,9 +21,10 @@ import {
   consumeBackupCode,
 } from './totp.js';
 
-// Roles that must use an authenticator. 'owner' joins this list when the
-// Account Owner role lands (step 3 of the login rework).
-export const MFA_REQUIRED_ROLES = ['supervisor', 'admin', 'owner'];
+// Roles that must use an authenticator. The Account Owner is a supervisor-role
+// row, so it is covered by 'supervisor'; requiresMfa also checks is_owner as a
+// belt-and-braces guard.
+export const MFA_REQUIRED_ROLES = ['supervisor', 'admin'];
 // Departments (keys from server-lib/portalDepartments.js) that must use one
 // regardless of role. The Owner will be able to extend this per company.
 export const MFA_SENSITIVE_DEPARTMENTS = ['safety', 'hr', 'payroll'];
@@ -32,7 +34,7 @@ export const TOTP_LOCKOUT_SECONDS = 15 * 60;
 
 export function requiresMfa(member) {
   if (!member) return false;
-  if (MFA_REQUIRED_ROLES.includes(member.role)) return true;
+  if (MFA_REQUIRED_ROLES.includes(member.role) || member.is_owner === true) return true;
   const depts = Array.isArray(member.departments) ? member.departments : [];
   return depts.some((d) => MFA_SENSITIVE_DEPARTMENTS.includes(d));
 }
@@ -186,18 +188,14 @@ export async function resetMfa(supabaseAdmin, rosterId) {
 // The reset pyramid: the founder resets anyone, an Owner resets supervisors
 // and workers, a supervisor resets workers. Nobody resets their own (they
 // would have to get past the authenticator to ask, and a reset by the same
-// person defeats it). Until the Account Owner role exists, only the founder
-// can reset a supervisor.
-const RESET_RANK = { worker: 0, supervisor: 1, owner: 2, admin: 2 };
+// person defeats it). Only the founder resets an Owner.
 export function canResetMfa(session, target) {
   if (!session || !target) return false;
-  if (session.role === 'admin' && !session.userId) return true; // founder
+  if (isFounder(session)) return true;
   if (session.userId && String(session.userId) === String(target.id)) return false;
   if (session.companyId !== target.company_id) return false;
-  const actor = RESET_RANK[session.role];
-  const victim = RESET_RANK[target.role];
-  if (actor === undefined || victim === undefined) return false;
-  if (session.role === 'supervisor') return victim === 0;
-  if (session.role === 'owner') return victim <= 1;
+  if (target.is_owner) return false;
+  if (isOwner(session)) return target.role === 'worker' || target.role === 'supervisor';
+  if (session.role === 'supervisor') return target.role === 'worker';
   return false;
 }

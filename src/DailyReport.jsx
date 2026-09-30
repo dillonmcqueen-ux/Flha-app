@@ -116,6 +116,9 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
         const siteData = await siteRes.json();
         if (siteRes.ok) {
           setSites(siteData.sites || []);
+          // The person's default site, from their profile. Never overrides a site
+          // already chosen or restored from a draft.
+          { const ds = (siteData.sites || []).find(x => x.id === siteData.defaultSiteId); if (ds) setSite(prev => prev || ds.name); }
           if (!siteData.sites || siteData.sites.length === 0) setSiteMode("other");
         } else {
           setSiteMode("other");

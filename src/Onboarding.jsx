@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
+import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
+import { SUGGESTED_JOB_TITLES } from "../server-lib/jobTitles";
 import {
   Building2, MapPin, Users, FileText, UploadCloud,
   Sparkles, AlertTriangle, CheckCircle2, ShieldCheck, Loader2, X, Check,
 } from "lucide-react";
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[^\s@<>,;"()]+@[^\s@<>,;"()]+\.[^\s@<>,;"()]+$/;
 const USER_LINE_RE = /^(.+?)\s*[—-]\s*(worker|supervisor)$/i;
 
 // Turns a saved "Name - role" list back into form rows, for an edit link
@@ -18,13 +20,15 @@ function personRowsFromUsersList(usersList) {
     .filter(Boolean)
     .map((line) => {
       const m = line.match(USER_LINE_RE);
-      return m ? { name: m[1].trim(), role: m[2].toLowerCase(), email: "" } : null;
+      return m ? { ...blankPerson(), name: m[1].trim(), role: m[2].toLowerCase() } : null;
     })
     .filter(Boolean);
-  return rows.length ? rows : [{ name: "", role: "worker", email: "" }];
+  return rows.length ? rows : [blankPerson()];
 }
 
-const blankPerson = () => ({ name: "", role: "worker", email: "" });
+function blankPerson() {
+  return { name: "", role: "worker", email: "", title: "", division: "", site: "", departments: [] };
+}
 
 // Same rules as normalizePeople in server-lib/onboardingHelpers.js, so a
 // submitter hears about a problem before uploading anything. Returns the
@@ -225,7 +229,11 @@ export default function Onboarding() {
           customRequest: r.custom_request || "",
         });
         setPeople(Array.isArray(r.people) && r.people.length
-          ? r.people.map((p) => ({ name: p.name || "", role: p.role === "supervisor" ? "supervisor" : "worker", email: p.email || "" }))
+          ? r.people.map((p) => ({
+              name: p.name || "", role: p.role === "supervisor" ? "supervisor" : "worker", email: p.email || "",
+              title: p.title || "", division: p.division || "", site: p.site || "",
+              departments: Array.isArray(p.departments) ? p.departments : [],
+            }))
           : personRowsFromUsersList(r.users_list));
         if (r.peopleUnreadable) setError("We couldn't load the email addresses you gave us. Please re-enter them before saving.");
         setAdminNote(r.admin_note || "");
@@ -244,6 +252,9 @@ export default function Onboarding() {
     const value = e.target.value;
     setPeople((rows) => rows.map((p, j) => (j === i ? { ...p, [key]: value } : p)));
   };
+  const toggleDepartment = (i, key) => setPeople((rows) => rows.map((r, j) => j !== i ? r : {
+    ...r, departments: r.departments.includes(key) ? r.departments.filter((d) => d !== key) : [...r.departments, key],
+  }));
   const addPerson = () => setPeople((rows) => [...rows, blankPerson()]);
   const removePerson = (i) => setPeople((rows) => (rows.length > 1 ? rows.filter((_, j) => j !== i) : [blankPerson()]));
   const rosterProblem = peopleProblem(people);
@@ -351,7 +362,10 @@ export default function Onboarding() {
           unitsList: form.unitsList.trim(),
           people: people
             .filter((p) => p.name.trim() || p.email.trim())
-            .map((p) => ({ name: p.name.trim(), role: p.role, email: p.email.trim() })),
+            .map((p) => ({
+              name: p.name.trim(), role: p.role, email: p.email.trim(),
+              title: p.title.trim(), division: p.division.trim(), site: p.site, departments: p.departments,
+            })),
           customRequest: form.customRequest.trim(),
           sopFilePaths,
           sopPathTokens,
@@ -522,10 +536,13 @@ export default function Onboarding() {
 
             <div style={styles.label}>People <span style={styles.required}>*</span></div>
             <div style={styles.hint}>
-              Everyone who will use FORA. Supervisors need an email address, since that is where document notifications and reports go. A worker's email is optional. Emails are stored encrypted.
+              Everyone who will use FORA. Supervisors need an email address, since that is where document notifications, reports and their sign-in setup link go. A worker's email is optional. Emails are stored encrypted. Title, division, default site and departments are optional and can be changed later. The contact person above becomes the account owner.
             </div>
+            <datalist id="onboarding-titles">
+              {SUGGESTED_JOB_TITLES.map((t) => <option key={t} value={t} />)}
+            </datalist>
             {people.map((p, i) => (
-              <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "center" }}>
+              <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${C.line}`, alignItems: "center" }}>
                 <input style={{ ...styles.input, flex: "1 1 160px", width: "auto" }} value={p.name} onChange={setPerson(i, "name")} placeholder="Full name" aria-label={`Name, person ${i + 1}`} />
                 <select style={{ ...styles.input, flex: "0 0 130px", width: "130px" }} value={p.role} onChange={setPerson(i, "role")} aria-label={`Role, person ${i + 1}`}>
                   <option value="worker">Worker</option>
@@ -537,6 +554,26 @@ export default function Onboarding() {
                   style={{ ...styles.input, flex: "0 0 44px", width: 44, padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <X size={16} />
                 </button>
+                <input style={{ ...styles.input, flex: "1 1 150px", width: "auto" }} list="onboarding-titles" value={p.title} onChange={setPerson(i, "title")}
+                  placeholder="Job title (optional)" aria-label={`Job title, person ${i + 1}`} />
+                <input style={{ ...styles.input, flex: "1 1 150px", width: "auto" }} value={p.division} onChange={setPerson(i, "division")}
+                  placeholder="Division (optional)" aria-label={`Division, person ${i + 1}`} />
+                <select style={{ ...styles.input, flex: "1 1 150px", width: "auto" }} value={p.site} onChange={setPerson(i, "site")} aria-label={`Default site, person ${i + 1}`}>
+                  <option value="">Default site (optional)</option>
+                  {siteLines.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <div style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", gap: 6 }} role="group" aria-label={`Departments, person ${i + 1}`}>
+                  {PORTAL_DEPARTMENTS.map((key) => {
+                    const on = p.departments.includes(key);
+                    return (
+                      <button key={key} type="button" onClick={() => toggleDepartment(i, key)} aria-pressed={on}
+                        style={{ padding: "6px 10px", borderRadius: RAD.pill, fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 32,
+                          border: `1.5px solid ${on ? C.orange : C.line}`, background: on ? "rgba(249,115,22,0.12)" : "transparent", color: on ? C.orange : C.text.muted }}>
+                        {on ? "✓ " : ""}{PORTAL_DEPARTMENT_LABELS[key]}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ))}
             <button type="button" onClick={addPerson} style={{ ...styles.fileBtn, width: "auto", marginTop: 4 }}>

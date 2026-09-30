@@ -120,7 +120,11 @@ export default function PortalDocumentForm({ companyId, companyName, userName: l
           body: JSON.stringify({ action: "list_sites", token, companyId }),
         });
         const data = await res.json();
-        if (res.ok) setSites(data.sites || []);
+        if (res.ok) {
+          setSites(data.sites || []);
+          // The person's default site, from their profile (never overrides a choice or draft).
+          if (data.defaultSiteId) setSiteId(prev => prev || String(data.defaultSiteId));
+        }
       } catch (e) { /* leave sites empty */ }
       try {
         const logoRes = await fetch("/api/companydata", {

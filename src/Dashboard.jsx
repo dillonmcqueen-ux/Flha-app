@@ -14,6 +14,8 @@ import TimeClockMap from "./TimeClockMap";
 import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
 import WorkerProfileDrawer from "./WorkerProfileDrawer";
+import CompanyStructureManager from "./CompanyStructureManager.jsx";
+import useCompanyStructure from "./useCompanyStructure.js";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
@@ -2341,6 +2343,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState(null);
+  // Departments, divisions, sites and the signed-in person's own profile.
+  // `canManageCompany` mirrors server-lib/ownerAccess.js: the founder, or the
+  // company's Account Owner. The server enforces it; this only decides what to show.
+  const companyStructure = useCompanyStructure({ token, companyId: selectedCompany });
+  const canManageCompany = viewerRole === "admin" || companyStructure.me?.isOwner === true;
   const [showWorkerForms, setShowWorkerForms] = useState(false);
 
   // ── Live refresh ──────────────────────────────────────────────────────
@@ -3537,7 +3544,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_worker_profile", token, id: profileRosterId, email: draft.email, phone: draft.phone, role: draft.role, departments: draft.departments }),
+        body: JSON.stringify({
+          action: "update_worker_profile", token, id: profileRosterId, email: draft.email, phone: draft.phone,
+          ...(canManageCompany ? {
+            role: draft.role, isOwner: draft.isOwner, title: draft.title, departments: draft.departments,
+            divisions: draft.divisions, defaultSiteId: draft.defaultSiteId ? Number(draft.defaultSiteId) : null,
+          } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setProfileSaveError(data.error || "Couldn't save those changes."); setSavingProfile(false); return; }
@@ -7795,6 +7808,16 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 ]} />
               )}
 
+              {canManageCompany && (
+                <CompanyStructureManager
+                  token={token}
+                  companyId={selectedCompany}
+                  departments={companyStructure.departments}
+                  divisions={companyStructure.divisions}
+                  onChanged={companyStructure.reload}
+                />
+              )}
+
               {loadingRosterList ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: C.text.faint }}>Loading…</div>
               ) : rosterList.length === 0 ? (
@@ -7817,12 +7840,26 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               >
                                 {m.name}
                               </button>
+                              {m.is_owner && (
+                                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: C.orange, background: C.panelInset, border: `1px solid ${C.orange}`, padding: "1px 7px", borderRadius: RAD.pill }}>
+                                  OWNER
+                                </span>
+                              )}
                               {m.employee_id && (
                                 <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: C.text.muted, background: C.panelInset, border: `1px solid ${C.line}`, padding: "1px 7px", borderRadius: RAD.pill }}>
                                   ID {m.employee_id}
                                 </span>
                               )}
                             </div>
+                            {(m.title || (m.departments || []).length > 0 || (m.divisions || []).length > 0) && (
+                              <div style={{ fontSize: 12, color: C.text.muted }}>
+                                {[
+                                  m.title,
+                                  ...(m.departments || []).map(k => companyStructure.departments.find(d => d.key === k)?.label || k),
+                                  ...(m.divisions || []).map(id => companyStructure.divisions.find(d => d.id === id)?.name).filter(Boolean),
+                                ].filter(Boolean).join(" · ")}
+                              </div>
+                            )}
                             <div style={{ fontSize: 12, color: C.text.faint }}>{m.last_login_at ? `Last login ${new Date(m.last_login_at).toLocaleDateString()}` : "Never logged in"}</div>
                             {/* Inline, per row: filling these in off an HRIS
                                 export is twenty people in a row, and a modal
@@ -7862,7 +7899,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           {isDocActive("certifications") && m.wallet_enabled && (
                             <button onClick={() => createRosterWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
                           )}
-                          {m.totp_enabled && (viewerRole === "admin" || m.role === "worker") && (
+                          {m.totp_enabled && (viewerRole === "admin" ? true : canManageCompany ? !m.is_owner && String(m.id) !== String(userId) : m.role === "worker") && (
                             <button
                               onClick={() => resetRosterMemberMfa(m.id, m.name)}
                               style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}
@@ -7870,6 +7907,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               Reset authenticator
                             </button>
                           )}
+                          {(viewerRole === "admin" || m.role === "worker" || String(m.id) === String(userId) || (canManageCompany && !m.is_owner)) && (
                           <button
                             onClick={() => resetRosterMemberPin(m.id, m.name)}
                             disabled={resettingRosterId === m.id}
@@ -7877,6 +7915,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           >
                             {resettingRosterId === m.id ? "Resetting…" : "Reset PIN"}
                           </button>
+                          )}
                         </div>
                       ))}
                     </CollapsibleGroup>
@@ -8019,6 +8058,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         saveError={profileSaveError}
         onToggleActive={toggleWorkerProfileActive}
         togglingActive={togglingProfileActive}
+        canManage={canManageCompany}
+        departments={companyStructure.departments}
+        divisions={companyStructure.divisions}
+        sites={companyStructure.sites}
       />
     </div>
   );

@@ -85,7 +85,11 @@ export default function CustomForm({ companyId, companyName, userName: loginUser
           body: JSON.stringify({ action: "list_sites", token, companyId }),
         });
         const data = await res.json();
-        if (res.ok) setSites(data.sites || []);
+        if (res.ok) {
+          setSites(data.sites || []);
+          // The person's default site, from their profile (never overrides a choice or draft).
+          if (data.defaultSiteId) setSiteId(prev => prev || String(data.defaultSiteId));
+        }
         else console.error("sites read error:", data.error);
       } catch (e) {
         console.error("sites read error:", e.message);

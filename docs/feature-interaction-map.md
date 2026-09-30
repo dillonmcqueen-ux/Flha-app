@@ -556,6 +556,40 @@ re-check items flagged at that time are now answered:
   from the phase-1 and phase-2 entries, not a new break — filed once, not
   refiled with each phase that touches it.
 
+**Update 2026-09-30 (branch `claude/step3-owner-profile`): the list is no
+longer fixed, onboarding now writes the column, and the phase-1 "Written"
+and "Validated" rows above are stale.**
+
+| Side | Where |
+|---|---|
+| Valid keys | the five built-ins (`server-lib/portalDepartments.js`) plus the company's own `c_...` keys from the new `company_departments` table (`server-lib/companyStructure.js:38-52`, `validDepartmentKeys`). Keys are prefixed `c_` (`:30-33`) so they cannot collide with a built-in |
+| Written, profile | `api/companydata.js:999-1002` via `sanitizeDepartments` (`companyStructure.js:55-60`). Owner-only (`:953-955`). The old "a worker row is forced to `[]`" rule is **gone**; a worker can now hold departments. Harmless today because every consumer below also requires `role='supervisor'` (`portal.js:737`, `portalReports.js:57`), but the phase-1 invariant no longer holds |
+| Written, onboarding | `server-lib/onboardingApproval.js:313` from `planRoster` (`server-lib/onboardingRoster.js:20-31`). **Closes the gap where approval wrote no `departments` at all** (`git show origin/main:server-lib/onboardingApproval.js` has no `departments` hit), so a new Company Portal customer's supervisors matched no document routing until someone edited each by hand |
+| Consumed (Portal) | `api/portal.js` validates document departments, escalation department and schedule/email departments against the per-company set (`deptSetFor`, `:95-100`; uses at `:280,289,385,1215,1295`). Dashboard scoping and email routing unchanged (`portal.js:737-739,788-790,934-936`, `portalReports.js:54-67`) |
+| Labels | `portalReports.js:21` falls back to `prettifyDepartmentKey` (`portalDepartments.js:31`) for a custom key |
+| Removal | deleting a custom department strips the key from every roster row (`companydata.js:1164-1166`). It does **not** strip it from `portal_documents.departments`, `portal_questions.escalation_department` or `portal_report_schedules.department`: see weak link W1 below |
+
+Weak links found in this pass (read in code, not yet numbered as breaks, listed
+for Dillon to decide; none loses data today):
+- **W1. Deleting a custom department orphans its Portal routing.** `companydata.js:1160-1169` cleans `roster` only. A document routed to `c_yard` keeps the key in `portal_documents.departments`; nobody holds it, so `submit_portal` emails nobody (`portal.js:682-693`) and a question escalating to it notifies nobody (`portal.js:645-652`, the same silence as break #34/#35). Re-check: `grep -n "portal_documents\|portal_questions\|portal_report_schedules" api/companydata.js` around `:1157-1169` returns nothing.
+- **W2. Onboarding keeps its own copy of the five-key list.** `server-lib/onboardingHelpers.js:59` (`ONBOARDING_DEPARTMENTS`) duplicates `PORTAL_DEPARTMENTS`; add a sixth built-in and onboarding drops it silently (`:89`). Onboarding cannot offer custom keys because the company does not exist yet (comment at `:84`), which is correct.
+- **W3. The AI document drafter only knows the five built-ins.** Prompt lists them at `api/portal.js:217,228`, so a custom department is never suggested; the sanitizer (`:280`) would accept one.
+- **W4. Onboarding sets departments on workers.** `onboardingHelpers.js:88-90` does not gate on role; same harmless-today caveat as above.
+
+**`roster.divisions` (`bigint[]` of `company_divisions.id`), 2026-09-30.**
+Written at profile edit (`companydata.js:1004-1007`, `sanitizeDivisionIds`,
+`companyStructure.js:75-84`, rejects another company's id) and onboarding
+(`onboardingApproval.js:294-302,311`, creates one `company_divisions` row per distinct
+division name, one division per person). Read back only on the profile/list payloads
+(`companydata.js:357,834,920,1216-1228`). Deleting a division strips it from roster
+(`:1202-1204`). **No consumer**: nothing in `portal.js`, `maintenance.js`, analytics or any
+report reads `divisions`. Intentional per `companyStructure.js:5-9` (tags for routing,
+filtering and reporting that never grant access) and the same producer-side-first shape as
+`roster.departments` phase 1. Filed as pending link **P2** (§4 pending links), not a break.
+Because it is an array of bare ids, there is no FK: Postgres will not cascade a division
+delete, which is why the handler cleans `roster` by hand at `:1202-1204`; any future
+table holding division ids needs the same cleanup.
+
 **Role-model note, Dillon's 2026-09-29 decision, mid-build:** the build
 spec's "Company Admin" persona — a customer-facing admin role distinct
 from worker/supervisor — was **not** built here, and should not be assumed
@@ -719,7 +753,29 @@ One concept, **three column shapes across ten features**:
 | `job_site` free text | FLHA (`flhas.js:126`) |
 | nothing at all | Equipment Inspection, Time Clock |
 
+(Company Portal is a fourth `site_id` FK user: `api/portal.js:476-479,515-525` check `siteId` against `sites`; it was missing from this table.)
+
 **This is break #2 below.**
+
+**`roster.default_site_id` -> `sites.id` (2026-09-30, branch `claude/step3-owner-profile`).**
+A person's default site. Written by `api/companydata.js:1009-1012` (`sanitizeDefaultSite`,
+`server-lib/companyStructure.js:88`, same contract as `resolveSiteId`: false for another
+company's site) and at onboarding approval, `server-lib/onboardingApproval.js:308,316`
+(name matched case-insensitively against the `sites` rows inserted at `:266-269`; a name
+that matches no site silently becomes `null`, no error). Read by `list_sites`,
+`api/companydata.js:1102-1107` (returns `defaultSiteId`), and preselected, never overriding
+a draft or a choice, by nine forms. Matching the table above, it is stored as an id but
+lands in two shapes:
+
+| Form | Preselect | Shape it lands in |
+|---|---|---|
+| Fuel, Monthly, Custom, Portal | `src/FuelLog.jsx:97`, `MonthlyInspection.jsx:94`, `CustomForm.jsx:91`, `PortalDocumentForm.jsx:126` | `siteId` (id, survives a site rename) |
+| FLHA, Incident, Near Miss, Toolbox, Daily | `src/App.jsx:400`, `Incident.jsx:237`, `NearMiss.jsx:142`, `ToolboxTalk.jsx:124`, `DailyReport.jsx:121` | the site's **name** copied into the free-text `site`/`job_site` state |
+
+So the new FK does not close break #2; for five forms it is one more id-to-string
+conversion at the client. Not a new break (nothing is lost today); #2's scope is unchanged.
+Also `list_sites` returns `defaultSiteId` only to a session with `session.userId`
+(`:1102`); a shared-code session gets `null` and no preselect, which is expected.
 
 ### `roster_id` → `roster.id` (the person)
 | Feature | Link |
@@ -3907,6 +3963,20 @@ the writer, promote this to a break.
 `from('platform_events')` with `.select`), and confirm the table exists live
 before trusting any dashboard number.
 
+### P2 - `roster.divisions` has no consumer (owner-profile step 3, 2026-09-30)
+**Pending by design, recorded 2026-09-30, branch `claude/step3-owner-profile`. Not a break,
+nothing to build now.** Divisions are written (`api/companydata.js:1004-1007`, onboarding
+`server-lib/onboardingApproval.js:294-311`) and shown on the profile
+(`companydata.js:1216-1228`), and nothing filters, routes or reports by them. The file says
+so on purpose (`server-lib/companyStructure.js:5-9`). *What a customer loses today:* nothing
+promised; the UI lets an Owner tag people with a division and nothing happens as a result, so
+the first customer to ask "what does division do" gets no answer. *Exit condition:* a later
+step makes Portal routing, Analytics or reports divisions-aware; if a release ships with
+divisions still unread, promote to a break. Re-check:
+`grep -rn "divisions" api server-lib src | grep -v "companydata.js\|companyStructure\|onboardingApproval\|WorkerProfileDrawer\|CompanyStructureManager"`
+(only `Dashboard.jsx:3551`, the profile save, should appear). Migration
+`docs/schema/owner-profile-migration.sql` applied live: **? not verified by this pass.**
+
 ### #42: The dashboard's seat cap is not the copy that enforces the cap
 **Severity: low** (founder-facing, no customer loses anything today, values agreed).
 **Status: BUILT and approved by Dillon, closed pending merge of its PR (branch
@@ -4389,3 +4459,4 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-09-29 | branch `founder-dashboard-health` | Deliberate non-connection added to §5: workforce-category custom documents appear in no Analytics panel, per Dillon (no Workforce analytics view). Re-check evidence cited there. Map only, no code touched. |
 | 2026-09-30 | branch `claude/fora-document-assignment-review-a0j8z7` | Gatehouse removed entirely by Dillon's decision (separate project): `api/gatehouse.js`, `src/GatehouseBooth.jsx`, `src/GatehouseDashboard.jsx`, `server-lib/gatehousePdf.js`, `docs/schema/gatehouse-migration.sql`, the Login routing, the Admin Panel Pricing tab and the `gatehouse-uploads` upload entry are deleted. Live `gatehouse_*` tables and the bucket are dropped after merge. Map: surface #18 retired (23 surfaces now, was 24 rows), its §5 non-connection rewritten, offline-queue producer count 11 to 10, MRR note trimmed. Archive artifact: https://claude.ai/artifact/JHsEaSAYpED6ZwymGNAXX4, code recoverable at commit `023b9bb`. Map only, no code touched here. |
 | 2026-09-30 | branch `claude/step1-autofill-name-stamp` | **Break #3 coverage corrected for FLHA; name stamp placed.** The map said `submitted_by_roster_id` was on all nine document tables since PR #118, but `api/flhas.js` never wrote it until this branch (`:426`, import `:10`). Also new: `stampAuthorName` overwrites free-text name columns with the roster name on every submit handler (`server-lib/authorStamp.js:57-63`; call sites listed under #3). `incidents`/`near_misses` `occurred_at` is now a datetime-local string for new rows (`src/occurredAt.js`, column stays text; `api/reports.js:173-174` allowlist unchanged), so old and new rows differ in shape: a consumer that parses it must tolerate both (no consumer of `occurred_at` for date math verified, `?`). No new break filed. Map only, no code touched. |
+| 2026-09-30 | branch `claude/step3-owner-profile` (uncommitted) | **Owner profile, company structure and default site placed on the map.** New roster columns `is_owner`, `title`, `divisions`, `default_site_id`; new tables `company_departments`, `company_divisions`. (1) `roster.departments` now accepts per-company `c_` keys (`server-lib/companyStructure.js:38-60`), Portal validation follows (`api/portal.js:95-100`); the phase-1 rows in that section are marked stale. (2) **Closed:** onboarding approval used to write no `departments`; it now does (`onboardingApproval.js:313`, `onboardingRoster.js`), so a new Portal customer's supervisors route from day one. (3) New join key `roster.default_site_id` -> `sites.id` (§2 site section): nine forms preselect it, but five copy the site name into free text, so break #2 is unchanged. (4) New weak links W1-W4 in the `roster.departments` section (W1: deleting a custom department leaves its key on Portal documents, escalations and schedules, `companydata.js:1157-1169`). (5) `roster.divisions` has no consumer, filed as pending link P2. (6) Onboarding also seeds the contact as Account Owner (`onboardingRoster.js:34-51`). Owner-only gating of profile edits (`companydata.js:953-955`) is tenant-scope territory and was not reviewed here. No matrix cell changed. |
