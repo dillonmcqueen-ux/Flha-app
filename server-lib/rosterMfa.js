@@ -57,11 +57,16 @@ function secretOf(member) {
 export async function startEnrollment(supabaseAdmin, member) {
   if (member.totp_enabled) return { error: 'Authenticator is already set up. Ask for a reset to start over.', status: 400 };
   const secret = generateTotpSecret();
-  const { error } = await supabaseAdmin
+  // Conditional on totp_enabled = false so a start that read the row before
+  // someone else finished enrolling cannot overwrite their live secret.
+  const { data: started, error } = await supabaseAdmin
     .from('roster')
     .update({ totp_secret: encryptField(secret) })
-    .eq('id', member.id);
+    .eq('id', member.id)
+    .eq('totp_enabled', false)
+    .select('id');
   if (error) return { error: "Couldn't start setup. Try again.", status: 500 };
+  if (!started || started.length === 0) return { error: 'Authenticator is already set up. Ask for a reset to start over.', status: 400 };
   const label = member.name || 'FORA';
   const otpauthUri = totpEnrollmentUri(secret, label);
   const qrDataUrl = await QRCode.toDataURL(otpauthUri);
@@ -79,7 +84,7 @@ export async function confirmEnrollment(supabaseAdmin, member, code) {
   const step = totpStepForCode(secret, code);
   if (step === null) return { error: 'Incorrect code. Try again.', status: 401 };
   const { plain, hashed } = generateBackupCodes();
-  const { error } = await supabaseAdmin
+  const { data: enabled, error } = await supabaseAdmin
     .from('roster')
     .update({
       totp_enabled: true,
@@ -89,8 +94,12 @@ export async function confirmEnrollment(supabaseAdmin, member, code) {
       totp_locked_until: null,
       totp_enrolled_at: new Date().toISOString(),
     })
-    .eq('id', member.id);
+    .eq('id', member.id)
+    .eq('totp_enabled', false)
+    .select('id');
   if (error) return { error: "Couldn't finish setup. Try again.", status: 500 };
+  // Two parallel confirms: only the one that flipped the flag gets codes.
+  if (!enabled || enabled.length === 0) return { error: 'Authenticator is already set up.', status: 400 };
   return { ok: true, backupCodes: plain };
 }
 
@@ -136,7 +145,7 @@ export async function verifyLoginCode(supabaseAdmin, member, code) {
       .select('id');
     if (error) return { ok: false, error: 'Connection error. Please try again.', status: 500 };
     if (bumped && bumped.length > 0) return { ok: true };
-    return { ok: false, error: 'That code was already used. Wait for the next one.', status: 401 };
+    return { ok: false, error: 'Incorrect code.', status: 401 };
   }
 
   const { matched, codes } = consumeBackupCode(code, member.totp_backup_codes);

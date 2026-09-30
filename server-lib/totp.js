@@ -97,7 +97,9 @@ export function consumeBackupCode(entered, backupCodes) {
   for (let i = 0; i < backupCodes.length; i++) {
     const entry = backupCodes[i];
     if (entry.used_at) continue;
-    if (hashPin(cleaned, entry.salt) === entry.hash) {
+    const a = Buffer.from(hashPin(cleaned, entry.salt));
+    const b = Buffer.from(String(entry.hash));
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
       matchedIndex = i;
       break;
     }
