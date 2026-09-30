@@ -53,7 +53,7 @@ export async function generateSafetyAnalyticsPDF({
     { label: "Total FLHAs", value: flhas.length },
     { label: "Incidents", value: incidents.length, color: incidents.length > 0 ? [220, 38, 38] : [22, 163, 74] },
     { label: "Near Misses", value: nearMisses.length, color: nearMisses.length > 0 ? [217, 119, 6] : [22, 163, 74] },
-    { label: "Near-Miss : Incident", value: ratio.ratioLabel },
+    { label: "Near-Miss : Incident", value: ratio.ratioLabel === "—" ? "N/A" : ratio.ratioLabel },
     { label: "Open Corrective Actions", value: openActionsCount, color: openActionsCount > 0 ? [217, 119, 6] : [22, 163, 74] },
     { label: "Toolbox Talks", value: toolbox.length + (attendance.count > 0 ? ` (avg ${attendance.avg})` : "") },
     { label: "Monthly Site Inspections", value: monthlyRecords.length },
@@ -129,7 +129,7 @@ export async function generateSafetyAnalyticsPDF({
     y += 8;
     y = drawBarList(doc, y, [
       { label: "Open < 30 days", count: aging.buckets.under30, color: [22, 163, 74] },
-      { label: "Open 30–60 days", count: aging.buckets.days30to60, color: [217, 119, 6] },
+      { label: "Open 30 to 60 days", count: aging.buckets.days30to60, color: [217, 119, 6] },
       { label: "Open 60+ days", count: aging.buckets.over60, color: [220, 38, 38] },
     ], { emptyLabel: "No open corrective actions." });
   }
