@@ -12,7 +12,7 @@ should ever be public.** As of the last verified check (run
 via `mcp__Supabase__execute_sql` against the project from
 `mcp__Supabase__list_projects` to get current truth — don't rely on a
 stale list), as of 2026-09-14 the buckets are: `company-logos`
-(public=true, correct), plus `flha-reports`, `gatehouse-uploads`,
+(public=true, correct), plus `flha-reports`,
 `incident-photos`, `onboarding-uploads`, `signatures`,
 `worker-certifications`, `worker-photos` (all public=false, correct).
 New private buckets appearing here is normal growth — confirm each one

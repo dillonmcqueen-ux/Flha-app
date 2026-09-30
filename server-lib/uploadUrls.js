@@ -208,7 +208,6 @@ const ALLOWED_EXTENSIONS = {
   'incident-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
   'signatures': ['png'],
   'onboarding-uploads': ['pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg'],
-  'gatehouse-uploads': ['jpg', 'jpeg', 'png', 'webp'],
   'worker-certifications': ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
   'worker-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
   // Company Portal (docs/schema/company-portal-phase2-migration.sql):
@@ -260,7 +259,7 @@ export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId
     .from(bucket).createSignedUploadUrl(path);
   if (error) return { error: error.message || 'Could not prepare the upload.' };
   // `receipt` is returned for every bucket so any flow can adopt it; the
-  // flha-reports write paths and gatehouse cheque photos verify one today.
+  // flha-reports write paths verify one today.
   return {
     path: data.path,
     uploadToken: data.token,

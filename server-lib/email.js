@@ -10,17 +10,15 @@
 import { recordPlatformEvent } from './platformEvents.js';
 
 // `attachments` (optional) is Resend's own shape: [{ filename, content }]
-// where content is a base64 string — used by Gatehouse's daily report
-// email (api/gatehouse.js) to attach the generated PDF directly rather
-// than linking out to it.
+// where content is a base64 string, for attaching a generated PDF directly
+// rather than linking out to it.
 //
 // The default `from` uses reports.forafieldsolutions.com, verified in
 // Resend on 2026-08-28. Before that, every email this function sent
-// (onboarding notifications and submitter confirmations included, not
-// just Gatehouse) used Resend's unverified onboarding@resend.dev sender,
+// (onboarding notifications and submitter confirmations included) used Resend's unverified onboarding@resend.dev sender,
 // which Resend restricts to the account owner's own address only — so
 // onboarding notifications to real new customers were silently failing
-// the same way Gatehouse's report email was, until this domain existed.
+// until this domain existed.
 export async function sendEmail({ to, subject, text, from = 'FORA <notifications@reports.forafieldsolutions.com>', attachments }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn(`sendEmail skipped (RESEND_API_KEY not set): "${subject}" to ${to}`);

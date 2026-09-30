@@ -102,7 +102,7 @@ entry nobody can check is worse than none, because the next session trusts
 it. It lists the product surfaces, the join keys that nearly every link
 comes down to, the interaction matrix, the verified breaks, and a
 "deliberate non-connections" list that exists to stop false positives
-(Gatehouse is a separate product; Equipment Inspection genuinely makes no AI
+(Equipment Inspection genuinely makes no AI
 call; `equipment_id` is null for free-text machines on purpose).
 
 **Hard rule: no application-code change without Dillon's explicit yes on a
