@@ -726,7 +726,7 @@ One concept, **three column shapes across ten features**:
 |---|---|
 | Time Clock | ✅ FK `roster_id` |
 | Certifications | ✅ FK, path-namespaced `certifications.js:130` |
-| Every document form (primary signer) | ✅ `submitted_by_roster_id`, stamped server-side from the session (#3, fixed PR #118; **FLHA only from branch `claude/step1-autofill-name-stamp`, `api/flhas.js:426`**, it was missing before) |
+| Every document form (primary signer) | ✅ `submitted_by_roster_id`, stamped server-side from the session (#3, fixed PR #118; **FLHA only from branch `claude/step1-autofill-name-stamp`, `api/flhas.js:428`**, it was missing before) |
 | Toolbox Talk attendee / FLHA crew (secondary signer) | ⚠️ **new as of this branch — client-asserted, not server-validated.** See below. |
 
 **The primary-signer link is break #3, closed.** The new secondary-signer link
@@ -1586,13 +1586,13 @@ both new). So every FLHA filed before this branch is text-only with a NULL
 author, and the Team Member page's per-person document list
 (`api/companydata.js:765-775`, `.eq('submitted_by_roster_id', id)`) could not
 have shown an FLHA authored by that person by id. Now stamped:
-`api/flhas.js:426` (`authorRosterId(session)`). Not backfilled in this
+`api/flhas.js:428` (`authorRosterId(session)`). Not backfilled in this
 branch (unknown whether a migration exists; `?`).
 
 **Name stamp, same branch.** The free-text name columns are now overwritten
 server-side with the roster name via `stampAuthorName`
 (`server-lib/authorStamp.js:57-63`; it skips when `isAnonymous` or when the
-session has no name, i.e. founder/admin): `api/flhas.js:387`
+session has no name, i.e. founder/admin): `api/flhas.js:389`
 (`worker_name`, `signed_by`), `api/fuellogs.js:216` (`worker_name`),
 `api/logs.js:379` via `AUTHOR_NAME_FIELDS` (`:156-160`: inspection, toolbox,
 daily), `api/reports.js:243` (`reporter_name`, `signed_by`; anonymous near
