@@ -619,7 +619,7 @@ export default async function handler(req, res) {
       const pin = genPin();
       const { error } = await supabaseAdmin
         .from('roster')
-        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null })
         .eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
       return res.status(200).json({ ok: true, pin });
@@ -755,7 +755,7 @@ export default async function handler(req, res) {
         const pin = genPin();
         const { error } = await supabaseAdmin
           .from('roster')
-          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
+          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null })
           .eq('id', m.id);
         if (error) return res.status(500).json({ error: `Couldn't regenerate the PIN for ${m.name}.` });
         roster.push({ id: m.id, name: m.name, role: m.role, pin });
@@ -929,6 +929,8 @@ export default async function handler(req, res) {
         const email = (req.body.email || '').trim();
         if (email && !isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
         updates.email = encryptField(email) || null;
+        updates.mfa_setup_jti_hash = null;
+        updates.mfa_setup_expires_at = null;
       }
       if ('phone' in req.body) {
         updates.phone = (req.body.phone || '').trim().slice(0, 40) || null;

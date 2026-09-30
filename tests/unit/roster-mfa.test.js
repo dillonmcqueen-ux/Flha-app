@@ -60,3 +60,12 @@ test('backup codes are single use and well formed', () => {
   assert.equal(again.matched, false);
   assert.equal(consumeBackupCode('WRONG-CODES', hashed).matched, false);
 });
+
+import { isValidEmail } from '../../server-lib/onboardingHelpers.js';
+test('email validation accepts one plain address only', () => {
+  assert.equal(isValidEmail('pat@example.com'), true);
+  assert.equal(isValidEmail('Bob<evil@evil.com>'), false);
+  assert.equal(isValidEmail('a@b.com, c@d.com'), false);
+  assert.equal(isValidEmail('a@b.com;c@d.com'), false);
+  assert.equal(isValidEmail('"x"@b.com'), false);
+});

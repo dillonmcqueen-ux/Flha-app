@@ -93,6 +93,8 @@ export async function confirmEnrollment(supabaseAdmin, member, code) {
       totp_failed_attempts: 0,
       totp_locked_until: null,
       totp_enrolled_at: new Date().toISOString(),
+      mfa_setup_jti_hash: null,
+      mfa_setup_expires_at: null,
     })
     .eq('id', member.id)
     .eq('totp_enabled', false)
@@ -174,6 +176,8 @@ export async function resetMfa(supabaseAdmin, rosterId) {
       totp_failed_attempts: 0,
       totp_locked_until: null,
       totp_enrolled_at: null,
+      mfa_setup_jti_hash: null,
+      mfa_setup_expires_at: null,
     })
     .eq('id', rosterId);
   return { error };

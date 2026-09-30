@@ -54,3 +54,11 @@ revoke all on function claim_totp_attempt(bigint, int, int) from public;
 revoke all on function claim_totp_attempt(bigint, int, int) from anon;
 revoke all on function claim_totp_attempt(bigint, int, int) from authenticated;
 grant execute on function claim_totp_attempt(bigint, int, int) to service_role;
+
+-- Emailed setup link (added after review): the link's ticket carries a random
+-- jti; only its SHA-256 is stored here, with an expiry. The enroll endpoints
+-- require a match, so the link is single-use and dies on PIN reset, MFA
+-- reset, email change, or a newer link. APPLIED live as "roster_mfa_setup_link".
+alter table roster
+  add column if not exists mfa_setup_jti_hash text,
+  add column if not exists mfa_setup_expires_at timestamptz;

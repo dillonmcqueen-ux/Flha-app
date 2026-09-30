@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
+import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -393,7 +394,9 @@ export default async function handler(req, res) {
       const name = (req.body.name || '').trim();
       const email = (req.body.email || '').trim();
       if (!name) return res.status(400).json({ error: 'Enter a name.' });
-      const { error } = await supabaseAdmin.from('roster').update({ name, email: encryptField(email) || null }).eq('id', session.userId).eq('company_id', session.companyId);
+      // FORA mails security links to this address, so it must be one plain address.
+      if (email && (email.length > 254 || !isValidEmail(email))) return res.status(400).json({ error: 'Enter a valid email address.' });
+      const { error } = await supabaseAdmin.from('roster').update({ name, email: encryptField(email) || null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null }).eq('id', session.userId).eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your details.' });
       return res.status(200).json({ ok: true });
     }

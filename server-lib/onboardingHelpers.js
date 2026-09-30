@@ -9,7 +9,9 @@
 
 import crypto from 'crypto';
 
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// One plain address: no whitespace, and none of the characters that let an
+// address field parse as a display name or several recipients.
+export const EMAIL_RE = /^[^\s@<>,;"()]+@[^\s@<>,;"()]+\.[^\s@<>,;"()]+$/;
 
 export function isValidEmail(value) {
   return !!value && EMAIL_RE.test(String(value).trim());

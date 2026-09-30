@@ -210,9 +210,10 @@ function signTicket(companyId, companyName, appType) {
 // else. Carries `purpose`, so every verifySession in api/ rejects it as a
 // session; it only becomes a session when mfa_enroll_confirm succeeds.
 const MFA_ENROLL_TTL_MS = 30 * 60 * 1000; // the emailed setup link lives this long
-function signEnrollTicket(member, ticket) {
+function signEnrollTicket(member, ticket, jti) {
   return signSession({
     purpose: 'mfa_enroll',
+    jti,
     rosterId: member.id,
     companyId: ticket.companyId,
     companyName: ticket.companyName,
@@ -222,12 +223,13 @@ function signEnrollTicket(member, ticket) {
 }
 const MFA_EMAIL_MAX_PER_HOUR = 3;
 
-// Host header is attacker-influenced in some setups, and this link carries a
-// token, so only ever build it on hosts we own (production and previews).
-function enrollOrigin(req) {
-  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
-  if (/^(portal\.forafieldsolutions\.com|[a-z0-9-]+\.vercel\.app)$/.test(host)) return `https://${host}`;
-  return 'https://portal.forafieldsolutions.com';
+// The link carries a token, so its origin must never come from a request
+// header a caller can set. Production uses the fixed portal host; previews use
+// the deployment's own host from Vercel's environment.
+function enrollOrigin() {
+  if (process.env.VERCEL_ENV === 'production') return 'https://portal.forafieldsolutions.com';
+  const host = process.env.VERCEL_BRANCH_URL || process.env.VERCEL_URL;
+  return host ? `https://${host}` : 'https://portal.forafieldsolutions.com';
 }
 
 function maskEmail(email) {
@@ -603,7 +605,18 @@ export default async function handler(req, res) {
       }
       const mailAllowed = await checkIpThrottle(`mfamail:${member.id}`, MFA_EMAIL_MAX_PER_HOUR, 60 * 60 * 1000);
       if (!mailAllowed) return res.status(429).json({ error: 'A setup email was already sent. Check your inbox, or try again later.' });
-      const link = `${enrollOrigin(req)}/?mfa_setup=${encodeURIComponent(signEnrollTicket(member, ticket))}`;
+      // Single-use: only the newest link works, and only until it is used or
+      // the PIN, authenticator or email changes (those clear this hash).
+      const jti = crypto.randomBytes(24).toString('base64url');
+      const { error: jtiErr } = await supabaseAdmin
+        .from('roster')
+        .update({
+          mfa_setup_jti_hash: crypto.createHash('sha256').update(jti).digest('hex'),
+          mfa_setup_expires_at: new Date(Date.now() + MFA_ENROLL_TTL_MS).toISOString(),
+        })
+        .eq('id', member.id);
+      if (jtiErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
+      const link = `${enrollOrigin()}/?mfa_setup=${encodeURIComponent(signEnrollTicket(member, ticket, jti))}`;
       await sendEmail({
         to: email,
         subject: 'Set up your FORA authenticator',
@@ -628,6 +641,13 @@ export default async function handler(req, res) {
     if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
     const member = rows && rows[0];
     if (!member || !member.active) return res.status(403).json({ error: 'This account is no longer active. Contact your administrator.' });
+    // The link must still be the live one for this row (newest, unused, not
+    // cleared by a PIN, authenticator or email change).
+    const jtiHash = enroll.jti ? crypto.createHash('sha256').update(String(enroll.jti)).digest('hex') : null;
+    if (!jtiHash || !member.mfa_setup_jti_hash || member.mfa_setup_jti_hash !== jtiHash
+        || !member.mfa_setup_expires_at || new Date(member.mfa_setup_expires_at) < new Date()) {
+      return res.status(401).json({ error: 'That setup link is no longer valid. Sign in again to get a new one.' });
+    }
     // The ticket was minted after a correct PIN, up to 10 minutes ago. Honour
     // anything that changed since: a PIN lockout, or a suspension.
     if (member.pin_locked_until && new Date(member.pin_locked_until) > new Date()) {
