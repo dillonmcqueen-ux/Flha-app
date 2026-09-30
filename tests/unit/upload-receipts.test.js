@@ -143,10 +143,10 @@ test('pathFromStoredUrl refuses a path that escapes its bucket', () => {
   // The bucket name is not a boundary: Supabase builds
   // `object/sign/<bucket>/<path>` as a URL string and dot segments collapse
   // before the request goes out, so `../flha-reports/x.pdf` stored against
-  // gatehouse-uploads would have signed a file in flha-reports.
-  const escape = 'https://example.supabase.co/storage/v1/object/public/gatehouse-uploads/'
+  // incident-photos would have signed a file in flha-reports.
+  const escape = 'https://example.supabase.co/storage/v1/object/public/incident-photos/'
     + '../flha-reports/FLHA_Acme_2026-03-04T14-22-05.pdf';
-  assert.equal(pathFromStoredUrl(escape, 'gatehouse-uploads'), null);
+  assert.equal(pathFromStoredUrl(escape, 'incident-photos'), null);
 
   for (const bad of ['../x.pdf', 'a/../../x.pdf', './x.pdf', 'a/./x.pdf', '/x.pdf']) {
     const url = `https://example.supabase.co/storage/v1/object/public/flha-reports/${bad}`;

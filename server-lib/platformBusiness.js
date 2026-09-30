@@ -7,7 +7,7 @@
 // each live company's list price (server-lib/pricing.js: platform base plus
 // every module it has switched on, before the 3% card surcharge). The result
 // is labelled as an estimate everywhere it is shown. It does not include
-// Company Portal engagements, Custom Builds or Gatehouse, which are priced
+// Company Portal engagements or Custom Builds, which are priced
 // outside pricing.js.
 //
 // Pure and DB-free: server-lib/platformOverview.js loads the rows and calls
@@ -178,7 +178,7 @@ export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], d
       atRisk: sum(priced.filter((c) => c.paymentRisk)),
       byTier,
       unpriced: perCompany.length - priced.length,
-      note: 'List price estimate: platform base plus switched-on modules, before the 3% card surcharge. Excludes Company Portal engagements, Custom Builds and Gatehouse.',
+      note: 'List price estimate: platform base plus switched-on modules, before the 3% card surcharge. Excludes Company Portal engagements and Custom Builds.',
     },
     seats: {
       nearCap: perCompany.filter((c) => c.nearCap).map((c) => ({ id: c.id, name: c.name, used: c.seatsUsed, cap: c.seatCap, pct: c.seatPct })),

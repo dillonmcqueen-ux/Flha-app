@@ -9,7 +9,7 @@ import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
 import { generateBrainProfilePDF } from "./generateBrainProfilePDF.js";
 import {
-  Construction, Inbox, Building2, FileText, User, DollarSign, Brain, Sparkles,
+  Construction, Inbox, Building2, FileText, User, Brain, Sparkles,
   MapPin, Tractor, HardHat, Zap, ArrowUpRight, CircleCheckBig, Hourglass,
   Check, Download, Menu, KeyRound, AlertTriangle, Activity,
 } from "lucide-react";
@@ -116,18 +116,6 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [siteList, setSiteList] = useState([]);
   const [newSite, setNewSite] = useState("");
 
-  // ── Gatehouse price tiers (only shown for app_type === 'gatehouse'
-  // companies — see AdminPanel.jsx's isGatehouseCompany) ─────────────────
-  const [gatehouseTiers, setGatehouseTiers] = useState([]);
-  const [loadingGatehouseTiers, setLoadingGatehouseTiers] = useState(false);
-  const [newTierLabel, setNewTierLabel] = useState("");
-  const [newTierPrice, setNewTierPrice] = useState("");
-  const [newTierIsAddon, setNewTierIsAddon] = useState(false);
-  const [editingTierId, setEditingTierId] = useState(null);
-  const [editTierLabel, setEditTierLabel] = useState("");
-  const [editTierPrice, setEditTierPrice] = useState("");
-  const [editTierIsAddon, setEditTierIsAddon] = useState(false);
-  const [savingTier, setSavingTier] = useState(false);
 
   const [equipList, setEquipList] = useState([]);
   const [fieldList, setFieldList] = useState([]);
@@ -693,17 +681,8 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
 
   const activeCompany = companies.find(c => c.id === activeId);
 
-  // Completeness — 4 steps for a safety company (SOPs included), 3 for a
-  // Gatehouse company (SOPs don't exist there, so requiring them would
-  // mean a Gatehouse company can never reach ACTIVE).
+  // Completeness: codes, SOPs, logo and contact.
   const steps = (c) => {
-    if (c.app_type === "gatehouse") {
-      return {
-        codes: !!c.company_code,
-        logo: !!c.logo_url,
-        contact: !!c.contact_email,
-      };
-    }
     const cnt = counts[c.id] || { sops: 0 };
     return {
       codes: !!c.company_code,
@@ -1046,68 +1025,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     setSiteList(prev => prev.filter(s => s.id !== id));
   };
 
-  // ── Gatehouse price tiers ────────────────────────────────────────────
-  const loadGatehouseTiers = async (companyId) => {
-    setLoadingGatehouseTiers(true);
-    try {
-      const res = await fetch("/api/gatehouse", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "admin_list_price_tiers", token, companyId }),
-      });
-      const data = await res.json();
-      setGatehouseTiers(res.ok ? (data.tiers || []) : []);
-    } catch (e) {
-      setGatehouseTiers([]);
-    }
-    setLoadingGatehouseTiers(false);
-  };
-
-  const addGatehouseTier = async () => {
-    setMsg("");
-    const label = newTierLabel.trim();
-    if (!label) { setMsg("Enter a load-size label."); return; }
-    if (newTierPrice === "" || isNaN(Number(newTierPrice))) { setMsg("Enter a valid price."); return; }
-    setSavingTier(true);
-    const sortOrder = gatehouseTiers.length > 0 ? Math.max(...gatehouseTiers.map(t => t.sort_order || 0)) + 1 : 1;
-    const res = await fetch("/api/gatehouse", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "admin_upsert_price_tier", token, companyId: activeId, label, price: Number(newTierPrice), sortOrder, isAddon: newTierIsAddon }),
-    });
-    const data = await res.json();
-    if (!res.ok) { setMsg("Couldn't add price: " + data.error); setSavingTier(false); return; }
-    setNewTierLabel(""); setNewTierPrice(""); setNewTierIsAddon(false);
-    await loadGatehouseTiers(activeId);
-    setSavingTier(false);
-  };
-
-  const startEditTier = (tier) => {
-    setEditingTierId(tier.id); setEditTierLabel(tier.label); setEditTierPrice(String(tier.price)); setEditTierIsAddon(!!tier.is_addon);
-  };
-
-  const saveEditTier = async (tier) => {
-    if (!editTierLabel.trim() || editTierPrice === "" || isNaN(Number(editTierPrice))) { setMsg("Enter a valid label and price."); return; }
-    setSavingTier(true);
-    const res = await fetch("/api/gatehouse", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "admin_upsert_price_tier", token, companyId: activeId, id: tier.id, label: editTierLabel.trim(), price: Number(editTierPrice), sortOrder: tier.sort_order, isAddon: editTierIsAddon }),
-    });
-    const data = await res.json();
-    if (!res.ok) { setMsg("Couldn't save: " + data.error); setSavingTier(false); return; }
-    setEditingTierId(null);
-    await loadGatehouseTiers(activeId);
-    setSavingTier(false);
-  };
-
-  const deleteGatehouseTier = async (id) => {
-    try {
-      await fetch("/api/gatehouse", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "admin_delete_price_tier", token, companyId: activeId, id }),
-      });
-    } catch (e) { /* leave list as-is if the request fails */ }
-    setGatehouseTiers(prev => prev.filter(t => t.id !== id));
-  };
-
   const addEquip = async () => {
     setMsg("");
     const { make, model, type } = newEquip;
@@ -1254,9 +1171,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // Completeness meter — the signature element
   const Meter = ({ c }) => {
     const stp = steps(c);
-    const order = c.app_type === "gatehouse"
-      ? [["codes", "Codes"], ["logo", "Logo"], ["contact", "Contact"]]
-      : [["codes", "Codes"], ["sops", "SOPs"], ["logo", "Logo"], ["contact", "Contact"]];
+    const order = [["codes", "Codes"], ["sops", "SOPs"], ["logo", "Logo"], ["contact", "Contact"]];
     return (
       <div>
         <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>
@@ -1293,7 +1208,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 1 }}>
               #{c.account_number || c.id}
-              {c.app_type === "gatehouse" ? " · Gatehouse" : ` · ${cnt.flhas} FLHAs · ${cnt.sops} SOPs`}
+              {` · ${cnt.flhas} FLHAs · ${cnt.sops} SOPs`}
               {" · "}{(rosterCounts[c.id]?.active || 0)}/{SEAT_CAP_BY_TIER[c.plan_tier] || SEAT_CAP_BY_TIER.basic} seats
             </div>
           </div>
@@ -1891,14 +1806,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   }
 
   // ═══ MANAGE ═══════════════════════════════════════════════
-  // Gatehouse companies (transfer-station receipts) don't use any of the
-  // safety-document machinery (SOPs, sites, equipment, custom fields,
-  // Brain) — swap in a Pricing tab instead, and drop the Documents
-  // category entirely rather than showing tabs that do nothing for them.
-  const isGatehouseCompany = activeCompany?.app_type === "gatehouse";
   const MANAGE_CATEGORIES = [
-    { key: "company", label: "Company Setup", icon: Building2, tabs: isGatehouseCompany ? ["profile", "pricing"] : ["profile", "sops", "sites", "equipment", "brain"] },
-    ...(isGatehouseCompany ? [] : [{ key: "documents", label: "Documents", icon: FileText, tabs: ["fields", "monthly", "custom", "forms"] }]),
+    { key: "company", label: "Company Setup", icon: Building2, tabs: ["profile", "sops", "sites", "equipment", "brain"] },
+    { key: "documents", label: "Documents", icon: FileText, tabs: ["fields", "monthly", "custom", "forms"] },
     { key: "people", label: "People & Access", icon: User, tabs: ["roster", "codes"] },
   ];
   const MANAGE_CATEGORY_OF = Object.fromEntries(MANAGE_CATEGORIES.flatMap(c => c.tabs.map(t => [t, c.key])));
@@ -1909,7 +1819,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     if (tab === "forms") loadDocSettings(activeId);
     if (tab === "roster") { setRevealedPin(null); setAllPinsResult(null); loadRoster(activeId); }
     if (tab === "brain") loadBrainTrends(activeId);
-    if (tab === "pricing") { setEditingTierId(null); loadGatehouseTiers(activeId); }
   };
 
   const cnt = counts[activeId] || { flhas: 0, sops: 0 };
@@ -1951,16 +1860,10 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           {activeManageCategory === "company" && (
             <>
               <button style={st.tab(manageTab === "profile")} onClick={() => goToManageTab("profile")}>Profile</button>
-              {isGatehouseCompany ? (
-                <button style={{ ...st.tab(manageTab === "pricing"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("pricing")}><DollarSign size={14} strokeWidth={2.25} /> Pricing</button>
-              ) : (
-                <>
-                  <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
-                  <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
-                  <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
-                  <button style={{ ...st.tab(manageTab === "brain"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("brain")}><Brain size={14} strokeWidth={2.25} /> Brain</button>
-                </>
-              )}
+              <button style={st.tab(manageTab === "sops")} onClick={() => goToManageTab("sops")}>SOPs</button>
+              <button style={st.tab(manageTab === "sites")} onClick={() => goToManageTab("sites")}>Sites</button>
+              <button style={st.tab(manageTab === "equipment")} onClick={() => goToManageTab("equipment")}>Equipment</button>
+              <button style={{ ...st.tab(manageTab === "brain"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => goToManageTab("brain")}><Brain size={14} strokeWidth={2.25} /> Brain</button>
             </>
           )}
           {activeManageCategory === "documents" && (
@@ -2036,84 +1939,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                   <div style={{ width: 22, height: 22, borderRadius: RAD.sm, background: "rgba(249,115,22,0.14)", border: `1px solid ${C.status.warning.border}`, color: C.amberDark, fontSize: 11, fontWeight: 800, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
                   <div style={{ flex: 1, fontSize: 14, color: C.inkSoft, lineHeight: 1.5 }}>{sop.policy_text}</div>
                   <button onClick={() => deleteSop(sop.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {manageTab === "pricing" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={st.card}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Add a load-size price</div>
-              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 12 }}>Base prices are the load-size buttons operators pick exactly one of. Add-ons (fridges, an untarped load, etc.) stack on top of the base price in the same transaction — check "Add-on" for those instead of a new base price.</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <input style={{ ...st.input, marginBottom: 0, flex: 2 }} placeholder="e.g. Pickup truck" value={newTierLabel}
-                  onChange={e => setNewTierLabel(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addGatehouseTier(); }} />
-                <input style={{ ...st.input, marginBottom: 0, flex: 1 }} type="number" step="0.01" placeholder="Price" value={newTierPrice}
-                  onChange={e => setNewTierPrice(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addGatehouseTier(); }} />
-                <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={addGatehouseTier} disabled={savingTier}>Add</button>
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: C.inkSoft, cursor: "pointer" }}>
-                <input type="checkbox" checked={newTierIsAddon} onChange={e => setNewTierIsAddon(e.target.checked)} />
-                This is an add-on / surcharge, not a base load size
-              </label>
-            </div>
-            <div style={st.card}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Base load prices ({gatehouseTiers.filter(t => !t.is_addon).length})</div>
-              {loadingGatehouseTiers ? (
-                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>Loading…</div>
-              ) : gatehouseTiers.filter(t => !t.is_addon).length === 0 ? (
-                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No base prices set yet — the booth screen will show nothing to tap until at least one is added.</div>
-              ) : gatehouseTiers.filter(t => !t.is_addon).map((tier, i, arr) => (
-                <div key={tier.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", opacity: tier.active ? 1 : 0.45 }}>
-                  {editingTierId === tier.id ? (
-                    <>
-                      <input style={{ ...st.input, marginBottom: 0, flex: 2 }} value={editTierLabel} onChange={e => setEditTierLabel(e.target.value)} />
-                      <input style={{ ...st.input, marginBottom: 0, flex: 1 }} type="number" step="0.01" value={editTierPrice} onChange={e => setEditTierPrice(e.target.value)} />
-                      <button onClick={() => saveEditTier(tier)} disabled={savingTier} style={{ background: "transparent", border: "none", color: C.status.success.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Save</button>
-                      <button onClick={() => setEditingTierId(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Cancel</button>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ flex: 1, fontSize: 14, color: C.inkSoft }}>{tier.label}{!tier.active && " (removed)"}</div>
-                      <div style={{ fontWeight: 700, color: C.ink, fontSize: 14 }}>${Number(tier.price).toFixed(2)}</div>
-                      {tier.active && (
-                        <>
-                          <button onClick={() => startEditTier(tier)} style={{ background: "transparent", border: "none", color: C.amber, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Edit</button>
-                          <button onClick={() => deleteGatehouseTier(tier.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div style={st.card}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 10 }}>Add-ons &amp; surcharges ({gatehouseTiers.filter(t => t.is_addon).length})</div>
-              {gatehouseTiers.filter(t => t.is_addon).length === 0 ? (
-                <div style={{ color: C.muted, padding: "14px 0", textAlign: "center" }}>No add-ons set yet.</div>
-              ) : gatehouseTiers.filter(t => t.is_addon).map((tier, i, arr) => (
-                <div key={tier.id} style={{ display: "flex", gap: 11, alignItems: "center", padding: "11px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none", opacity: tier.active ? 1 : 0.45 }}>
-                  {editingTierId === tier.id ? (
-                    <>
-                      <input style={{ ...st.input, marginBottom: 0, flex: 2 }} value={editTierLabel} onChange={e => setEditTierLabel(e.target.value)} />
-                      <input style={{ ...st.input, marginBottom: 0, flex: 1 }} type="number" step="0.01" value={editTierPrice} onChange={e => setEditTierPrice(e.target.value)} />
-                      <button onClick={() => saveEditTier(tier)} disabled={savingTier} style={{ background: "transparent", border: "none", color: C.status.success.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Save</button>
-                      <button onClick={() => setEditingTierId(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Cancel</button>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ flex: 1, fontSize: 14, color: C.inkSoft }}>{tier.label}{!tier.active && " (removed)"}</div>
-                      <div style={{ fontWeight: 700, color: C.ink, fontSize: 14 }}>+${Number(tier.price).toFixed(2)}</div>
-                      {tier.active && (
-                        <>
-                          <button onClick={() => startEditTier(tier)} style={{ background: "transparent", border: "none", color: C.amber, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Edit</button>
-                          <button onClick={() => deleteGatehouseTier(tier.id)} style={{ background: "transparent", border: "none", color: C.status.danger.text, fontSize: 13, cursor: "pointer", fontWeight: 700, flexShrink: 0 }}>Remove</button>
-                        </>
-                      )}
-                    </>
-                  )}
                 </div>
               ))}
             </div>

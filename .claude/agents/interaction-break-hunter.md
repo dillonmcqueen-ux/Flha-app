@@ -77,7 +77,6 @@ performance. If a break you find is also a tenant-isolation bug, say so
 once and hand it to `tenant-scope-reviewer` — don't work it yourself.
 
 Never report anything under "Deliberate non-connections" in the map.
-Gatehouse not interoperating with the safety documents is a decision;
 Equipment Inspection not calling the AI is a decision; `equipment_id` being
 null for a free-text machine is a decision.
 

@@ -8,7 +8,7 @@
 // CDN inside the trust boundary of a logged-in session: anything served from
 // that URL would have run with full access to the session token and every
 // form on the page. `jspdf` is already a dependency of this project — it's
-// what server-lib/reportPdfs.js and server-lib/gatehousePdf.js render with —
+// what server-lib/reportPdfs.js renders with —
 // so the browser now loads the copy we already ship and build.
 //
 // Two things fall out of this beyond the supply-chain fix:
