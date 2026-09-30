@@ -143,7 +143,7 @@ export function drawTable(doc, y, { columns, rows, emptyLabel = "Not enough data
     if (ri % 2 === 1) { doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 7, "F"); }
     doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
     columns.forEach((c, i) => {
-      const val = c.render ? c.render(row) : (row[c.key] ?? "—");
+      const val = c.render ? c.render(row) : (row[c.key] ?? "N/A");
       const x = c.align === "right" ? colX[i] + colWidths[i] - 2 : colX[i] + 2;
       doc.text(String(val), x, y + 5, c.align === "right" ? { align: "right" } : undefined);
     });

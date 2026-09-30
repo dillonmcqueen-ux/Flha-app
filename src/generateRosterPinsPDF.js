@@ -24,17 +24,17 @@ export async function generateRosterPinsPDF({ companyName, companyCode, roster }
   doc.setTextColor(217, 119, 6); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("COMPANY", margin + 4, y + 6);
   doc.setTextColor(30, 41, 59); doc.setFontSize(11); doc.setFont("helvetica", "normal");
-  doc.text(companyName || "—", margin + 4, y + 12);
+  doc.text(companyName || "N/A", margin + 4, y + 12);
   doc.setTextColor(217, 119, 6); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("COMPANY CODE", margin + 4, y + 18);
   doc.setTextColor(30, 41, 59); doc.setFontSize(11); doc.setFont("helvetica", "bold");
-  doc.text(companyCode || "—", margin + 44, y + 18);
+  doc.text(companyCode || "N/A", margin + 44, y + 18);
   y += 32;
 
   doc.setTextColor(153, 27, 27); doc.setFontSize(9); doc.setFont("helvetica", "bold");
   y = (() => {
     const lines = doc.splitTextToSize(
-      "Every PIN below was just regenerated and replaces each person's previous PIN immediately. This is the only copy — distribute it now and store it somewhere secure.",
+      "Every PIN below was just regenerated and replaces each person's previous PIN immediately. This is the only copy: distribute it now and store it somewhere secure.",
       contentW
     );
     lines.forEach(line => { doc.text(line, margin, y); y += 4.6; });

@@ -53,11 +53,11 @@ export async function generateSafetyAnalyticsPDF({
     { label: "Total FLHAs", value: flhas.length },
     { label: "Incidents", value: incidents.length, color: incidents.length > 0 ? [220, 38, 38] : [22, 163, 74] },
     { label: "Near Misses", value: nearMisses.length, color: nearMisses.length > 0 ? [217, 119, 6] : [22, 163, 74] },
-    { label: "Near-Miss : Incident", value: ratio.ratioLabel },
+    { label: "Near-Miss : Incident", value: ratio.ratioLabel === "—" ? "N/A" : ratio.ratioLabel },
     { label: "Open Corrective Actions", value: openActionsCount, color: openActionsCount > 0 ? [217, 119, 6] : [22, 163, 74] },
     { label: "Toolbox Talks", value: toolbox.length + (attendance.count > 0 ? ` (avg ${attendance.avg})` : "") },
     { label: "Monthly Site Inspections", value: monthlyRecords.length },
-    { label: "Monthly Pass Rate", value: passRate.total > 0 ? `${passRate.pct}%` : "—", color: passRate.total === 0 ? undefined : (passRate.pct >= 90 ? [22, 163, 74] : passRate.pct >= 70 ? [217, 119, 6] : [220, 38, 38]) },
+    { label: "Monthly Pass Rate", value: passRate.total > 0 ? `${passRate.pct}%` : "N/A", color: passRate.total === 0 ? undefined : (passRate.pct >= 90 ? [22, 163, 74] : passRate.pct >= 70 ? [217, 119, 6] : [220, 38, 38]) },
     { label: "Custom Safety Docs", value: customDocs.length },
   ], NAVY);
 
@@ -65,7 +65,7 @@ export async function generateSafetyAnalyticsPDF({
   y = drawBarList(doc, y, ["Critical", "High", "Medium", "Low"].map(k => ({ label: k, count: sev[k], color: SEV_COLOR[k] })),
     { emptyLabel: "No near misses or incidents reported yet." });
 
-  y = drawSectionTitle(doc, y, "Top Sites — Near Misses & Incidents", null, NAVY);
+  y = drawSectionTitle(doc, y, "Top Sites: Near Misses & Incidents", null, NAVY);
   y = drawBarList(doc, y, fieldSites.slice(0, 5).map(s => ({ label: s.site, count: s.nearMisses + s.incidents })),
     { emptyLabel: "No near misses or incidents reported yet.", barColor: [153, 27, 27] });
 
@@ -87,7 +87,7 @@ export async function generateSafetyAnalyticsPDF({
   } else {
     doc.setTextColor(riskRate.pct > 0 ? 220 : 22, riskRate.pct > 0 ? 38 : 163, riskRate.pct > 0 ? 38 : 74);
     doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
-    doc.text(`${riskRate.pct}% — ${riskRate.highRisk} of ${riskRate.total} FLHAs flagged High risk`, PAGE.margin, y);
+    doc.text(`${riskRate.pct}%: ${riskRate.highRisk} of ${riskRate.total} FLHAs flagged High risk`, PAGE.margin, y);
     y += 8;
   }
 
@@ -125,11 +125,11 @@ export async function generateSafetyAnalyticsPDF({
     doc.text("No corrective actions logged yet.", PAGE.margin, y); y += 8;
   } else {
     doc.setTextColor(51, 65, 85); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
-    doc.text(`Open: ${aging.openCount} · Resolved: ${aging.resolvedCount} · Avg. resolution: ${aging.avgResolutionDays != null ? `${aging.avgResolutionDays}d` : "—"}`, PAGE.margin, y);
+    doc.text(`Open: ${aging.openCount} · Resolved: ${aging.resolvedCount} · Avg. resolution: ${aging.avgResolutionDays != null ? `${aging.avgResolutionDays}d` : "N/A"}`, PAGE.margin, y);
     y += 8;
     y = drawBarList(doc, y, [
       { label: "Open < 30 days", count: aging.buckets.under30, color: [22, 163, 74] },
-      { label: "Open 30–60 days", count: aging.buckets.days30to60, color: [217, 119, 6] },
+      { label: "Open 30 to 60 days", count: aging.buckets.days30to60, color: [217, 119, 6] },
       { label: "Open 60+ days", count: aging.buckets.over60, color: [220, 38, 38] },
     ], { emptyLabel: "No open corrective actions." });
   }
@@ -146,7 +146,7 @@ export async function generateSafetyAnalyticsPDF({
   } else {
     doc.setTextColor(passRate.pct >= 90 ? 22 : passRate.pct >= 70 ? 217 : 220, passRate.pct >= 90 ? 163 : passRate.pct >= 70 ? 119 : 38, passRate.pct >= 90 ? 74 : passRate.pct >= 70 ? 6 : 38);
     doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
-    doc.text(`${passRate.pct}% — ${passRate.passed} of ${passRate.total} inspections passed clean`, PAGE.margin, y);
+    doc.text(`${passRate.pct}%: ${passRate.passed} of ${passRate.total} inspections passed clean`, PAGE.margin, y);
     y += 8;
   }
 

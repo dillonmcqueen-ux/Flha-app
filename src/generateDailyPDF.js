@@ -40,13 +40,13 @@ export async function generateAndUploadDaily(data) {
   doc.setTextColor(21, 128, 61); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("SITE", L, y + 7); doc.text("DATE", R, y + 7);
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-  doc.text(site || "—", L, y + 13, { maxWidth: contentW / 2 - 8 });
-  doc.text(reportDate || "—", R, y + 13, { maxWidth: contentW / 2 - 8 });
+  doc.text(site || "N/A", L, y + 13, { maxWidth: contentW / 2 - 8 });
+  doc.text(reportDate || "N/A", R, y + 13, { maxWidth: contentW / 2 - 8 });
   doc.setTextColor(21, 128, 61); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
   doc.text("WEATHER", L, y + 21); doc.text("PREPARED BY", R, y + 21);
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-  doc.text(`${weather || "—"}${temperature ? `, ${temperature}` : ""}`, L, y + 27, { maxWidth: contentW / 2 - 8 });
-  doc.text(reporter || "—", R, y + 27, { maxWidth: contentW / 2 - 8 });
+  doc.text(`${weather || "N/A"}${temperature ? `, ${temperature}` : ""}`, L, y + 27, { maxWidth: contentW / 2 - 8 });
+  doc.text(reporter || "N/A", R, y + 27, { maxWidth: contentW / 2 - 8 });
   y += 38;
   y = drawCustomFieldsPDF(doc, customFields, { margin, contentW, y, accent: [21, 128, 61] });
 
@@ -66,9 +66,9 @@ export async function generateAndUploadDaily(data) {
     y += 7;
   };
 
-  section("Work Completed", report?.workSummary || "—");
-  section("Delays / Issues", report?.delaysSummary || "—");
-  section("Plan for Tomorrow", report?.tomorrowPlan || "—");
+  section("Work Completed", report?.workSummary || "N/A");
+  section("Delays / Issues", report?.delaysSummary || "N/A");
+  section("Plan for Tomorrow", report?.tomorrowPlan || "N/A");
 
   // prepared-by line
   if (y > 250) { doc.addPage(); y = 20; }
