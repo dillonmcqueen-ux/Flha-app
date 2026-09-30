@@ -33,10 +33,10 @@ export async function generateAndUploadMonthlyInspection({
   doc.setTextColor(67, 56, 202); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("SITE", margin + 4, y + 7); doc.text("COMPANY", margin + 90, y + 7); doc.text("SUBMITTED BY", margin + 140, y + 7);
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-  doc.text(siteName || "—", margin + 4, y + 15, { maxWidth: 82 });
+  doc.text(siteName || "N/A", margin + 4, y + 15, { maxWidth: 82 });
   doc.setFontSize(9);
-  doc.text(companyName || "—", margin + 90, y + 15, { maxWidth: 45 });
-  doc.text(submittedBy || "—", margin + 140, y + 15, { maxWidth: 50 });
+  doc.text(companyName || "N/A", margin + 90, y + 15, { maxWidth: 45 });
+  doc.text(submittedBy || "N/A", margin + 140, y + 15, { maxWidth: 50 });
   y += 32;
 
   // AI summary

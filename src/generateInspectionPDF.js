@@ -27,7 +27,7 @@ const CHECK_COLS = [
   { key: "Monitor", label: "M", color: [217, 119, 6] },
   { key: "Defective", label: "D", color: [220, 38, 38] },
 ];
-const BOX = 4, PITCH = 7; // mm — checkbox size and spacing between the three boxes
+const BOX = 4, PITCH = 7; // mm: checkbox size and spacing between the three boxes
 
 // Compact one-line-per-item checklist: item name on the left, a small
 // Good/Monitor/Defective checkbox trio on the right (the matching box is
@@ -73,7 +73,7 @@ function drawChecklistCompact(doc, items, { margin, contentW, y, W }) {
       doc.roundedRect(margin, y - 4, contentW, 7, 1.5, 1.5, "F");
       doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
       doc.setTextColor(...(attached ? [91, 33, 182] : [30, 64, 175]));
-      doc.text(`${attached ? "ATTACHMENT" : "MACHINE"}${it.unitLabel ? ` — ${it.unitLabel}` : ""}`, margin + 3, y);
+      doc.text(`${attached ? "ATTACHMENT" : "MACHINE"}${it.unitLabel ? `: ${it.unitLabel}` : ""}`, margin + 3, y);
       y += 6.5;
       lastUnit = unitKey(it);
       lastCategory = null; // force the category header to redraw under the new unit
@@ -129,7 +129,7 @@ function drawDeficienciesSection(doc, items, { margin, contentW, y, W }) {
     doc.setFillColor(240, 253, 244); doc.setDrawColor(134, 239, 172);
     doc.roundedRect(margin, y, contentW, 10, 2, 2, "FD");
     doc.setTextColor(22, 101, 52); doc.setFontSize(9); doc.setFont("helvetica", "bold");
-    doc.text("None — all items Good", margin + 4, y + 6.5);
+    doc.text("None: all items Good", margin + 4, y + 6.5);
     return y + 16;
   }
 
@@ -138,7 +138,7 @@ function drawDeficienciesSection(doc, items, { margin, contentW, y, W }) {
   // non-combined inspection (no unit tags at all) renders exactly as before.
   const anyUnitTagged = flagged.some(it => it.unit);
   const groups = anyUnitTagged
-    ? [...new Set(flagged.map(it => unitKey(it) || "—"))].map(u => ({ unit: u, list: flagged.filter(it => (unitKey(it) || "—") === u) }))
+    ? [...new Set(flagged.map(it => unitKey(it) || "N/A"))].map(u => ({ unit: u, list: flagged.filter(it => (unitKey(it) || "N/A") === u) }))
     : [{ unit: null, list: flagged }];
 
   groups.forEach(({ unit, list }) => {
@@ -147,7 +147,7 @@ function drawDeficienciesSection(doc, items, { margin, contentW, y, W }) {
       const attached = isAttachmentItem(list[0]);
       doc.setFontSize(7.5); doc.setFont("helvetica", "bold");
       doc.setTextColor(...(attached ? [91, 33, 182] : [30, 64, 175]));
-      doc.text(`${attached ? "ATTACHMENT" : "MACHINE"}${list[0]?.unitLabel ? ` — ${list[0].unitLabel}` : ""}`, margin, y);
+      doc.text(`${attached ? "ATTACHMENT" : "MACHINE"}${list[0]?.unitLabel ? `: ${list[0].unitLabel}` : ""}`, margin, y);
       y += 5;
     }
     list
@@ -164,7 +164,7 @@ function drawDeficienciesSection(doc, items, { margin, contentW, y, W }) {
         doc.setFillColor(...bg); doc.setDrawColor(...border); doc.setLineWidth(0.4);
         doc.roundedRect(margin, y, contentW, boxH, 1.5, 1.5, "FD");
         doc.setTextColor(...col); doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
-        doc.text(`${isDef ? "DEFECTIVE" : "MONITOR"} — ${it.item}`, margin + 3, y + 5.5, { maxWidth: contentW - 6 });
+        doc.text(`${isDef ? "DEFECTIVE" : "MONITOR"}: ${it.item}`, margin + 3, y + 5.5, { maxWidth: contentW - 6 });
         doc.setTextColor(71, 85, 105); doc.setFont("helvetica", "normal"); doc.setFontSize(8);
         doc.text(noteLines, margin + 3, y + 10);
         y += boxH + 3;
@@ -186,7 +186,7 @@ function drawInfoBox(doc, { margin, contentW, y, W, rows }) {
       doc.setTextColor(3, 105, 161); doc.setFontSize(7.5); doc.setFont("helvetica", "bold");
       doc.text(c.label, cx + 4, ry + 6);
       doc.setTextColor(30, 41, 59); doc.setFontSize(9.5); doc.setFont("helvetica", "normal");
-      doc.text(c.value || "—", cx + 4, ry + 13, { maxWidth: colW - 6 });
+      doc.text(c.value || "N/A", cx + 4, ry + 13, { maxWidth: colW - 6 });
     });
   });
   return y + rowH * rows.length + 8;
@@ -242,8 +242,8 @@ export async function generateAndUploadInspection({
           ? [{ label: "MACHINE", value: equipmentLabel }, { label: attachmentLabels.length > 1 ? "ATTACHMENTS" : "ATTACHMENT", value: attachedTrailerLabel }, { label: "COMPANY", value: companyName }]
           : [{ label: "MACHINE", value: equipmentLabel }, { label: "COMPANY", value: companyName }],
         [
-          { label: "PRE-TRIP INSPECTOR", value: linkedPretrip ? `${linkedPretrip.worker_name || "—"} · ${linkedPretrip.created_at ? new Date(linkedPretrip.created_at).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" }) : ""}` : "—" },
-          { label: "POST-TRIP TECHNICIAN", value: `${workerName || "—"} · ${new Date().toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" })}` },
+          { label: "PRE-TRIP INSPECTOR", value: linkedPretrip ? `${linkedPretrip.worker_name || "N/A"} · ${linkedPretrip.created_at ? new Date(linkedPretrip.created_at).toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" }) : ""}` : "N/A" },
+          { label: "POST-TRIP TECHNICIAN", value: `${workerName || "N/A"} · ${new Date().toLocaleString("en-CA", { dateStyle: "short", timeStyle: "short" })}` },
         ],
       ],
     });
@@ -265,12 +265,12 @@ export async function generateAndUploadInspection({
   if (isPost) {
     doc.text("STARTING READING", margin + 4, y + 7); doc.text("ENDING READING", margin + 90, y + 7);
     doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    doc.text(`${(linkedPretrip?.start_reading ?? startReading) || "—"} ${readingUnit || ""}`, margin + 4, y + 15);
-    doc.text(`${endReading || "—"} ${readingUnit || ""}`, margin + 90, y + 15);
+    doc.text(`${(linkedPretrip?.start_reading ?? startReading) || "N/A"} ${readingUnit || ""}`, margin + 4, y + 15);
+    doc.text(`${endReading || "N/A"} ${readingUnit || ""}`, margin + 90, y + 15);
   } else {
     doc.text("STARTING READING", margin + 4, y + 7);
     doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    doc.text(`${startReading || "—"} ${readingUnit || ""}`, margin + 4, y + 15);
+    doc.text(`${startReading || "N/A"} ${readingUnit || ""}`, margin + 4, y + 15);
   }
   y += 28;
 
@@ -296,7 +296,7 @@ export async function generateAndUploadInspection({
     if (y > 265) { doc.addPage(); y = 20; }
     doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(margin, y, W - margin, y); y += 6;
     doc.setTextColor(100, 116, 139); doc.setFontSize(8); doc.setFont("helvetica", "italic");
-    doc.text(`Pre-Trip signed by ${linkedPretrip?.worker_name || "—"} — see the original Pre-Trip record for the signature image.`, margin, y);
+    doc.text(`Pre-Trip signed by ${linkedPretrip?.worker_name || "N/A"}: see the original Pre-Trip record for the signature image.`, margin, y);
     y += 10;
 
     // ── POST-TRIP section ──────────────────────────────────────────────
@@ -310,7 +310,7 @@ export async function generateAndUploadInspection({
     if (y + 18 > 280) { doc.addPage(); y = 20; }
     doc.setFillColor(237, 233, 254); doc.roundedRect(margin, y, contentW, 7, 1.5, 1.5, "F");
     doc.setTextColor(91, 33, 182); doc.setFontSize(8.5); doc.setFont("helvetica", "bold");
-    doc.text(posttripItems.length > 0 ? "POST-TRIP CHECKLIST" : "POST-TRIP — CHANGES SINCE PRE-TRIP", margin + 3, y + 5);
+    doc.text(posttripItems.length > 0 ? "POST-TRIP CHECKLIST" : "POST-TRIP: CHANGES SINCE PRE-TRIP", margin + 3, y + 5);
     y += 11;
 
     if (posttripItems.length > 0) {
@@ -322,7 +322,7 @@ export async function generateAndUploadInspection({
       if (resolvedItems.length > 0) {
         const lines = resolvedItems.map(it => {
           const what = (it.resolutionNote || "").trim();
-          return `${it.unitLabel ? `[${it.unitLabel}] ` : ""}${it.item}${what ? ` — ${what}` : ""}`;
+          return `${it.unitLabel ? `[${it.unitLabel}] ` : ""}${it.item}${what ? `: ${what}` : ""}`;
         });
         const wrapped = lines.flatMap(l => doc.splitTextToSize(l, contentW - 10));
         const boxH = 13 + wrapped.length * 4.5;
@@ -357,11 +357,11 @@ export async function generateAndUploadInspection({
       const col = isDef ? [220, 38, 38] : [217, 119, 6];
       doc.setFillColor(...(isDef ? [254, 242, 242] : [255, 251, 235]));
       doc.setDrawColor(...col);
-      const notesLines = doc.splitTextToSize(changeNotes || "—", contentW - 8);
+      const notesLines = doc.splitTextToSize(changeNotes || "N/A", contentW - 8);
       const boxH = 14 + notesLines.length * 4.5;
       doc.roundedRect(margin, y, contentW, boxH, 2, 2, "FD");
       doc.setTextColor(...col); doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
-      doc.text(`CHANGE REPORTED — ${(changeCondition || "").toUpperCase()}`, margin + 4, y + 7);
+      doc.text(`CHANGE REPORTED: ${(changeCondition || "").toUpperCase()}`, margin + 4, y + 7);
       doc.setFont("helvetica", "normal"); doc.setTextColor(51, 65, 85); doc.setFontSize(8.5);
       doc.text(notesLines, margin + 4, y + 13);
       y += boxH + 6;

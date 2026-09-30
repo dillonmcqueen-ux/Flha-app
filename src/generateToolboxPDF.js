@@ -41,9 +41,9 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
   doc.setTextColor(91, 33, 182); doc.setFontSize(8); doc.setFont("helvetica", "bold");
   doc.text("TYPE", margin + 4, y + 7); doc.text("PRESENTER", margin + 55, y + 7); doc.text("SITE", margin + 120, y + 7);
   doc.setTextColor(30, 41, 59); doc.setFontSize(10);
-  doc.text(meetingType || "—", margin + 4, y + 15);
-  doc.text(presenter || "—", margin + 55, y + 15, { maxWidth: 60 });
-  doc.text(site || "—", margin + 120, y + 15, { maxWidth: 70 });
+  doc.text(meetingType || "N/A", margin + 4, y + 15);
+  doc.text(presenter || "N/A", margin + 55, y + 15, { maxWidth: 60 });
+  doc.text(site || "N/A", margin + 120, y + 15, { maxWidth: 70 });
   y += 28;
   doc.setTextColor(100, 116, 139); doc.setFontSize(8);
   doc.text(`Date: ${new Date().toLocaleString("en-CA")}`, margin, y); y += 8;
@@ -81,7 +81,7 @@ export async function generateAndUploadToolbox({ presenter, meetingType, site, t
     doc.setFillColor(250, 245, 255); doc.setDrawColor(233, 213, 255);
     const boxStart = y;
     doc.setTextColor(91, 33, 182); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-    doc.text("Discussion — questions for the crew", margin + 3, y + 6); y += 12;
+    doc.text("Discussion: questions for the crew", margin + 3, y + 6); y += 12;
     doc.setTextColor(51, 65, 85); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     points.discussion.forEach((d, i) => {
       if (y > 270) { doc.addPage(); y = 20; }

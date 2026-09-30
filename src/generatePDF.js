@@ -72,10 +72,10 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.text("JOB SITE", margin + 130, y + 7);
   doc.setTextColor(30, 58, 95);
   doc.setFontSize(11);
-  doc.text(companyName || "—", margin + 4, y + 16, { maxWidth: 62 });
+  doc.text(companyName || "N/A", margin + 4, y + 16, { maxWidth: 62 });
   doc.setFontSize(10);
-  doc.text(workerName || "—", margin + 70, y + 16, { maxWidth: 55 });
-  doc.text(jobSite || "—", margin + 130, y + 16, { maxWidth: 60 });
+  doc.text(workerName || "N/A", margin + 70, y + 16, { maxWidth: 55 });
+  doc.text(jobSite || "N/A", margin + 130, y + 16, { maxWidth: 60 });
   y += 30;
 
   // ── Company custom fields ────────────────────────────────
@@ -95,7 +95,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
       doc.setTextColor(30, 41, 59);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.text(String(f.value || "—"), x, cy + 4.5, { maxWidth: contentW / 2 - 8 });
+      doc.text(String(f.value || "N/A"), x, cy + 4.5, { maxWidth: contentW / 2 - 8 });
       col++;
       if (col > 1) { col = 0; cy += 9; }
     });
@@ -109,7 +109,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("PENDING SUPERVISOR APPROVAL — EXTREME RISK", W / 2, y + 5.5, { align: "center" });
+    doc.text("PENDING SUPERVISOR APPROVAL: EXTREME RISK", W / 2, y + 5.5, { align: "center" });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.text("Work must not begin until a supervisor has signed off below.", W / 2, y + 9.5, { align: "center" });
@@ -223,7 +223,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
 
       const hazardLines = doc.splitTextToSize(hz.hazard || "", cHazW - 4);
       const controlLines = doc.splitTextToSize(hz.control || "", cCtrlW - 4);
-      const sopLines = doc.splitTextToSize(hz.sopRef || "—", cSopW - 4);
+      const sopLines = doc.splitTextToSize(hz.sopRef || "N/A", cSopW - 4);
       const maxLines = Math.max(hazardLines.length, controlLines.length, sopLines.length, 1);
       const rowH = Math.max(9, maxLines * 4.2 + 3);
 
@@ -379,7 +379,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
       doc.setTextColor(71, 85, 105);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7.5);
-      doc.text(c.name || "—", x + 3, y + 22, { maxWidth: sigW - 6 });
+      doc.text(c.name || "N/A", x + 3, y + 22, { maxWidth: sigW - 6 });
       if (c.signedAt) {
         doc.setTextColor(148, 163, 184);
         doc.setFontSize(6.5);
@@ -402,7 +402,7 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
     doc.setTextColor(22, 101, 52);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text("Supervisor Approval — Extreme-Risk Sign-Off", margin, sy);
+    doc.text("Supervisor Approval: Extreme-Risk Sign-Off", margin, sy);
     sy += 4;
     if (supervisorApproval.signature) {
       try { doc.addImage(supervisorApproval.signature, "PNG", margin, sy, 70, 21); } catch (e) {}
