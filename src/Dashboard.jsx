@@ -3494,6 +3494,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setResettingRosterId(null);
   };
 
+  const resetRosterMemberMfa = async (id, name) => {
+    if (!window.confirm(`Reset ${name}'s authenticator? They will set it up again at their next login.`)) return;
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_roster_mfa", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Couldn't reset the authenticator."); return; }
+      setRosterList(prev => prev.map(m => m.id === id ? { ...m, totp_enabled: false, mfa: { ...(m.mfa || {}), enabled: false } } : m));
+    } catch (e) { alert("Couldn't reset the authenticator. Try again."); }
+  };
+
   const openWorkerProfile = async (id) => {
     setProfileRosterId(id);
     setProfileData(null);
@@ -7848,6 +7861,14 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           )}
                           {isDocActive("certifications") && m.wallet_enabled && (
                             <button onClick={() => createRosterWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
+                          )}
+                          {m.totp_enabled && (viewerRole === "admin" || m.role === "worker") && (
+                            <button
+                              onClick={() => resetRosterMemberMfa(m.id, m.name)}
+                              style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}
+                            >
+                              Reset authenticator
+                            </button>
                           )}
                           <button
                             onClick={() => resetRosterMemberPin(m.id, m.name)}

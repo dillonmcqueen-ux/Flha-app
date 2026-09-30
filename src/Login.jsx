@@ -3,6 +3,7 @@ import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
+import MfaSetup from "./MfaSetup.jsx";
 import { HardHat, ClipboardList, KeyRound, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import { setDraftUser } from "./useDraftAutosave.js";
@@ -84,9 +85,26 @@ export default function Login() {
   // enrolled from the Admin Panel. See api/login.js's checkMfa.
   const [totpRequired, setTotpRequired] = useState(false);
   const [totpCode, setTotpCode] = useState("");
+  // Per-person authenticator on roster logins. Set after a correct PIN when
+  // the person must finish setting one up before they get a session.
+  const [enrollTicket, setEnrollTicket] = useState(null);
+  // The setup link is emailed, not returned. After a correct PIN the server
+  // says "sent" and this holds a masked address to show.
+  const [enrollLinkHint, setEnrollLinkHint] = useState(null);
 
   // Restore session on load
   useEffect(() => {
+    // Arriving from the emailed authenticator setup link: go straight to setup.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const setupToken = params.get("mfa_setup");
+      if (setupToken) {
+        window.history.replaceState({}, "", window.location.pathname);
+        setRole("worker");
+        setEnrollTicket(setupToken);
+        return;
+      }
+    } catch (e) { /* no URL access: fall through to the normal login */ }
     const s = loadSession();
     if (s && s.role) setSession(s);
   }, []);
@@ -107,6 +125,8 @@ export default function Login() {
     setPendingMasterCompanyId(null);
     setTotpRequired(false);
     setTotpCode("");
+    setEnrollTicket(null);
+    setEnrollLinkHint(null);
   };
 
   const handleSubmit = async () => {
@@ -234,26 +254,52 @@ export default function Login() {
   };
 
   const submitTotp = () => {
-    if (pendingMasterCompanyId) {
+    if (selectedRoster) {
+      submitPin(pin, totpCode.trim());
+    } else if (pendingMasterCompanyId) {
       pickMasterCompany(pendingMasterCompanyId);
     } else {
       handleSubmit();
     }
   };
 
-  const submitPin = async (pinValue) => {
+  const submitPin = async (pinValue, totpValue) => {
     setError("");
     setChecking(true);
     try {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "roster_login", companyTicket, rosterId: selectedRoster.id, pin: pinValue }),
+        body: JSON.stringify({
+          action: "roster_login", companyTicket, rosterId: selectedRoster.id, pin: pinValue,
+          ...(totpValue ? { totp: totpValue } : {}),
+        }),
       });
       const data = await res.json();
+      // Wrong authenticator code: stay on the code screen with the PIN kept.
+      if (data.stage === "need_totp" && !res.ok) {
+        setError(data.error || "Incorrect code. Try again.");
+        setTotpCode("");
+        setChecking(false);
+        return;
+      }
       if (!res.ok) {
-        setError(data.error || "Something went wrong. Please try again.");
+        const msg = data.error || "Something went wrong. Please try again.";
+        // PIN rejected or locked while on the code screen: back to the start.
+        if (totpRequired) resetToRolePick();
+        setError(msg);
         setPin("");
+        setChecking(false);
+        return;
+      }
+      if (data.stage === "need_totp") {
+        setTotpRequired(true);
+        setChecking(false);
+        return;
+      }
+      if (data.stage === "enroll_link_sent") {
+        setTotpRequired(false);
+        setEnrollLinkHint(data.emailHint || "your email");
         setChecking(false);
         return;
       }
@@ -428,6 +474,49 @@ export default function Login() {
               </button>
             </div>
           </>
+        ) : enrollLinkHint ? (
+          // ── PIN accepted, but an authenticator must be set up first. The
+          // link is in the person's inbox, not on this screen. ─────────────
+          <>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Check your email</div>
+            <div style={{ fontSize: 13, color: C.text.body, marginBottom: 16, lineHeight: 1.5 }}>
+              Your role requires an authenticator app. We sent a setup link to {enrollLinkHint}. Open it, finish setup, and you'll be signed in. The link expires in 30 minutes.
+            </div>
+            <button style={styles.backBtn} onClick={resetToRolePick}><ChevronLeft size={14} /> Start over</button>
+          </>
+        ) : enrollTicket ? (
+          // ── Forced authenticator setup, opened from the emailed link. No session
+          // exists until the person confirms a code and saves their backup
+          // codes; the session comes back from mfa_enroll_confirm. ────────
+          <MfaSetup
+            forced
+            onCancel={resetToRolePick}
+            start={async () => {
+              try {
+                const res = await fetch("/api/login", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "mfa_enroll_start", enrollTicket }),
+                });
+                const data = await res.json();
+                return res.ok ? data : { error: data.error || "Couldn't start setup." };
+              } catch (e) { return { error: "Connection error. Please try again." }; }
+            }}
+            confirm={async (codeValue) => {
+              try {
+                const res = await fetch("/api/login", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "mfa_enroll_confirm", enrollTicket, code: codeValue }),
+                });
+                const data = await res.json();
+                return res.ok ? data : { error: data.error || "Incorrect code. Try again." };
+              } catch (e) { return { error: "Connection error. Please try again." }; }
+            }}
+            onDone={(result) => {
+              const s = { ...result.session, token: result.token };
+              saveSession(s);
+              setSession(s);
+            }}
+          />
         ) : totpRequired ? (
           // ── MFA challenge — required on the admin role and master-code
           // paths once enrolled from the Admin Panel ──────────────────

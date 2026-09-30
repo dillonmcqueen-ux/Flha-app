@@ -309,6 +309,19 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { setMsg("Couldn't reset PIN. Try again."); }
   };
 
+  const resetRosterMfa = async (id, name) => {
+    if (!window.confirm(`Reset ${name}'s authenticator? They will set it up again at their next login.`)) return;
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_roster_mfa", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Couldn't reset the authenticator."); return; }
+      await loadRoster(activeId);
+    } catch (e) { setMsg("Couldn't reset the authenticator. Try again."); }
+  };
+
   // ── Onboarding wallet (Phase 2): per-person opt-in + invite link ────────
   const [walletInviteLink, setWalletInviteLink] = useState(null); // { name, url }
 
@@ -2348,6 +2361,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                           )}
                           {m.active && m.wallet_enabled && (
                             <button onClick={() => createWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
+                          )}
+                          {m.active && m.totp_enabled && (
+                            <button onClick={() => resetRosterMfa(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Reset authenticator</button>
                           )}
                           {m.active && (
                             <button onClick={() => resetRosterPin(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Reset PIN</button>

@@ -24,6 +24,7 @@ import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
+import { requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode } from '../server-lib/rosterMfa.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -201,6 +202,55 @@ function signSession(payload) {
 // is genuinely a session sets it.
 function signTicket(companyId, companyName, appType) {
   return signSession({ purpose: 'roster', companyId, companyName, appType, issuedAt: Date.now() });
+}
+
+// Issued after a CORRECT PIN to someone who must use an authenticator but has
+// not set one up yet. It proves the PIN step passed for exactly this roster
+// row and lets them reach mfa_enroll_start / mfa_enroll_confirm, nothing
+// else. Carries `purpose`, so every verifySession in api/ rejects it as a
+// session; it only becomes a session when mfa_enroll_confirm succeeds.
+const MFA_ENROLL_TTL_MS = 30 * 60 * 1000; // the emailed setup link lives this long
+function signEnrollTicket(member, ticket, jti) {
+  return signSession({
+    purpose: 'mfa_enroll',
+    jti,
+    rosterId: member.id,
+    companyId: ticket.companyId,
+    companyName: ticket.companyName,
+    appType: ticket.appType || 'safety',
+    issuedAt: Date.now(),
+  });
+}
+const MFA_EMAIL_MAX_PER_HOUR = 3;
+
+// The link carries a token, so its origin must never come from a request
+// header a caller can set. Production uses the fixed portal host; previews use
+// the deployment's own host from Vercel's environment.
+function enrollOrigin() {
+  if (process.env.VERCEL_ENV === 'production') return 'https://portal.forafieldsolutions.com';
+  const host = process.env.VERCEL_BRANCH_URL || process.env.VERCEL_URL;
+  return host ? `https://${host}` : 'https://portal.forafieldsolutions.com';
+}
+
+function maskEmail(email) {
+  const [user, domain] = String(email).split('@');
+  if (!domain) return '';
+  return `${user.slice(0, 1)}***@${domain}`;
+}
+
+function verifyEnrollTicket(enrollTicket) {
+  if (!enrollTicket || typeof enrollTicket !== 'string' || !enrollTicket.includes('.')) return null;
+  const [data, sig] = enrollTicket.split('.');
+  const expectedSig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(data).digest('base64url');
+  if (!safeEqual(sig, expectedSig)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
+    if (payload.purpose !== 'mfa_enroll') return null;
+    if (!payload.issuedAt || Date.now() - payload.issuedAt > MFA_ENROLL_TTL_MS) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
 }
 
 function verifyTicket(ticket) {
@@ -383,6 +433,27 @@ async function sendSubmitterConfirmation(req, record, editToken) {
   });
 }
 
+// The one place a roster login turns into a session, after the PIN and (when
+// it applies) the authenticator have both passed.
+async function mintRosterSession(member, ticket, suspended) {
+  await supabaseAdmin
+    .from('roster')
+    .update({ last_login_at: new Date().toISOString() })
+    .eq('id', member.id);
+  const payload = {
+    role: member.role,
+    companyId: ticket.companyId,
+    companyName: ticket.companyName,
+    appType: ticket.appType || 'safety',
+    userId: member.id,
+    userName: member.name,
+    suspended,
+    issuedAt: Date.now(),
+  };
+  const token = signSession(payload);
+  return { session: payload, token };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -511,21 +582,105 @@ export default async function handler(req, res) {
 
     await supabaseAdmin
       .from('roster')
-      .update({ failed_pin_attempts: 0, pin_locked_until: null, last_login_at: new Date().toISOString() })
+      .update({ failed_pin_attempts: 0, pin_locked_until: null })
       .eq('id', member.id);
 
-    const payload = {
-      role: member.role,
-      companyId: ticket.companyId,
-      companyName: ticket.companyName,
-      appType: ticket.appType || 'safety',
-      userId: member.id,
-      userName: member.name,
-      suspended,
-      issuedAt: Date.now(),
-    };
-    const token = signSession(payload);
-    return res.status(200).json({ session: payload, token });
+    // Second factor, after the PIN. Enrolled people must present a code (or
+    // a backup code). Someone who is required to use an authenticator but
+    // has not set one up is sent to enrollment and gets no session until
+    // they finish it. Everyone else (workers who have not opted in) goes
+    // straight through.
+    if (member.totp_enabled) {
+      const code = req.body.totp;
+      if (!code) return res.status(200).json({ stage: 'need_totp' });
+      const verdict = await verifyLoginCode(supabaseAdmin, member, code);
+      if (!verdict.ok) return res.status(verdict.status || 401).json({ error: verdict.error, stage: 'need_totp' });
+    } else if (requiresMfa(member)) {
+      // The setup link goes to the person's own inbox, never back in this
+      // response. Knowing (or guessing) someone's PIN is then not enough to
+      // enroll your phone in their place: you also need their mailbox.
+      const email = (withDecryptedEmail(member).email || '').trim();
+      if (!email) {
+        return res.status(403).json({ error: "You need to set up an authenticator, but there is no email address on file for you. Ask your administrator to add one." });
+      }
+      const mailAllowed = await checkIpThrottle(`mfamail:${member.id}`, MFA_EMAIL_MAX_PER_HOUR, 60 * 60 * 1000);
+      if (!mailAllowed) return res.status(429).json({ error: 'A setup email was already sent. Check your inbox, or try again later.' });
+      // Single-use: only the newest link works, and only until it is used or
+      // the PIN, authenticator or email changes (those clear this hash).
+      const jti = crypto.randomBytes(24).toString('base64url');
+      const { error: jtiErr } = await supabaseAdmin
+        .from('roster')
+        .update({
+          mfa_setup_jti_hash: crypto.createHash('sha256').update(jti).digest('hex'),
+          mfa_setup_expires_at: new Date(Date.now() + MFA_ENROLL_TTL_MS).toISOString(),
+        })
+        .eq('id', member.id);
+      if (jtiErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
+      const link = `${enrollOrigin()}/?mfa_setup=${encodeURIComponent(signEnrollTicket(member, ticket, jti))}`;
+      await sendEmail({
+        to: email,
+        subject: 'Set up your FORA authenticator',
+        text: `Hi ${member.name},\n\nYour role requires an authenticator app to sign in to FORA. Open this link on your phone or computer to set it up. It expires in 30 minutes.\n\n${link}\n\nIf you did not just try to sign in, do not open the link. Tell your administrator that someone entered your PIN.\n\nFORA Field Solutions`,
+      }).catch((e) => console.error('mfa setup email failed:', e.message));
+      return res.status(200).json({ stage: 'enroll_link_sent', emailHint: maskEmail(email) });
+    }
+
+    return res.status(200).json(await mintRosterSession(member, ticket, suspended));
+  }
+
+  // ── Forced authenticator enrollment (runs after a correct PIN) ──────────
+  if (action === 'mfa_enroll_start' || action === 'mfa_enroll_confirm') {
+    const enroll = verifyEnrollTicket(req.body.enrollTicket);
+    if (!enroll) return res.status(401).json({ error: 'That took too long. Please sign in again.' });
+
+    const allowed = await checkIpThrottle(`totp:${clientIp(req)}`, TOTP_THROTTLE_MAX_ATTEMPTS, TOTP_THROTTLE_WINDOW_MS);
+    if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('roster').select('*').eq('id', enroll.rosterId).eq('company_id', enroll.companyId).limit(1);
+    if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
+    const member = rows && rows[0];
+    if (!member || !member.active) return res.status(403).json({ error: 'This account is no longer active. Contact your administrator.' });
+    // The link must still be the live one for this row (newest, unused, not
+    // cleared by a PIN, authenticator or email change).
+    const jtiHash = enroll.jti ? crypto.createHash('sha256').update(String(enroll.jti)).digest('hex') : null;
+    if (!jtiHash || !member.mfa_setup_jti_hash || member.mfa_setup_jti_hash !== jtiHash
+        || !member.mfa_setup_expires_at || new Date(member.mfa_setup_expires_at) < new Date()) {
+      return res.status(401).json({ error: 'That setup link is no longer valid. Sign in again to get a new one.' });
+    }
+    // The ticket was minted after a correct PIN, up to 10 minutes ago. Honour
+    // anything that changed since: a PIN lockout, or a suspension.
+    if (member.pin_locked_until && new Date(member.pin_locked_until) > new Date()) {
+      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in a few minutes.' });
+    }
+    {
+      const { data: coRows0 } = await supabaseAdmin.from('companies').select('suspended').eq('id', enroll.companyId).limit(1);
+      if (coRows0 && coRows0[0] && coRows0[0].suspended && member.role === 'worker') {
+        return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
+      }
+    }
+
+    if (action === 'mfa_enroll_start') {
+      const result = await startEnrollment(supabaseAdmin, member);
+      if (result.error) return res.status(result.status || 500).json({ error: result.error });
+      return res.status(200).json({ ok: true, secret: result.secret, qrDataUrl: result.qrDataUrl });
+    }
+
+    const result = await confirmEnrollment(supabaseAdmin, member, req.body.code);
+    if (result.error) return res.status(result.status || 500).json({ error: result.error });
+    const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', enroll.companyId).limit(1);
+    const suspended = !!(coRows && coRows[0] && coRows[0].suspended);
+    const minted = await mintRosterSession(member, { companyId: enroll.companyId, companyName: enroll.companyName, appType: enroll.appType }, suspended);
+    // Tell the person, so an enrollment they did not do does not go unnoticed.
+    const notifyTo = (withDecryptedEmail(member).email || '').trim();
+    if (notifyTo) {
+      await sendEmail({
+        to: notifyTo,
+        subject: 'An authenticator was set up on your FORA account',
+        text: `Hi ${member.name},\n\nAn authenticator app was just set up for your FORA sign-in. If that was you, nothing to do. If it was not, tell your administrator right away so they can reset it.\n\nFORA Field Solutions`,
+      }).catch((e) => console.error('mfa setup notice failed:', e.message));
+    }
+    return res.status(200).json({ ...minted, backupCodes: result.backupCodes });
   }
 
   // ── Onboarding wallet (Phase 2): redeem a single-use invite link ────────
@@ -541,7 +696,7 @@ export default async function handler(req, res) {
 
     const { data: rows, error } = await supabaseAdmin
       .from('roster')
-      .select('id, name, email, role, company_id, active, wallet_enabled, wallet_invite_token_expires_at')
+      .select('id, name, email, role, company_id, active, wallet_enabled, wallet_invite_token_expires_at, departments, totp_enabled')
       .eq('wallet_invite_token', inviteToken)
       .limit(1);
     if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
@@ -557,6 +712,12 @@ export default async function handler(req, res) {
     const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type, suspended').eq('id', member.company_id).limit(1);
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
+    // An invite link is a substitute for the PIN, not for the authenticator.
+    // Anyone who uses one (or must) signs in from the normal login page.
+    // Checked before the token is consumed so the link is not burned.
+    if (member.totp_enabled || requiresMfa(member)) {
+      return res.status(403).json({ error: 'This account uses an authenticator app. Sign in from the normal login page instead.' });
+    }
     // Same suspension gate as roster_login: a suspended company's workers
     // don't get in even with a valid, unexpired invite link.
     if (company.suspended && member.role === 'worker') {
