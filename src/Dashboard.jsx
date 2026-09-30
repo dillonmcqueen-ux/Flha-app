@@ -2315,6 +2315,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const [resettingRosterId, setResettingRosterId] = useState(null);
   const [togglingWalletId, setTogglingWalletId] = useState(null);
   const [rosterInviteLink, setRosterInviteLink] = useState(null); // { name, url }
+  const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
+  const [bulkLinkMsg, setBulkLinkMsg] = useState("");
 
   // ── Worker profile drawer: click a name in the Roster tab ───────────────
   const [profileRosterId, setProfileRosterId] = useState(null);
@@ -3617,16 +3619,38 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     setTogglingWalletId(null);
   };
 
-  const createRosterWalletInvite = async (id, name) => {
+  const sendRosterSetupLink = async (id, name) => {
     try {
       const res = await fetch("/api/companydata", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create_wallet_invite", token, id }),
+        body: JSON.stringify({ action: "send_pin_setup_link", token, id }),
       });
       const data = await res.json();
-      if (!res.ok) { alert(data.error || "Couldn't create the invite link."); return; }
-      setRosterInviteLink({ name, url: data.inviteUrl });
-    } catch (e) { alert("Couldn't create the invite link. Try again."); }
+      if (!res.ok) { alert(data.error || "Couldn't send the setup link."); return; }
+      setRosterInviteLink({ name, url: data.inviteUrl, emailed: !!data.emailSent });
+      await loadRosterList();
+    } catch (e) { alert("Couldn't send the setup link. Try again."); }
+  };
+
+  const sendAllSetupLinks = async () => {
+    setBulkLinkMsg("");
+    setBulkLinkBusy(true);
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_pin_setup_links_all", token, companyId: selectedCompany }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setBulkLinkMsg(data.error || "Couldn't send the setup links."); setBulkLinkBusy(false); return; }
+      const parts = [`Sent ${data.sent} setup link${data.sent === 1 ? "" : "s"}.`];
+      if (data.failed) parts.push(`${data.failed} failed to send, try again.`);
+      if (data.skippedNoEmail) parts.push(`${data.skippedNoEmail} ${data.skippedNoEmail === 1 ? "person has" : "people have"} no email on file.`);
+      if (data.remaining) parts.push(`${data.remaining} more waiting, click again to send the next batch.`);
+      if (data.sent === 0 && !data.failed && !data.skippedNoEmail) parts.push("Nobody needs one right now. Everyone has a PIN or was sent a link in the last hour.");
+      setBulkLinkMsg(parts.join(" "));
+      await loadRosterList();
+    } catch (e) { setBulkLinkMsg("Couldn't send the setup links. Try again."); }
+    setBulkLinkBusy(false);
   };
 
   const onboardNewEmployee = async () => {
@@ -7727,9 +7751,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             {onboardResult && (
               <div style={{ ...styles.card, background: C.status.success.bg, border: `1.5px solid ${C.status.success.border}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.status.success.text, marginBottom: 4 }}>
-                  {onboardResult.emailSent ? `Invite sent to ${onboardResult.email}` : `Couldn't send the email to ${onboardResult.email} — share this link with them directly`}
+                  {onboardResult.emailSent ? `Setup link sent to ${onboardResult.email}. They choose their own PIN from it (24 hours for a supervisor, 7 days for everyone else).` : onboardResult.inviteUrl ? `Couldn't send the email to ${onboardResult.email}. Share this link with them directly.` : `Couldn't send the email to ${onboardResult.email}. Use "Send setup link" on their row to try again.`}
                 </div>
-                {!onboardResult.emailSent && (
+                {!onboardResult.emailSent && onboardResult.inviteUrl && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
                     <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text.body, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 10px", wordBreak: "break-all" }}>{onboardResult.inviteUrl}</span>
                     <button onClick={() => navigator.clipboard?.writeText(onboardResult.inviteUrl)} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Copy link</button>
@@ -7741,10 +7765,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
             {rosterInviteLink && (
               <div style={{ ...styles.card, background: C.status.warning.bg, border: `1.5px solid ${C.status.warning.border}` }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.warning.text, marginBottom: 4 }}>Onboarding wallet invite for {rosterInviteLink.name} — single-use, send it to them now</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.status.warning.text, marginBottom: 4 }}>
+                  {rosterInviteLink.emailed ? `Setup link emailed to ${rosterInviteLink.name}.` : `Couldn't email ${rosterInviteLink.name}.`}
+                  {rosterInviteLink.url ? " It works once (24 hours for a supervisor, 7 days for everyone else). You can also send it to them yourself:" : ""}
+                </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text.body, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 10px", wordBreak: "break-all" }}>{rosterInviteLink.url}</span>
-                  <button onClick={() => navigator.clipboard?.writeText(rosterInviteLink.url)} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Copy link</button>
+                  {rosterInviteLink.url && <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text.body, background: C.panelInset, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "6px 10px", wordBreak: "break-all" }}>{rosterInviteLink.url}</span>}
+                  {rosterInviteLink.url && <button onClick={() => navigator.clipboard?.writeText(rosterInviteLink.url)} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Copy link</button>}
                   <button onClick={() => setRosterInviteLink(null)} style={{ background: "transparent", border: "none", color: C.text.muted, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>Done</button>
                 </div>
               </div>
@@ -7799,6 +7826,21 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   </button>
                 )}
               />
+
+              {canManageCompany && (
+                <div style={{ ...styles.card, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.text.body }}>Send setup links</div>
+                    <div style={{ fontSize: 12, color: C.text.faint }}>
+                      Emails everyone with an email on file who has not chosen a PIN yet (and was not sent a link in the last hour) a link to set their own. Another Owner is never included. Supervisor links last 24 hours, everyone else's 7 days.
+                    </div>
+                    {bulkLinkMsg && <div style={{ fontSize: 12, fontWeight: 700, color: C.text.body, marginTop: 6 }}>{bulkLinkMsg}</div>}
+                  </div>
+                  <button onClick={sendAllSetupLinks} disabled={bulkLinkBusy} style={{ background: C.orange, color: C.text.onOrange, border: "none", borderRadius: RAD.sm, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: bulkLinkBusy ? 0.6 : 1 }}>
+                    {bulkLinkBusy ? "Sending…" : "Send setup links"}
+                  </button>
+                </div>
+              )}
 
               {rosterList.length > 0 && (
                 <StatStrip items={[
@@ -7891,13 +7933,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             )}
                           </div>
                           {isDocActive("certifications") && (
-                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title={`Lets ${m.name.split(" ")[0]} upload their own safety tickets. Turn this on, then use "Invite" to send them a one-time link.`}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0, cursor: "pointer" }} title={`Lets ${m.name.split(" ")[0]} upload their own safety tickets. Turn this on so they can add tickets when they finish setup.`}>
                               <input type="checkbox" checked={!!m.wallet_enabled} disabled={togglingWalletId === m.id} onChange={e => toggleRosterWallet(m.id, e.target.checked)} />
                               Wallet
                             </label>
                           )}
-                          {isDocActive("certifications") && m.wallet_enabled && (
-                            <button onClick={() => createRosterWalletInvite(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>Invite</button>
+                          {m.active && !m.pin_set_at && !m.last_login_at && (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0 }} title="This person has not chosen their own PIN yet.">
+                              {m.pin_link_sent_at ? "Waiting for PIN" : "No setup link sent"}
+                            </span>
+                          )}
+                          {m.active && (viewerRole === "admin" ? true : String(m.id) === String(userId) ? true : canManageCompany ? !m.is_owner : m.role === "worker") && (
+                            <button onClick={() => sendRosterSetupLink(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>{m.pin_link_sent_at && !m.pin_set_at ? "Resend setup link" : "Send setup link"}</button>
                           )}
                           {m.totp_enabled && (viewerRole === "admin" ? true : canManageCompany ? !m.is_owner && String(m.id) !== String(userId) : m.role === "worker") && (
                             <button

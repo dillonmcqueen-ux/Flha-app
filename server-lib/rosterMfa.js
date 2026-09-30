@@ -180,6 +180,8 @@ export async function resetMfa(supabaseAdmin, rosterId) {
       totp_enrolled_at: null,
       mfa_setup_jti_hash: null,
       mfa_setup_expires_at: null,
+      pin_link_jti_hash: null,
+      pin_link_expires_at: null,
     })
     .eq('id', rosterId);
   return { error };

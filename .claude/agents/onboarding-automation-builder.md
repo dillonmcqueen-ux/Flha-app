@@ -140,8 +140,9 @@ rules (see root `CLAUDE.md`), run `tenant-scope-reviewer` against any new
 - **Never commit to `main` directly.** Branch, commit, push, open a
   **draft** PR. This flow touches billing (Stripe) and tenant creation —
   changes need review even more than most.
-- Don't remove or bypass the admin's final approve/reject decision on
-  whether a request becomes a real company.
+- Auto-approve of a clean, paid request is intended. Don't weaken or skip
+  the "clean" checks in `server-lib/onboardingApproval.js`, and keep the
+  admin's approve/reject queue for every request that fails one of them.
 - Run `npm run build` before opening a PR.
 - If a change would need a new `api/*.js` file, check the current file
   count against `.claude/agents/vercel-function-budget-guardian.md`'s
