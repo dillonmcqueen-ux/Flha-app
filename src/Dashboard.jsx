@@ -7900,7 +7900,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                               Wallet
                             </label>
                           )}
-                          {m.active && !m.pin_set_at && (
+                          {m.active && !m.pin_set_at && !m.last_login_at && (
                             <span style={{ fontSize: 11, fontWeight: 700, color: C.text.faint, flexShrink: 0 }} title="This person has not chosen their own PIN yet.">
                               {m.pin_link_sent_at ? "Waiting for PIN" : "No setup link sent"}
                             </span>

@@ -2363,7 +2363,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                               Wallet
                             </label>
                           )}
-                          {m.active && !m.pin_set_at && (
+                          {m.active && !m.pin_set_at && !m.last_login_at && (
                             <span style={{ fontSize: 11, fontWeight: 700, color: C.muted, flexShrink: 0 }}>{m.pin_link_sent_at ? "Waiting for PIN" : "No setup link sent"}</span>
                           )}
                           {m.active && (
