@@ -209,7 +209,7 @@ function signTicket(companyId, companyName, appType) {
 // row and lets them reach mfa_enroll_start / mfa_enroll_confirm, nothing
 // else. Carries `purpose`, so every verifySession in api/ rejects it as a
 // session; it only becomes a session when mfa_enroll_confirm succeeds.
-const MFA_ENROLL_TTL_MS = 10 * 60 * 1000;
+const MFA_ENROLL_TTL_MS = 30 * 60 * 1000; // the emailed setup link lives this long
 function signEnrollTicket(member, ticket) {
   return signSession({
     purpose: 'mfa_enroll',
@@ -220,6 +220,22 @@ function signEnrollTicket(member, ticket) {
     issuedAt: Date.now(),
   });
 }
+const MFA_EMAIL_MAX_PER_HOUR = 3;
+
+// Host header is attacker-influenced in some setups, and this link carries a
+// token, so only ever build it on hosts we own (production and previews).
+function enrollOrigin(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
+  if (/^(portal\.forafieldsolutions\.com|[a-z0-9-]+\.vercel\.app)$/.test(host)) return `https://${host}`;
+  return 'https://portal.forafieldsolutions.com';
+}
+
+function maskEmail(email) {
+  const [user, domain] = String(email).split('@');
+  if (!domain) return '';
+  return `${user.slice(0, 1)}***@${domain}`;
+}
+
 function verifyEnrollTicket(enrollTicket) {
   if (!enrollTicket || typeof enrollTicket !== 'string' || !enrollTicket.includes('.')) return null;
   const [data, sig] = enrollTicket.split('.');
@@ -578,7 +594,22 @@ export default async function handler(req, res) {
       const verdict = await verifyLoginCode(supabaseAdmin, member, code);
       if (!verdict.ok) return res.status(verdict.status || 401).json({ error: verdict.error, stage: 'need_totp' });
     } else if (requiresMfa(member)) {
-      return res.status(200).json({ stage: 'need_enroll', enrollTicket: signEnrollTicket(member, ticket) });
+      // The setup link goes to the person's own inbox, never back in this
+      // response. Knowing (or guessing) someone's PIN is then not enough to
+      // enroll your phone in their place: you also need their mailbox.
+      const email = (withDecryptedEmail(member).email || '').trim();
+      if (!email) {
+        return res.status(403).json({ error: "You need to set up an authenticator, but there is no email address on file for you. Ask your administrator to add one." });
+      }
+      const mailAllowed = await checkIpThrottle(`mfamail:${member.id}`, MFA_EMAIL_MAX_PER_HOUR, 60 * 60 * 1000);
+      if (!mailAllowed) return res.status(429).json({ error: 'A setup email was already sent. Check your inbox, or try again later.' });
+      const link = `${enrollOrigin(req)}/?mfa_setup=${encodeURIComponent(signEnrollTicket(member, ticket))}`;
+      await sendEmail({
+        to: email,
+        subject: 'Set up your FORA authenticator',
+        text: `Hi ${member.name},\n\nYour role requires an authenticator app to sign in to FORA. Open this link on your phone or computer to set it up. It expires in 30 minutes.\n\n${link}\n\nIf you did not just try to sign in, do not open the link. Tell your administrator that someone entered your PIN.\n\nFORA Field Solutions`,
+      }).catch((e) => console.error('mfa setup email failed:', e.message));
+      return res.status(200).json({ stage: 'enroll_link_sent', emailHint: maskEmail(email) });
     }
 
     return res.status(200).json(await mintRosterSession(member, ticket, suspended));
@@ -620,6 +651,15 @@ export default async function handler(req, res) {
     const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', enroll.companyId).limit(1);
     const suspended = !!(coRows && coRows[0] && coRows[0].suspended);
     const minted = await mintRosterSession(member, { companyId: enroll.companyId, companyName: enroll.companyName, appType: enroll.appType }, suspended);
+    // Tell the person, so an enrollment they did not do does not go unnoticed.
+    const notifyTo = (withDecryptedEmail(member).email || '').trim();
+    if (notifyTo) {
+      await sendEmail({
+        to: notifyTo,
+        subject: 'An authenticator was set up on your FORA account',
+        text: `Hi ${member.name},\n\nAn authenticator app was just set up for your FORA sign-in. If that was you, nothing to do. If it was not, tell your administrator right away so they can reset it.\n\nFORA Field Solutions`,
+      }).catch((e) => console.error('mfa setup notice failed:', e.message));
+    }
     return res.status(200).json({ ...minted, backupCodes: result.backupCodes });
   }
 

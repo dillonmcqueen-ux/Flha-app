@@ -88,9 +88,23 @@ export default function Login() {
   // Per-person authenticator on roster logins. Set after a correct PIN when
   // the person must finish setting one up before they get a session.
   const [enrollTicket, setEnrollTicket] = useState(null);
+  // The setup link is emailed, not returned. After a correct PIN the server
+  // says "sent" and this holds a masked address to show.
+  const [enrollLinkHint, setEnrollLinkHint] = useState(null);
 
   // Restore session on load
   useEffect(() => {
+    // Arriving from the emailed authenticator setup link: go straight to setup.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const setupToken = params.get("mfa_setup");
+      if (setupToken) {
+        window.history.replaceState({}, "", window.location.pathname);
+        setRole("worker");
+        setEnrollTicket(setupToken);
+        return;
+      }
+    } catch (e) { /* no URL access: fall through to the normal login */ }
     const s = loadSession();
     if (s && s.role) setSession(s);
   }, []);
@@ -112,6 +126,7 @@ export default function Login() {
     setTotpRequired(false);
     setTotpCode("");
     setEnrollTicket(null);
+    setEnrollLinkHint(null);
   };
 
   const handleSubmit = async () => {
@@ -282,9 +297,9 @@ export default function Login() {
         setChecking(false);
         return;
       }
-      if (data.stage === "need_enroll") {
+      if (data.stage === "enroll_link_sent") {
         setTotpRequired(false);
-        setEnrollTicket(data.enrollTicket);
+        setEnrollLinkHint(data.emailHint || "your email");
         setChecking(false);
         return;
       }
@@ -459,8 +474,18 @@ export default function Login() {
               </button>
             </div>
           </>
+        ) : enrollLinkHint ? (
+          // ── PIN accepted, but an authenticator must be set up first. The
+          // link is in the person's inbox, not on this screen. ─────────────
+          <>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Check your email</div>
+            <div style={{ fontSize: 13, color: C.text.body, marginBottom: 16, lineHeight: 1.5 }}>
+              Your role requires an authenticator app. We sent a setup link to {enrollLinkHint}. Open it, finish setup, and you'll be signed in. The link expires in 30 minutes.
+            </div>
+            <button style={styles.backBtn} onClick={resetToRolePick}><ChevronLeft size={14} /> Start over</button>
+          </>
         ) : enrollTicket ? (
-          // ── Forced authenticator setup, after a correct PIN. No session
+          // ── Forced authenticator setup, opened from the emailed link. No session
           // exists until the person confirms a code and saves their backup
           // codes; the session comes back from mfa_enroll_confirm. ────────
           <MfaSetup

@@ -920,6 +920,12 @@ export default async function handler(req, res) {
 
       const updates = {};
       if ('email' in req.body) {
+        // The emailed authenticator setup link goes to this address, so whoever
+        // can change a supervisor's email can take the account over. Same rank
+        // rule as role and PIN: a supervisor edits workers (or themselves).
+        if (session.role === 'supervisor' && rows[0].role !== 'worker' && String(rows[0].id) !== String(session.userId)) {
+          return res.status(403).json({ error: "Only the account owner can change a supervisor's email." });
+        }
         const email = (req.body.email || '').trim();
         if (email && !isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
         updates.email = encryptField(email) || null;
