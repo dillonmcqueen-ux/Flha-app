@@ -9,6 +9,7 @@ import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
 import { ArrowLeft, Ambulance, WifiOff, X, Camera, AlertTriangle, CheckCircle2, Loader2, PenLine, Trash2, Plus } from "lucide-react";
+import { nowLocalInput, isLocalInput, formatOccurredAt } from "./occurredAt.js";
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -177,7 +178,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
   const [siteMode, setSiteMode] = useState("list");
-  const [occurredAt, setOccurredAt] = useState("");
+  const [occurredAt, setOccurredAt] = useState(nowLocalInput());
   const [incidentType, setIncidentType] = useState("Injury / Illness");
 
   const [injuredPerson, setInjuredPerson] = useState("");
@@ -185,6 +186,12 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [treatment, setTreatment] = useState("");
   const [medicalAttention, setMedicalAttention] = useState("None");
   const [witnesses, setWitnesses] = useState("");
+  // Roster pickers for injured person / witnesses. The columns stay plain
+  // text (names joined with ", "); the pickers only replace the typing.
+  const [rosterNames, setRosterNames] = useState([]);
+  const [injuredOther, setInjuredOther] = useState(false);
+  const [witnessPicks, setWitnessPicks] = useState([]);
+  const [witnessExtra, setWitnessExtra] = useState("");
   const [evidence, setEvidence] = useState("");
 
   const [photos, setPhotos] = useState([]); // [{ id, file, previewUrl, uploading, uploadedUrl, pending, pendingPhotoId, error }]
@@ -208,6 +215,12 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
+  const updateWitnesses = (picks, extra) => {
+    setWitnessPicks(picks);
+    setWitnessExtra(extra);
+    setWitnesses([...picks, extra.trim()].filter(Boolean).join(", "));
+  };
+
   useEffect(() => {
     async function load() {
       // Sites — via protected endpoint
@@ -226,6 +239,16 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
       } catch (e) {
         setSiteMode("other");
       }
+
+      // Roster names — for the injured person / witness pickers
+      try {
+        const rosterRes = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_roster_names", token, companyId }),
+        });
+        const rosterData = await rosterRes.json();
+        if (rosterRes.ok) setRosterNames((rosterData.members || []).map(m => m.name).filter(Boolean));
+      } catch (e) { /* no roster: the pickers fall back to typing */ }
 
       // Company logo — via protected endpoint
       try {
@@ -261,7 +284,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
     async function restore() {
       const draft = loadDraft("incident", companyId);
       if (draft && draft.step && draft.step !== "done") {
-        if (draft.reporter) setReporter(draft.reporter);
+        if (draft.reporter && !loginUserName) setReporter(draft.reporter);
         if (draft.site) setSite(draft.site);
         if (draft.siteMode) setSiteMode(draft.siteMode);
         if (draft.occurredAt) setOccurredAt(draft.occurredAt);
@@ -271,6 +294,12 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
         if (draft.treatment) setTreatment(draft.treatment);
         if (draft.medicalAttention) setMedicalAttention(draft.medicalAttention);
         if (draft.witnesses) setWitnesses(draft.witnesses);
+        if (draft.injuredOther) setInjuredOther(true);
+        if (Array.isArray(draft.witnessPicks)) setWitnessPicks(draft.witnessPicks);
+        if (draft.witnessExtra) setWitnessExtra(draft.witnessExtra);
+        // Drafts saved before the pickers existed carry only plain text.
+        if (draft.witnesses && draft.witnessExtra === undefined) setWitnessExtra(draft.witnesses);
+        if (draft.injuredPerson && draft.injuredOther === undefined) setInjuredOther(true);
         if (draft.evidence) setEvidence(draft.evidence);
         if (draft.description) setDescription(draft.description);
         if (draft.report) setReport(draft.report);
@@ -398,7 +427,7 @@ export default function Incident({ companyId, companyName, userName: loginUserNa
 
 Company: ${companyName}
 Site: ${site}
-When it occurred: ${occurredAt || "not specified"}
+When it occurred: ${formatOccurredAt(occurredAt) || "not specified"}
 Incident type: ${incidentType}
 Injured person: ${injuredPerson || "n/a"}
 Body part affected: ${bodyPart || "n/a"}
@@ -548,13 +577,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <div style={s.card}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Incident details</div>
 
-          <label style={s.label}>Your name</label>
+          {loginUserName ? (
+            <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+          ) : (
+            <>
+            <label style={s.label}>Your name</label>
           <input
             style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Reporter name" value={reporter}
             onChange={e => setReporter(e.target.value)}
             readOnly={!!loginUserName}
           />
+            </>
+          )}
 
           <label style={s.label}>Incident type</label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
@@ -575,7 +610,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           )}
 
           <label style={s.label}>When did it happen?</label>
-          <input style={s.input} placeholder="e.g. Today at 2:30pm" value={occurredAt} onChange={e => setOccurredAt(e.target.value)} />
+          <input type="datetime-local" style={s.input} max={nowLocalInput()} value={isLocalInput(occurredAt) ? occurredAt : ""} onChange={e => setOccurredAt(e.target.value)} />
 
           <button style={s.btn((reporter && site) ? accent : disabledBg(C))} disabled={!reporter || !site} onClick={() => setStep("details")}>Continue →</button>
         </div>
@@ -588,7 +623,15 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 14 }}>Fill in what applies. Leave blank anything not relevant to this incident.</div>
 
           <label style={s.label}>Injured person (if any)</label>
-          <input style={s.input} placeholder="Name of injured person" value={injuredPerson} onChange={e => setInjuredPerson(e.target.value)} />
+          {rosterNames.length > 0 && !injuredOther ? (
+            <select style={s.input} value={injuredPerson} onChange={e => { if (e.target.value === "__other__") { setInjuredOther(true); setInjuredPerson(""); } else setInjuredPerson(e.target.value); }}>
+              <option value="">No one injured / not applicable</option>
+              {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+              <option value="__other__">＋ Other (not on roster)</option>
+            </select>
+          ) : (
+            <input style={s.input} placeholder="Name of injured person" value={injuredPerson} onChange={e => setInjuredPerson(e.target.value)} />
+          )}
 
           <label style={s.label}>Body part affected</label>
           <input style={s.input} placeholder="e.g. Left hand" value={bodyPart} onChange={e => setBodyPart(e.target.value)} />
@@ -604,7 +647,18 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           </div>
 
           <label style={s.label}>Witnesses</label>
-          <input style={s.input} placeholder="Names of anyone who saw it" value={witnesses} onChange={e => setWitnesses(e.target.value)} />
+          {rosterNames.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+              {rosterNames.filter(n => n !== reporter).map(n => {
+                const on = witnessPicks.includes(n);
+                return (
+                  <button key={n} type="button" onClick={() => updateWitnesses(on ? witnessPicks.filter(x => x !== n) : [...witnessPicks, n], witnessExtra)}
+                    style={{ padding: "8px 12px", borderRadius: RAD.pill, fontSize: 13, fontWeight: 700, cursor: "pointer", minHeight: 36, border: `1.5px solid ${on ? accent : C.line}`, background: on ? C.status.danger.bg : C.panelInset, color: on ? C.status.danger.text : C.text.faint }}>{n}</button>
+                );
+              })}
+            </div>
+          )}
+          <input style={s.input} placeholder={rosterNames.length > 0 ? "Anyone else (not on roster)" : "Names of anyone who saw it"} value={witnessExtra} onChange={e => updateWitnesses(witnessPicks, e.target.value)} />
 
           <label style={s.label}>Evidence on file</label>
           <textarea style={{ ...s.input, minHeight: 70, resize: "vertical" }} placeholder="Describe any physical evidence not covered by the photos below" value={evidence} onChange={e => setEvidence(e.target.value)} />
@@ -688,7 +742,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           )}
           <div style={s.card}>
             <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>{incidentType} — Incident Report</div>
-            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{reporter} · {site}{occurredAt ? ` · ${occurredAt}` : ""}</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2 }}>{reporter} · {site}{occurredAt ? ` · ${formatOccurredAt(occurredAt)}` : ""}</div>
           </div>
 
           {/* Severity */}

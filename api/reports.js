@@ -4,7 +4,7 @@
 // covers both report types since they work the same way.
 
 import { createClient } from '@supabase/supabase-js';
-import { authorRosterId } from '../server-lib/authorStamp.js';
+import { authorRosterId, stampAuthorName } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { openCorrectiveActions, correctiveActionsFromReport } from '../server-lib/correctiveActions.js';
 import crypto from 'crypto';
@@ -72,12 +72,12 @@ async function verifySession(token) {
   // instead of waiting out the token's TTL.
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id')
+    .select('active, role, company_id, name')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
-  return { ...payload, role: rows[0].role };
+  return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
 // flha-reports/signatures/incident-photos are private buckets — the DB
@@ -238,6 +238,9 @@ export default async function handler(req, res) {
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+      // The name on the report is the signed-in person's, not the request's
+      // (server-lib/authorStamp.js). An anonymous near miss keeps its label.
+      stampAuthorName(session, recordToInsert, ['reporter_name', 'signed_by'], { isAnonymous: recordToInsert.is_anonymous === true });
 
       // Break #2 — a client-supplied site_id is a tenancy question, not a
       // validation detail: unchecked, a worker could file their own

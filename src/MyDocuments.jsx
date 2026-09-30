@@ -20,7 +20,7 @@ import {
   ChevronLeft, FileText, RotateCcw, Trash2, ExternalLink, Inbox,
   HardHat, Wrench, MessageSquareText, Eye, Siren, ClipboardList, CalendarClock, FolderKanban,
 } from "lucide-react";
-import { clearDraft } from "./useDraftAutosave.js";
+import { clearDraft, draftUserSuffix } from "./useDraftAutosave.js";
 
 const NAME_KEY_PREFIX = "fora_myname_";
 const DRAFT_PREFIX = "fora_draft_";
@@ -51,8 +51,15 @@ function scanDrafts(companyId) {
       const sep = rest.indexOf("_");
       if (sep === -1) continue;
       const type = rest.slice(0, sep);
-      const scopeId = rest.slice(sep + 1);
+      let scopeId = rest.slice(sep + 1);
       if (!TYPE_META[type]) continue;
+
+      // Drafts are saved per signed-in user ("@u<rosterId>" suffix, see
+      // useDraftAutosave.js). Only list the current user's own.
+      const userAt = scopeId.indexOf("@u");
+      const keyUser = userAt === -1 ? "" : scopeId.slice(userAt);
+      if (userAt !== -1) scopeId = scopeId.slice(0, userAt);
+      if (keyUser !== draftUserSuffix()) continue;
 
       let formId = null;
       let scopeCompanyId = scopeId;

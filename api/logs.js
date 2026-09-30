@@ -4,7 +4,7 @@
 // session checks as the other protected endpoints.
 
 import { createClient } from '@supabase/supabase-js';
-import { authorRosterId } from '../server-lib/authorStamp.js';
+import { authorRosterId, stampAuthorName } from '../server-lib/authorStamp.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { resolveEquipmentId, resolveEquipmentIds } from '../server-lib/equipmentScope.js';
 import { sanitizeSignerRosterIds } from '../server-lib/rosterSignerScope.js';
@@ -151,6 +151,13 @@ function pickAllowed(record, allowed) {
   }
   return out;
 }
+
+// Free-text name columns that hold the submitter, per document type.
+const AUTHOR_NAME_FIELDS = {
+  inspection: ['worker_name', 'signed_by'],
+  toolbox: ['presenter_name'],
+  daily: ['reporter_name'],
+};
 
 const SUBMITTABLE_FIELDS = {
   inspection: ['worker_name', 'equipment_label', 'equipment_id', 'results_json', 'signed_by', 'pdf_url', 'trip_type', 'linked_inspection_id', 'start_reading', 'end_reading', 'reading_unit', 'has_changes'],
@@ -367,6 +374,9 @@ export default async function handler(req, res) {
         // server actually issued, so a caller can't store another company's
         // report path and have a list endpoint sign it for them later.
       const recordToInsert = pickAllowed(record, SUBMITTABLE_FIELDS[type] || []);
+      // The name on the document is the signed-in person's, not whatever the
+      // request carried (server-lib/authorStamp.js).
+      stampAuthorName(session, recordToInsert, AUTHOR_NAME_FIELDS[type] || []);
 
       // Break #2 — a client-supplied site_id is a tenancy question, not a
       // validation detail: unchecked, a worker could file their own

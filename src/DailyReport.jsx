@@ -156,7 +156,7 @@ export default function DailyReport({ companyId, companyName, userName: loginUse
     if (!companyId) return;
     const draft = loadDraft("daily", companyId);
     if (draft && draft.step && draft.step !== "done") {
-      if (draft.reporter) setReporter(draft.reporter);
+      if (draft.reporter && !loginUserName) setReporter(draft.reporter);
       if (draft.site) setSite(draft.site);
       if (draft.siteMode) setSiteMode(draft.siteMode);
       if (draft.reportDate) setReportDate(draft.reportDate);
@@ -344,13 +344,19 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <div style={s.card}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Site & conditions</div>
 
-          <label style={s.label}>Your name</label>
+          {loginUserName ? (
+            <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+          ) : (
+            <>
+            <label style={s.label}>Your name</label>
           <input
             style={{ ...s.input, ...(loginUserName ? { background: C.line, color: C.text.faint } : {}) }}
             placeholder="Reporter name" value={reporter}
             onChange={e => setReporter(e.target.value)}
             readOnly={!!loginUserName}
           />
+            </>
+          )}
 
           <label style={s.label}>Site / Location</label>
           {sites.length > 0 && siteMode === "list" ? (

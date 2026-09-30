@@ -2,6 +2,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { loadJsPDF } from "./loadJsPDF.js";
 import { drawCustomFieldsPDF } from "./customFields.jsx";
 import { getForaLogoDataUrl } from "./foraLogo.js";
+import { formatOccurredAt } from "./occurredAt.js";
 
 function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   const lines = doc.splitTextToSize(text || "", maxW);
@@ -40,7 +41,7 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   doc.setTextColor(30, 41, 59); doc.setFontSize(10);
   doc.text(reporter || "—", margin + 4, y + 15, { maxWidth: 60 });
   doc.text(site || "—", margin + 70, y + 15, { maxWidth: 55 });
-  doc.text(occurredAt || "—", margin + 130, y + 15, { maxWidth: 60 });
+  doc.text(formatOccurredAt(occurredAt) || "—", margin + 130, y + 15, { maxWidth: 60 });
   doc.setTextColor(100, 116, 139); doc.setFontSize(8); doc.setFont("helvetica", "normal");
   doc.text(`Involved: ${involved || "—"}`, margin + 4, y + 23, { maxWidth: contentW - 8 });
   y += 36;
