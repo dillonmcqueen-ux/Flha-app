@@ -19,6 +19,8 @@ import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowe
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
 import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
+import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
+import { logAuditEvent } from '../server-lib/auditLog.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -348,7 +350,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -359,7 +361,8 @@ export default async function handler(req, res) {
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
       const activeSeatCount = (members || []).filter(m => m.active).length;
 
-      return res.status(200).json({ members: members || [], activeSeatCount, cap: effectiveSeatCap(tier), tier });
+      const withMfa = (members || []).map(m => ({ ...m, mfa: mfaStatus(m) }));
+      return res.status(200).json({ members: withMfa, activeSeatCount, cap: effectiveSeatCap(tier), tier });
     }
 
     // Admin-only: { [companyId]: { total, active } } across all companies,
@@ -614,6 +617,62 @@ export default async function handler(req, res) {
         .eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
       return res.status(200).json({ ok: true, pin });
+    }
+
+    // ── Per-person authenticator (TOTP). Supervisors and anyone in a sensitive
+    // department are forced to enroll at login (api/login.js); everyone else
+    // can opt in here. See server-lib/rosterMfa.js.
+    if (action === 'get_my_mfa_status' || action === 'mfa_self_enroll_start'
+        || action === 'mfa_self_enroll_confirm' || action === 'mfa_self_disable') {
+      // The founder session has no roster row; its authenticator is the
+      // global one managed in the Admin Panel.
+      if (!session.userId) return res.status(200).json({ applicable: false });
+      const { data: meRows, error: meErr } = await supabaseAdmin
+        .from('roster').select('*').eq('id', session.userId).eq('company_id', session.companyId).limit(1);
+      const me = meRows && meRows[0];
+      if (meErr || !me || !me.active) return res.status(403).json({ error: 'Not allowed.' });
+
+      if (action === 'get_my_mfa_status') return res.status(200).json({ applicable: true, ...mfaStatus(me) });
+
+      if (action === 'mfa_self_enroll_start') {
+        const r = await startEnrollment(supabaseAdmin, me);
+        if (r.error) return res.status(r.status || 500).json({ error: r.error });
+        return res.status(200).json({ ok: true, secret: r.secret, qrDataUrl: r.qrDataUrl });
+      }
+      if (action === 'mfa_self_enroll_confirm') {
+        const r = await confirmEnrollment(supabaseAdmin, me, req.body.code);
+        if (r.error) return res.status(r.status || 500).json({ error: r.error });
+        return res.status(200).json({ ok: true, backupCodes: r.backupCodes });
+      }
+      // mfa_self_disable: optional users only, and only with a current code.
+      if (requiresMfa(me)) return res.status(403).json({ error: 'Your role requires an authenticator. Ask for a reset instead.' });
+      if (!me.totp_enabled) return res.status(400).json({ error: 'Authenticator is not set up.' });
+      const v = await verifyLoginCode(supabaseAdmin, me, req.body.code);
+      if (!v.ok) return res.status(v.status || 401).json({ error: v.error });
+      const { error: offErr } = await resetMfa(supabaseAdmin, me.id);
+      if (offErr) return res.status(500).json({ error: "Couldn't turn it off." });
+      await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'mfa_self_disable', companyId: session.companyId, targetType: 'roster', targetId: me.id });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Reset pyramid: founder resets anyone, an Owner resets supervisors and
+    // workers (role arrives in step 3), a supervisor resets workers. The
+    // person re-enrolls at their next login.
+    if (action === 'reset_roster_mfa') {
+      if (session.role !== 'admin' && session.role !== 'supervisor' && session.role !== 'owner') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      if (!canResetMfa(session, rows[0])) return res.status(403).json({ error: 'Not allowed.' });
+      const { error } = await resetMfa(supabaseAdmin, id);
+      if (error) return res.status(500).json({ error: "Couldn't reset the authenticator." });
+      await logAuditEvent(supabaseAdmin, {
+        actorRole: session.role,
+        action: 'reset_roster_mfa', companyId: rows[0].company_id, targetType: 'roster', targetId: id,
+        details: { by_roster_id: session.userId || null },
+      });
+      return res.status(200).json({ ok: true });
     }
 
     // ── Onboarding wallet (Phase 2): opt-in per roster row. Off by default

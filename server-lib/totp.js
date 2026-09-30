@@ -8,6 +8,7 @@
 // bespoke one.
 
 import * as OTPAuth from 'otpauth';
+import crypto from 'crypto';
 import { genSalt, hashPin } from './onboardingApproval.js';
 
 const ISSUER = 'FORA';
@@ -17,10 +18,10 @@ export function generateTotpSecret() {
   return new OTPAuth.Secret({ size: 20 }).base32;
 }
 
-function buildTotp(secret) {
+function buildTotp(secret, label = LABEL) {
   return new OTPAuth.TOTP({
     issuer: ISSUER,
-    label: LABEL,
+    label,
     algorithm: 'SHA1',
     digits: 6,
     period: 30,
@@ -30,8 +31,8 @@ function buildTotp(secret) {
 
 // otpauth://... URI for the enrollment QR code. Never logged or returned
 // after the initial enrollment response.
-export function totpEnrollmentUri(secret) {
-  return buildTotp(secret).toString();
+export function totpEnrollmentUri(secret, label) {
+  return buildTotp(secret, label || LABEL).toString();
 }
 
 // window: 1 allows the code from one 30s step before/after the server's
@@ -43,6 +44,19 @@ export function verifyTotpCode(secret, token) {
   if (!/^\d{6}$/.test(cleaned)) return false;
   const delta = buildTotp(secret).validate({ token: cleaned, window: 1 });
   return delta !== null;
+}
+
+// Like verifyTotpCode, but returns the 30 second time step the code belongs
+// to (or null). Per-person logins store the last accepted step and refuse
+// anything at or below it, so a captured code cannot be replayed inside its
+// own window. Same window of +/- 1 step as verifyTotpCode.
+export function totpStepForCode(secret, token, now = Date.now()) {
+  if (!secret || !token || typeof token !== 'string') return null;
+  const cleaned = token.replace(/\s+/g, '');
+  if (!/^\d{6}$/.test(cleaned)) return null;
+  const delta = buildTotp(secret).validate({ token: cleaned, window: 1, timestamp: now });
+  if (delta === null) return null;
+  return Math.floor(now / 30000) + delta;
 }
 
 // Ten single-use recovery codes, shown once at enrollment. Hashed the same
@@ -66,7 +80,7 @@ function randomBackupCode() {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 10; i++) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+    code += alphabet[crypto.randomInt(alphabet.length)];
   }
   return `${code.slice(0, 5)}-${code.slice(5)}`;
 }

@@ -12,6 +12,7 @@ import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import FieldService, { resubmitFieldService } from "./FieldService.jsx";
 import MyDocuments from "./MyDocuments.jsx";
+import AccountSecurity from "./AccountSecurity.jsx";
 import WorkerCertifications from "./WorkerCertifications.jsx";
 import { drainQueue } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
@@ -88,6 +89,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [portalDocumentId, setPortalDocumentId] = useState(null);
   const [portalDocuments, setPortalDocuments] = useState([]);
   const [showMyDocs, setShowMyDocs] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
   // True when the company no longer has Time Clock but this person is still
@@ -206,6 +208,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     window.addEventListener("online", drainAll);
     return () => window.removeEventListener("online", drainAll);
   }, [token]);
+
+  if (showSecurity) {
+    return <AccountSecurity token={token} onBack={() => setShowSecurity(false)} />;
+  }
 
   if (showMyDocs) {
     return (
@@ -557,6 +563,15 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           </div>
           <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
         </div>
+
+        {userId && (
+          <button
+            onClick={() => setShowSecurity(true)}
+            style={{ display: "block", background: "transparent", border: "none", color: C.text.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", margin: "-6px 0 16px", padding: "8px 2px", minHeight: 36, textDecoration: "underline" }}
+          >
+            Sign-in security
+          </button>
+        )}
 
         <div style={{ display: "grid", gap: 12 }}>
           {visibleCategories.map(cat => {
