@@ -313,6 +313,8 @@ export default async function handler(req, res) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
         const amendUpdate = pickAllowed(record, SUBMITTABLE_FIELDS);
+        // An amendment must not be able to rename the author either.
+        stampAuthorName(session, amendUpdate, ['worker_name', 'signed_by'].filter(k => Object.prototype.hasOwnProperty.call(amendUpdate, k)));
 
         // Break #2 — a client-supplied site_id is a tenancy question:
         // unchecked, a worker could file their own company's FLHA against
