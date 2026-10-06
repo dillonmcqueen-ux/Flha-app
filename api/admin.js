@@ -543,7 +543,7 @@ export default async function handler(req, res) {
       const { data: existing } = await supabaseAdmin
         .from('companies')
         .select('id')
-        .eq('company_code', companyCode);
+        .ilike('company_code', companyCode); // the login lookup ignores case, so the clash check must too
       if (existing && existing.length > 0) {
         return res.status(400).json({ error: 'That code is already in use. Edit and try again.' });
       }
@@ -605,7 +605,7 @@ export default async function handler(req, res) {
       const { data: codeClash } = await supabaseAdmin
         .from('companies')
         .select('id')
-        .eq('company_code', companyCode)
+        .ilike('company_code', companyCode) // the login lookup ignores case, so the clash check must too
         .neq('id', companyId);
       if (codeClash && codeClash.length > 0) {
         return res.status(400).json({ error: 'That company code is already in use.' });

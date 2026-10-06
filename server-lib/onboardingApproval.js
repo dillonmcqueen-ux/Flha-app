@@ -177,7 +177,7 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   let companyCode = '';
   for (let tries = 0; tries < 8; tries++) {
     const candidate = `${prefix}${randomSuffix(5)}`; // at least 6 characters, the same floor the Admin Panel enforces
-    const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('company_code', candidate).limit(1);
+    const { data: clash } = await supabaseAdmin.from('companies').select('id').ilike('company_code', candidate).limit(1);
     if (!clash || clash.length === 0) { companyCode = candidate; break; }
   }
   if (!companyCode) return { error: "Couldn't generate a unique company code. Try again." };
