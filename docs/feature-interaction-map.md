@@ -1338,6 +1338,43 @@ lock out a company that bought Equipment Inspections and not the weekly report.
 The surface table in §1 has said `inspection` for Weekly Hours since it was
 added; the server now agrees with it.
 
+### `document_assignments.document_key` + `sites.division_id` (who may submit or view which document; branch `claude/assignments-enforcement`, `ae9aee4`, placed 2026-10-06)
+
+**Migration NOT applied to the live DB** (`docs/schema/document-assignments-migration.sql:3`, Dillon runs it by hand). **? Live state not verified by this pass.** Until it is applied, every read tolerates the missing table or column and behaves as before (`server-lib/documentAccess.js:60-63,177`, `:114`), so shipping the code ahead of the SQL narrows nothing.
+
+**The table.** One row = "this audience may `submit` or `view` this document". `document_key` is the same key space as `company_document_settings` plus the `portal_<id>` prefix (`migration.sql:13-15,36-49`); `audience_type` is `everyone|role|department|division|site|individual` with `audience_value` text (NULL only for `everyone`, check at `:48`); `due_at`; soft end `ended_at`. A row can only narrow, never widen past `requireDocKey` (`documentAccess.js:6-12`); no active rows for a document and action means unchanged behaviour (`:166`). Departments and divisions are tags, not locks, until a row names them.
+
+**Who is exempt.** Founder session (admin, or master code, no `userId`) at `documentAccess.js:40-42,91-93`; Account Owner is `roster.is_owner === true && role === 'supervisor'`, read from the roster row on every call (`:120`), not the token.
+
+**Audience match** (`documentAccess.js:133-143`): `role` against `roster.role`; `department` against `roster.departments`; `division` against `roster.divisions`; `site` against the actor's site set; `individual` against `roster.id`. The actor's site set is `roster.default_site_id` plus every `sites.id` whose `division_id` is in the person's `roster.divisions` (`:106-116`).
+
+| Join | Producer | Consumer | State |
+|---|---|---|---|
+| `document_assignments` rows | **nothing in the product** (`grep -rn "document_assignments" api src server-lib` returns only the reader, `documentAccess.js:172`, plus comments) | `readAssignmentRows` (`documentAccess.js:170-181`) | ❌ **#45** |
+| `sites.division_id` -> `company_divisions.id` | **nothing**: the only site writer inserts `{ company_id, name }` (`api/companydata.js:1343`) | `loadActor` (`documentAccess.js:109-113`) | ❌ **#46** |
+| `roster.divisions` | `companydata.js:1004-1007` (P2) | `documentAccess.js:105,138,260` | ✅ the "no consumer" note in P2 is stale as of this branch |
+| `roster.departments` | §2 `roster.departments` | `documentAccess.js:124,137,259` | ✅ |
+| `roster.default_site_id` | `companydata.js:1009-1012` | `documentAccess.js:107` | ✅ |
+| `submitted_by_roster_id` (author) | break #3 stamp | `recordInScope` author rule (`documentAccess.js:251-263`, default `authorKey`) | ✅ for the seven handlers below; null on pre-stamp rows (only a site or a shared tag can place them) |
+| `site_id` on the record | break #2 FK users | `recordInScope` site rule (`documentAccess.js:254-255`) | ✅ where the column exists; **`inspections` has none** and is placed by author only (`api/logs.js:125-131`) |
+| `body.queuedAt` | **no client sends it yet** (`grep -n "queuedAt" src/*.js*` returns nothing) | `clampAsOf` (`documentAccess.js:66-73`), passed at `flhas.js:283`, `logs.js:365`, `reports.js:216`, `monthly.js:291`, `customforms.js:566`, `fuellogs.js:164`, `portal.js:558` | ⚠️ pending, see P3 |
+
+**Where it is enforced** (submit = `requireAssignment(..., SUBMIT)`; the rest = `view` rows then supervisor rule A through `requireRecordsAccess` / `listVisibleRecords*`):
+
+| Surface | Submit | List | Detail / edit / delete / review / approve |
+|---|---|---|---|
+| FLHA | `flhas.js:283` | `:474` | edit `:507`, delete `:563`, approve `:584` |
+| Equipment Inspection, Toolbox, Daily (`logs.js`, `docKey` at `:136,142,148`) | `:365`; `list_open_toolbox` `:751`; late-sign `:781,840` | `:644` | delete `:663`, edit `:702`, notes `:811` |
+| Incident, Near Miss (`reports.js`, `docKey` `:122,128`) | `:216` | `:356` | review `:379`, edit `:423`, delete `:469` |
+| Monthly Inspection | `:291` | `:515` | detail `:567`, edit `:618` |
+| Custom Documents | `:519` (get_active_form), `:566` (submit) | `:658` (per-form `custom_<id>` view rows) | detail `:693`, edit `:735` |
+| Fuel Log | `:164` | `:305` (burn rates computed from every row first, `:300-303`) | no edit or delete action exists (`fuellogs.js:120,160,247` are the only actions) |
+| Company Portal | `:508` (get_active_portal_document), `:558` (submit_portal) | **not wrapped** | **not wrapped** (**#47**) |
+
+**Supervisor scope, rule A** (`documentAccess.js:13-17,251-264`): a non-Owner supervisor's record is in scope if they authored it, it sits at one of their sites, or its author shares a department or a division with them. A supervisor with no tags set sees only their own submissions (`:16-17`). `scopeRecords` is applied to supervisor-tier handlers only; a worker is never narrowed by a `view` row (`:201`). Read errors fail closed with 503 so the offline queue retries (`:36-38,203,207`).
+
+**Which keys may carry a row** (`documentAccess.js:48-58`): `ENFORCED_BUILTIN_KEYS` (8 of the 13 `BUILTIN_DOC_KEYS`, `customforms.js:126`) plus `custom_<n>` and `portal_<n>`. The five left out (`equipment_reports`, `maintenance`, `timeclock`, `certifications`, `equipment_compliance`) are in §5 as a deliberate non-connection, because a row on them would hide a menu card while the handler still answered (the break #21 shape).
+
 ### `source_type` → `company_signals` (the Brain's input)
 | Writer | source_type |
 |---|---|
@@ -1479,6 +1516,22 @@ The Platform events row is all `—` on purpose: it is a founder-only health
 log, not a product feature a company uses, and it feeds none of the seven
 columns. Its only planned consumer is the Admin Panel, which is not a column
 here. See §2's `platform_events` section and §4's "Known pending links".
+
+**Document assignments as a consumer, 2026-10-06 (`ae9aee4`, branch `claude/assignments-enforcement`).**
+Assignments and supervisor scope sit in front of the document surfaces, not
+beside them. Cells say whether the surface's handlers consult
+`server-lib/documentAccess.js` (full list with lines in §2's `document_assignments`
+section):
+
+| Surface | Submit narrowed | Supervisor list / detail scoped | Worker menu hides unassigned |
+|---|---|---|---|
+| FLHA, Toolbox, Daily, Incident, Near Miss, Monthly, Custom, Fuel Log | ✅ | ✅ (Fuel Log: list only, it has no other action) | ✅ built-ins and Custom (`customforms.js:403-411`) |
+| Equipment Inspection | ✅ `logs.js:365` | ⚠️ author only, no `site_id` (`logs.js:125-131`) | ✅ built-in menu |
+| Company Portal | ✅ `portal.js:508,558` | ❌ #47 (department scope only, `portal.js:760-763,812-817,1103-1107`) | ❌ #47 (`portal.js:482-491` unwrapped; the wrapped call at `:344` sits in an admin-only action) |
+| Corrective Actions | — | ❌ #48 (`monthly.js:699-702`) | — |
+| Worker profile history (`get_worker_profile`) | — | ❌ #48 (`companydata.js:919-930`) | — |
+| Equipment Reports, Maintenance, Time Clock, Certifications, Equipment Compliance | — | — by design (§5) | — |
+| Analytics, Overview, Brain | — | `?` they read the list actions above, so a scoped supervisor may see smaller totals; **not verified** (no `src/` call site read by this pass) | — |
 
 **Fleet Overview as a consumer — new joins as of `42ed3c7` (#13, #18).**
 Fleet Overview has no column above because until now it consumed nothing but
@@ -3995,6 +4048,48 @@ needs `eventType: 'cron_run'` followed by `subtype:` in the same object. Re-chec
 
 **A fix would touch:** set `pin_set_at` in the other PIN writers, or show the label only when `!pin_set_at && !last_login_at`; backfill `pin_set_at = last_login_at` for existing rows. Two one-line edits plus a migration statement. Needs a yes.
 
+### The document-assignment pass (2026-10-06, branch `claude/assignments-enforcement`, `ae9aee4`): #45-#48
+
+Four breaks filed by the pass that placed assignments and supervisor scope. All
+OPEN, none approved. #45 and #46 are "the reader shipped, the writer did not";
+#47 and #48 are surfaces the enforcement skipped.
+
+### #45 — Nothing in the product can create, list or end an assignment row
+**Severity: no customer loss today, becomes silent the day the migration is applied. Status: OPEN, not approved.** Opened 2026-10-06.
+
+Every enforcement call reads `document_assignments` (`server-lib/documentAccess.js:170-181`) and nothing writes it. Same shape as §4b.
+
+*Evidence (real output):* `grep -rn "document_assignments" api src server-lib` returns `documentAccess.js:172` (the read) and comment lines only; no `insert`, no `update`, no action name. The `isAssignableKey` list the assignment screen must respect (`documentAccess.js:48-58`) has no screen to respect it, and the migration does not constrain `document_key` itself (`document-assignments-migration.sql:36-40`), so a hand-inserted row on `maintenance` or `timeclock` is accepted and does nothing (§5). *What a customer loses:* an Owner cannot assign a document to anyone, so the "who may submit this" product promise has no entry point. Supervisor scope rule A is the exception: it needs no rows, so it **is** live the moment the code is deployed (`documentAccess.js:288-299`), with or without the migration, for any supervisor not flagged Owner. That means every non-Owner supervisor starts seeing only own-author, own-site or shared-tag records on the seven wrapped handlers, and one with no tags sees only their own (`:16-17`).
+
+Re-check: `grep -rn "document_assignments" api src server-lib | grep -v "^server-lib/documentAccess.js"` (empty today). **Fixed when** an Owner-gated create / list / end action exists and rejects keys failing `isAssignableKey`. **A fix would touch:** one handler (probably `api/companydata.js`) plus the PR 2 screen. Needs a yes.
+
+**Not verified (`?`):** whether the migration has been run live. Verification queries are at `document-assignments-migration.sql:65-70`.
+
+### #46 — `sites.division_id` has no writer, so "a division owns sites" never takes effect
+**Severity: medium once divisions are in use, silent. Status: OPEN, not approved.** Opened 2026-10-06.
+
+The actor's site set adds every site in the person's divisions (`documentAccess.js:108-116`); a `site` audience and rule A's site test both read that set (`:139,254-255`). The only site writer inserts `{ company_id, name }` (`api/companydata.js:1343`), and the migration's own comment says the application validates the division "in `api/companydata.js`" (`document-assignments-migration.sql:58-61`). That validation does not exist.
+
+*Evidence (real output):* `grep -rn "division_id" api src server-lib` returns `documentAccess.js:113` and the division edit and delete handlers' own local variable named `divisionId` (`companydata.js:1283-1301`); no `sites` write touches the column. *What a customer loses:* tagging a supervisor with a division widens their scope to nothing, because no site belongs to any division. Only `default_site_id` places a site for them (`documentAccess.js:107`). Deleting a division does not clear it either; the FK is `on delete set null` (`migration.sql:63`) so that half is safe.
+
+Re-check: `grep -rn "division_id" api src server-lib`. **Fixed when** `add_site` (and a new "move site to division" action) writes the column after checking the division's `company_id`, and the Sites screen shows it. **A fix would touch:** `companydata.js:1335-1345` plus `src/` Sites UI. Needs a yes.
+
+### #47 — Company Portal is enforced on submit only; its worker menu, supervisor list and `view` rows are untouched
+**Severity: medium, silent. Status: OPEN, not approved.** Opened 2026-10-06.
+
+Three halves. (1) The worker menu is `get_worker_portal_documents` (`api/portal.js:482-491`, called from `src/WorkerMenu.jsx:129`) and returns every active document with no assignment check, so a worker sees cards for documents assigned to someone else and gets "This document is not assigned to you." on open (`portal.js:508,558`). The `menuAccessFor` call that looks like the menu fix sits at `:344` inside `list_documents`, which answers only `role === 'admin'` (`:333`); for that caller `loadActor` returns `bypass: true` (`documentAccess.js:91-93`), so it narrows nothing. (2) `portal.js` imports only `requireAssignment, menuAccessFor, SUBMIT` (`:38`): `list_portal_records` (`:741`), `get_portal_record_detail` (`:788`), `update_portal_record` / `delete_portal_record` (`:1111,1159`, via `loadManageableRecord` `:1094-1108`) and `email_portal_record` (`:1315`) scope by the document's departments alone. (3) So a `view` row on `portal_<id>`, which `isAssignableKey` accepts (`documentAccess.js:57`), does nothing, and rule A's author, site and shared-tag test never runs on Portal records. The file header says Portal is "enforced too" (`:52-53`); that is true of submit only.
+
+Re-check: `sed -n 38p api/portal.js` shows no `listVisibleRecords` or `requireRecordsAccess`. **Fixed when** the worker menu goes through `menuAccessFor` and the four record handlers through `requireRecordsAccess` / `listVisibleRecords` (the department rule can stay as an extra narrowing). **A fix would touch:** `api/portal.js` only, around five call sites. Needs a yes.
+
+### #48 — Rule A has side doors: corrective actions and the worker profile show what the document lists hide
+**Severity: medium, silent, and it defeats the narrowing a customer just set. Status: OPEN, not approved.** Opened 2026-10-06.
+
+A supervisor scoped away from an incident or inspection record can still read it through two other doors. `list_corrective_actions` returns every action in the company (`select('*')`, company filter only, `api/monthly.js:702-706`), and the code below it enriches each action from its source (`:708-`; the comment at `:414-418` says the list renders question wording), so the finding text reaches the supervisor; `update_corrective_action` is likewise company-scoped (`:883-894`). And `get_worker_profile` lists any worker's signed documents with `pdf_url` for any supervisor in the company (`api/companydata.js:895-930`), keyed on `submitted_by_roster_id` but never passed through `scopeRecords`. Neither imports `documentAccess.js` (import list: `grep -rln documentAccess api` returns `flhas, logs, reports, monthly, customforms, fuellogs, portal` only; `monthly.js` uses it for inspection records, not for `corrective_actions`).
+
+Re-check: `grep -n "documentAccess" api/companydata.js` (empty) and `sed -n 699,706p api/monthly.js`. **Fixed when** both handlers route their rows through `scopeRecords` (corrective actions placed by their source record, which needs the source's `site_id` and author carried onto the action, or looked up). **A fix would touch:** `monthly.js` (list and update) and `companydata.js` (`get_worker_profile`); the corrective-action placement is the real design question. Needs a yes.
+
+**Not verified (`?`):** whether Analytics, Overview and the Brain summary shrink for a scoped supervisor. They are fed by the list actions above, but no `src/` call site was read by this pass.
+
 ## Known pending links (intentional, not breaks)
 
 A producer with no consumer **yet**, where the consumer is a scheduled phase
@@ -4036,6 +4131,24 @@ divisions still unread, promote to a break. Re-check:
 `grep -rn "divisions" api server-lib src | grep -v "companydata.js\|companyStructure\|onboardingApproval\|WorkerProfileDrawer\|CompanyStructureManager"`
 (only `Dashboard.jsx:3551`, the profile save, should appear). Migration
 `docs/schema/owner-profile-migration.sql` applied live: **? not verified by this pass.**
+
+**Update 2026-10-06 (branch `claude/assignments-enforcement`): the first consumer exists.**
+`server-lib/documentAccess.js:105,138,260` now reads `roster.divisions` (division audience on an
+assignment row, and rule A's shared-division test). The re-check grep above will therefore also list
+`documentAccess.js`; add it to the exclusions. Division-owned sites are not wired: see #46. This
+entry stays open until #46 and #45 are decided, because the consumer reads a table nothing writes.
+
+### P3 - the offline queue does not send `queuedAt` yet (document assignments PR 2, 2026-10-06)
+**Pending by design, branch `claude/assignments-enforcement`. Not a break while no assignment rows
+can be created (#45).** Seven submit handlers pass `req.body.queuedAt` to `requireAssignment`
+(`flhas.js:283`, `logs.js:365`, `reports.js:216`, `monthly.js:291`, `customforms.js:566`,
+`fuellogs.js:164`, `portal.js:558`), clamped to 7 days (`documentAccess.js:46,66-73`). No client sends
+it: `grep -n "queuedAt" src/*.js*` is empty. Until it does, a form filled in offline is judged as of
+the moment it syncs, and a 403 from a row created in between makes `src/offlineQueue.js` drop it
+for good (`documentAccess.js:24-26`). Also unwired: `get_active_form` (`customforms.js:519`) and
+`get_active_portal_document` (`portal.js:508`) evaluate as of now by design (a fetch is live).
+*Exit condition:* PR 2 sends `queuedAt`; **promote to a break** if rows become creatable (#45 built)
+before it does.
 
 ### #42: The dashboard's seat cap is not the copy that enforces the cap
 **Severity: low** (founder-facing, no customer loses anything today, values agreed).
@@ -4170,6 +4283,15 @@ Two related instances, same family:
 ## 5. Deliberate non-connections
 
 Do **not** flag these. They are decisions, not gaps.
+
+- **Assignments and supervisor scope do not cover Equipment Reports, Maintenance, Time
+  Clock, Certifications or Equipment Compliance, and Equipment Inspection is placed by
+  author only.** `ENFORCED_BUILTIN_KEYS` lists the eight document types whose handlers call
+  `requireAssignment` (`server-lib/documentAccess.js:48-58`); a row on any other key would
+  hide a card while the handler answered (the #21 shape), so the assignment screen must not
+  offer them. `inspections` has no `site_id` (`api/logs.js:125-131`), so only the author rule
+  can place it. Dillon's scoping for the branch, 2026-10-06. Corrective Actions and the worker
+  profile are **not** in this list: those are #48.
 
 - **Custom documents emit no Brain signals, and Portal answer values and
   worker names stay out of the Brain.** Dillon's call 2026-09-17, reconfirmed
@@ -4558,3 +4680,4 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-09-30 | branch `claude/step-pin-setup-links`, `624ef31` | **Set-your-own-PIN link placed on the map.** New surface #25 and a §2 section with the producer/consumer table. `create_wallet_invite` / `redeem_wallet_invite` are gone; the stale references were re-anchored, not deleted: #24's flag row and test row (`api/login.js:774-775`, `src/WalletInvite.jsx:81,124-125,304,368`), the §5 wallet-invite bullet, the #3 pointer to `WalletInvite.jsx`, and the `last_login_at` writer, which was stale map-wide (`login.js:514`, now `mintRosterSession` at `:437`; the "wallet redemption mints a session without setting it" weak point is fixed because the link's session stage goes through `mintRosterSession`, `:772`). Five new §5 non-connections. **New break #43** (`pin_set_at` has one writer, so typed, reset and pre-existing PINs show "Waiting for PIN"). Not verified: migration applied live; `tests/wallet-invite.spec.js` against this commit. `send_pin_setup_link` fetches by `id` alone (`companydata.js:726`) but is company-checked by `canResetMfa` (`rosterMfa.js:198`), so not filed. All line numbers are against commit `624ef31`; commit `6c30667` (another session, landed after this pass read the code) changed `api/companydata.js` adds a 30 per hour per company throttle on `onboard_new_employee` and clears the link on deactivate; `server-lib/setupLinks.js` sanitises name and company in the email), which shifts `companydata.js` lines after about `:488` by 5. Re-anchor those. Not built, not approved. |
 | 2026-10-06 | branch `claude/step4-company-name-login`, `b2044ee` | **Company-name login placed on the map.** New §2 section "Login and session" with file:line for search_companies, list_roster_names, roster_login, master_login, unlock_roster_pin plus the derived `locked` flag, `server-lib/sessionTtl.js` (supervisor 12h, other 7d, 13 api files) and supervisor localStorage persistence. Stale entries rewritten: Portal shared-code fallback (§2 Portal scoping), `list_sites` defaultSiteId note, Portal-reports shared-code note, break #3 'two of three companies on shared logins' (now `?`: live roster counts unknown), and the §5 `app_type` note. Mechanical checks run, no new break. Line numbers cited elsewhere for `api/login.js` after about :430 (e.g. `last_login_at` is now :435, not :437; `pin_link_*` lines shifted) and `companydata.js` after about :700 are against older commits, re-anchor on next sweep. Map only, no code touched. |
 | 2026-10-06 | branch `claude/step4b-company-code-login`, `bc446a0` (anchored against `2724f83`) | **Login step 1 is a company code, not a name search.** The §2 "Login and session" section is rewritten: `find_company` (`api/login.js:508-530`, exact case-insensitive `company_code`, shape `[A-Z0-9-]` 6-32), throttles `clookup:` and `ccode:` in `master_code_ip_limits`, `peekIpThrottle` (`server-lib/ipThrottle.js:52`) and `ipBucket` (`:69`, IPv6 to /64, wraps five throttle keys), Owner recovery `request_unlock_link` (`:561-589`), `pin_link_set_pin` clearing the authenticator lock (`:858-861`). `company_code` is a login-finding key again (it was recorded as internal-only); its readers and four writers are tabled with the case-insensitive clash checks from `9861cc0`. Stale anchors re-pointed map-wide (the login.js file shifted by up to 100 lines): `master_login`, the PIN-link block, `mintRosterSession`, `claim_get_details`, `claim_set_roster_pin`, the ADMIN_CODE entry, the onboarding people_encrypted write and read; changelog rows left as history. **New break #44** (auto-generated company code can fail the login regex). Mechanical checks re-run, nothing else new. Map only, no code touched. |
+| 2026-10-06 | branch `claude/assignments-enforcement`, `ae9aee4` | **Document assignments and supervisor scope placed on the map.** New table `document_assignments` (migration not applied live, `?`) and new column `sites.division_id`; new `server-lib/documentAccess.js`. New §2 section with the join table and the per-surface enforcement lines; new matrix block; §5 non-connection for the five unenforced built-in keys; new pending link P3 (`queuedAt` not sent by any client); P2 updated (`roster.divisions` now has a reader). **Four new breaks, all OPEN: #45** (no code writes `document_assignments`; rule A is live without it), **#46** (nothing writes `sites.division_id`, and the migration's claim that `companydata.js` validates it is false), **#47** (Portal enforced on submit only; the worker menu action `get_worker_portal_documents` is unwrapped and the `menuAccessFor` call at `portal.js:344` is in an admin-only action), **#48** (`list_corrective_actions` and `get_worker_profile` bypass rule A). Correction to the brief: the Portal worker-menu wrap is not in place. Map only, no code touched. |

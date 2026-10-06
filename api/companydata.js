@@ -28,6 +28,7 @@ import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { listVisibleRecords, listVisibleRecordsMulti } from '../server-lib/documentAccess.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -916,17 +917,17 @@ export default async function handler(req, res) {
 
       const FETCH_LIMIT = 200;
       const [flhaRows, inspectionRows, toolboxRows, dailyRows, incidentRows, nearMissRows] = await Promise.all([
-        flhaOn ? supabaseAdmin.from('flhas').select('id, job_site, created_at, pdf_url')
+        flhaOn ? supabaseAdmin.from('flhas').select('id, job_site, site_id, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
         inspectionOn ? supabaseAdmin.from('inspections').select('id, equipment_label, trip_type, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        toolboxOn ? supabaseAdmin.from('toolbox_talks').select('id, topic, created_at, pdf_url')
+        toolboxOn ? supabaseAdmin.from('toolbox_talks').select('id, topic, site_id, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        dailyOn ? supabaseAdmin.from('daily_reports').select('id, site, report_date, created_at, pdf_url')
+        dailyOn ? supabaseAdmin.from('daily_reports').select('id, site, site_id, report_date, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        incidentOn ? supabaseAdmin.from('incidents').select('id, site, incident_type, created_at, pdf_url')
+        incidentOn ? supabaseAdmin.from('incidents').select('id, site, site_id, incident_type, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        nearmissOn ? supabaseAdmin.from('near_misses').select('id, site, created_at, pdf_url')
+        nearmissOn ? supabaseAdmin.from('near_misses').select('id, site, site_id, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
       ]);
 
@@ -939,7 +940,7 @@ export default async function handler(req, res) {
         (forms || []).forEach(f => { monthlyFormMap[f.id] = f.title; });
         const formIds = (forms || []).map(f => f.id);
         if (formIds.length) {
-          const { data } = await supabaseAdmin.from('inspection_records').select('id, created_at, pdf_url, form_id')
+          const { data } = await supabaseAdmin.from('inspection_records').select('id, created_at, pdf_url, form_id, site_id')
             .in('form_id', formIds).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT);
           monthlyRows = data || [];
         }
@@ -949,19 +950,42 @@ export default async function handler(req, res) {
       const customFormMap = {}; (customForms || []).forEach(f => { customFormMap[f.id] = f.title; });
       const customFormIds = (customForms || []).map(f => f.id);
       const { data: customRows } = customFormIds.length
-        ? await supabaseAdmin.from('custom_form_records').select('id, created_at, pdf_url, form_id')
+        ? await supabaseAdmin.from('custom_form_records').select('id, created_at, pdf_url, form_id, site_id')
             .in('form_id', customFormIds).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT)
         : { data: [] };
 
+      // The profile is a second door to every document this person filed, so
+      // it goes through the same view rows and supervisor scope as the lists
+      // (a supervisor outside a document's scope must not get a signed PDF
+      // link here either). A refusal or a failed check means "show none of
+      // that type", never the whole profile and never the unfiltered rows.
+      // Every row below was filed by `id`, so that is its author.
+      const asAuthor = (rows) => (rows || []).map(r => ({ ...r, submitted_by_roster_id: Number(id) }));
+      const keepVisible = async (docKey, rows) => {
+        const out = await listVisibleRecords(supabaseAdmin, session, docKey, asAuthor(rows));
+        return out.denied ? [] : out.records;
+      };
+      const [flhaVis, inspectionVis, toolboxVis, dailyVis, incidentVis, nearMissVis, monthlyVis] = await Promise.all([
+        keepVisible('flha', flhaRows.data),
+        keepVisible('inspection', inspectionRows.data),
+        keepVisible('toolbox', toolboxRows.data),
+        keepVisible('daily', dailyRows.data),
+        keepVisible('incident', incidentRows.data),
+        keepVisible('nearmiss', nearMissRows.data),
+        keepVisible('monthly', monthlyRows),
+      ]);
+      const customOut = await listVisibleRecordsMulti(supabaseAdmin, session, asAuthor(customRows), (r) => `custom_${r.form_id}`);
+      const customVis = customOut.denied ? [] : customOut.records;
+
       const documents = [
-        ...(flhaRows.data || []).map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(inspectionRows.data || []).map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(toolboxRows.data || []).map(r => ({ id: r.id, type: 'toolbox', title: 'Toolbox Talk', subtitle: r.topic || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(dailyRows.data || []).map(r => ({ id: r.id, type: 'daily', title: 'Daily Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(incidentRows.data || []).map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(nearMissRows.data || []).map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...monthlyRows.map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(customRows || []).map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...flhaVis.map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...inspectionVis.map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...toolboxVis.map(r => ({ id: r.id, type: 'toolbox', title: 'Toolbox Talk', subtitle: r.topic || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...dailyVis.map(r => ({ id: r.id, type: 'daily', title: 'Daily Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...incidentVis.map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...nearMissVis.map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...monthlyVis.map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
+        ...customVis.map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
       ];
       documents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       const signedDocuments = await signRows(supabaseAdmin, documents.slice(0, 150), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
