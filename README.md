@@ -12,17 +12,18 @@ isolated from every other company's.
 
 Three roles: **worker**, **supervisor**, and **admin**.
 
-- **Company login** — each company gets its own login code(s). New
-  companies start on a single shared `company_code`; some companies
-  predate that and still use separate legacy `worker_code`/`supervisor_code`
-  values. Admin can edit any of these from the Admin Panel's Codes tab.
-- **Individual roster login** — a company can opt into per-person logins
-  instead of a shared code: each worker/supervisor gets their own name and a
-  6-digit PIN (managed from the Admin Panel's Roster tab), so deactivating
-  one person cuts off exactly that person, immediately. This is what
-  auto-fills a person's name on the paperwork they submit.
-- **Master code** — a single admin-settable code that logs into any
-  company as either role, for admin use. Every use is logged
+- **Company-name login** — nobody types a shared code. A person searches
+  for their company by name (3 or more letters), picks their own name from
+  that company's roster, enters their own 6-digit PIN, then an authenticator
+  code if their role requires one. Deactivating one person cuts off exactly
+  that person, immediately, and the name they picked is what auto-fills on
+  the paperwork they submit. Supervisors (which includes the Account Owner)
+  stay signed in for 12 hours, workers for 7 days. Too many wrong PINs locks
+  a person for 15 minutes; their supervisor or the Account Owner can unlock
+  them from the Roster. `companies.company_code` still exists as an internal
+  reference but is not used to sign in.
+- **Master code** — a single admin-settable code (entered under "Founder
+  access") that logs into any company as either role, for admin use. Every use is logged
   (Admin Panel → All Codes → recent master-code logins).
 
 ## Plan tiers

@@ -21,19 +21,19 @@ import {
   listDepartments, listDivisions, sanitizeDepartments, sanitizeDivisionIds, sanitizeDefaultSite,
   departmentKeyFromLabel, cleanLabel, cleanTitle, MAX_CUSTOM_DEPARTMENTS, MAX_DIVISIONS,
 } from '../server-lib/companyStructure.js';
-import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
+import { encryptField, withDecryptedEmail, keyProblemMessage } from '../server-lib/fieldCrypto.js';
 import { applyRulesToNewRosterMember } from '../server-lib/portalAssignments.js';
 import { issueAndEmailPinLink, issuePinSetupLink, MAX_LINKS_PER_BATCH } from '../server-lib/setupLinks.js';
 import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
+import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -58,7 +58,7 @@ async function verifySession(token) {
   } catch (e) {
     return null;
   }
-  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+  if (sessionExpired(payload)) return null;
 
   // A login TICKET is not a session. api/login.js mints two roleless,
   // short-lived tokens with this same signature and secret — the roster
@@ -317,8 +317,7 @@ export default async function handler(req, res) {
     // ══ COMPANY (branding-only, no codes/contact info) ═════════════════
     // These exist so the Dashboard and worker-facing forms never need to
     // query the companies table directly with the anon key — that table
-    // also holds worker_code/supervisor_code (login credentials) and
-    // contact info, none of which belong in these responses.
+    // also holds contact info, which does not belong in these responses.
 
     // Admin: every company (for the multi-company selector). Supervisor:
     // just their own, as a one-element array — same shape either way so
@@ -355,7 +354,7 @@ export default async function handler(req, res) {
 
       const { data: members, error } = await supabaseAdmin
         .from('roster')
-        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled, is_owner, title, divisions, default_site_id, pin_set_at, pin_link_sent_at')
+        .select('id, name, role, active, last_login_at, deactivated_at, created_at, wallet_enabled, employee_id, departments, totp_enabled, is_owner, title, divisions, default_site_id, pin_set_at, pin_link_sent_at, pin_locked_until, totp_locked_until')
         .eq('company_id', companyId)
         .order('role', { ascending: true })
         .order('name', { ascending: true });
@@ -366,7 +365,13 @@ export default async function handler(req, res) {
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
       const activeSeatCount = (members || []).filter(m => m.active).length;
 
-      const withMfa = (members || []).map(m => ({ ...m, mfa: mfaStatus(m) }));
+      const nowMs = Date.now();
+      const withMfa = (members || []).map(({ pin_locked_until, totp_locked_until, ...m }) => ({
+        ...m,
+        mfa: mfaStatus(m),
+        // Only whether they are locked out right now, never the timestamps.
+        locked: [pin_locked_until, totp_locked_until].some(t => t && new Date(t).getTime() > nowMs),
+      }));
       return res.status(200).json({ members: withMfa, activeSeatCount, cap: effectiveSeatCap(tier), tier });
     }
 
@@ -697,6 +702,32 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // Unlocks someone locked out by wrong PINs (or wrong authenticator codes).
+    // Same rank rule as the authenticator reset: founder anyone, an Owner
+    // supervisors and workers, a supervisor workers, never yourself. Names are
+    // searchable before login, so anyone can lock anyone for 15 minutes; this
+    // is how the people above them clear it without waiting.
+    if (action === 'unlock_roster_pin') {
+      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+      const { data: rows, error: findErr } = await supabaseAdmin.from('roster').select('id, company_id, role, is_owner').eq('id', id).limit(1);
+      if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Not found.' });
+      if (!canResetMfa(session, rows[0])) return res.status(403).json({ error: 'Not allowed.' });
+      const { error } = await supabaseAdmin
+        .from('roster')
+        .update({ failed_pin_attempts: 0, pin_locked_until: null, totp_failed_attempts: 0, totp_locked_until: null })
+        .eq('id', id)
+        .eq('company_id', rows[0].company_id);
+      if (error) return res.status(500).json({ error: "Couldn't unlock." });
+      await logAuditEvent(supabaseAdmin, {
+        actorRole: session.role,
+        action: 'unlock_roster_pin', companyId: rows[0].company_id, targetType: 'roster', targetId: id,
+        details: { by_roster_id: session.userId || null },
+      });
+      return res.status(200).json({ ok: true });
+    }
+
     // ── Onboarding wallet (Phase 2): opt-in per roster row. Off by default
     // — see docs/schema/worker-certifications-migration.sql — so no
     // existing company suddenly exposes an upload flow it didn't ask for.
@@ -841,32 +872,6 @@ export default async function handler(req, res) {
         roster.push({ id: m.id, name: m.name, role: m.role, pin });
       }
       return res.status(200).json({ ok: true, roster });
-    }
-
-    // Flips a company between the legacy shared-code login and the roster/PIN
-    // login. Turning it ON requires at least one active worker and one
-    // active supervisor already set up, so no one can strand a company with
-    // no way to log in. Turning it OFF is always allowed — an instant,
-    // lossless rollback since the legacy codes are never touched.
-    if (action === 'set_roster_cutover') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
-      const companyId = resolveCompanyId(session, req.body.companyId);
-      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const enabled = !!req.body.enabled;
-
-      if (enabled) {
-        const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('role').eq('company_id', companyId).eq('active', true);
-        if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
-        const hasWorker = (activeRows || []).some(r => r.role === 'worker');
-        const hasSupervisor = (activeRows || []).some(r => r.role === 'supervisor');
-        if (!hasWorker || !hasSupervisor) {
-          return res.status(400).json({ error: 'Add at least one active worker and one active supervisor before switching over.' });
-        }
-      }
-
-      const { error } = await supabaseAdmin.from('companies').update({ roster_enabled: enabled }).eq('id', companyId);
-      if (error) return res.status(500).json({ error: "Couldn't update." });
-      return res.status(200).json({ ok: true });
     }
 
     // ── Worker profile: everything this one roster row has signed their
@@ -2307,6 +2312,6 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: 'Unknown action.' });
   } catch (e) {
-    return res.status(500).json({ error: 'Server error. Please try again.' });
+    return res.status(500).json({ error: keyProblemMessage(e) || 'Server error. Please try again.' });
   }
 }

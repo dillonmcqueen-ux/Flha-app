@@ -28,10 +28,10 @@ see Cleanup.
 ## Setup: two disposable test companies
 
 1. Log into the Admin Panel.
-2. **Onboard Company** → create `ZZZ_CLAUDE_QA_A` with a company code you'll
-   remember (e.g. `QATESTA`). Leave roster login off (use the shared
-   company code) to keep this simple — worker/supervisor/admin all log in
-   with the same code + role picker.
+2. **Onboard Company** → create `ZZZ_CLAUDE_QA_A` with a reference code you'll
+   remember (e.g. `QATESTA`). Add a worker and a supervisor to its roster
+   with PINs. Workers and supervisors sign in by searching the company name,
+   picking their name and entering their PIN; the admin uses Founder access.
 3. Repeat for `ZZZ_CLAUDE_QA_B` / code `QATESTB` — this second company only
    exists for Test 6 (tenant isolation); everything else uses company A.
 4. For company A: Admin Panel → manage → SOPs tab → add 2-3 short policies

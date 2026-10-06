@@ -95,7 +95,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [newCompanyCode, setNewCompanyCode] = useState("");
 
   const [profile, setProfile] = useState({ name: "", contact_name: "", contact_email: "", contact_phone: "", address: "", logo_url: "" });
-  const [codesForm, setCodesForm] = useState({ companyCode: "", workerCode: "", supervisorCode: "" });
+  const [codesForm, setCodesForm] = useState({ companyCode: "" });
   const [savingCodes, setSavingCodes] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
@@ -230,10 +230,9 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [newRosterRole, setNewRosterRole] = useState("worker");
   const [revealedPin, setRevealedPin] = useState(null); // { name, pin }
   const [rosterCounts, setRosterCounts] = useState({});
-  const [cutoverSaving, setCutoverSaving] = useState(false);
   const [regeneratingAll, setRegeneratingAll] = useState(false);
   const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
-  const [allPinsResult, setAllPinsResult] = useState(null); // { roster: [{name, role, pin}], companyName, companyCode }
+  const [allPinsResult, setAllPinsResult] = useState(null); // { roster: [{name, role, pin}], companyName }
 
   const loadRoster = async (companyId) => {
     setLoadingRoster(true);
@@ -323,6 +322,18 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     } catch (e) { setMsg("Couldn't reset the authenticator. Try again."); }
   };
 
+  const unlockRosterPin = async (id, name) => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unlock_roster_pin", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || `Couldn't unlock ${name}.`); return; }
+      await loadRoster(activeId);
+    } catch (e) { setMsg(`Couldn't unlock ${name}. Try again.`); }
+  };
+
   // ── Onboarding wallet (Phase 2): per-person opt-in + invite link ────────
   const [walletInviteLink, setWalletInviteLink] = useState(null); // { name, url }
 
@@ -382,30 +393,12 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "Couldn't regenerate PINs."); setRegeneratingAll(false); return; }
-      setAllPinsResult({ roster: data.roster, companyName: activeCompany?.name || "", companyCode: activeCompany?.company_code || "" });
+      setAllPinsResult({ roster: data.roster, companyName: activeCompany?.name || "" });
       await loadRoster(activeId);
     } catch (e) {
       setMsg("Couldn't regenerate PINs. Try again.");
     }
     setRegeneratingAll(false);
-  };
-
-  const setCutover = async (enabled) => {
-    if (enabled && !window.confirm("Switch this company to individual logins? The shared company code will stop being offered — everyone will need their own name + PIN.")) return;
-    setCutoverSaving(true);
-    setMsg("");
-    try {
-      const res = await fetch("/api/companydata", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_roster_cutover", token, companyId: activeId, enabled }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setMsg(data.error || "Couldn't update."); setCutoverSaving(false); return; }
-      await loadAll();
-    } catch (e) {
-      setMsg("Couldn't update. Try again.");
-    }
-    setCutoverSaving(false);
   };
 
   // ── All Codes view: every company's codes at a glance, plus the master
@@ -438,7 +431,8 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     enroll_mfa_confirm: "Enabled MFA",
     disable_mfa: "Disabled MFA",
     create_company: "Created company",
-    update_company_codes: "Changed company codes",
+    update_company_codes: "Changed company reference code",
+    unlock_roster_pin: "Unlocked a login",
     toggle_suspend: "Changed suspension",
     delete_company: "Deleted company",
     approve_onboarding_request: "Approved onboarding request",
@@ -785,7 +779,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     setAnalyticsTierState(c.plan_tier || "basic");
     setRosterCap(SEAT_CAP_BY_TIER[c.plan_tier] || SEAT_CAP_BY_TIER.basic);
     setRevealedPin(null);
-    setCodesForm({ companyCode: c.company_code || "", workerCode: c.worker_code || "", supervisorCode: c.supervisor_code || "" });
+    setCodesForm({ companyCode: c.company_code || "" });
 
     try {
       const res = await fetch("/api/companydata", {
@@ -875,7 +869,6 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const saveCodes = async () => {
     setMsg("");
     if (!codesForm.companyCode.trim()) { setMsg("Company code cannot be empty."); return; }
-    if (!window.confirm("Save these codes? Anyone using the old value will no longer be able to log in with it.")) return;
     setSavingCodes(true);
     try {
       const res = await fetch("/api/admin", {
@@ -883,12 +876,12 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "update_company_codes", token, companyId: activeId,
-          companyCode: codesForm.companyCode, workerCode: codesForm.workerCode, supervisorCode: codesForm.supervisorCode,
+          companyCode: codesForm.companyCode,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "Couldn't update codes."); setSavingCodes(false); return; }
-      setMsg("Codes updated"); await loadAll();
+      setMsg("Reference code updated"); await loadAll();
     } catch (e) {
       setMsg("Couldn't update codes. Try again.");
     }
@@ -1438,13 +1431,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           <span style={st.code} onClick={() => copyText(c.company_code)}>{c.company_code || "—"}</span>
                           {c.roster_enabled && <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: C.status.success.bg, padding: "3px 9px", borderRadius: 20 }}>ROSTER</span>}
-                          {(c.worker_code || c.supervisor_code) && (
-                            <>
-                              <span style={{ fontSize: 11, color: C.muted }}>legacy:</span>
-                              {c.worker_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.worker_code)}>{c.worker_code}</span>}
-                              {c.supervisor_code && <span style={{ ...st.code, fontSize: 12, opacity: 0.75 }} onClick={() => copyText(c.supervisor_code)}>{c.supervisor_code}</span>}
-                            </>
-                          )}
                         </div>
                       </div>
                     ))
@@ -2401,6 +2387,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
                           {m.active && (
                             <button onClick={() => sendSetupLink(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>{m.pin_link_sent_at && !m.pin_set_at ? "Resend setup link" : "Send setup link"}</button>
                           )}
+                          {m.active && m.locked && (
+                            <button onClick={() => unlockRosterPin(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Unlock</button>
+                          )}
                           {m.active && m.totp_enabled && (
                             <button onClick={() => resetRosterMfa(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.inkSoft, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: 8, padding: "6px 10px", flexShrink: 0 }}>Reset authenticator</button>
                           )}
@@ -2420,71 +2409,22 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               )}
             </div>
 
-            <div style={{ ...st.card, borderLeft: `4px solid ${activeCompany?.roster_enabled ? C.green : C.amber}` }}>
-              <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Login mode</div>
-              <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 14 }}>
-                {activeCompany?.roster_enabled
-                  ? "This company is on individual logins — the shared company code is no longer offered. Reverting is instant and safe."
-                  : "This company is still on the shared company code. Switching to individual logins requires at least one active worker and one active supervisor on the roster above."}
-              </div>
-              <button
-                onClick={() => setCutover(!activeCompany?.roster_enabled)}
-                disabled={cutoverSaving}
-                style={{
-                  width: "100%", borderRadius: 10, padding: "11px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer",
-                  border: activeCompany?.roster_enabled ? `1.5px solid ${C.status.danger.border}` : "none",
-                  background: activeCompany?.roster_enabled ? C.status.danger.bg : C.amber,
-                  color: activeCompany?.roster_enabled ? C.status.danger.text : C.ink,
-                }}>
-                {cutoverSaving ? "Updating…" : activeCompany?.roster_enabled ? "Revert to shared company code" : "Switch to individual logins"}
-              </button>
-            </div>
           </div>
         )}
 
         {manageTab === "codes" && (
           <div style={st.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Company code</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Company reference code</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>
-              {activeCompany?.roster_enabled
-                ? "Everyone enters this, then picks their name and PIN — see the Roster tab."
-                : (activeCompany?.worker_code || activeCompany?.supervisor_code)
-                  ? "This company still has its own worker/supervisor codes below, which take priority over this one for logging in — changing this alone won't change what they type."
-                  : "Shared by everyone at this company to log in as worker or supervisor."}
+              An internal reference only. It is not used to sign in. People search for the company by name, then pick their own name from the roster.
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.companyCode} onChange={e => setCodesForm(f => ({ ...f, companyCode: e.target.value.toUpperCase() }))} />
               <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={() => copyText(codesForm.companyCode)}>Copy</button>
             </div>
 
-            {(activeCompany?.worker_code || activeCompany?.supervisor_code) && (
-              <div style={{ marginTop: 6, paddingTop: 16, borderTop: `1px solid ${C.line}` }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 10 }}>
-                  Legacy — accepted until this company switches to individual logins
-                </div>
-                {activeCompany?.worker_code && (
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={st.label}>Worker code</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.workerCode} onChange={e => setCodesForm(f => ({ ...f, workerCode: e.target.value.toUpperCase() }))} />
-                      <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={() => copyText(codesForm.workerCode)}>Copy</button>
-                    </div>
-                  </div>
-                )}
-                {activeCompany?.supervisor_code && (
-                  <div>
-                    <div style={st.label}>Supervisor code</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.supervisorCode} onChange={e => setCodesForm(f => ({ ...f, supervisorCode: e.target.value.toUpperCase() }))} />
-                      <button style={{ ...st.darkBtn, flexShrink: 0 }} onClick={() => copyText(codesForm.supervisorCode)}>Copy</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
             <button style={{ ...st.amberBtn, width: "100%", marginTop: 18 }} onClick={saveCodes} disabled={savingCodes}>
-              {savingCodes ? "Saving…" : "Save codes"}
+              {savingCodes ? "Saving…" : "Save reference code"}
             </button>
 
             {onViewDashboard && (

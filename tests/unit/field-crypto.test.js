@@ -52,3 +52,22 @@ test('withDecryptedEmail handles rows, lists, and a bad row without throwing', (
   try { assert.equal(withDecryptedEmail({ email: 'enc:v1:x:y:z' }).email, null); } finally { console.error = origErr; }
   assert.deepEqual(withDecryptedEmail({ id: 2 }), { id: 2 });
 }));
+
+test('a missing or wrong-length key is reported in plain words, never with the key', async () => {
+  const { encryptionKeyProblem, keyProblemMessage, KeyConfigError, encryptField } = await import('../../server-lib/fieldCrypto.js');
+  const saved = process.env.FIELD_ENCRYPTION_KEY;
+  try {
+    process.env.FIELD_ENCRYPTION_KEY = 'tooshort';
+    assert.match(encryptionKeyProblem(), /FIELD_ENCRYPTION_KEY.*missing or the wrong length/);
+    assert.ok(!encryptionKeyProblem().includes('tooshort'));
+    assert.throws(() => encryptField('a@b.com'), KeyConfigError);
+    try { encryptField('a@b.com'); } catch (e) { assert.match(keyProblemMessage(e), /wrong length/); }
+    delete process.env.FIELD_ENCRYPTION_KEY;
+    assert.ok(encryptionKeyProblem());
+    process.env.FIELD_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+    assert.equal(encryptionKeyProblem(), null);
+    assert.equal(keyProblemMessage(new Error('something else')), null);
+  } finally {
+    if (saved === undefined) delete process.env.FIELD_ENCRYPTION_KEY; else process.env.FIELD_ENCRYPTION_KEY = saved;
+  }
+});

@@ -19,8 +19,9 @@ architecture) and `docs/security/` (the other documents in this folder).
 ## Access control
 
 - **Customer-facing access** is role-based: worker, supervisor, admin.
-  Workers and supervisors authenticate with a shared company code or an
-  individual roster PIN; admins configure their company from the Admin
+  Workers and supervisors authenticate individually: company name, their own
+  name, their own PIN, and an authenticator code where their role requires
+  one. There are no shared worker or supervisor codes. Admins configure their company from the Admin
   Panel. See `README.md` → "Roles & login".
 - **Privileged access**: a single admin-settable master code can log into
   any company. Every master-code use is logged and reviewable from the

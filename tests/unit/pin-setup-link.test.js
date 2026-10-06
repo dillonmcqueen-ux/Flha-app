@@ -35,7 +35,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PATCH') { patches.push(raw ? JSON.parse(raw) : null); return send(200, patchResult); }
     return send(200, [row]);
   }
-  if (table === 'companies') return send(200, [{ id: 7, name: 'Test Co', app_type: 'safety', suspended: false }]);
+  if (table === 'companies') return send(200, [{ id: 7, name: 'Test Co', suspended: false }]);
   if (table === 'company_document_settings') return send(200, [{ is_active: true }]);
   return send(200, []);
 });

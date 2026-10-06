@@ -43,6 +43,26 @@ const AI_RESPONSE = {
   tomorrowPlan: 'Strip forms and begin south footings.',
 };
 
+// Answers every step of the company-name login (search, name list, PIN) the
+// way the real api/login.js does, so a test can sign in through the real
+// screens. `role` is what the PIN step hands back; `userName` is the one name
+// on the roster. `sessionUserName` is what the session carries: the worker
+// tests leave it empty so the form name fields stay typeable, as before.
+async function fulfillLoginStep(route, { role, companyId, companyName, userName, sessionUserName = userName, userId }) {
+  const body = route.request().postDataJSON() || {};
+  const json = (payload) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
+  if (body.action === 'search_companies') {
+    return json({ companies: [{ name: companyName, companyTicket: 'test-ticket' }] });
+  }
+  if (body.action === 'list_roster_names') {
+    return json({ names: [{ id: userId || 'test-roster-id', name: userName }], companyName });
+  }
+  return json({
+    session: { role, companyId, companyName, userName: sessionUserName, userId: userId || 'test-roster-id' },
+    token: 'test-token',
+  });
+}
+
 // Stubs every backend call a worker-facing form makes so these tests run
 // fully offline and deterministically, independent of Supabase/Anthropic
 // availability or real company data.
@@ -51,17 +71,7 @@ const AI_RESPONSE = {
 // already clocked in. `calls` records every companydata action, in order.
 export async function mockWorkerApis(page, { companyId = 'test-company-id', companyName = 'Test Co', userId = null, builtinActive = {}, clockOpenSince: initialClockOpenSince = null } = {}) {
   const calls = [];
-  await page.route('**/api/login', async route => {
-    const body = route.request().postDataJSON();
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        session: { role: body.role, companyId, companyName, userName: '', userId },
-        token: 'test-token',
-      }),
-    });
-  });
+  await page.route('**/api/login', route => fulfillLoginStep(route, { role: 'worker', companyId, companyName, userName: 'Jamie Worker', sessionUserName: '', userId }));
 
   await page.route('**/api/customforms', async route => {
     await route.fulfill({
@@ -231,14 +241,19 @@ export async function mockExternalServices(page) {
   });
 }
 
-export async function loginAsWorker(page) {
+// Company name, then your name, then your PIN: the same three steps a person
+// takes. A 6 digit PIN submits itself.
+async function signInThroughScreens(page, { companyName = 'Test Co', userName }) {
   await page.goto('/');
-  await page.getByRole('button', { name: /Worker/ }).click();
-  await page.getByPlaceholder('Company code').fill('TESTCODE');
-  // src/Login.jsx renders `Continue <ChevronRight />` — the arrow is a lucide
-  // icon component, not the literal "→" this used to match. Matching on the
-  // word alone survives the next icon swap.
-  await page.getByRole('button', { name: /^Continue/ }).click();
+  await page.getByPlaceholder('Company name').fill(companyName.slice(0, 4));
+  await page.getByRole('button', { name: companyName }).click();
+  await page.getByPlaceholder('Start typing your name…').fill(userName.slice(0, 3));
+  await page.getByRole('button', { name: userName }).click();
+  await page.locator('input[type="tel"]').fill('123456');
+}
+
+export async function loginAsWorker(page) {
+  await signInThroughScreens(page, { userName: 'Jamie Worker' });
   await expect(page.getByText('Safety', { exact: true })).toBeVisible();
 }
 
@@ -302,13 +317,7 @@ export function mockSupervisorApis(page, {
     status: 200, contentType: 'application/json', body: JSON.stringify(payload),
   });
 
-  page.route('**/api/login', async route => {
-    const body = route.request().postDataJSON();
-    await json(route, {
-      session: { role: body.role, companyId, companyName, userName: 'Sam Supervisor', userId },
-      token: 'test-token',
-    });
-  });
+  page.route('**/api/login', route => fulfillLoginStep(route, { role: 'supervisor', companyId, companyName, userName: 'Sam Supervisor', userId }));
 
   page.route('**/api/companydata', async route => {
     const body = route.request().postDataJSON();
@@ -369,9 +378,6 @@ export function flhaFixture({ id = 'flha-new', workerName = 'Jamie Worker', site
 }
 
 export async function loginAsSupervisor(page) {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Supervisor \/ Safety/ }).click();
-  await page.getByPlaceholder('Company code').fill('TESTCODE');
-  await page.getByRole('button', { name: /^Continue/ }).click();
+  await signInThroughScreens(page, { userName: 'Sam Supervisor' });
   await expect(page.getByText(/Welcome back/)).toBeVisible();
 }

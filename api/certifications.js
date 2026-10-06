@@ -9,15 +9,15 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
-import { encryptField, withDecryptedEmail } from '../server-lib/fieldCrypto.js';
+import { encryptField, withDecryptedEmail, keyProblemMessage } from '../server-lib/fieldCrypto.js';
 import { isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const BUCKET = 'worker-certifications';
 const PHOTO_BUCKET = 'worker-photos';
 const EXPIRING_SOON_DAYS = 30;
@@ -63,7 +63,7 @@ async function verifySession(token) {
   } catch (e) {
     return null;
   }
-  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+  if (sessionExpired(payload)) return null;
 
   // A login TICKET is not a session. api/login.js mints two roleless,
   // short-lived tokens with this same signature and secret — the roster
@@ -444,6 +444,6 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: 'Unknown action.' });
   } catch (e) {
-    return res.status(500).json({ error: 'Unexpected error.' });
+    return res.status(500).json({ error: keyProblemMessage(e) || 'Unexpected error.' });
   }
 }
