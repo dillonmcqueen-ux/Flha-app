@@ -59,8 +59,9 @@ create table if not exists public.document_assignments (
   -- server-lib/documentAccess.js.
   check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|fuellog|custom_[0-9]+|portal_[0-9]+)$'),
   -- Portal supervisor reads are routed by department and ignore view rows.
-  check (not (document_key like 'portal\_%' and action = 'view')),
-  check (action = 'submit' or restricts)
+  check (not (document_key like 'portal\_%' and action = 'view'))
+  -- (action = 'submit' or restricts) is added below as a named constraint, so
+  -- a fresh install and a catch-up end up identical.
 );
 
 -- Idempotent catch-up for a database that created the table from an earlier
