@@ -121,14 +121,36 @@ export function pinSetupEmail({ name: rawName, companyName: rawCompany, url, nee
   };
 }
 
+// The Account Owner's way back in after a lockout. Same single-use link as the
+// setup email (it opens the choose-a-PIN page, which also clears the lockout),
+// worded for someone who already has an account.
+export function unlockLinkEmail({ name: rawName, companyName: rawCompany, url, ttlMs = PIN_LINK_MFA_TTL_MS }) {
+  const name = plainLine(rawName, 60);
+  const companyName = plainLine(rawCompany, 80) || 'your company';
+  return {
+    subject: `Unlock your FORA sign-in for ${companyName}`,
+    text: [
+      `Hi ${name},`,
+      '',
+      `Your FORA sign-in for ${companyName} was locked after too many wrong PIN or authenticator codes. If that was you, open this link, choose a new PIN, and you are back in:`,
+      '',
+      url,
+      '',
+      `The link works once and expires in ${ttlMs <= PIN_LINK_MFA_TTL_MS ? '24 hours' : '7 days'}. It is just for you, so do not forward it. If that was not you, ignore this email. Your account stays safe and the lock clears on its own after 15 minutes.`,
+      '',
+      'FORA Field Solutions',
+    ].join('\n'),
+  };
+}
+
 // Issues a link and emails it to `email`. Best-effort: the roster row already
 // exists, so a failed send is reported, never thrown. Returns
 // { sent, url, error }.
-export async function issueAndEmailPinLink({ supabaseAdmin, sendEmail, member, email, companyName, needsAuthenticator }) {
+export async function issueAndEmailPinLink({ supabaseAdmin, sendEmail, member, email, companyName, needsAuthenticator, buildEmail = pinSetupEmail }) {
   const issued = await issuePinSetupLink(supabaseAdmin, member);
   if (issued.error) return { sent: false, error: issued.error };
   try {
-    await sendEmail({ to: email, ...pinSetupEmail({ name: member.name, companyName, url: issued.url, needsAuthenticator, ttlMs: issued.ttlMs }) });
+    await sendEmail({ to: email, ...buildEmail({ name: member.name, companyName, url: issued.url, needsAuthenticator, ttlMs: issued.ttlMs }) });
     return { sent: true, url: issued.url };
   } catch (e) {
     console.error('PIN setup email failed:', e.message);

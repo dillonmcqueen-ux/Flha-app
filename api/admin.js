@@ -46,6 +46,14 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ah, bh);
 }
 
+// The company code is what staff type to find their company, so it is chosen
+// with care: upper case letters, digits and hyphens, 6 to 32 characters. Short
+// codes are guessable; the lookup throttle only slows a guesser down.
+function normalizeCompanyCode(raw) {
+  const code = String(raw || '').trim().toUpperCase();
+  return /^[A-Z0-9-]{6,32}$/.test(code) ? code : null;
+}
+
 async function verifySession(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [data, sig] = token.split('.');
@@ -523,17 +531,19 @@ export default async function handler(req, res) {
     }
 
     // ── Onboard a new company ───────────────────────────────────────────
-    // company_code is an internal reference. People sign in by searching for
-    // the company name, then picking their own name from its roster.
+    // company_code is what staff type to find their company on the login page
+    // (see update_company_codes), chosen by the founder.
     if (action === 'create_company') {
-      const { name, companyCode } = req.body;
-      if (!name?.trim() || !companyCode?.trim()) {
+      const { name } = req.body;
+      if (!name?.trim() || !req.body.companyCode?.trim()) {
         return res.status(400).json({ error: 'Missing company details.' });
       }
+      const companyCode = normalizeCompanyCode(req.body.companyCode);
+      if (!companyCode) return res.status(400).json({ error: 'The company code needs 6 to 32 letters, numbers or hyphens.' });
       const { data: existing } = await supabaseAdmin
         .from('companies')
         .select('id')
-        .eq('company_code', companyCode.trim());
+        .eq('company_code', companyCode);
       if (existing && existing.length > 0) {
         return res.status(400).json({ error: 'That code is already in use. Edit and try again.' });
       }
@@ -547,7 +557,7 @@ export default async function handler(req, res) {
 
       const { data: created, error } = await supabaseAdmin.from('companies').insert({
         name: name.trim(),
-        company_code: companyCode.trim(),
+        company_code: companyCode,
         account_number: acct,
       }).select('id').single();
       if (error) { console.error("create_company failed:", error.message); return res.status(500).json({ error: "Couldn't add company. Try again." }); }
@@ -580,25 +590,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ── Edit a company's internal reference code ────────────────────────
-    // company_code is an internal reference only. It is not used to sign in
-    // (people find their company by name), so changing it breaks nothing.
+    // ── Edit a company's code ───────────────────────────────────────────
+    // company_code is what the company's staff type on the login page to find
+    // their company. It is not a login by itself: it only opens that company's
+    // name list. Changing it means telling the company the new one.
     if (action === 'update_company_codes') {
-      const { companyId, companyCode } = req.body;
-      if (!companyId || !companyCode?.trim()) {
+      const { companyId } = req.body;
+      if (!companyId || !req.body.companyCode?.trim()) {
         return res.status(400).json({ error: 'Missing company code.' });
       }
+      const companyCode = normalizeCompanyCode(req.body.companyCode);
+      if (!companyCode) return res.status(400).json({ error: 'The company code needs 6 to 32 letters, numbers or hyphens.' });
 
       const { data: codeClash } = await supabaseAdmin
         .from('companies')
         .select('id')
-        .eq('company_code', companyCode.trim())
+        .eq('company_code', companyCode)
         .neq('id', companyId);
       if (codeClash && codeClash.length > 0) {
         return res.status(400).json({ error: 'That company code is already in use.' });
       }
 
-      const { error } = await supabaseAdmin.from('companies').update({ company_code: companyCode.trim() }).eq('id', companyId);
+      const { error } = await supabaseAdmin.from('companies').update({ company_code: companyCode }).eq('id', companyId);
       if (error) { console.error("update codes failed:", error.message); return res.status(500).json({ error: "Couldn't update the code. Try again." }); }
       await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'update_company_codes', companyId, targetType: 'company', targetId: companyId });
       return res.status(200).json({ ok: true });

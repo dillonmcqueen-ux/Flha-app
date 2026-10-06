@@ -1,13 +1,18 @@
-// Company-name login (api/login.js: search_companies, list_roster_names) and
-// the 12 hour supervisor session (server-lib/sessionTtl.js).
+// Company-code login (api/login.js: find_company, list_roster_names,
+// request_unlock_link) and the 12 hour supervisor session
+// (server-lib/sessionTtl.js).
 //
 // What has to hold:
-//   - the search is public, so it needs 3+ letters, returns at most 8 names,
-//     escapes LIKE wildcards, and is throttled per IP;
-//   - a ticket from a search opens that company's name list and nothing else,
-//     and the list carries names only (no role);
-//   - the shared worker/supervisor company codes are gone: only the founder
-//     codes remain on the old code-entry path;
+//   - the lookup is an exact match on a code the founder chose, never a search
+//     or a list, so a stranger cannot browse which companies are on FORA;
+//   - only misses spend the failure budget, and a spent budget refuses the next
+//     guess before the lookup;
+//   - a ticket opens that company's name list and nothing else, and the list
+//     carries names only (no role);
+//   - the shared worker/supervisor codes are gone: only the founder codes remain
+//     on the old code-entry path;
+//   - the Account Owner, and only the Owner, can email themselves an unlock link,
+//     and only while locked;
 //   - a supervisor session expires after 12 hours, a worker session after 7 days.
 
 import test from 'node:test';
@@ -22,6 +27,7 @@ process.env.ADMIN_CODE = 'a-long-admin-code-123456';
 let companies; // what the fake companies table answers
 let rosterRows; // what the fake roster table answers
 let throttleCount; // what bump_ip_throttle returns
+let missRow; // what the failure-budget read finds in master_code_ip_limits
 let seen; // every request the handler sent: { table, query }
 
 const server = http.createServer(async (req, res) => {
@@ -32,6 +38,7 @@ const server = http.createServer(async (req, res) => {
   seen.push({ table, query: Object.fromEntries(url.searchParams), body: raw });
   const send = (code, payload) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(payload)); };
   if (table === 'rpc/bump_ip_throttle') return send(200, throttleCount);
+  if (table === 'master_code_ip_limits') return send(200, missRow ? [missRow] : []);
   if (table === 'rpc/claim_pin_attempt') return send(200, [{ failed_pin_attempts: 1, pin_locked_until: null }]);
   if (table === 'companies') return send(200, companies);
   if (table === 'roster') return send(200, rosterRows);
@@ -56,49 +63,77 @@ async function call(body) {
 }
 
 test.beforeEach(() => {
-  companies = [{ id: 1, name: 'ABC Earthworks Company' }, { id: 5, name: 'ABC Safety' }];
+  companies = [{ id: 1, name: 'ABC Earthworks Company' }];
   rosterRows = [{ id: 11, name: 'Jamie Worker' }, { id: 12, name: 'Sam Supervisor' }];
   throttleCount = 1;
+  missRow = null;
   seen = [];
 });
 
-test('a search under 3 letters answers nothing and never touches the database', async () => {
-  const out = await call({ action: 'search_companies', query: 'AB' });
-  assert.equal(out.statusCode, 200);
-  assert.deepEqual(out.body.companies, []);
+const find = (code) => call({ action: 'find_company', code });
+const bumps = () => seen.filter(r => r.table === 'rpc/bump_ip_throttle').map(r => JSON.parse(r.body).p_key.split(':')[0]);
+
+test('the right code gives back the company name and a ticket, and never a list', async () => {
+  const out = await find('  abc ');
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.equal(out.body.companyName, 'ABC Earthworks Company');
+  assert.ok(out.body.companyTicket);
+  assert.equal(out.body.companies, undefined);
+  assert.equal(out.body.id, undefined); // never a raw company id
+  const q = seen.find(r => r.table === 'companies').query;
+  assert.equal(q.company_code, 'ilike.ABC'); // trimmed, upper-cased, exact
+  assert.equal(q.limit, '1');
+});
+
+test('an unknown code is a 401 and spends the failure budget; a right one does not', async () => {
+  companies = [];
+  const miss = await find('NOPE123');
+  assert.equal(miss.statusCode, 401);
+  assert.ok(bumps().includes('ccode'), 'a miss is counted');
+
+  seen = [];
+  companies = [{ id: 1, name: 'ABC Earthworks Company' }];
+  await find('ABC');
+  assert.equal(bumps().includes('ccode'), false, 'a hit is not counted against the failure budget');
+});
+
+test('codes with wildcards or odd characters never reach the database', async () => {
+  for (const bad of ['%%%', 'A_C', 'a*b', '', 'ab', 'x'.repeat(33), "ABC'; --"]) {
+    const out = await find(bad);
+    assert.equal(out.statusCode, 401, bad);
+  }
   assert.equal(seen.some(r => r.table === 'companies'), false);
 });
 
-test('a search returns names with a ticket each, capped at 8', async () => {
-  const out = await call({ action: 'search_companies', query: '  abc ' });
-  assert.equal(out.statusCode, 200);
-  assert.equal(out.body.companies.length, 2);
-  assert.equal(out.body.companies[0].name, 'ABC Earthworks Company');
-  assert.ok(out.body.companies[0].companyTicket);
-  // The ticket carries the company, but the response never hands back a raw id.
-  assert.equal(out.body.companies[0].id, undefined);
-  const q = seen.find(r => r.table === 'companies').query;
-  assert.equal(q.limit, '8');
-  assert.equal(q.select, 'id,name');
-});
-
-test('LIKE wildcards in the search are escaped, not honored', async () => {
-  await call({ action: 'search_companies', query: '%%%' });
-  const q = seen.find(r => r.table === 'companies').query;
-  assert.match(q.name, /^ilike\./);
-  assert.ok(q.name.includes('\\%'), `expected escaped wildcard in ${q.name}`);
-});
-
-test('the search is throttled per IP', async () => {
-  throttleCount = 100000;
-  const out = await call({ action: 'search_companies', query: 'abc' });
+test('a spent failure budget refuses the next guess before looking anything up', async () => {
+  missRow = { window_start: new Date().toISOString(), count: 20 };
+  const out = await find('ABC');
   assert.equal(out.statusCode, 429);
   assert.equal(seen.some(r => r.table === 'companies'), false);
 });
 
-test('a search ticket opens the name list, which carries names only', async () => {
-  const search = await call({ action: 'search_companies', query: 'abc' });
-  const out = await call({ action: 'list_roster_names', companyTicket: search.body.companies[0].companyTicket });
+test('an expired failure window starts fresh', async () => {
+  missRow = { window_start: new Date(Date.now() - 3600_000).toISOString(), count: 20 };
+  const out = await find('ABC');
+  assert.equal(out.statusCode, 200);
+});
+
+test('the lookup volume is throttled per IP', async () => {
+  throttleCount = 100000;
+  const out = await find('ABC');
+  assert.equal(out.statusCode, 429);
+  assert.equal(seen.some(r => r.table === 'companies'), false);
+});
+
+test('the old company search is gone', async () => {
+  const out = await call({ action: 'search_companies', query: 'abc' });
+  assert.notEqual(out.statusCode, 200);
+  assert.equal(out.body.companies, undefined);
+});
+
+test('a company ticket opens the name list, which carries names only', async () => {
+  const found = await find('ABC');
+  const out = await call({ action: 'list_roster_names', companyTicket: found.body.companyTicket });
   assert.equal(out.statusCode, 200);
   assert.equal(out.body.companyName, 'ABC Earthworks Company');
   assert.deepEqual(out.body.names.map(n => n.name), ['Jamie Worker', 'Sam Supervisor']);
@@ -186,16 +221,10 @@ test('a founder session opened on a company is still accepted', async () => {
   assert.notEqual(out.statusCode, 401);
 });
 
-test('a search with * wildcards cannot get under the 3 letter minimum', async () => {
-  const out = await call({ action: 'search_companies', query: 'a**' });
-  assert.deepEqual(out.body.companies, []);
-  assert.equal(seen.some(r => r.table === 'companies'), false);
-});
-
 test('the name list is throttled per IP', async () => {
-  const search = await call({ action: 'search_companies', query: 'abc' });
+  const found = await find('ABC');
   throttleCount = 100000;
-  const out = await call({ action: 'list_roster_names', companyTicket: search.body.companies[0].companyTicket });
+  const out = await call({ action: 'list_roster_names', companyTicket: found.body.companyTicket });
   assert.equal(out.statusCode, 429);
 });
 
@@ -203,9 +232,9 @@ test('a lock that has run out starts a fresh set of attempts', async () => {
   const salt = 'abcd';
   const hash = crypto.scryptSync('482913', salt, 64).toString('hex');
   rosterRows = [{ id: 11, name: 'Jamie Worker', role: 'worker', active: true, company_id: 1, failed_pin_attempts: 8, pin_locked_until: new Date(Date.now() - 60_000).toISOString(), pin_salt: salt, pin_hash: hash, totp_enabled: false, departments: [] }];
-  const search = await call({ action: 'search_companies', query: 'abc' });
+  const found = await find('ABC');
   seen = [];
-  const out = await call({ action: 'roster_login', companyTicket: search.body.companies[0].companyTicket, rosterId: 11, pin: '000999' });
+  const out = await call({ action: 'roster_login', companyTicket: found.body.companyTicket, rosterId: 11, pin: '000999' });
   assert.equal(out.statusCode, 401);
   const resetIdx = seen.findIndex(r => r.table === 'roster' && r.body.includes('"failed_pin_attempts":0'));
   const claimIdx = seen.findIndex(r => r.table === 'rpc/claim_pin_attempt');
@@ -216,10 +245,11 @@ test('a lock that has run out starts a fresh set of attempts', async () => {
 test('a lock that is still running is left alone', async () => {
   const salt = 'abcd';
   rosterRows = [{ id: 11, name: 'Jamie Worker', role: 'worker', active: true, company_id: 1, failed_pin_attempts: 8, pin_locked_until: new Date(Date.now() + 600_000).toISOString(), pin_salt: salt, pin_hash: 'x', totp_enabled: false, departments: [] }];
-  const search = await call({ action: 'search_companies', query: 'abc' });
+  const found = await find('ABC');
   seen = [];
-  const out = await call({ action: 'roster_login', companyTicket: search.body.companies[0].companyTicket, rosterId: 11, pin: '000999' });
+  const out = await call({ action: 'roster_login', companyTicket: found.body.companyTicket, rosterId: 11, pin: '000999' });
   assert.equal(out.statusCode, 403);
+  assert.equal(out.body.locked, true); // the screen uses this to offer the Owner's unlock link
   assert.equal(seen.some(r => r.table === 'roster' && r.body.includes('failed_pin_attempts')), false);
 });
 
@@ -236,4 +266,66 @@ test('a worker cannot pick a trivial PIN from their setup link', async () => {
   const out = await call({ action: 'pin_link_set_pin', linkToken: signPinLinkTicket({ rosterId: 1, companyId: 7, jti: 'j' }), pin: '123456' });
   assert.equal(out.statusCode, 400);
   assert.match(out.body.error, /too easy/);
+});
+
+
+// ── Account Owner unlock link ────────────────────────────────────────────
+function ownerRow(over = {}) {
+  return {
+    id: 21, name: 'Olive Owner', role: 'supervisor', is_owner: true, active: true, company_id: 1,
+    email: 'owner@example.com', departments: [], totp_enabled: true,
+    pin_locked_until: new Date(Date.now() + 600_000).toISOString(),
+    totp_locked_until: null, pin_link_sent_at: null,
+    ...over,
+  };
+}
+const unlockCall = async (row) => {
+  rosterRows = [row];
+  const found = await find('ABC');
+  seen = [];
+  const out = await call({ action: 'request_unlock_link', companyTicket: found.body.companyTicket, rosterId: row.id });
+  const issued = seen.some(r => r.table === 'roster' && r.body.includes('pin_link_jti_hash'));
+  return { out, issued };
+};
+
+test('a locked Account Owner with an email on file is sent an unlock link', async () => {
+  const { out, issued } = await unlockCall(ownerRow());
+  assert.equal(out.statusCode, 200);
+  assert.deepEqual(out.body, { ok: true });
+  assert.equal(issued, true);
+});
+
+test('the answer is identical when nothing was sent, so it leaks nothing', async () => {
+  const cases = {
+    'not the Owner': ownerRow({ is_owner: false }),
+    'not locked': ownerRow({ pin_locked_until: null }),
+    'no email on file': ownerRow({ email: null }),
+    'deactivated': ownerRow({ active: false }),
+    'emailed within the hour': ownerRow({ pin_link_sent_at: new Date().toISOString() }),
+  };
+  for (const [label, row] of Object.entries(cases)) {
+    const { out, issued } = await unlockCall(row);
+    assert.equal(out.statusCode, 200, label);
+    assert.deepEqual(out.body, { ok: true }, label);
+    assert.equal(issued, false, label);
+  }
+});
+
+test('a lock that has already run out sends nothing', async () => {
+  const { issued } = await unlockCall(ownerRow({ pin_locked_until: new Date(Date.now() - 1000).toISOString() }));
+  assert.equal(issued, false);
+});
+
+test('an authenticator lockout counts too', async () => {
+  const { issued } = await unlockCall(ownerRow({ pin_locked_until: null, totp_locked_until: new Date(Date.now() + 600_000).toISOString() }));
+  assert.equal(issued, true);
+});
+
+test('the unlock link needs a real ticket and is throttled per IP', async () => {
+  assert.equal((await call({ action: 'request_unlock_link', companyTicket: 'x.y', rosterId: 21 })).statusCode, 401);
+  rosterRows = [ownerRow()];
+  const found = await find('ABC');
+  throttleCount = 100000;
+  const out = await call({ action: 'request_unlock_link', companyTicket: found.body.companyTicket, rosterId: 21 });
+  assert.equal(out.statusCode, 429);
 });

@@ -43,3 +43,21 @@ async function legacyCheckIpThrottle(supabaseAdmin, key, maxAttempts, windowMs) 
   await supabaseAdmin.from('master_code_ip_limits').update({ count: row.count + 1 }).eq('ip', key);
   return true;
 }
+
+// Reads a bucket without counting this call: true while it is still under
+// `maxAttempts` in its current window. For limits that should only count
+// FAILURES (a wrong company code) but must still refuse the next guess once the
+// budget is spent. Pair it with checkIpThrottle() on the failure path. A read
+// error answers true, so a database blip never locks everyone out of login.
+export async function peekIpThrottle(supabaseAdmin, key, maxAttempts, windowMs) {
+  const { data, error } = await supabaseAdmin
+    .from('master_code_ip_limits')
+    .select('window_start, count')
+    .eq('ip', key)
+    .limit(1);
+  if (error) return true;
+  const row = data && data[0];
+  if (!row) return true;
+  if (Date.now() - new Date(row.window_start).getTime() > windowMs) return true;
+  return row.count < maxAttempts;
+}

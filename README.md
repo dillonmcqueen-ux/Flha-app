@@ -12,16 +12,20 @@ isolated from every other company's.
 
 Three roles: **worker**, **supervisor**, and **admin**.
 
-- **Company-name login** — nobody types a shared code. A person searches
-  for their company by name (3 or more letters), picks their own name from
-  that company's roster, enters their own 6-digit PIN, then an authenticator
-  code if their role requires one. Deactivating one person cuts off exactly
-  that person, immediately, and the name they picked is what auto-fills on
-  the paperwork they submit. Supervisors (which includes the Account Owner)
-  stay signed in for 12 hours, workers for 7 days. Too many wrong PINs locks
-  a person for 15 minutes; their supervisor or the Account Owner can unlock
-  them from the Roster. `companies.company_code` still exists as an internal
-  reference but is not used to sign in.
+- **Company-code login** — nobody types a shared password. A person types
+  their company's code (`companies.company_code`, chosen by the founder in the
+  Admin Panel's Codes tab, 6 to 32 letters, numbers or hyphens), picks their own
+  name from that company's roster, enters their own 6-digit PIN, then an
+  authenticator code if their role requires one. The code only finds the company
+  and opens its name list: it is an exact match, there is no search and no list
+  of companies, so one customer cannot see who else is on FORA. Wrong codes spend
+  a per-IP budget (20 per 15 minutes). Deactivating one person cuts off exactly
+  that person, immediately, and the name they picked is what auto-fills on the
+  paperwork they submit. Supervisors (which includes the Account Owner) stay
+  signed in for 12 hours, workers for 7 days. Too many wrong PINs locks a person
+  for 15 minutes; their supervisor or the Account Owner can unlock them from the
+  Roster, and a locked Account Owner can email themselves an unlock link from the
+  login screen.
 - **Master code** — a single admin-settable code (entered under "Founder
   access") that logs into any company as either role, for admin use. Every use is logged
   (Admin Panel → All Codes → recent master-code logins).
