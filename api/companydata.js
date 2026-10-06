@@ -28,7 +28,7 @@ import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
-import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned, readRosterFlags } from '../server-lib/documentAccess.js';
+import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned, readRosterFlags, requireAssignment, SUBMIT as ASSIGN_SUBMIT } from '../server-lib/documentAccess.js';
 import { requireLead, loadCrew } from '../server-lib/leadAccess.js';
 import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
 
@@ -1506,6 +1506,12 @@ export default async function handler(req, res) {
         });
         if (checked.error) return res.status(checked.status).json({ error: checked.error });
         const r = { ...checked.row, restricts: false };
+        // A task puts a document on someone's list; it cannot give them one
+        // they have no right to. If the Owner restricted the document away
+        // from this person, or limited them to what is assigned to them, the
+        // lead cannot undo that.
+        const targetAccess = await requireAssignment(supabaseAdmin, { role: 'worker', userId: personId, companyId }, r.document_key, ASSIGN_SUBMIT);
+        if (targetAccess) return res.status(targetAccess.status === 503 ? 503 : 403).json({ error: targetAccess.status === 503 ? targetAccess.error : "That person can't use this document right now. Ask your account owner." });
         const { data: mine, error: readErr } = await supabaseAdmin.from('document_assignments')
           .select('id, document_key, audience_value').eq('company_id', companyId).eq('created_by', session.userId).is('ended_at', null);
         if (readErr) return res.status(500).json({ error: missingTable(readErr) ? SETUP_MSG : "Couldn't save the task." });
@@ -1514,7 +1520,7 @@ export default async function handler(req, res) {
           return res.status(409).json({ error: 'That person already has this task from you.' });
         }
         const { data: created, error } = await supabaseAdmin.from('document_assignments')
-          .insert({ ...r, company_id: companyId, created_by: session.userId }).select('id').single();
+          .insert({ ...r, by_lead: true, company_id: companyId, created_by: session.userId }).select('id').single();
         if (error) {
           console.error('lead_assign_task failed:', error.message);
           return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't save the task." });

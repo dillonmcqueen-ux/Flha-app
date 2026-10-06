@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireCustomDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
-import { requireLead } from '../server-lib/leadAccess.js';
+import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, listVisibleRecordsMulti, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
@@ -484,8 +484,14 @@ export default async function handler(req, res) {
         }
       }
 
-      collected.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      const top = collected.slice(0, 150);
+      // Only what the crew itself wrote. Rule A also places a record by its
+      // site, which would let a lead see a supervisor's or an Owner's record
+      // at their site, or an anonymous or unstamped one.
+      const crewIds = await crewIdSet(supabaseAdmin, session, lead.actor);
+      if (crewIds.error) return res.status(503).json({ error: "Couldn't check your crew. Please try again." });
+      const crewOnly = collected.filter(r => crewIds.ids.has(Number(r.submitted_by_roster_id)));
+      crewOnly.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const top = crewOnly.slice(0, 150);
       const ids = [...new Set(top.flatMap(r => [r.submitted_by_roster_id, r.entered_by_roster_id]).filter(v => v != null))];
       const nameOf = new Map();
       if (ids.length) {

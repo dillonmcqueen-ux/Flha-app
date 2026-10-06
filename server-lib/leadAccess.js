@@ -47,14 +47,44 @@ export function inCrew(actor, person) {
  * so a lead cannot reach upward.
  */
 export async function loadCrew(supabase, session, actor) {
-  const { data, error } = await supabase
+  // is_lead rides along so an approval can refuse another lead's record; a
+  // database without the column has no leads, so the read is retried without.
+  let { data, error } = await supabase
     .from('roster')
-    .select('id, name, role, is_owner, departments, divisions, default_site_id')
+    .select('id, name, role, is_owner, is_lead, departments, divisions, default_site_id')
     .eq('company_id', session.companyId)
     .eq('active', true)
     .eq('role', 'worker');
+  if (error && ['42703', 'PGRST204'].includes(String(error.code || ''))) {
+    ({ data, error } = await supabase
+      .from('roster')
+      .select('id, name, role, is_owner, departments, divisions, default_site_id')
+      .eq('company_id', session.companyId)
+      .eq('active', true)
+      .eq('role', 'worker'));
+  }
   if (error) return { error: true, crew: [] };
   return { crew: (data || []).filter((p) => inCrew(actor, p)) };
+}
+
+/**
+ * The ids of the lead's crew, for narrowing a record list to records a crew
+ * member wrote. Rule A (documentAccess.js) places a record by its SITE as well
+ * as its author, which is right for a supervisor but would let a lead reach a
+ * supervisor's or an Owner's record at the lead's site, or one with no author
+ * stamp at all. A lead's reach is the crew's own records, so a record counts
+ * only when its author is on the crew.
+ */
+export async function crewIdSet(supabase, session, actor) {
+  const { crew, error } = await loadCrew(supabase, session, actor);
+  if (error) return { error: true, ids: new Set(), leadIds: new Set() };
+  return {
+    ids: new Set(crew.map((p) => Number(p.id))),
+    // Other crew leads, whose FLHAs a lead may not sign off: two leads
+    // approving each other's extreme-risk assessments is not a second pair
+    // of eyes.
+    leadIds: new Set(crew.filter((p) => p.is_lead === true).map((p) => Number(p.id))),
+  };
 }
 
 /**

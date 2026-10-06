@@ -203,19 +203,25 @@ export function activeRowsAsOf(rows, asOfMs) {
 export function evaluateAccess(rows, actor, action, asOfMs) {
   if (actor.bypass) return { narrowed: false, allowed: true };
   const active = activeRowsAsOf(rows, asOfMs).filter((r) => r.action === action);
-  // "Hide everything not assigned to me": with no row naming this person the
-  // document is off for them, even when nobody else has been narrowed. A task
-  // names them just as a restriction does.
-  if (action === SUBMIT && actor.hideUnassigned) {
-    return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
-  }
   // Only a RESTRICTING row narrows. A task (restricts = false) puts the
   // document on someone's "assigned to you" list with a due date and takes
   // nothing away from anyone else. A row with no `restricts` field predates
   // the switch and restricts, as it always did.
   const restricting = active.filter(isRestricting);
+  if (restricting.length > 0 && !restricting.some((r) => matchesAudience(r, actor))) {
+    return { narrowed: true, allowed: false };
+  }
+  // "Hide everything not assigned to me": with no row naming this person the
+  // document is off for them, even when nobody else has been narrowed. A task
+  // from the Owner names them just as a restriction does, but a task from a
+  // crew lead does not: the Owner's decision to limit what this person sees
+  // is not the lead's to undo. The restriction check above has already run,
+  // so no task can get past a restriction either.
+  if (action === SUBMIT && actor.hideUnassigned) {
+    return { narrowed: true, allowed: active.some((r) => r.by_lead !== true && matchesAudience(r, actor)) };
+  }
   if (restricting.length === 0) return { narrowed: false, allowed: true };
-  return { narrowed: true, allowed: restricting.some((r) => matchesAudience(r, actor)) };
+  return { narrowed: true, allowed: true };
 }
 
 /** Does this row narrow access, or is it only a task? Pure. */
@@ -224,11 +230,21 @@ export function isRestricting(row) {
 }
 
 async function readAssignmentRows(supabase, companyId, documentKeys) {
-  const { data, error } = await supabase
+  // by_lead arrived with the crew lead migration; a database without it
+  // answers 42703 and the read is retried without it, so an unapplied
+  // migration never switches every assignment off.
+  let { data, error } = await supabase
     .from('document_assignments')
-    .select('document_key, audience_type, audience_value, action, restricts, due_at, created_at, ended_at')
+    .select('document_key, audience_type, audience_value, action, restricts, by_lead, due_at, created_at, ended_at')
     .eq('company_id', companyId)
     .in('document_key', documentKeys);
+  if (error && isMissingSchema(error) && String(error.code) === '42703') {
+    ({ data, error } = await supabase
+      .from('document_assignments')
+      .select('document_key, audience_type, audience_value, action, restricts, due_at, created_at, ended_at')
+      .eq('company_id', companyId)
+      .in('document_key', documentKeys));
+  }
   if (error) {
     if (isMissingSchema(error)) return { rows: [], error: false };
     return { rows: [], error: true };

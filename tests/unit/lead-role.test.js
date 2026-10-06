@@ -34,12 +34,17 @@ const ROSTER = [
   P({ id: 11, name: 'Crew Cam', role: 'worker', departments: ['safety'] }),
   P({ id: 12, name: 'Other Oz', role: 'worker' }),
   P({ id: 13, name: 'Not Lead Nat', role: 'worker', departments: ['safety'] }),
+  P({ id: 14, name: 'Lead Two', role: 'worker', is_lead: true, departments: ['safety'] }),
+  P({ id: 15, name: 'Hidden Hal', role: 'worker', departments: ['safety'], hide_unassigned: true }),
   P({ id: 90, name: 'Other Co', role: 'worker', company_id: 8, departments: ['safety'] }),
 ];
 const SETTINGS = ['flha', 'daily', 'fuellog', 'incident'].map(k => ({ company_id: 7, document_key: k, is_active: true }));
 const FLHAS = [
   { id: 101, company_id: 7, worker_name: 'Crew Cam', job_site: 'Pit', site_id: null, status: 'pending_approval', submitted_by_roster_id: 11, created_at: '2026-10-01T10:00:00Z', hazards_json: {}, pdf_url: null },
   { id: 102, company_id: 7, worker_name: 'Other Oz', job_site: 'Yard', site_id: null, status: 'pending_approval', submitted_by_roster_id: 12, created_at: '2026-10-02T10:00:00Z', hazards_json: {}, pdf_url: null },
+  { id: 104, company_id: 7, worker_name: 'Sup Sam', job_site: 'Pit', site_id: null, status: 'pending_approval', submitted_by_roster_id: 2, created_at: '2026-10-04T10:00:00Z', hazards_json: {}, pdf_url: null },
+  { id: 105, company_id: 7, worker_name: 'Crew Cam', job_site: 'Pit', site_id: null, status: 'complete', supervisor_signed_at: '2026-10-02T10:00:00Z', supervisor_signed_by: 'Sup Sam', submitted_by_roster_id: 11, created_at: '2026-10-02T09:00:00Z', hazards_json: {}, pdf_url: null },
+  { id: 106, company_id: 7, worker_name: 'Lead Two', job_site: 'Pit', site_id: null, status: 'pending_approval', submitted_by_roster_id: 14, created_at: '2026-10-05T10:00:00Z', hazards_json: {}, pdf_url: null },
   { id: 103, company_id: 7, worker_name: 'Lead Lee', job_site: 'Pit', site_id: null, status: 'pending_approval', submitted_by_roster_id: 10, created_at: '2026-10-03T10:00:00Z', hazards_json: {}, pdf_url: null },
 ];
 
@@ -109,7 +114,7 @@ test('get_my_crew: a lead gets their crew, workers only, not themselves or other
   const out = await run(companydata, { action: 'get_my_crew', token: LEAD() });
   assert.equal(out.statusCode, 200);
   assert.equal(out.body.isLead, true);
-  assert.deepEqual(out.body.crew.map(p => p.name).sort(), ['Crew Cam', 'Not Lead Nat']);
+  assert.deepEqual(out.body.crew.map(p => p.name).sort(), ['Crew Cam', 'Hidden Hal', 'Lead Two', 'Not Lead Nat']);
 });
 
 test('get_my_crew: anyone else is simply not a lead, and a token claim proves nothing', async () => {
@@ -122,7 +127,9 @@ test('get_my_crew: anyone else is simply not a lead, and a token claim proves no
 test('a lead lists their crew\'s FLHAs, not other people\'s', async () => {
   const out = await run(flhas, { action: 'list', token: LEAD() });
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
-  assert.deepEqual(out.body.flhas.map(f => f.id).sort(), [101, 103]);
+  // Their crew's own FLHAs: not the supervisor's (104) at a shared tag, not an
+  // unrelated worker's (102), not their own (103).
+  assert.deepEqual(out.body.flhas.map(f => f.id).sort(), [101, 105, 106]);
   const worker = await run(flhas, { action: 'list', token: as(13, 'worker') });
   assert.equal(worker.statusCode, 403);
 });
@@ -139,6 +146,16 @@ test('a lead signs off a crew FLHA, never their own, never one outside the crew'
   assert.equal(outside.statusCode, 403);
   const plain = await run(flhas, { action: 'approve', token: as(13, 'worker'), id: 101, supName: 'x', supSignature: 'data:image/png;base64,AAAA' });
   assert.equal(plain.statusCode, 403);
+});
+
+test('a lead cannot sign off a supervisor\'s FLHA, another lead\'s, or one already signed', async () => {
+  const sig = 'data:image/png;base64,AAAA';
+  const supervisors = await run(flhas, { action: 'approve', token: LEAD(), id: 104, supName: 'x', supSignature: sig });
+  assert.equal(supervisors.statusCode, 403, 'a supervisor\'s own FLHA');
+  const otherLead = await run(flhas, { action: 'approve', token: LEAD(), id: 106, supName: 'x', supSignature: sig });
+  assert.equal(otherLead.statusCode, 403, 'another lead\'s FLHA needs a supervisor');
+  const signed = await run(flhas, { action: 'approve', token: LEAD(), id: 105, supName: 'x', supSignature: sig });
+  assert.equal(signed.statusCode, 409, 'an existing sign-off is never replaced');
 });
 
 test('a lead cannot edit or delete an FLHA', async () => {
@@ -161,6 +178,24 @@ test('a lead gives a crew member a task, which never restricts, and cannot reach
   assert.equal((await run(companydata, { action: 'lead_assign_task', token: LEAD(), documentKey: 'timeclock', personId: 11 })).statusCode, 400);
   assert.equal((await run(companydata, { action: 'lead_assign_task', token: LEAD(), documentKey: 'flha', personId: 11 })).statusCode, 409, 'duplicate');
   assert.equal((await run(companydata, { action: 'lead_assign_task', token: as(13, 'worker'), documentKey: 'flha', personId: 11 })).statusCode, 403, 'not a lead');
+});
+
+test('a lead\'s task cannot undo the Owner: not for a hidden person, not past a restriction', async () => {
+  assignments = [];
+  const hidden = await run(companydata, { action: 'lead_assign_task', token: LEAD(), documentKey: 'flha', personId: 15 });
+  assert.equal(hidden.statusCode, 403, 'the Owner limits what Hidden Hal sees');
+  assert.equal(assignments.length, 0);
+  assignments = [{ id: 700, company_id: 7, created_by: 1, restricts: true, action: 'submit', audience_type: 'role', audience_value: 'supervisor', document_key: 'incident', ended_at: null, created_at: '2026-01-01T00:00:00Z' }];
+  const restricted = await run(companydata, { action: 'lead_assign_task', token: LEAD(), documentKey: 'incident', personId: 11 });
+  assert.equal(restricted.statusCode, 403, 'the Owner restricted Incident Reports to supervisors');
+  assert.equal(assignments.length, 1);
+});
+
+test('a lead\'s task is marked as theirs', async () => {
+  assignments = [];
+  const ok = await run(companydata, { action: 'lead_assign_task', token: LEAD(), documentKey: 'flha', personId: 11 });
+  assert.equal(ok.statusCode, 200, JSON.stringify(ok.body));
+  assert.equal(assignments[0].by_lead, true);
 });
 
 test('a lead can end only their own tasks, never the Owner\'s assignments', async () => {
