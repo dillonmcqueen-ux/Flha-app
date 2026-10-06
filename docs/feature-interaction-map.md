@@ -1407,7 +1407,7 @@ corrective actions the fourth writer of that table, alongside
 
 Replaces the plaintext wallet invite. `create_wallet_invite` and `redeem_wallet_invite` no longer exist (`grep -rn "wallet_invite" api/ server-lib/ src/` returns only `tests/unit/wallet-invite-modules.test.js:10`, a comment). The old `roster.wallet_invite_token` columns stay in the table unused (`docs/schema/roster-pin-setup-link-migration.sql:2`). Re-check: `grep -rn "pin_link_jti_hash" api/ server-lib/ src/`.
 
-**Key:** the link is a signed ticket `{purpose:'pin_setup', jti, rosterId, companyId}` (`server-lib/setupLinks.js:47-49`). The join is `roster.id` + `roster.company_id` **and** `roster.pin_link_jti_hash = sha256(jti)`, checked on open (`api/login.js:802-812`) and again inside the set-PIN UPDATE's WHERE (`:763`), which also clears it, so two parallel submits cannot both win. A worker session never carries this purpose, so `verifySession` rejects it (`setupLinks.js:4-5`).
+**Key:** the link is a signed ticket `{purpose:'pin_setup', jti, rosterId, companyId}` (`server-lib/setupLinks.js:47-49`). The join is `roster.id` + `roster.company_id` **and** `roster.pin_link_jti_hash = sha256(jti)`, checked on open (`api/login.js:802-812`) and again inside the set-PIN UPDATE's WHERE (`:872`), which also clears it, so two parallel submits cannot both win. A worker session never carries this purpose, so `verifySession` rejects it (`setupLinks.js:4-5`).
 
 | Side | Who | Evidence |
 |---|---|---|
@@ -1415,7 +1415,7 @@ Replaces the plaintext wallet invite. `create_wallet_invite` and `redeem_wallet_
 | Producer 1, company creation | everyone with an email, Owner first, cap 25, 3 parallel senders | `server-lib/onboardingApproval.js:148-167` (cap `setupLinks.js:18`), called `:364`; matches people to inserted rows by lower-cased name (`:149,157`) |
 | Producer 2, Owner adds a person | email required, link emailed; a worker's URL is also handed back to the caller | `api/companydata.js:451-520` (`:519` hand-back rule) |
 | Producer 3, resend | rank check via `canResetMfa` or self, throttled 5 per hour per person; no email on file means URL only, handed back | `api/companydata.js:720-760` |
-| Consumer | `pin_link_open` returns name, company, `emailOnFile`, `mfaRequired`, `hasAuthenticator`; `pin_link_set_pin` saves the PIN, sets `pin_set_at`, clears the link | `api/login.js:795-885` (`pin_set_at` `:753`) |
+| Consumer | `pin_link_open` returns name, company, `emailOnFile`, `mfaRequired`, `hasAuthenticator`; `pin_link_set_pin` saves the PIN, sets `pin_set_at`, clears the link | `api/login.js:795-885` (`pin_set_at` `:862`) |
 | Feeds authenticator setup | `mfaNeeded = requiresMfa(member) && !totp_enabled` mints `mfa_setup_jti_hash` and returns `stage:'enroll'` + `enrollTicket`; the page redirects to `/?mfa_setup=` | `api/login.js:826,851-868,879-881`; `src/WalletInvite.jsx:114-118`; `src/Login.jsx:100`; consumer `mfa_enroll_start/confirm` `api/login.js:729` |
 | Already has an authenticator | PIN reset only, `stage:'signin'`, no session | `api/login.js:878`; `src/WalletInvite.jsx:119` |
 | Everyone else | session minted through `mintRosterSession` (writes `last_login_at`) | `api/login.js:882-884`, `:437` |
@@ -3938,7 +3938,7 @@ designed, but the number means less than its label):
 1. **"Active workers" is PIN logins in the window, not activity.**
    `roster.last_login_at` is written in exactly one place, `mintRosterSession`
    (`api/login.js:444`, re-checked 2026-09-30 against `624ef31`). The old wallet-invite redemption minted a session
-   without it; that path is gone, and `pin_link_set_pin`'s session stage now goes through `mintRosterSession` (`:772`), so a first login via the setup link **does** count. A worker on an existing session who
+   without it; that path is gone, and `pin_link_set_pin`'s session stage now goes through `mintRosterSession` (`:882`), so a first login via the setup link **does** count. A worker on an existing session who
    never re-enters a PIN does not move it. Read: `platformOverview.js:87`.
 2. **Mixed denominators.** `activeCompanies7/30` are built from every
    document including a suspended company's (`:67-79`) while `live` and
