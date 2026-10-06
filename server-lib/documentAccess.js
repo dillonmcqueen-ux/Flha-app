@@ -27,8 +27,8 @@
 // at noon. Assignment rows therefore carry created_at and ended_at, and a
 // submit is evaluated AS OF the moment it was filled in (`asOf`, from the
 // client's queued time, clamped to GRACE_MS). A live submit has no queued
-// time and is evaluated as of now. The client side that sends the queued
-// time ships with the worker-menu change; until then asOf is always "now".
+// time and is evaluated as of now. Each form's request builder sends the
+// queued time on a replay (queuedAtFor in src/offlineQueue.js).
 //
 // DB FAILURE POSTURE
 //   - missing document_assignments table or sites.division_id (migration not
@@ -78,8 +78,9 @@ function isMissingSchema(error) {
  * carries a clientSubmissionId, so a bare `queuedAt` on its own is ignored.
  * This is a speed bump, not a proof: anyone holding a token can add both
  * fields. What it bounds is the damage (GRACE_MS, a submit only, never a
- * read). The real fix is a server-signed "opened at" stamp the client echoes
- * back, which ships with the client change in PR 2.
+ * read). The real fix would be a server-signed "opened at" stamp the client
+ * echoes back; it is not built, so a handcrafted request can still reach back
+ * GRACE_MS on a submit.
  */
 export function queuedAsOf(body) {
   if (!body || typeof body.clientSubmissionId !== 'string' || !body.clientSubmissionId) return undefined;
