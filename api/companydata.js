@@ -28,7 +28,8 @@ import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
-import { listVisibleRecords, listVisibleRecordsMulti } from '../server-lib/documentAccess.js';
+import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned } from '../server-lib/documentAccess.js';
+import { listAssignableDocuments, validateAssignment, describeAssignments, endAssignmentsForAudience, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -1011,6 +1012,7 @@ export default async function handler(req, res) {
           departments: member.departments || [],
           isOwner: member.is_owner === true, title: member.title || '',
           divisions: member.divisions || [], defaultSiteId: member.default_site_id || null,
+          hideUnassigned: await readHideUnassigned(supabaseAdmin, companyId, member.id),
           mfaEnabled: member.totp_enabled === true,
         },
         documents: signedDocuments,
@@ -1043,7 +1045,7 @@ export default async function handler(req, res) {
       }
       const target = rows[0];
       const manager = canManageCompany(session);
-      const structural = ['role', 'isOwner', 'title', 'departments', 'divisions', 'defaultSiteId'].filter(k => k in req.body);
+      const structural = ['role', 'isOwner', 'title', 'departments', 'divisions', 'defaultSiteId', 'hideUnassigned'].filter(k => k in req.body);
       if (structural.length > 0 && !manager) {
         return res.status(403).json({ error: 'Only the account owner can change roles, titles, departments, divisions or default sites.' });
       }
@@ -1110,6 +1112,10 @@ export default async function handler(req, res) {
         const divisions = await sanitizeDivisionIds(supabaseAdmin, target.company_id, req.body.divisions);
         if (!divisions) return res.status(400).json({ error: 'Invalid division.' });
         updates.divisions = divisions;
+      }
+      if ('hideUnassigned' in req.body) {
+        if (typeof req.body.hideUnassigned !== 'boolean') return res.status(400).json({ error: 'Invalid setting.' });
+        updates.hide_unassigned = req.body.hideUnassigned;
       }
       if ('defaultSiteId' in req.body) {
         const siteId = await sanitizeDefaultSite(supabaseAdmin, target.company_id, req.body.defaultSiteId);
@@ -1200,7 +1206,11 @@ export default async function handler(req, res) {
     if (action === 'list_sites') {
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
-      const { data, error } = await supabaseAdmin.from('sites').select('id, name').eq('company_id', companyId).order('name');
+      // division_id arrived later; a database without it answers the old shape.
+      let { data, error } = await supabaseAdmin.from('sites').select('id, name, division_id').eq('company_id', companyId).order('name');
+      if (error && ['42703', 'PGRST204'].includes(String(error.code || ''))) {
+        ({ data, error } = await supabaseAdmin.from('sites').select('id, name').eq('company_id', companyId).order('name'));
+      }
       if (error) return res.status(500).json({ error: 'Could not load sites.' });
       // The signed-in person's own default site, so forms can preselect it.
       // Only ever their own row in their own company.
@@ -1209,7 +1219,7 @@ export default async function handler(req, res) {
         const { data: me } = await supabaseAdmin.from('roster').select('default_site_id').eq('id', session.userId).limit(1);
         defaultSiteId = (me && me[0] && me[0].default_site_id) || null;
       }
-      return res.status(200).json({ sites: data || [], defaultSiteId });
+      return res.status(200).json({ sites: (data || []).map(s => ({ id: s.id, name: s.name, divisionId: s.division_id || null })), defaultSiteId });
     }
 
     // ══ DEPARTMENTS, DIVISIONS AND THE SIGNED-IN PERSON'S PROFILE ════════
@@ -1286,6 +1296,7 @@ export default async function handler(req, res) {
         for (const h of holders || []) {
           await supabaseAdmin.from('roster').update({ departments: (h.departments || []).filter(d => d !== key) }).eq('id', h.id).eq('company_id', companyId);
         }
+        await endAssignmentsForAudience(supabaseAdmin, companyId, 'department', key);
         await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'delete_department', companyId, targetType: 'department', targetId: key, details: { by_roster_id: session.userId || null } });
         return res.status(200).json({ ok: true, departments: await listDepartments(supabaseAdmin, companyId) });
       }
@@ -1324,8 +1335,98 @@ export default async function handler(req, res) {
       for (const h of holders || []) {
         await supabaseAdmin.from('roster').update({ divisions: (h.divisions || []).filter(d => d !== divisionId) }).eq('id', h.id).eq('company_id', companyId);
       }
+      await endAssignmentsForAudience(supabaseAdmin, companyId, 'division', divisionId);
       await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'delete_division', companyId, targetType: 'division', targetId: divisionId, details: { by_roster_id: session.userId || null } });
       return res.status(200).json({ ok: true, divisions: await listDivisions(supabaseAdmin, companyId) });
+    }
+
+    // ══ DOCUMENT ASSIGNMENTS (the Owner's screen) ═══════════════════════════
+    // Who may submit or view which document. Rows only ever narrow access;
+    // enforcement is server-lib/documentAccess.js. Owner and founder only,
+    // and every id is checked against the company in
+    // server-lib/assignmentAdmin.js.
+    if (action === 'list_document_assignments' || action === 'create_document_assignment'
+        || action === 'end_document_assignment' || action === 'set_site_division') {
+      if (!canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can change document assignments.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const missingTable = (e) => !!e && ['42P01', 'PGRST205'].includes(String(e.code || ''));
+      const SETUP_MSG = "Document assignments aren't switched on for this database yet. Contact FORA support.";
+
+      if (action === 'list_document_assignments') {
+        const [documents, rowsRes, peopleRes] = await Promise.all([
+          listAssignableDocuments(supabaseAdmin, companyId),
+          supabaseAdmin.from('document_assignments')
+            .select('id, document_key, audience_type, audience_value, action, due_at, created_at')
+            .eq('company_id', companyId).is('ended_at', null).order('created_at', { ascending: true }),
+          supabaseAdmin.from('roster').select('id, role, departments, divisions, default_site_id').eq('company_id', companyId).eq('active', true),
+        ]);
+        if (rowsRes.error && !missingTable(rowsRes.error)) return res.status(500).json({ error: 'Could not load assignments.' });
+        if (peopleRes.error) return res.status(500).json({ error: 'Could not load assignments.' });
+        let siteRes = await supabaseAdmin.from('sites').select('id, division_id').eq('company_id', companyId);
+        if (siteRes.error) siteRes = { data: [] };
+        const siteDivision = new Map((siteRes.data || []).map(s => [s.id, s.division_id]));
+        return res.status(200).json({
+          documents,
+          needsSetup: missingTable(rowsRes.error),
+          assignments: describeAssignments(rowsRes.data || [], peopleRes.data || [], siteDivision),
+        });
+      }
+
+      if (action === 'create_document_assignment') {
+        // `action` on the request is this endpoint's own verb, so the assignment's
+        // verb (submit or view) arrives as `assignAction`.
+        const checked = await validateAssignment(supabaseAdmin, companyId, { ...req.body, action: req.body.assignAction });
+        if (checked.error) return res.status(checked.status).json({ error: checked.error });
+        const { data: active, error: readErr } = await supabaseAdmin.from('document_assignments')
+          .select('id, document_key, audience_type, audience_value, action').eq('company_id', companyId).is('ended_at', null);
+        if (readErr) return res.status(500).json({ error: missingTable(readErr) ? SETUP_MSG : "Couldn't save the assignment." });
+        if ((active || []).length >= MAX_ACTIVE_ASSIGNMENTS) return res.status(400).json({ error: 'Assignment limit reached.' });
+        const r = checked.row;
+        if ((active || []).some(a => a.document_key === r.document_key && a.action === r.action
+            && a.audience_type === r.audience_type && (a.audience_value || null) === (r.audience_value || null))) {
+          return res.status(409).json({ error: 'That assignment already exists.' });
+        }
+        const { data: created, error } = await supabaseAdmin.from('document_assignments')
+          .insert({ ...r, company_id: companyId, created_by: session.userId || null }).select('id').single();
+        if (error) {
+          console.error('create_document_assignment failed:', error.message);
+          return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't save the assignment." });
+        }
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'create_document_assignment', companyId, targetType: 'document_assignment', targetId: created.id, details: { document_key: r.document_key, audience_type: r.audience_type, audience_value: r.audience_value, assignment_action: r.action, by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true, id: created.id });
+      }
+
+      if (action === 'end_document_assignment') {
+        const id = Number(req.body.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'Missing id.' });
+        const { data: ended, error } = await supabaseAdmin.from('document_assignments')
+          .update({ ended_at: new Date().toISOString() }).eq('id', id).eq('company_id', companyId).is('ended_at', null).select('id');
+        if (error) return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't remove the assignment." });
+        if (!ended || ended.length === 0) return res.status(404).json({ error: 'Not found.' });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'end_document_assignment', companyId, targetType: 'document_assignment', targetId: id, details: { by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true });
+      }
+
+      if (action === 'set_site_division') {
+        const siteId = Number(req.body.siteId);
+        if (!Number.isInteger(siteId)) return res.status(400).json({ error: 'Pick a site.' });
+        const { data: siteRows } = await supabaseAdmin.from('sites').select('id').eq('id', siteId).eq('company_id', companyId).limit(1);
+        if (!siteRows || siteRows.length === 0) return res.status(403).json({ error: 'Not allowed for this site.' });
+        let divisionId = null;
+        if (req.body.divisionId !== null && req.body.divisionId !== undefined && req.body.divisionId !== '') {
+          const ids = await sanitizeDivisionIds(supabaseAdmin, companyId, [req.body.divisionId]);
+          if (!ids || ids.length !== 1) return res.status(400).json({ error: 'Pick one of your divisions.' });
+          divisionId = ids[0];
+        }
+        const { error } = await supabaseAdmin.from('sites').update({ division_id: divisionId }).eq('id', siteId).eq('company_id', companyId);
+        if (error) {
+          console.error('set_site_division failed:', error.message);
+          return res.status(500).json({ error: ['42703', 'PGRST204'].includes(String(error.code || '')) ? SETUP_MSG : "Couldn't save the site's division." });
+        }
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'set_site_division', companyId, targetType: 'site', targetId: siteId, details: { division_id: divisionId, by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true });
+      }
     }
 
     // The signed-in person's own profile, for auto-filling forms and showing
@@ -1441,6 +1542,7 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('sites').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove site." });
+      await endAssignmentsForAudience(supabaseAdmin, site.company_id, 'site', id);
       return res.status(200).json({ ok: true });
     }
 

@@ -15,6 +15,7 @@ import { getPunchLocation } from "./punchLocation";
 import WorkerMenu from "./WorkerMenu";
 import WorkerProfileDrawer from "./WorkerProfileDrawer";
 import CompanyStructureManager from "./CompanyStructureManager.jsx";
+import DocumentAssignmentsManager from "./DocumentAssignmentsManager.jsx";
 import useCompanyStructure from "./useCompanyStructure.js";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
@@ -3563,6 +3564,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           ...(canManageCompany ? {
             role: draft.role, isOwner: draft.isOwner, title: draft.title, departments: draft.departments,
             divisions: draft.divisions, defaultSiteId: draft.defaultSiteId ? Number(draft.defaultSiteId) : null,
+            // Only sent when changed, so saving an unrelated field never
+            // depends on the hide_unassigned column existing.
+            ...(draft.hideUnassigned !== draft.hideUnassignedLoaded ? { hideUnassigned: draft.hideUnassigned } : {}),
           } : {}),
         }),
       });
@@ -7868,7 +7872,19 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   companyId={selectedCompany}
                   departments={companyStructure.departments}
                   divisions={companyStructure.divisions}
+                  sites={companyStructure.sites}
                   onChanged={companyStructure.reload}
+                />
+              )}
+
+              {canManageCompany && (
+                <DocumentAssignmentsManager
+                  token={token}
+                  companyId={selectedCompany}
+                  departments={companyStructure.departments}
+                  divisions={companyStructure.divisions}
+                  sites={companyStructure.sites}
+                  roster={rosterList}
                 />
               )}
 

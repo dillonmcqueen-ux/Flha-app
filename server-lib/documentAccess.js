@@ -117,11 +117,18 @@ export async function loadActor(supabase, session) {
   }
   if (!session.userId) return { actor: null, error: false };
 
-  const { data: rows, error } = await supabase
+  // hide_unassigned arrived after the other columns. A database that does not
+  // have it yet answers 42703, and the read is retried without it so a
+  // missing column never takes every submit and list down with it.
+  const BASE_COLUMNS = 'id, role, is_owner, departments, divisions, default_site_id, company_id';
+  let { data: rows, error } = await supabase
     .from('roster')
-    .select('id, role, is_owner, departments, divisions, default_site_id, company_id')
+    .select(`${BASE_COLUMNS}, hide_unassigned`)
     .eq('id', session.userId)
     .limit(1);
+  if (error && isMissingSchema(error)) {
+    ({ data: rows, error } = await supabase.from('roster').select(BASE_COLUMNS).eq('id', session.userId).limit(1));
+  }
   if (error) return { actor: null, error: true };
   const r = rows && rows[0];
   if (!r || r.company_id !== session.companyId) return { actor: null, error: false };
@@ -148,6 +155,8 @@ export async function loadActor(supabase, session) {
       departments: Array.isArray(r.departments) ? r.departments : [],
       divisionIds,
       siteIds,
+      // The Owner hid every document that is not assigned to this person.
+      hideUnassigned: r.hide_unassigned === true,
     },
     error: false,
   };
@@ -187,6 +196,11 @@ export function activeRowsAsOf(rows, asOfMs) {
 export function evaluateAccess(rows, actor, action, asOfMs) {
   if (actor.bypass) return { narrowed: false, allowed: true };
   const active = activeRowsAsOf(rows, asOfMs).filter((r) => r.action === action);
+  // "Hide everything not assigned to me": with no row naming this person the
+  // document is off for them, even when nobody else has been narrowed.
+  if (action === SUBMIT && actor.hideUnassigned) {
+    return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
+  }
   if (active.length === 0) return { narrowed: false, allowed: true };
   return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
 }
@@ -263,7 +277,12 @@ export async function menuAccessFor(supabase, session, documentKeys) {
     const mine = activeRowsAsOf(forKey, now).filter((r) => r.action === SUBMIT && matchesAudience(r, actor));
     if (mine.length > 0) {
       const dues = mine.map((r) => (r.due_at ? Date.parse(r.due_at) : null)).filter((t) => t !== null);
-      assigned.push({ documentKey: key, dueAt: dues.length ? new Date(Math.min(...dues)).toISOString() : null });
+      const sinceMs = Math.min(...mine.map((r) => Date.parse(r.created_at)).filter((t) => Number.isFinite(t)));
+      assigned.push({
+        documentKey: key,
+        dueAt: dues.length ? new Date(Math.min(...dues)).toISOString() : null,
+        since: Number.isFinite(sinceMs) ? new Date(sinceMs).toISOString() : null,
+      });
     }
   }
   return { allowedKeys, assigned, error: false };
@@ -378,4 +397,58 @@ export async function listVisibleRecordsMulti(supabase, session, records, keyOf,
     kept = records.filter((r) => allowedByKey.get(keyOf(r)));
   }
   return scopeRecords(supabase, session, kept, opts);
+}
+
+/**
+ * One person's hide-unassigned flag, tolerant of the column not existing yet
+ * (returns false). For profile screens; enforcement reads it in loadActor.
+ */
+export async function readHideUnassigned(supabase, companyId, rosterId) {
+  const { data, error } = await supabase
+    .from('roster').select('hide_unassigned').eq('id', rosterId).eq('company_id', companyId).limit(1);
+  if (error || !data || !data[0]) return false;
+  return data[0].hide_unassigned === true;
+}
+
+// Where each document's submissions live and how they join to the author.
+// Monthly, custom and Portal rows have no company_id of their own; they are
+// reached through their form or document, which is already this company's.
+const COMPLETION_SOURCES = {
+  flha: { table: 'flhas' },
+  inspection: { table: 'inspections' },
+  toolbox: { table: 'toolbox_talks' },
+  nearmiss: { table: 'near_misses' },
+  incident: { table: 'incidents' },
+  daily: { table: 'daily_reports' },
+  fuellog: { table: 'fuel_logs' },
+  monthly: { table: 'inspection_records' },
+};
+
+/**
+ * Adds `completedAt` to each assignment: this person's latest submission of
+ * that document made at or after the assignment began, or null. Derived from
+ * the author stamp on the record, never stored. A document whose records
+ * carry no author (an anonymous near miss) can never show as done. Best
+ * effort: any read error leaves completedAt null.
+ */
+export async function withCompletion(supabase, session, assigned) {
+  if (!session || !session.userId || assigned.length === 0) return assigned;
+  return Promise.all(assigned.map(async (a) => {
+    try {
+      let q;
+      const custom = /^custom_(\d+)$/.exec(a.documentKey);
+      const portal = /^portal_(\d+)$/.exec(a.documentKey);
+      if (custom) q = supabase.from('custom_form_records').select('created_at').eq('form_id', Number(custom[1]));
+      else if (portal) q = supabase.from('portal_records').select('created_at').eq('document_id', Number(portal[1]));
+      else if (COMPLETION_SOURCES[a.documentKey]) {
+        q = supabase.from(COMPLETION_SOURCES[a.documentKey].table).select('created_at');
+        if (a.documentKey !== 'monthly') q = q.eq('company_id', session.companyId);
+      } else return { ...a, completedAt: null };
+      if (a.since) q = q.gte('created_at', a.since);
+      const { data, error } = await q.eq('submitted_by_roster_id', session.userId).order('created_at', { ascending: false }).limit(1);
+      return { ...a, completedAt: !error && data && data[0] ? data[0].created_at : null };
+    } catch (e) {
+      return { ...a, completedAt: null };
+    }
+  }));
 }

@@ -30,7 +30,7 @@ export default function WorkerProfileDrawer({
   // Owner or founder. Everyone else sees the structural fields read-only.
   canManage = false, departments = [], divisions = [], sites = [],
 }) {
-  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", isOwner: false, title: "", departments: [], divisions: [], defaultSiteId: "" });
+  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", isOwner: false, title: "", departments: [], divisions: [], defaultSiteId: "", hideUnassigned: false, hideUnassignedLoaded: false });
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -40,6 +40,7 @@ export default function WorkerProfileDrawer({
         email: m.email || "", phone: m.phone || "", role: m.role, isOwner: m.isOwner === true,
         title: m.title || "", departments: m.departments || [], divisions: m.divisions || [],
         defaultSiteId: m.defaultSiteId || "",
+        hideUnassigned: m.hideUnassigned === true, hideUnassignedLoaded: m.hideUnassigned === true,
       });
       setDirty(false);
     }
@@ -161,6 +162,18 @@ export default function WorkerProfileDrawer({
                     )}
                   </div>
 
+                  {!draft.isOwner && (
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: C.text.body, cursor: "pointer" }}>
+                        <input type="checkbox" checked={draft.hideUnassigned} onChange={e => { setDraft(d => ({ ...d, hideUnassigned: e.target.checked })); setDirty(true); }} />
+                        Only show documents assigned to this person
+                      </label>
+                      <div style={{ fontSize: 11, color: C.text.faint, marginTop: 4, lineHeight: 1.5 }}>
+                        Every other document is hidden from their menu and blocked on the server until you assign it to them under Document assignments.
+                      </div>
+                    </div>
+                  )}
+
                   <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 4 }}>Default site</label>
                   <select style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }} value={draft.defaultSiteId} onChange={set("defaultSiteId")}>
                     <option value="">None</option>
@@ -174,6 +187,7 @@ export default function WorkerProfileDrawer({
                   <div><span style={{ color: C.text.faint }}>Departments:</span> {(member.departments || []).length ? member.departments.map(deptLabel).join(", ") : "None"}</div>
                   <div><span style={{ color: C.text.faint }}>Divisions:</span> {(member.divisions || []).length ? member.divisions.map(divName).filter(Boolean).join(", ") : "None"}</div>
                   <div><span style={{ color: C.text.faint }}>Default site:</span> {member.defaultSiteId ? siteName(member.defaultSiteId) || "Set" : "None"}</div>
+                  {member.hideUnassigned && <div><span style={{ color: C.text.faint }}>Documents:</span> Only the ones assigned to them</div>}
                   <div style={{ fontSize: 11, color: C.text.faint, marginTop: 4 }}>Only the account owner can change these.</div>
                 </div>
               )}

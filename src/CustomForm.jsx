@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { generateAndUploadCustomForm } from "./generateCustomFormPDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle } from "./FormKit";
@@ -31,7 +31,7 @@ export async function resubmitCustomForm(payload, clientSubmissionId, tokenForRe
     res = await fetch("/api/customforms", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "submit_custom", token: tokenForRequest, clientSubmissionId,
+        action: "submit_custom", token: tokenForRequest, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         siteId, formId, submittedBy, aiSummary, aiAssisted, pdfUrl,
         answers: items.map(it => ({ questionId: it.questionId, answer: it.answer, note: it.note || "" })),
       }),

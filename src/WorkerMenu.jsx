@@ -88,6 +88,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // every worker, same interim behavior custom forms already have.
   const [portalDocumentId, setPortalDocumentId] = useState(null);
   const [portalDocuments, setPortalDocuments] = useState([]);
+  // Documents the Owner assigned to this person, with due dates and whether
+  // they have already filled them in. Shown first on the menu.
+  const [assignedBuiltin, setAssignedBuiltin] = useState([]);
+  const [assignedPortal, setAssignedPortal] = useState([]);
   const [showMyDocs, setShowMyDocs] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
@@ -109,6 +113,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
         if (res.ok) {
           setBuiltinActive(data.builtinActive || {});
           setCustomForms(data.customForms || []);
+          setAssignedBuiltin(data.assigned || []);
         } else {
           // If the endpoint fails, default to showing everything so workers
           // aren't locked out by a transient error.
@@ -129,7 +134,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           body: JSON.stringify({ action: "get_worker_portal_documents", token }),
         });
         const data = await res.json();
-        if (res.ok) setPortalDocuments(data.documents || []);
+        if (res.ok) { setPortalDocuments(data.documents || []); setAssignedPortal(data.assigned || []); }
       } catch (e) { /* leave list empty on a transient error */ }
     }
     loadPortalDocs();
@@ -319,6 +324,47 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     .filter(cat => cat.builtins.length > 0 || cat.forms.length > 0);
 
   const totalItems = categorizedBuiltins.length + customForms.length + portalDocuments.length + (timeclockItem ? 1 : 0);
+
+  // "Assigned to you": built-in, custom and Portal documents the Owner named
+  // this person for, soonest due first, finished ones last. The server has
+  // already removed anything switched off or assigned to someone else.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const describeAssignment = (a) => {
+    if (a.completedAt) return { status: "done", statusText: `Done ${new Date(a.completedAt).toLocaleDateString("en-CA")}` };
+    if (!a.dueAt) return { status: "open", statusText: "Assigned to you" };
+    const due = new Date(a.dueAt);
+    const days = Math.ceil((due.getTime() - Date.now()) / dayMs);
+    if (days < 0) return { status: "overdue", statusText: `Overdue, was due ${due.toLocaleDateString("en-CA")}` };
+    if (days === 0) return { status: "soon", statusText: "Due today" };
+    return { status: "soon", statusText: `Due ${due.toLocaleDateString("en-CA")}` };
+  };
+  const assignedItems = [
+    ...assignedBuiltin.map(a => {
+      const customMatch = /^custom_(\d+)$/.exec(a.documentKey);
+      if (customMatch) {
+        const f = customForms.find(x => String(x.id) === customMatch[1]);
+        if (!f) return null;
+        return { key: a.documentKey, a, title: f.title, accent: f.accent_color || "#4338CA", open: () => { setCustomFormId(f.id); setDoc("custom"); },
+          iconNode: f.icon ? <span style={{ fontSize: 22 }}>{f.icon}</span> : <FileText size={22} color={f.accent_color || "#4338CA"} strokeWidth={2.25} /> };
+      }
+      const t = BUILTIN_TYPES.find(x => x.key === a.documentKey);
+      if (!t || (builtinActive && builtinActive[t.key] === false)) return null;
+      const Icon = t.icon;
+      return { key: a.documentKey, a, title: t.title, accent: t.accent, open: () => setDoc(t.key), iconNode: <Icon size={22} color={t.accent} strokeWidth={2.25} /> };
+    }),
+    ...assignedPortal.map(a => {
+      const m = /^portal_(\d+)$/.exec(a.documentKey);
+      const d = m && portalDocuments.find(x => String(x.id) === m[1]);
+      if (!d) return null;
+      return { key: a.documentKey, a, title: d.title, accent: "#F97316", open: () => { setPortalDocumentId(d.id); setDoc("portal"); },
+        iconNode: d.icon ? <span style={{ fontSize: 22 }}>{d.icon}</span> : <FileText size={22} color="#F97316" strokeWidth={2.25} /> };
+    }),
+  ].filter(Boolean).map(it => ({ ...it, ...describeAssignment(it.a) }))
+    .sort((x, y) => {
+      const rank = (i) => (i.status === "done" ? 3 : i.status === "overdue" ? 0 : i.a.dueAt ? 1 : 2);
+      if (rank(x) !== rank(y)) return rank(x) - rank(y);
+      return new Date(x.a.dueAt || "9999-01-01") - new Date(y.a.dueAt || "9999-01-01");
+    });
 
   const renderItemCard = (d) => {
     const Icon = d.icon;
@@ -571,6 +617,28 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           >
             Sign-in security
           </button>
+        )}
+
+        {assignedItems.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: C.text.muted, marginBottom: 8 }}>
+              Assigned to you
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {assignedItems.map(it => (
+                <div key={it.key} style={s.card(it.accent, true)} onClick={it.open}>
+                  <div style={s.iconTile(it.accent)}>{it.iconNode}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{it.title}</div>
+                    <div style={{ fontSize: 13, marginTop: 1, fontWeight: it.status === "overdue" ? 700 : 400, color: it.status === "done" ? C.status.success.text : it.status === "overdue" ? C.status.danger.text : C.text.muted }}>
+                      {it.statusText}
+                    </div>
+                  </div>
+                  <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         <div style={{ display: "grid", gap: 12 }}>

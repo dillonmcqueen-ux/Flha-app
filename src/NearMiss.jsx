@@ -3,7 +3,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { siteIdForName } from "./siteLookup.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
@@ -51,7 +51,7 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
         type: "nearmiss",
         action: "submit",
         token: tokenForRequest,
-        clientSubmissionId,
+        clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         signatureReceipt,
         record: {
           reporter_name: reporterLabel,

@@ -199,6 +199,17 @@ export function isPermanentRejection(error) {
   return true;
 }
 
+// clientSubmissionId -> ISO time the entry was filled in, present only while
+// that entry is being replayed.
+const replayTimes = new Map();
+
+// The time a queued entry was filled in, for the request body of its replay;
+// undefined for a live submit. The server only honours it alongside the
+// clientSubmissionId and only up to 48 hours back (documentAccess.js).
+export function queuedAtFor(clientSubmissionId) {
+  return replayTimes.get(clientSubmissionId);
+}
+
 // Drains every queued item for `formType`, calling `resubmit(payload)` for
 // each. `resubmit` must return a truthy result on success (falls through
 // to removing the item) or throw on failure.
@@ -243,7 +254,17 @@ export async function drainQueue(formType, resubmit) {
   const results = { succeeded: 0, remaining: items.length, lastError: null, pdfUnlinked: 0, dropped: [] };
   for (const item of items) {
     try {
-      const response = await resubmit(item.payload, item.clientSubmissionId);
+      // Tells the form's request builder (via queuedAtFor) when this entry
+      // was filled in, so the server judges assignments as of then rather
+      // than as of this replay. Keyed by id because the form types drain in
+      // parallel.
+      replayTimes.set(item.clientSubmissionId, new Date(item.createdAt).toISOString());
+      let response;
+      try {
+        response = await resubmit(item.payload, item.clientSubmissionId);
+      } finally {
+        replayTimes.delete(item.clientSubmissionId);
+      }
       if (response && response.pdfLinked === false) results.pdfUnlinked += 1;
       await removeQueued(item.id);
       results.succeeded += 1;

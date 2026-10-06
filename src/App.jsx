@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { siteIdForName } from "./siteLookup.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
@@ -43,7 +43,7 @@ export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest)
       body: JSON.stringify({
         action: "submit",
         token: tokenForRequest,
-        clientSubmissionId,
+        clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         aiEditSignal: aiEditSignal || null,
         record: {
           worker_name: workerName,
