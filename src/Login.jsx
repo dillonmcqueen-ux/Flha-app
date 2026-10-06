@@ -4,7 +4,7 @@ import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 import MfaSetup from "./MfaSetup.jsx";
-import { KeyRound, Search, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { KeyRound, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import { setDraftUser } from "./useDraftAutosave.js";
 
@@ -55,16 +55,18 @@ function clearSession() {
 
 export default function Login() {
   const [session, setSession] = useState(null);
-  const [role, setRole] = useState(null); // null (company search) or "admin" (founder access). The logged-in role always comes back from the server.
+  const [role, setRole] = useState(null); // null (company code) or "admin" (founder access). The logged-in role always comes back from the server.
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
   const [adminDashCompany, setAdminDashCompany] = useState(null); // admin viewing a specific company's dashboard
 
-  // Company search (step 1 for everyone except the founder)
-  const [companyQuery, setCompanyQuery] = useState("");
-  const [companyResults, setCompanyResults] = useState([]);
-  const [searching, setSearching] = useState(false);
+  // Company code (step 1 for everyone except the founder)
+  const [companyCode, setCompanyCode] = useState("");
+  // Set when a PIN or authenticator attempt hits the lockout, so the Account
+  // Owner can ask for an emailed unlock link.
+  const [lockedOut, setLockedOut] = useState(false);
+  const [unlockNote, setUnlockNote] = useState("");
 
   // Roster login
   const [companyTicket, setCompanyTicket] = useState(null);
@@ -108,35 +110,11 @@ export default function Login() {
     if (s && s.role) setSession(s);
   }, []);
 
-  // Type 3+ letters of the company name; results come back after a short pause.
-  useEffect(() => {
-    const q = companyQuery.trim();
-    if (q.length < 3) { setCompanyResults([]); setSearching(false); return; }
-    let cancelled = false;
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch("/api/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "search_companies", query: q }),
-        });
-        const data = await res.json();
-        if (cancelled) return;
-        if (!res.ok) { setError(data.error || "Something went wrong. Please try again."); setCompanyResults([]); }
-        else { setError(""); setCompanyResults(data.companies || []); }
-      } catch (e) {
-        if (!cancelled) setError("Connection error. Please try again.");
-      }
-      if (!cancelled) setSearching(false);
-    }, 300);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [companyQuery]);
-
   const resetToRolePick = () => {
     setRole(null);
-    setCompanyQuery("");
-    setCompanyResults([]);
+    setCompanyCode("");
+    setLockedOut(false);
+    setUnlockNote("");
     setMasterRole("supervisor");
     setCode("");
     setError("");
@@ -212,10 +190,23 @@ export default function Login() {
     setChecking(false);
   };
 
-  const pickCompany = async (company) => {
+  const submitCompanyCode = async () => {
+    const entered = companyCode.trim();
+    if (!entered) { setError("Enter your company code."); return; }
     setError("");
     setChecking(true);
     try {
+      const found = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "find_company", code: entered }),
+      });
+      const company = await found.json();
+      if (!found.ok) {
+        setError(company.error || "Something went wrong. Please try again.");
+        setChecking(false);
+        return;
+      }
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -228,10 +219,32 @@ export default function Login() {
         return;
       }
       setCompanyTicket(company.companyTicket);
-      setRosterCompanyName(company.name || "");
+      setRosterCompanyName(company.companyName || "");
       setRosterNames(data.names || []);
     } catch (e) {
       setError("Connection error. Please try again.");
+    }
+    setChecking(false);
+  };
+
+  // The Account Owner's way back in after a lockout: an emailed single-use link.
+  // The server answers the same whoever asks, so this never says whether it sent.
+  const requestUnlockLink = async () => {
+    if (!selectedRoster) return;
+    setUnlockNote("");
+    setChecking(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "request_unlock_link", companyTicket, rosterId: selectedRoster.id }),
+      });
+      const data = await res.json();
+      setUnlockNote(res.ok
+        ? "If you are the Account Owner and have an email on file, an unlock link is on its way. Check your inbox."
+        : (data.error || "Something went wrong. Please try again."));
+    } catch (e) {
+      setUnlockNote("Connection error. Please try again.");
     }
     setChecking(false);
   };
@@ -240,6 +253,8 @@ export default function Login() {
     setSelectedRoster(member);
     setPin("");
     setError("");
+    setLockedOut(false);
+    setUnlockNote("");
   };
 
   const pickMasterCompany = async (companyId) => {
@@ -313,6 +328,7 @@ export default function Login() {
         const msg = data.error || "Something went wrong. Please try again.";
         // PIN rejected or locked while on the code screen: back to the start.
         if (totpRequired) resetToRolePick();
+        setLockedOut(!!data.locked);
         setError(msg);
         setPin("");
         setChecking(false);
@@ -652,7 +668,16 @@ export default function Login() {
               </button>
             )}
 
-            <button style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); }}>
+            {lockedOut && (
+              <div style={{ marginBottom: 10 }}>
+                <button style={styles.backBtn} disabled={checking} onClick={requestUnlockLink}>
+                  Account Owner? Email me an unlock link
+                </button>
+                {unlockNote && <div style={{ fontSize: 12, color: C.text.muted, marginTop: 8, lineHeight: 1.5 }}>{unlockNote}</div>}
+              </div>
+            )}
+
+            <button style={styles.backBtn} onClick={() => { setSelectedRoster(null); setPin(""); setError(""); setLockedOut(false); setUnlockNote(""); }}>
               <ChevronLeft size={14} /> Not {selectedRoster.name}?
             </button>
           </>
@@ -691,46 +716,33 @@ export default function Login() {
             </button>
           </>
         ) : (
-          // ── Step 1: find your company by name ───────────────────────
+          // ── Step 1: type your company code ──────────────────────────
           <>
             <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Sign in</div>
-            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Search for your company by name.</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Enter your company code. Your supervisor can give it to you.</div>
 
-            <div style={{ position: "relative" }}>
-              <input
-                style={{ ...styles.input, paddingLeft: 40 }}
-                type="text"
-                placeholder="Company name"
-                value={companyQuery}
-                onChange={e => { setCompanyQuery(e.target.value); setError(""); }}
-                autoComplete="off"
-                autoFocus
-              />
-              <Search size={16} color={C.text.muted} style={{ position: "absolute", left: 14, top: 15 }} />
-            </div>
-
-            <div style={{ maxHeight: 320, overflowY: "auto" }}>
-              {companyQuery.trim().length < 3 ? (
-                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>Type at least 3 letters.</div>
-              ) : searching && companyResults.length === 0 ? (
-                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>Searching…</div>
-              ) : companyResults.length === 0 && !error ? (
-                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>No company found. Check the spelling, or ask your supervisor.</div>
-              ) : (
-                companyResults.map(c => (
-                  <button key={c.companyTicket} style={styles.nameBtn(false)} disabled={checking} onClick={() => pickCompany(c)}>
-                    <span>{c.name}</span>
-                    <ChevronRight size={16} color={C.text.muted} />
-                  </button>
-                ))
-              )}
-            </div>
+            <input
+              style={{ ...styles.input, textTransform: "uppercase", letterSpacing: 1 }}
+              type="text"
+              placeholder="Company code"
+              value={companyCode}
+              onChange={e => { setCompanyCode(e.target.value); setError(""); }}
+              onKeyDown={e => { if (e.key === "Enter" && !checking) submitCompanyCode(); }}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              autoFocus
+            />
 
             {error && (
-              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
                 <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
               </div>
             )}
+
+            <button style={{ ...styles.primaryBtn, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={submitCompanyCode} disabled={checking || !companyCode.trim()}>
+              {checking ? "Checking…" : (<>Continue <ChevronRight size={16} /></>)}
+            </button>
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
               <button style={styles.adminBtn(adminAccent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>

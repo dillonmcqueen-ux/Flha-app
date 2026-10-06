@@ -43,7 +43,7 @@ const AI_RESPONSE = {
   tomorrowPlan: 'Strip forms and begin south footings.',
 };
 
-// Answers every step of the company-name login (search, name list, PIN) the
+// Answers every step of the company-code login (code, name list, PIN) the
 // way the real api/login.js does, so a test can sign in through the real
 // screens. `role` is what the PIN step hands back; `userName` is the one name
 // on the roster. `sessionUserName` is what the session carries: the worker
@@ -51,8 +51,8 @@ const AI_RESPONSE = {
 async function fulfillLoginStep(route, { role, companyId, companyName, userName, sessionUserName = userName, userId }) {
   const body = route.request().postDataJSON() || {};
   const json = (payload) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
-  if (body.action === 'search_companies') {
-    return json({ companies: [{ name: companyName, companyTicket: 'test-ticket' }] });
+  if (body.action === 'find_company') {
+    return json({ companyTicket: 'test-ticket', companyName });
   }
   if (body.action === 'list_roster_names') {
     return json({ names: [{ id: userId || 'test-roster-id', name: userName }], companyName });
@@ -241,12 +241,12 @@ export async function mockExternalServices(page) {
   });
 }
 
-// Company name, then your name, then your PIN: the same three steps a person
+// Company code, then your name, then your PIN: the same three steps a person
 // takes. A 6 digit PIN submits itself.
-async function signInThroughScreens(page, { companyName = 'Test Co', userName }) {
+async function signInThroughScreens(page, { userName }) {
   await page.goto('/');
-  await page.getByPlaceholder('Company name').fill(companyName.slice(0, 4));
-  await page.getByRole('button', { name: companyName }).click();
+  await page.getByPlaceholder('Company code').fill('TESTCODE');
+  await page.getByRole('button', { name: /^Continue/ }).click();
   await page.getByPlaceholder('Start typing your name…').fill(userName.slice(0, 3));
   await page.getByRole('button', { name: userName }).click();
   await page.locator('input[type="tel"]').fill('123456');

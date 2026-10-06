@@ -7,7 +7,7 @@
 import { getForaLogoDataUrl } from "./foraLogo.js";
 import { loadJsPDF } from "./loadJsPDF.js";
 
-export async function generateRosterPinsPDF({ companyName, roster }) {
+export async function generateRosterPinsPDF({ companyName, companyCode, roster }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -26,9 +26,9 @@ export async function generateRosterPinsPDF({ companyName, roster }) {
   doc.setTextColor(30, 41, 59); doc.setFontSize(11); doc.setFont("helvetica", "normal");
   doc.text(companyName || "N/A", margin + 4, y + 12);
   doc.setTextColor(217, 119, 6); doc.setFontSize(8); doc.setFont("helvetica", "bold");
-  doc.text("SIGN IN", margin + 4, y + 18);
-  doc.setTextColor(30, 41, 59); doc.setFontSize(9); doc.setFont("helvetica", "normal");
-  doc.text("Search for the company name, pick your name, enter your PIN.", margin + 24, y + 18);
+  doc.text("COMPANY CODE", margin + 4, y + 18);
+  doc.setTextColor(30, 41, 59); doc.setFontSize(11); doc.setFont("helvetica", "bold");
+  doc.text(companyCode || "N/A", margin + 44, y + 18);
   y += 32;
 
   doc.setTextColor(153, 27, 27); doc.setFontSize(9); doc.setFont("helvetica", "bold");

@@ -232,7 +232,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const [rosterCounts, setRosterCounts] = useState({});
   const [regeneratingAll, setRegeneratingAll] = useState(false);
   const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
-  const [allPinsResult, setAllPinsResult] = useState(null); // { roster: [{name, role, pin}], companyName }
+  const [allPinsResult, setAllPinsResult] = useState(null); // { roster: [{name, role, pin}], companyName, companyCode }
 
   const loadRoster = async (companyId) => {
     setLoadingRoster(true);
@@ -393,7 +393,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "Couldn't regenerate PINs."); setRegeneratingAll(false); return; }
-      setAllPinsResult({ roster: data.roster, companyName: activeCompany?.name || "" });
+      setAllPinsResult({ roster: data.roster, companyName: activeCompany?.name || "", companyCode: activeCompany?.company_code || "" });
       await loadRoster(activeId);
     } catch (e) {
       setMsg("Couldn't regenerate PINs. Try again.");
@@ -431,7 +431,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     enroll_mfa_confirm: "Enabled MFA",
     disable_mfa: "Disabled MFA",
     create_company: "Created company",
-    update_company_codes: "Changed company reference code",
+    update_company_codes: "Changed company code",
     unlock_roster_pin: "Unlocked a login",
     toggle_suspend: "Changed suspension",
     delete_company: "Deleted company",
@@ -737,7 +737,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const handleNameChange = (val) => {
     setNewName(val);
     const p = codePrefix(val);
-    setNewCompanyCode(`${p}-${randomSuffix()}`);
+    setNewCompanyCode(`${p}-${randomSuffix(5)}`);
   };
 
   // Company creation now goes through our protected server endpoint.
@@ -869,6 +869,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
   const saveCodes = async () => {
     setMsg("");
     if (!codesForm.companyCode.trim()) { setMsg("Company code cannot be empty."); return; }
+    if (!window.confirm("Save this company code? Staff will need the new code to sign in, so tell them first.")) return;
     setSavingCodes(true);
     try {
       const res = await fetch("/api/admin", {
@@ -881,7 +882,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       });
       const data = await res.json();
       if (!res.ok) { setMsg(data.error || "Couldn't update codes."); setSavingCodes(false); return; }
-      setMsg("Reference code updated"); await loadAll();
+      setMsg("Company code updated"); await loadAll();
     } catch (e) {
       setMsg("Couldn't update codes. Try again.");
     }
@@ -2414,9 +2415,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 
         {manageTab === "codes" && (
           <div style={st.card}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Company reference code</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Company code</div>
             <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 16 }}>
-              An internal reference only. It is not used to sign in. People search for the company by name, then pick their own name from the roster.
+              What the staff at this company type on the login page to find their company, then they pick their own name and enter their PIN. Letters, numbers and hyphens, 6 to 32 characters. The code alone gives no access, but anyone who has it can see the names on the roster, so share it only with that company. Changing it means telling them the new one.
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input style={{ ...st.input, marginBottom: 0, flex: 1 }} value={codesForm.companyCode} onChange={e => setCodesForm(f => ({ ...f, companyCode: e.target.value.toUpperCase() }))} />
@@ -2424,7 +2425,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             </div>
 
             <button style={{ ...st.amberBtn, width: "100%", marginTop: 18 }} onClick={saveCodes} disabled={savingCodes}>
-              {savingCodes ? "Saving…" : "Save reference code"}
+              {savingCodes ? "Saving…" : "Save company code"}
             </button>
 
             {onViewDashboard && (

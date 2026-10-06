@@ -7,8 +7,8 @@
 -- Workers and supervisors now find their company by name, then pick their own
 -- name and enter their own PIN. The shared worker/supervisor codes and the
 -- Gatehouse-era app_type flag have no reader left in the codebase.
--- companies.company_code is kept as an internal reference (it is unique and
--- shows up in Slack notices), and companies.roster_enabled is kept because the
+-- companies.company_code is kept: it is the code staff type to find their company
+-- (api/login.js find_company, chosen by the founder in the Admin Panel), and companies.roster_enabled is kept because the
 -- Dashboard and crons still read it; every company is on the roster now.
 
 alter table companies drop column if exists worker_code;

@@ -237,7 +237,7 @@ when PR #124 merges).
 | 22 | Maintenance Records | Equipment ▸ Maintenance Records (`Dashboard.jsx:6089`) | `api/maintenance.js:415` | `maintenance` |
 | 23 | Platform events (founder telemetry; **migration written, NOT applied live**, branch `platform-events-instrumentation`) | none yet (Admin Panel, planned phase 3c) | writer `server-lib/platformEvents.js:47` (`recordPlatformEvent`); table `docs/schema/platform-events-migration.sql:19` | *(none, platform-wide, not a company feature)* |
 | 24 | Founder Dashboard (Platform tab), slices 3a, 3b and 3c | `src/PlatformDashboard.jsx`, Admin Panel > Platform (`AdminPanel.jsx:32,1408-1409`); 3b adds Revenue, Company health and Seats cards (`PlatformDashboard.jsx:67-113`, mounted `:159`) | `api/admin.js:127-134` → `server-lib/platformOverview.js:221`; 3b is `server-lib/platformBusiness.js` `buildBusinessMetrics`, called at `platformOverview.js:190`; 3c is `server-lib/platformHealth.js` `buildPlatformHealth` (`platformOverview.js:19,194`), fed by the `platform_events` read at `platformOverview.js:258-268`, rendered by `HealthSection` (`PlatformDashboard.jsx:69`). *`loadPlatformOverview` is now at `:234`; the `:221` above and the 3b card anchors were not re-swept after 3c.* | *(none on purpose, admin-only, see §5)* |
-| 25 | Set-your-own-PIN link (roster onboarding; branch `claude/step-pin-setup-links`, `624ef31`, **migration `docs/schema/roster-pin-setup-link-migration.sql` written, not verified applied live**) | `src/WalletInvite.jsx` (route `/wallet`, `src/main.jsx:12`), `src/ClaimAccount.jsx`, roster rows in `src/Dashboard.jsx:7903-7909` and `src/AdminPanel.jsx:2366-2370` | producers `server-lib/onboardingApproval.js:140-167` (at company creation), `api/companydata.js:451` (`onboard_new_employee`), `:720` (`send_pin_setup_link`); consumer `api/login.js:694` (`pin_link_open` / `pin_link_set_pin`); lib `server-lib/setupLinks.js` | *(none, roster is platform base)* |
+| 25 | Set-your-own-PIN link (roster onboarding; branch `claude/step-pin-setup-links`, `624ef31`, **migration `docs/schema/roster-pin-setup-link-migration.sql` written, not verified applied live**) | `src/WalletInvite.jsx` (route `/wallet`, `src/main.jsx:12`), `src/ClaimAccount.jsx`, roster rows in `src/Dashboard.jsx:7903-7909` and `src/AdminPanel.jsx:2366-2370` | producers `server-lib/onboardingApproval.js:140-167` (at company creation), `api/companydata.js:451` (`onboard_new_employee`), `:720` (`send_pin_setup_link`); consumer `api/login.js:795` (`pin_link_open` / `pin_link_set_pin`); lib `server-lib/setupLinks.js` | *(none, roster is platform base)* |
 
 **The Equipment hub, 2026-09-17, corrected 2026-09-18.** Maintenance and Fuel
 Logs stopped being top-level tabs and became sub-tabs of Equipment, and the hub
@@ -536,7 +536,7 @@ is the first real consumer.** Read directly:
 |---|---|
 | Consumed — dashboard scoping | `api/portal.js:587-590` (`list_portal_records`) and `:634-637` (`get_portal_record_detail`) — only for an **individually-identified** supervisor session (`session.role === 'supervisor' && session.userId`); each looks up that caller's own `roster.departments` and keeps only `portal_documents` rows whose `departments` array intersects it (`.some(dep => myDepartments.includes(dep))`) |
 | Consumed — submission email | `api/portal.js`'s `submit_portal` — queries `roster` for `company_id`-scoped, active, `role: 'supervisor'` rows with an email on file, then filters to those whose `departments` intersect the submitted document's `departments`, and emails only that set |
-| Fallback (not a bug) | **Updated 2026-10-06 (`b2044ee`):** the shared company-code login is deleted, so the only supervisor session without `session.userId` left is the founder's `master_login` company-entry session (`api/login.js:837-849`, role picked by the founder, stored per tab, `src/Login.jsx:19`). It has no individual roster row to scope by, so both read actions fall back to unfiltered-within-company, same as before. Real customer supervisors always carry `userId` (`mintRosterSession`, `api/login.js:437-445`) |
+| Fallback (not a bug) | **Updated 2026-10-06 (`b2044ee`):** the shared company-code login is deleted, so the only supervisor session without `session.userId` left is the founder's `master_login` company-entry session (`api/login.js:888-921`, role picked by the founder, stored per tab, `src/Login.jsx:19`). It has no individual roster row to scope by, so both read actions fall back to unfiltered-within-company, same as before. Real customer supervisors always carry `userId` (`mintRosterSession`, `api/login.js:441-452`) |
 
 This closes the "no consumer yet" note phase 1 recorded above. The two
 re-check items flagged at that time are now answered:
@@ -776,7 +776,7 @@ lands in two shapes:
 So the new FK does not close break #2; for five forms it is one more id-to-string
 conversion at the client. Not a new break (nothing is lost today); #2's scope is unchanged.
 Also `list_sites` returns `defaultSiteId` only to a session with `session.userId`
-(`:1102`; line now `companydata.js:1179`, `b2044ee`); a no-userId session (today only the founder's `master_login` entry, `api/login.js:837-849`) gets `null` and no preselect, which is expected.
+(`:1102`; line now `companydata.js:1179`, `b2044ee`); a no-userId session (today only the founder's `master_login` entry, `api/login.js:888-921`) gets `null` and no preselect, which is expected.
 
 ### `roster_id` → `roster.id` (the person)
 | Feature | Link |
@@ -1036,7 +1036,7 @@ no new key of its own.
 Manager scoping matches the neighbouring Portal actions: an
 individually-identified supervisor only manages schedules for departments on
 their own roster row (`portal.js:1017-1034`, `:1072-1073`), missing and foreign
-ids get the same 403, no-userId supervisors have no department limit (since `b2044ee` that is only the founder's `master_login` session, `api/login.js:837-849`; the shared company-code login is gone).
+ids get the same 403, no-userId supervisors have no department limit (since `b2044ee` that is only the founder's `master_login` session, `api/login.js:888-921`; the shared company-code login is gone).
 Surfaces: `src/PortalReports.jsx` (Portal "Reports" sub-tab,
 `Dashboard.jsx:6271,6380-6381`) and the "Email to department" button in
 `PortalRecordCard` (`Dashboard.jsx:1610,1651`, department picker limited to
@@ -1058,9 +1058,9 @@ next pass doesn't re-derive it): `roster.email` is AES-256-GCM via
 `server-lib/fieldCrypto.js`, so it can't be `.eq()`-searched
 (`fieldCrypto.js:19-21`); every reader must call `withDecryptedEmail`/
 `decryptField` (`certifications.js:285`, `companydata.js:751,894`,
-`login.js:600`, `portal.js:603,644`, `portalReports.js:66`).
-`onboarding_requests.people_encrypted` is written `login.js:665,681` and
-consumed `login.js:860-868` (edit link, blanked once approved) and
+`login.js:825`, `portal.js:603,644`, `portalReports.js:66`).
+`onboarding_requests.people_encrypted` is written `login.js:949,965` and
+consumed `login.js:1142-1152` (edit link, blanked once approved) and
 `onboardingApproval.js:276-293` (approval writes the encrypted roster
 emails). Supervisors creating assignment rules: `portal.js:797-798`
 (`admin` or `supervisor`). The Overview "Company Portal" panel: **read
@@ -1407,7 +1407,7 @@ corrective actions the fourth writer of that table, alongside
 
 Replaces the plaintext wallet invite. `create_wallet_invite` and `redeem_wallet_invite` no longer exist (`grep -rn "wallet_invite" api/ server-lib/ src/` returns only `tests/unit/wallet-invite-modules.test.js:10`, a comment). The old `roster.wallet_invite_token` columns stay in the table unused (`docs/schema/roster-pin-setup-link-migration.sql:2`). Re-check: `grep -rn "pin_link_jti_hash" api/ server-lib/ src/`.
 
-**Key:** the link is a signed ticket `{purpose:'pin_setup', jti, rosterId, companyId}` (`server-lib/setupLinks.js:47-49`). The join is `roster.id` + `roster.company_id` **and** `roster.pin_link_jti_hash = sha256(jti)`, checked on open (`api/login.js:700-708`) and again inside the set-PIN UPDATE's WHERE (`:763`), which also clears it, so two parallel submits cannot both win. A worker session never carries this purpose, so `verifySession` rejects it (`setupLinks.js:4-5`).
+**Key:** the link is a signed ticket `{purpose:'pin_setup', jti, rosterId, companyId}` (`server-lib/setupLinks.js:47-49`). The join is `roster.id` + `roster.company_id` **and** `roster.pin_link_jti_hash = sha256(jti)`, checked on open (`api/login.js:802-812`) and again inside the set-PIN UPDATE's WHERE (`:872`), which also clears it, so two parallel submits cannot both win. A worker session never carries this purpose, so `verifySession` rejects it (`setupLinks.js:4-5`).
 
 | Side | Who | Evidence |
 |---|---|---|
@@ -1415,32 +1415,34 @@ Replaces the plaintext wallet invite. `create_wallet_invite` and `redeem_wallet_
 | Producer 1, company creation | everyone with an email, Owner first, cap 25, 3 parallel senders | `server-lib/onboardingApproval.js:148-167` (cap `setupLinks.js:18`), called `:364`; matches people to inserted rows by lower-cased name (`:149,157`) |
 | Producer 2, Owner adds a person | email required, link emailed; a worker's URL is also handed back to the caller | `api/companydata.js:451-520` (`:519` hand-back rule) |
 | Producer 3, resend | rank check via `canResetMfa` or self, throttled 5 per hour per person; no email on file means URL only, handed back | `api/companydata.js:720-760` |
-| Consumer | `pin_link_open` returns name, company, `emailOnFile`, `mfaRequired`, `hasAuthenticator`; `pin_link_set_pin` saves the PIN, sets `pin_set_at`, clears the link | `api/login.js:694-776` (`pin_set_at` `:753`) |
-| Feeds authenticator setup | `mfaNeeded = requiresMfa(member) && !totp_enabled` mints `mfa_setup_jti_hash` and returns `stage:'enroll'` + `enrollTicket`; the page redirects to `/?mfa_setup=` | `api/login.js:734,742-761,768-770`; `src/WalletInvite.jsx:114-118`; `src/Login.jsx:100`; consumer `mfa_enroll_start/confirm` `api/login.js:628` |
-| Already has an authenticator | PIN reset only, `stage:'signin'`, no session | `api/login.js:767`; `src/WalletInvite.jsx:119` |
-| Everyone else | session minted through `mintRosterSession` (writes `last_login_at`) | `api/login.js:771-775`, `:437` |
+| Consumer | `pin_link_open` returns name, company, `emailOnFile`, `mfaRequired`, `hasAuthenticator`; `pin_link_set_pin` saves the PIN, sets `pin_set_at`, clears the link | `api/login.js:795-885` (`pin_set_at` `:862`) |
+| Feeds authenticator setup | `mfaNeeded = requiresMfa(member) && !totp_enabled` mints `mfa_setup_jti_hash` and returns `stage:'enroll'` + `enrollTicket`; the page redirects to `/?mfa_setup=` | `api/login.js:826,851-868,879-881`; `src/WalletInvite.jsx:114-118`; `src/Login.jsx:100`; consumer `mfa_enroll_start/confirm` `api/login.js:729` |
+| Already has an authenticator | PIN reset only, `stage:'signin'`, no session | `api/login.js:878`; `src/WalletInvite.jsx:119` |
+| Everyone else | session minted through `mintRosterSession` (writes `last_login_at`) | `api/login.js:882-884`, `:437` |
 | Invalidated by | email change, `reset_roster_pin`-type resets, `set_own_pin`, a newer link | `api/companydata.js:633,778,970-971`; `api/certifications.js:411`; `setupLinks.js:70-78` |
-| Read by the UI | `pin_set_at`, `pin_link_sent_at` on the roster list | `api/companydata.js:358`; `src/Dashboard.jsx:7903-7909`; `src/AdminPanel.jsx:2366-2370`; `claim_get_details` returns `hasEmail/linkSent/pinSet` (`api/login.js:1101-1114`) which drive `needsTypedPin` (`src/ClaimAccount.jsx:184-185,218-222`) |
+| Read by the UI | `pin_set_at`, `pin_link_sent_at` on the roster list | `api/companydata.js:358`; `src/Dashboard.jsx:7903-7909`; `src/AdminPanel.jsx:2366-2370`; `claim_get_details` returns `hasEmail/linkSent/pinSet` (`api/login.js:1210,1223`) which drive `needsTypedPin` (`src/ClaimAccount.jsx:184-185,218-222`) |
 
 **Gating:** roster is platform base, so no `requireDocKey`. `pin_link_*` does not check `wallet_enabled`; that flag only governs the ticket upload (`api/certifications.js:95-100`), same as before. Not re-verified: that the migration is applied to the live project.
 
-**Tenant scope:** every lookup is by `id` **and** `company_id` (`login.js:699-700,760-761`, `setupLinks.js:76-77`). `send_pin_setup_link` fetches by `id` alone (`companydata.js:726`) but then requires either self in the same company (`:729`) or `canResetMfa`, which rejects a different company unless founder (`server-lib/rosterMfa.js:196-198`). Read, so not a break.
+**Tenant scope:** every lookup is by `id` **and** `company_id` (`login.js:802-803,869-870`, `setupLinks.js:76-77`). `send_pin_setup_link` fetches by `id` alone (`companydata.js:726`) but then requires either self in the same company (`:729`) or `canResetMfa`, which rejects a different company unless founder (`server-lib/rosterMfa.js:196-198`). Read, so not a break.
 
-### Login and session (`b2044ee`, 2026-10-06)
+### Login and session (`b2044ee` 2026-10-06; step 1 changed to company code on branch `claude/step4b-company-code-login`, anchored against `2724f83`)
 
-**Key:** a customer signs in as `companies.id` (via an HMAC `companyTicket`, `api/login.js:515`) then `roster.id` + `roster.company_id` (`:550-551`) then PIN, plus authenticator where `requiresMfa`. There is no company-wide code any more.
+**Key:** a customer types the founder-chosen `companies.company_code`, which `find_company` matches exactly (case-insensitive) to `companies.id` and wraps in an HMAC `companyTicket` (`api/login.js:521,529`). Then `roster.id` + `roster.company_id` (`:604-605`) then PIN, plus authenticator where `requiresMfa`. The code opens that company's name list and nothing else; it is not a login by itself, and the old shared worker/supervisor codes stay gone.
 
 | Piece | Where |
 |---|---|
-| Step 1, company-name search (`ilike`, 8 results, IP throttle) | `api/login.js:499-517`; UI `src/Login.jsx:122` |
-| Step 2, active names only, no role returned | `api/login.js:522-535`; UI `src/Login.jsx:222`; same action name reused by `src/App.jsx:461`, `src/Incident.jsx:250`, `src/ToolboxTalk.jsx:150` with a session token, served by `api/companydata.js:1156` (a different handler, not the ticket one) |
-| Step 3, PIN, lockout `pin_locked_until`, session via `mintRosterSession` | `api/login.js:538-616`, `:432-448`; UI `src/Login.jsx:300` |
-| Founder entry, still no `userId` | `master_login` `api/login.js:818-849` |
-| Unlock a locked person | `unlock_roster_pin` `api/companydata.js:710-729` (rank rule via `canResetMfa`, audit-logged); the derived `locked` flag (PIN or authenticator lock, timestamps never sent) `companydata.js:357,369-373`; read by `src/Dashboard.jsx:3523,7961`, `src/AdminPanel.jsx:329,2390` |
-| Session lifetime: supervisor with `userId` 12h, everyone else 7d | `server-lib/sessionTtl.js:16-28`, `sessionExpired` imported by 13 api files (monthly, logs, reports, equipmentreports, customforms, certifications, generate-flha, admin, portal, flhas, maintenance, fuellogs, companydata) |
-| Browser storage: named non-admin sessions in `localStorage`, admin and no-`userId` in `sessionStorage` | `src/Login.jsx:12-51` |
-| `companies.company_code` | kept as an internal reference only: `api/admin.js:521-598`, `server-lib/onboardingApproval.js:180-194`, shown `src/AdminPanel.jsx:1432`; no login reads it |
+| Step 1, `find_company`: code trimmed, upper-cased, shape `[A-Z0-9-]`, 6-32 chars (`:104-105,515-518`), `ilike('company_code', entered)` limit 1 (`:521`); one answer for any miss (401, `:527`). Two throttles: `clookup:` counts every call (`:510`, 60 per 15 min, `:108,112`), `ccode:` counts only misses (`:512,526`, 20 per 15 min, `:106-107`); both keyed by `ipBucket(ip)` (`:509`) | `api/login.js:508-530`; UI `src/Login.jsx:202` |
+| `peekIpThrottle`: reads a `master_code_ip_limits` bucket without counting; a read error answers "allowed". `ipBucket`: IPv4 as is, IPv6 collapsed to its /64 so one customer cannot mint a fresh budget per address | `server-lib/ipThrottle.js:52-63` and `:69`; imported `api/login.js:17`; `peekIpThrottle` has one caller (`:512`); `ipBucket` wraps the `clookup:`, `ccode:`, `rnames:`, `unlock:` and `pin:` keys (`:509,539,565,598`) |
+| Step 2, active names only, no role returned | `api/login.js:535-550`; UI `src/Login.jsx:213`; same action name reused by `src/App.jsx:461`, `src/Incident.jsx:250`, `src/ToolboxTalk.jsx:150` with a session token, served by `api/companydata.js:1161` (a different handler, not the ticket one) |
+| Owner lockout recovery, `request_unlock_link`: ticket-verified, IP throttle `unlock:` (`:565`); answers `{ok:true}` for every case (`:567`); sends only if the roster row is in this company, active, `is_owner === true`, and a PIN or authenticator lock is live (`:570-577`); at most one per hour by `pin_link_sent_at` (`:578`) and 3 per hour per person (`:581`); emails the same single-use link through `issueAndEmailPinLink` (`:584-587`, `server-lib/setupLinks.js:149`, `unlockLinkEmail` `:127`) | `api/login.js:561-589`; UI button `src/Login.jsx:230-244,674` |
+| That link clears the lock: `pin_link_set_pin` also writes `totp_failed_attempts: 0, totp_locked_until: null` beside the PIN lock columns | `api/login.js:858-861` (whole block `:795-885`) |
+| Step 3, PIN, lockout `pin_locked_until`, session via `mintRosterSession` | `api/login.js:592-726`, `:441-457`; UI `src/Login.jsx:315` |
+| Founder entry, still no `userId` | `master_login` `api/login.js:888-921` |
+| Unlock a locked person | `unlock_roster_pin` `api/companydata.js:715-733` (rank rule via `canResetMfa`, audit-logged); the derived `locked` flag (PIN or authenticator lock, timestamps never sent) `companydata.js:362,374-378`; read by `src/Dashboard.jsx:3523,7961`, `src/AdminPanel.jsx:329,2390` (Dashboard/AdminPanel anchors not re-checked this pass) |
+| `companies.company_code`, the login-finding key again | **Reader:** `find_company` `api/login.js:521`. **Writers:** founder-typed `create_company` (`api/admin.js:536-562`) and `update_company_codes` (`:597-614`), both through `normalizeCompanyCode` (upper-case, `[A-Z0-9-]{6,32}`, `:52-55`) and a case-insensitive clash check (`:546,608`, `ilike`, added `9861cc0`); onboarding auto-generation `server-lib/onboardingApproval.js:176-194` (prefix plus 5 random characters, 8 tries, `ilike` clash check `:180`). **Shown to staff:** `src/AdminPanel.jsx:1433`, `src/ClaimAccount.jsx:174,194` ("type it on the login page"). The two founder writers validate the shape the reader requires; the onboarding writer does not: break #44 |
 | `worker_code`, `supervisor_code`, `app_type` | dropped by `docs/schema/company-name-login-migration.sql:14-16`, **not verified applied live**; no reader left in `api/`, `src/`, `server-lib/` |
+| Browser storage: named non-admin sessions in `localStorage`, admin and no-`userId` in `sessionStorage` | `src/Login.jsx:12-51` (not re-checked this pass) |
 
 `set_roster_cutover` and the legacy no-`userId` worker/supervisor session path are gone. Several api files still carry `!session.userId` guards (e.g. `api/certifications.js:138`, `api/companydata.js:656`); they now only ever catch the founder's `master_login` session, so they are dead-ish but harmless and not filed.
 
@@ -1502,7 +1504,7 @@ It produces nothing another feature reads. It consumes:
 | Nine document tables (`flhas`, `toolbox_talks`, `incidents`, `near_misses`, `daily_reports`, `inspections`, `fuel_logs`, `time_clock_entries`, `worker_certifications`) | `company_id`, `created_at` (`platformOverview.js:208-218,244`) | Documents per day and per type, per-company activity | ✅ |
 | Monthly, Custom, Portal records | `form_id`/`document_id` → parent's `company_id` (`:222-226,246-251`) | Same | ✅ *(a record whose parent was deleted counts in the daily total but credits no company, `:73-75`)* |
 | `company_document_settings` + `pricing.js` `MODULES` | `document_key` (`:126-133,144-155`) | Modules bought vs used | ✅ **#41** built, closes when its PR merges: `UNMEASURED_DOC_KEYS` (`platformOverview.js:46`) plus four guard tests (`tests/unit/platform-overview.test.js:148-173`) keep the doc-type list equal to `ALL_DOC_KEYS` (`pricing.js:124`) |
-| `roster.last_login_at` | `login.js:437` | Active workers | ⚠️ PIN logins only, #41 weak point 1 |
+| `roster.last_login_at` | `login.js:444` | Active workers | ⚠️ PIN logins only, #41 weak point 1 |
 | `companies`, `onboarding_requests` | `created_at`, `plan_tier`, `stripe_subscription_status`, `status` (`:225-232`) | Sign-ups, plan mix | ✅ |
 | Preventative Maintenance, Equipment Compliance | none, no filing of their own | `not measurable` | n/a, deliberate |
 | `platform_events` (last 30 days, `event_type, status, subtype, company_id, metrics, created_at`) | `event_type` + `subtype` to `CRONS` (`platformHealth.js:40-44`); `metrics.model` to `MODEL_PRICES` (`:28-32`, `:54-55`); `company_id` to `companies.name` (`:65,139`) | **3c, Platform health** (`PlatformDashboard.jsx:69`): job state ok / failed / overdue (1.5 cadences plus 2h, `:75`) / not observed yet, email sent / failed / skipped with failure kinds, AI success rate, estimated cost by document type, model and company (unlisted model counted unpriced, `:54-55,132`), recent trouble, and a note that storage growth, Supabase advisors and Vercel errors are not visible from the app (`:174`). Read failure yields `{unavailable:true}`, not a failed dashboard (`platformOverview.js:194,266-268`) | ✅ **P1 CLOSED by 3c**, see §4. Writers (8 producers) are on `main` via PR #162, not on this branch, verified with `git grep origin/main`. Two unguarded couplings recorded in §4, neither a break today |
@@ -1510,7 +1512,7 @@ It produces nothing another feature reads. It consumes:
 | `company_document_settings` | `is_active`, `document_key` (`platformBusiness.js:64-69`, read `platformOverview.js:238`) | "Bought" = any of a module's doc keys active (`platformBusiness.js:37`) | ⚠️ a hand-created company gets all 13 keys on (`admin.js:565`, `pricing.js:255`), so it is priced at every module, list price, in "Not billed via Stripe" |
 | `companies.stripe_subscription_status` | written `stripe-webhook.js:84` and `onboardingApproval.js:198` | Billed / not billed / payment at risk split (`platformBusiness.js:28-29,100-102,174-182`) | ⚠️ see #42 weak point 1: the webhook suspends `canceled`, `unpaid`, `incomplete_expired` (`stripe-webhook.js:46,86`) and the dashboard drops suspended companies (`platformBusiness.js:62`) |
 | `effectiveSeatCap` (`onboardingHelpers.js:101-103`, wraps `planSeatCap` `:92-94`) | `plan_tier` | Seat usage, near cap at 80 percent (`platformBusiness.js:21,33,104-106,160`) | ✅ **#42** built, closes when its PR merges: the dashboard (`platformBusiness.js:105`) and the enforcing handler (`companydata.js:362,392,457,582`) both call `effectiveSeatCap`, one source, an unknown tier is basic in both |
-| `roster.last_login_at` | `login.js:437` (same single writer) | Worker logins this week, 30 of the 100 health points (`platformBusiness.js:88-95,138`) | ⚠️ PIN logins only, same weak point as Active workers (#41 weak point 1); a worker on a live session scores as not logged in |
+| `roster.last_login_at` | `login.js:444` (same single writer) | Worker logins this week, 30 of the 100 health points (`platformBusiness.js:88-95,138`) | ⚠️ PIN logins only, same weak point as Active workers (#41 weak point 1); a worker on a live session scores as not logged in |
 | `companies.created_at` + first document | `created_at` (`platformBusiness.js:73-79,108-110,171`) | Median days to first document, and the under-14-days "new" band (`:32,125`) | ✅ |
 
 **Every ✅ above is conditional on the gate, as of `edd7a41`.** A cell says the
@@ -1675,7 +1677,7 @@ Two of three companies are on shared logins with no roster rows, so their
 records stay text-only — the same graceful degradation as #2's "other site"
 path, which is why the column is nullable.
 **Stale as of 2026-10-06 (`b2044ee`):** shared logins no longer exist
-(`api/login.js:499-616` is the only customer login: company search, name, PIN).
+(`api/login.js:508-726` is the only customer login: company code, name, PIN).
 Whether those two companies have roster rows now is live data this map cannot
 see, marked `?` in the changelog row. If they have none, nobody at them can
 sign in at all.
@@ -1710,7 +1712,7 @@ logins. Founder/admin sessions still submit typed names.
 Original finding: Roster login exists precisely so a person is a real
 record, but every submitted document stores a name string. Per-worker
 analytics, "show me everything Rob submitted", and deactivation-aware
-history all become string matching. `WalletInvite.jsx` (the session it stores comes from `rosterId`-keyed `mintRosterSession`, `api/login.js:772`) and
+history all become string matching. `WalletInvite.jsx` (the session it stores comes from `rosterId`-keyed `mintRosterSession`, `api/login.js:882`) and
 `certifications.js` show the correct pattern.
 
 ### #4 — The Brain learns from 4 of 9 document types
@@ -3082,7 +3084,7 @@ Dillon took **the honest version** below: the invite payload carries the flag.
 
 | Piece | Where |
 |---|---|
-| The flag | **Re-anchored 2026-09-30 against `624ef31`: `redeem_wallet_invite` no longer exists; `pin_link_set_pin` replaced it.** `api/login.js:774-775`, the `pin_link_set_pin` `stage: 'session'` response returns `certificationsEnabled`, read through the shared `readDocKeySetting` (`server-lib/docKeyGate.js:66`, called `login.js:774`): `true` / `false`, or **`null`** when the settings lookup fails. Deny-by-default like every built-in key, so a company with **no** row gets `false` |
+| The flag | **Re-anchored 2026-09-30 against `624ef31`: `redeem_wallet_invite` no longer exists; `pin_link_set_pin` replaced it.** `api/login.js:883-884`, the `pin_link_set_pin` `stage: 'session'` response returns `certificationsEnabled`, read through the shared `readDocKeySetting` (`server-lib/docKeyGate.js:66`, called `login.js:883`): `true` / `false`, or **`null`** when the settings lookup fails. Deny-by-default like every built-in key, so a company with **no** row gets `false` |
 | The screen | `src/WalletInvite.jsx:81` (state), `:124-125` (stored; `loadCerts` skipped only on an explicit `false`), `:304` (ticket card) and `:368` (the "No tickets yet?" hint) render unless the flag is exactly `false`. The flag only arrives on the session stage, so a person sent on to authenticator setup or sign-in never sees the card at all (see #43 and the §5 entry) |
 | Still gated server-side | unchanged — `api/certifications.js:143,160` `requireDocKey(..., 'certifications')`; a `null` keeps the card and the server still refuses an upload the company has not bought |
 | Tests | `tests/unit/wallet-invite-modules.test.js` (4, `redeem()` now drives `pin_link_set_pin`, header `:10`); `tests/wallet-invite.spec.js` (3, Playwright; not re-run by this pass against `624ef31`) |
@@ -3935,8 +3937,8 @@ module still reads as measurable.
 designed, but the number means less than its label):
 1. **"Active workers" is PIN logins in the window, not activity.**
    `roster.last_login_at` is written in exactly one place, `mintRosterSession`
-   (`api/login.js:437`, re-checked 2026-09-30 against `624ef31`). The old wallet-invite redemption minted a session
-   without it; that path is gone, and `pin_link_set_pin`'s session stage now goes through `mintRosterSession` (`:772`), so a first login via the setup link **does** count. A worker on an existing session who
+   (`api/login.js:444`, re-checked 2026-09-30 against `624ef31`). The old wallet-invite redemption minted a session
+   without it; that path is gone, and `pin_link_set_pin`'s session stage now goes through `mintRosterSession` (`:882`), so a first login via the setup link **does** count. A worker on an existing session who
    never re-enters a PIN does not move it. Read: `platformOverview.js:87`.
 2. **Mixed denominators.** `activeCompanies7/30` are built from every
    document including a suspended company's (`:67-79`) while `live` and
@@ -3987,9 +3989,9 @@ needs `eventType: 'cron_run'` followed by `subtype:` in the same object. Re-chec
 ### #43 — "Waiting for PIN" / "No setup link sent" shows on everyone who got a PIN any other way
 **Severity: low-medium, misleading rather than lossy. Status: OPEN, not approved.** Opened 2026-09-30 by the pass that placed `624ef31`.
 
-`roster.pin_set_at` is written in exactly one place, `pin_link_set_pin` (`api/login.js:753`). Every other path that sets a PIN leaves it null: the claim-page typed PIN `claim_set_roster_pin` (`api/login.js:1146`), `set_own_pin` (`api/certifications.js:411`), an Owner PIN reset (`api/companydata.js:633,778`), and every roster row that existed before the migration. The roster rows show the label for `active && !pin_set_at` (`src/Dashboard.jsx:7903-7906`, `src/AdminPanel.jsx:2366-2367`), so those people read "No setup link sent" or "Waiting for PIN" while signing in fine every day. The claim page shows the honest state only for the link path (`src/ClaimAccount.jsx:221-222`). Customer loses: an Owner who trusts the label chases people who are already set up, and the label stops meaning anything, which is the wrong outcome for the only roster-wide "who is not onboarded" signal.
+`roster.pin_set_at` is written in exactly one place, `pin_link_set_pin` (`api/login.js:862`). Every other path that sets a PIN leaves it null: the claim-page typed PIN `claim_set_roster_pin` (`api/login.js:1256`), `set_own_pin` (`api/certifications.js:411`), an Owner PIN reset (`api/companydata.js:633,778`), and every roster row that existed before the migration. The roster rows show the label for `active && !pin_set_at` (`src/Dashboard.jsx:7903-7906`, `src/AdminPanel.jsx:2366-2367`), so those people read "No setup link sent" or "Waiting for PIN" while signing in fine every day. The claim page shows the honest state only for the link path (`src/ClaimAccount.jsx:221-222`). Customer loses: an Owner who trusts the label chases people who are already set up, and the label stops meaning anything, which is the wrong outcome for the only roster-wide "who is not onboarded" signal.
 
-*Evidence:* `grep -n "pin_set_at" api/*.js server-lib/*.js` returns the roster select (`companydata.js:358`), the claim select (`login.js:1101,1114`) and the single writer (`login.js:753`). Re-check: same grep; it is fixed when a second writer exists or the label also keys off `last_login_at`.
+*Evidence:* `grep -n "pin_set_at" api/*.js server-lib/*.js` returns the roster select (`companydata.js:358`), the claim select (`login.js:1210,1223`) and the single writer (`login.js:862`). Re-check: same grep; it is fixed when a second writer exists or the label also keys off `last_login_at`.
 
 **A fix would touch:** set `pin_set_at` in the other PIN writers, or show the label only when `!pin_set_at && !last_login_at`; backfill `pin_set_at = last_login_at` for existing rows. Two one-line edits plus a migration statement. Needs a yes.
 
@@ -4080,7 +4082,7 @@ than its label):
 2. **Hand-created companies inflate the estimate.** `create_company` turns all 13 doc keys on
    (`api/admin.js:565`), so every one counts as owning every module at list price and lands
    in "Not billed via Stripe" (`platformBusiness.js:177`).
-3. **Logins are PIN logins only**, same source as #41 weak point 1 (`login.js:437`), and
+3. **Logins are PIN logins only**, same source as #41 weak point 1 (`login.js:444`), and
    they drive 30 of 100 points (`platformBusiness.js:138`).
 4. **Health thresholds are a judgment call, not measured against churn.** Document
    recency cutoffs 7/14/30 days worth 40/30/15/0 (`:129-132`), logins as the share of active
@@ -4093,6 +4095,17 @@ than its label):
    billed (`:28`) only because Stripe can report it.
 6. **Truncation** carries over from #41 weak point 3: rows come through the same 20000-row cap
    (`platformOverview.js:235-238`).
+
+### #44: An auto-generated company code can contain characters the login page rejects
+**Severity: medium for the one company it hits, silent. Status: OPEN, not approved.** Opened 2026-10-06 by the pass that placed the company-code login.
+
+`find_company` only accepts `[A-Z0-9-]`, 6 to 32 characters, and answers any other code with the same "wasn't recognized" 401 (`api/login.js:104-105,518,527`). The two founder-typed writers run `normalizeCompanyCode`, which enforces exactly that shape (`api/admin.js:52-55,541,602`). The onboarding auto-generator does not: `codePrefix` takes the first three characters of a one-word name, or the first letters of up to three words, with no character filter (`server-lib/onboardingApproval.js:66-72`), and the code is inserted unchecked (`:177-194`). A company whose name starts with an apostrophe, bracket or accented letter gets a code its staff can never type successfully. Nothing errors; the claim page and Admin Panel show the code and tell staff to type it (`src/ClaimAccount.jsx:174,194`, `src/AdminPanel.jsx:1433`).
+
+*Evidence (real output, the generator's `codePrefix` copied verbatim, suffix `ABCDE`, tested against the login regex):* `O'Brien` gives `O'BABCDE` false; `Étoile Haulage` gives `ÉHABCDE` false; `(1) Ltd Co` gives `(LCABCDE` false; `Acme Corp` gives `ACABCDE` true. Re-check: `grep -n "codePrefix\|normalizeCompanyCode\|shapeOk" server-lib/onboardingApproval.js api/admin.js api/login.js`; it is fixed when the generator filters to `[A-Z0-9]` (or runs the same validator) before the clash check.
+
+**A fix would touch:** `codePrefix` (strip non `[A-Z0-9]`, fall back to `CO`), one line, plus a unit test; existing bad rows are repaired by the founder through `update_company_codes`. Needs a yes.
+
+**Not verified (`?`):** whether any live `companies.company_code` is shorter than 6 characters or contains other characters. The login floor moved from 3 to 6 (`api/login.js:104`, `2724f83`) and `normalizeCompanyCode` has always required 6, but a legacy row typed before that rule would be unfindable. One query settles it: `select name, company_code from companies where company_code !~ '^[A-Za-z0-9-]{6,32}$'`.
 
 ## 4b. The recurring shape: a key written and never read
 
@@ -4304,7 +4317,7 @@ Do **not** flag these. They are decisions, not gaps.
   is removed and the worker is told why. A failed settings lookup is 503 and
   keeps it. Do not "fix" this by holding the entry.
 - **The wallet invite shows the ticket card when it cannot tell.**
-  `certificationsEnabled: null` (settings lookup failed, `api/login.js:774-775`)
+  `certificationsEnabled: null` (settings lookup failed, `api/login.js:883-884`)
   keeps the card (`src/WalletInvite.jsx:304`); only an explicit `false` hides
   it. The upload is still refused server-side if the company has not bought
   the module (`certifications.js:143,160`). Deliberate (#24).
@@ -4312,15 +4325,15 @@ Do **not** flag these. They are decisions, not gaps.
   The "extras" stage (photo, tickets) is only reached on `stage:'session'`
   (`src/WalletInvite.jsx:121-126`). A role that needs an authenticator gets
   `stage:'enroll'` and is redirected to the login page's setup
-  (`:114-118`, `api/login.js:768-770`), and someone who already has one gets
-  `stage:'signin'` (`:119`, `login.js:767`). Neither sees the extras. Deliberate
+  (`:114-118`, `api/login.js:879-881`), and someone who already has one gets
+  `stage:'signin'` (`:119`, `login.js:878`). Neither sees the extras. Deliberate
   per the 2026-09-30 brief: the session only exists after the second factor,
   and a half-signed-in person must not reach the certifications API. They add a
   photo and tickets later from "My Certifications". Do not file as a break.
 - **`pin_link_open` does not return `certificationsEnabled`.** Only the session
-  stage does (`api/login.js:775`). Nothing on the PIN step needs it.
+  stage does (`api/login.js:884`). Nothing on the PIN step needs it.
 - **A setup link replaces a PIN, never the second factor.** Opening it for
-  someone with `totp_enabled` resets the PIN only (`api/login.js:767`); the
+  someone with `totp_enabled` resets the PIN only (`api/login.js:878`); the
   authenticator stays. Deliberate (comment `:689-690`).
 - **The setup link is emailed to the address on file, and a supervisor's link is
   never handed to someone else.** `handBack` is founder or worker only
@@ -4415,7 +4428,7 @@ Verified 2026-09-29 against `cb9908a`. `platform_overview` has no
 `requireDocKey`/`docKeyGate` call (`api/admin.js` never references the gate;
 the action sits at `:127-134` behind the handler-level check at `:112`, which
 answers 403 to anything but a `role: 'admin'` session, minted only for the
-`ADMIN_CODE` login, `api/login.js:1030-1036`). A company must not be able to
+`ADMIN_CODE` login, `api/login.js:1335-1341`). A company must not be able to
 switch off the founder's own view of the platform, so a missing
 `company_document_settings` row here is data to count, not a gate to obey.
 `tests/unit/platform-overview.test.js:121-127` pins the 403 for worker,
@@ -4544,3 +4557,4 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-09-30 | branch `claude/step3-owner-profile` (uncommitted) | **Owner profile, company structure and default site placed on the map.** New roster columns `is_owner`, `title`, `divisions`, `default_site_id`; new tables `company_departments`, `company_divisions`. (1) `roster.departments` now accepts per-company `c_` keys (`server-lib/companyStructure.js:38-60`), Portal validation follows (`api/portal.js:95-100`); the phase-1 rows in that section are marked stale. (2) **Closed:** onboarding approval used to write no `departments`; it now does (`onboardingApproval.js:313`, `onboardingRoster.js`), so a new Portal customer's supervisors route from day one. (3) New join key `roster.default_site_id` -> `sites.id` (§2 site section): nine forms preselect it, but five copy the site name into free text, so break #2 is unchanged. (4) New weak links W1-W4 in the `roster.departments` section (W1: deleting a custom department leaves its key on Portal documents, escalations and schedules, `companydata.js:1157-1169`). (5) `roster.divisions` has no consumer, filed as pending link P2. (6) Onboarding also seeds the contact as Account Owner (`onboardingRoster.js:34-51`). Owner-only gating of profile edits (`companydata.js:953-955`) is tenant-scope territory and was not reviewed here. No matrix cell changed. |
 | 2026-09-30 | branch `claude/step-pin-setup-links`, `624ef31` | **Set-your-own-PIN link placed on the map.** New surface #25 and a §2 section with the producer/consumer table. `create_wallet_invite` / `redeem_wallet_invite` are gone; the stale references were re-anchored, not deleted: #24's flag row and test row (`api/login.js:774-775`, `src/WalletInvite.jsx:81,124-125,304,368`), the §5 wallet-invite bullet, the #3 pointer to `WalletInvite.jsx`, and the `last_login_at` writer, which was stale map-wide (`login.js:514`, now `mintRosterSession` at `:437`; the "wallet redemption mints a session without setting it" weak point is fixed because the link's session stage goes through `mintRosterSession`, `:772`). Five new §5 non-connections. **New break #43** (`pin_set_at` has one writer, so typed, reset and pre-existing PINs show "Waiting for PIN"). Not verified: migration applied live; `tests/wallet-invite.spec.js` against this commit. `send_pin_setup_link` fetches by `id` alone (`companydata.js:726`) but is company-checked by `canResetMfa` (`rosterMfa.js:198`), so not filed. All line numbers are against commit `624ef31`; commit `6c30667` (another session, landed after this pass read the code) changed `api/companydata.js` adds a 30 per hour per company throttle on `onboard_new_employee` and clears the link on deactivate; `server-lib/setupLinks.js` sanitises name and company in the email), which shifts `companydata.js` lines after about `:488` by 5. Re-anchor those. Not built, not approved. |
 | 2026-10-06 | branch `claude/step4-company-name-login`, `b2044ee` | **Company-name login placed on the map.** New §2 section "Login and session" with file:line for search_companies, list_roster_names, roster_login, master_login, unlock_roster_pin plus the derived `locked` flag, `server-lib/sessionTtl.js` (supervisor 12h, other 7d, 13 api files) and supervisor localStorage persistence. Stale entries rewritten: Portal shared-code fallback (§2 Portal scoping), `list_sites` defaultSiteId note, Portal-reports shared-code note, break #3 'two of three companies on shared logins' (now `?`: live roster counts unknown), and the §5 `app_type` note. Mechanical checks run, no new break. Line numbers cited elsewhere for `api/login.js` after about :430 (e.g. `last_login_at` is now :435, not :437; `pin_link_*` lines shifted) and `companydata.js` after about :700 are against older commits, re-anchor on next sweep. Map only, no code touched. |
+| 2026-10-06 | branch `claude/step4b-company-code-login`, `bc446a0` (anchored against `2724f83`) | **Login step 1 is a company code, not a name search.** The §2 "Login and session" section is rewritten: `find_company` (`api/login.js:508-530`, exact case-insensitive `company_code`, shape `[A-Z0-9-]` 6-32), throttles `clookup:` and `ccode:` in `master_code_ip_limits`, `peekIpThrottle` (`server-lib/ipThrottle.js:52`) and `ipBucket` (`:69`, IPv6 to /64, wraps five throttle keys), Owner recovery `request_unlock_link` (`:561-589`), `pin_link_set_pin` clearing the authenticator lock (`:858-861`). `company_code` is a login-finding key again (it was recorded as internal-only); its readers and four writers are tabled with the case-insensitive clash checks from `9861cc0`. Stale anchors re-pointed map-wide (the login.js file shifted by up to 100 lines): `master_login`, the PIN-link block, `mintRosterSession`, `claim_get_details`, `claim_set_roster_pin`, the ADMIN_CODE entry, the onboarding people_encrypted write and read; changelog rows left as history. **New break #44** (auto-generated company code can fail the login regex). Mechanical checks re-run, nothing else new. Map only, no code touched. |

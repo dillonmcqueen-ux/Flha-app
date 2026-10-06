@@ -63,12 +63,15 @@ function randomSuffix(len = 3) {
   for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
-function codePrefix(name) {
-  const clean = (name || '').trim().toUpperCase();
-  if (!clean) return 'CO';
-  const words = clean.split(/\s+/).filter(Boolean);
+// Letters and digits only, because find_company (api/login.js) rejects anything
+// else: a company called "O'Brien" or "Étoile Haulage" must not get a code its own
+// staff cannot type. Accents are folded to their plain letter first.
+export function codePrefix(name) {
+  const plain = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const words = plain.split(/\s+/).map((w) => w.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
+  if (words.length === 0) return 'CO';
   if (words.length === 1) return words[0].slice(0, 3);
-  return words.map(w => w[0]).join('').slice(0, 3);
+  return words.map((w) => w[0]).join('').slice(0, 3);
 }
 // 6 digits (1,000,000 possible values), not 4 — see PIN_LOCKOUT_AFTER_ATTEMPTS
 // in api/login.js and docs/security/soc2-readiness-gaps.md item 8. Bumped
@@ -176,8 +179,8 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
   const prefix = codePrefix(request.company_name);
   let companyCode = '';
   for (let tries = 0; tries < 8; tries++) {
-    const candidate = `${prefix}${randomSuffix()}`;
-    const { data: clash } = await supabaseAdmin.from('companies').select('id').eq('company_code', candidate).limit(1);
+    const candidate = `${prefix}${randomSuffix(5)}`; // at least 6 characters, the same floor the Admin Panel enforces
+    const { data: clash } = await supabaseAdmin.from('companies').select('id').ilike('company_code', candidate).limit(1);
     if (!clash || clash.length === 0) { companyCode = candidate; break; }
   }
   if (!companyCode) return { error: "Couldn't generate a unique company code. Try again." };
@@ -377,7 +380,8 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
         to: request.contact_email,
         subject: `Your FORA account is ready — ${request.company_name}`,
         text: [
-          `To sign in, search for "${request.company_name}" on the FORA login page, pick your name, and enter your PIN.`,
+          `Your company code: ${companyCode}`,
+          'To sign in: open the FORA login page, type your company code, pick your name, and enter your PIN. Share the code only with your own team.',
           '',
           `Finish setup: review the equipment and SOPs we drafted from what you sent. You were emailed a link to set your own PIN. Send everyone else theirs from the roster in the app (Send setup links), or type a PIN for anyone without an email address on this page:`,
           `${siteOrigin(req)}/claim?token=${claimToken}`,

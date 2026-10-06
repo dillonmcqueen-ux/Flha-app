@@ -239,3 +239,13 @@ test('a 7 day link held by someone who now needs an authenticator is refused aft
   row = freshRow();
   assert.equal((await setPin({}, aged)).statusCode, 200);
 });
+
+test('choosing a PIN from a link also clears an authenticator lockout, so it works as the Owner unlock link', async () => {
+  row = freshRow({ role: 'supervisor', is_owner: true, totp_enabled: true, email: 'enc-ignored', totp_locked_until: new Date(Date.now() + 600_000).toISOString(), pin_locked_until: new Date(Date.now() + 600_000).toISOString() });
+  const out = await setPin();
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.equal(pinPatch().pin_locked_until, null);
+  assert.equal(pinPatch().failed_pin_attempts, 0);
+  assert.equal(pinPatch().totp_locked_until, null);
+  assert.equal(pinPatch().totp_failed_attempts, 0);
+});
