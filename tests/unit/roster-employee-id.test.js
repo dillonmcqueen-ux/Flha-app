@@ -125,7 +125,7 @@ const companyDataHandler = (await import('../../api/companydata.js')).default;
 test.after(() => fake.server.close());
 
 function supervisorToken(companyId = 'acme') {
-  const payload = Buffer.from(JSON.stringify({ role: 'supervisor', companyId, name: 'Sup', issuedAt: Date.now() })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ role: 'supervisor', founder: true, companyId, name: 'Sup', issuedAt: Date.now() })).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }

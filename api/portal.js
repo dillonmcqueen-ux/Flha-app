@@ -76,7 +76,12 @@ async function verifySession(token) {
   // See api/customforms.js's verifySession for why this check exists — a
   // login TICKET (purpose: 'roster' | 'master') must never be accepted here.
   if (payload.purpose) return null;
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
     .select('active, role, company_id, name')

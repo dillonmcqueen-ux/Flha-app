@@ -23,6 +23,7 @@ import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboa
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
 import { verifyPinLinkTicket, hashJti, setupOrigin, PIN_LINK_MFA_TTL_MS } from '../server-lib/setupLinks.js';
+import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode } from '../server-lib/rosterMfa.js';
 
 const supabaseAdmin = createClient(
@@ -88,10 +89,9 @@ async function checkMasterCodeThrottle(ip) {
   return checkIpThrottle(ip, MASTER_CODE_THROTTLE_MAX_ATTEMPTS, MASTER_CODE_THROTTLE_WINDOW_MS);
 }
 
-// Counts FAILED founder-code attempts that are too short to hit the master-code
-// throttle above. A correct code never counts, so this never blocks real use.
+// Counts every founder-code attempt per IP, before the compare.
 const COMPANY_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
-const COMPANY_CODE_THROTTLE_MAX_FAILURES = 50;
+const COMPANY_CODE_THROTTLE_MAX_FAILURES = 30;
 
 // Per-IP ceiling on company-name searches. The search is public (a worker has
 // no session yet) and its result is a company name plus a short-lived ticket,
@@ -499,7 +499,9 @@ async function loginHandler(req, res) {
   if (action === 'search_companies') {
     const allowed = await checkIpThrottle(`csearch:${clientIp(req)}`, COMPANY_SEARCH_THROTTLE_MAX, COMPANY_SEARCH_THROTTLE_WINDOW_MS);
     if (!allowed) return res.status(429).json({ error: 'Too many searches. Please wait and try again.' });
-    const q = String(req.body.query || '').trim().slice(0, 60);
+    // PostgREST reads * in an ilike value as a wildcard, same as %, so it is
+    // stripped like the LIKE wildcards are escaped below.
+    const q = String(req.body.query || '').replace(/\*/g, '').trim().slice(0, 60);
     if (q.length < COMPANY_SEARCH_MIN_LENGTH) return res.status(200).json({ companies: [] });
     // % and _ are LIKE wildcards; searching for them literally would otherwise
     // let one character match every company name.
@@ -523,6 +525,8 @@ async function loginHandler(req, res) {
     const { companyTicket } = req.body;
     const ticket = verifyTicket(companyTicket);
     if (!ticket) return res.status(401).json({ error: 'That took too long. Please start over.' });
+    const namesAllowed = await checkIpThrottle(`rnames:${clientIp(req)}`, COMPANY_SEARCH_THROTTLE_MAX, COMPANY_SEARCH_THROTTLE_WINDOW_MS);
+    if (!namesAllowed) return res.status(429).json({ error: 'Too many requests. Please wait and try again.' });
 
     const { data, error } = await supabaseAdmin
       .from('roster')
@@ -565,6 +569,19 @@ async function loginHandler(req, res) {
     const suspended = !!(coRows && coRows[0] && coRows[0].suspended);
     if (suspended && member.role === 'worker') {
       return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
+    }
+
+    // A lock that has run out starts a fresh set of attempts. claim_pin_attempt
+    // only counts up, so without this the counter stays at the lockout limit
+    // after the first lock and ONE wrong guess per 15 minutes would re-lock the
+    // account for good. Conditioned on the old lock time so two requests racing
+    // here cannot wipe a lock a third one just set.
+    if (member.pin_locked_until && new Date(member.pin_locked_until) <= new Date()) {
+      await supabaseAdmin
+        .from('roster')
+        .update({ failed_pin_attempts: 0, pin_locked_until: null })
+        .eq('id', member.id)
+        .eq('pin_locked_until', member.pin_locked_until);
     }
 
     // Claim this attempt BEFORE checking the PIN. The lockout check above
@@ -771,6 +788,7 @@ async function loginHandler(req, res) {
 
     const pin = String(req.body.pin || '');
     if (!/^\d{6}$/.test(pin)) return res.status(400).json({ error: 'Choose a 6-digit PIN.' });
+    if (isWeakPin(pin)) return res.status(400).json({ error: WEAK_PIN_MESSAGE });
     // The address is only taken from the page when none is on file. Changing
     // an existing one stays with the people who can already edit the roster.
     let newEmail = '';
@@ -840,6 +858,7 @@ async function loginHandler(req, res) {
     // reaches the founder (src/Login.jsx).
     const payload = {
       role: pickedRole,
+      founder: true, // the only userId-less session verifySession still accepts besides admin
       companyId: company.id,
       companyName: company.name,
       suspended: false,
@@ -1165,6 +1184,7 @@ async function loginHandler(req, res) {
     if (!rosterId || !/^\d{6}$/.test(String(pin || ''))) {
       return res.status(400).json({ error: 'Enter a 6-digit PIN.' });
     }
+    if (isWeakPin(pin)) return res.status(400).json({ error: WEAK_PIN_MESSAGE });
 
     // Ownership check — this rosterId must actually belong to the company
     // this claim token resolved to, never trusted from the client alone.
@@ -1250,7 +1270,11 @@ async function loginHandler(req, res) {
 
   const entered = String(code).trim();
 
-  // Long entries could be master-code guesses: throttle per IP.
+  // Founder codes are guessed online, so every attempt (right or wrong) is
+  // counted per IP BEFORE the compare. Counting only after a failed compare, as
+  // the old company-code check did, never slowed a guess down.
+  const founderAllowed = await checkIpThrottle(`code:${clientIp(req)}`, COMPANY_CODE_THROTTLE_MAX_FAILURES, COMPANY_CODE_THROTTLE_WINDOW_MS);
+  if (!founderAllowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
   if (entered.length >= MASTER_CODE_THROTTLE_MIN_LENGTH) {
     const allowed = await checkMasterCodeThrottle(clientIp(req));
     if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
@@ -1261,7 +1285,7 @@ async function loginHandler(req, res) {
     if (mfa.throttled) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
     if (mfa.required && !mfa.ok) return res.status(200).json({ stage: 'need_totp' });
 
-    const payload = { role: 'admin', companyId: null, issuedAt: Date.now() };
+    const payload = { role: 'admin', founder: true, companyId: null, issuedAt: Date.now() };
     const token = signSession(payload);
     return res.status(200).json({ session: payload, token });
   }
@@ -1273,11 +1297,5 @@ async function loginHandler(req, res) {
     return res.status(200).json({ stage: 'pick_company', masterTicket, companies: companies || [] });
   }
 
-  // Count the failure before answering, so repeated wrong codes from one
-  // address burn the budget even though a correct code never does.
-  if (entered.length < MASTER_CODE_THROTTLE_MIN_LENGTH) {
-    const allowed = await checkIpThrottle(`code:${clientIp(req)}`, COMPANY_CODE_THROTTLE_MAX_FAILURES, COMPANY_CODE_THROTTLE_WINDOW_MS);
-    if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
-  }
   return res.status(401).json({ error: 'Code not recognized.' });
 }

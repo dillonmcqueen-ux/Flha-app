@@ -190,7 +190,7 @@ test.after(() => fake.server.close());
 // signature and TTL alone — the legacy/pre-roster shape, which is what keeps
 // this test off the roster table.
 function supervisorToken(companyId = 'acme') {
-  const payload = Buffer.from(JSON.stringify({ role: 'supervisor', companyId, name: 'Sup', issuedAt: Date.now() })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ role: 'supervisor', founder: true, companyId, name: 'Sup', issuedAt: Date.now() })).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }

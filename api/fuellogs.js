@@ -61,7 +61,12 @@ async function verifySession(token) {
   // handler: the next endpoint added without a role check inherits it.
   if (payload.purpose) return null;
 
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
 
   const { data: rows, error } = await supabaseAdmin
     .from('roster')

@@ -13,6 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import crypto from 'node:crypto';
 
 process.env.SESSION_SECRET = 'test-session-secret-for-signing-only';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
@@ -31,6 +32,7 @@ const server = http.createServer(async (req, res) => {
   seen.push({ table, query: Object.fromEntries(url.searchParams), body: raw });
   const send = (code, payload) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(payload)); };
   if (table === 'rpc/bump_ip_throttle') return send(200, throttleCount);
+  if (table === 'rpc/claim_pin_attempt') return send(200, [{ failed_pin_attempts: 1, pin_locked_until: null }]);
   if (table === 'companies') return send(200, companies);
   if (table === 'roster') return send(200, rosterRows);
   return send(200, []);
@@ -40,6 +42,8 @@ process.env.SUPABASE_URL = `http://127.0.0.1:${server.address().port}`;
 test.after(() => new Promise(r => server.close(r)));
 
 const { default: handler } = await import('../../api/login.js');
+const { default: companyData } = await import('../../api/companydata.js');
+const { isWeakPin } = await import('../../server-lib/weakPins.js');
 const { sessionExpired, SUPERVISOR_SESSION_TTL_MS, WORKER_SESSION_TTL_MS } = await import('../../server-lib/sessionTtl.js');
 
 async function call(body) {
@@ -146,12 +150,90 @@ test('a supervisor session lasts 12 hours, a worker session 7 days', () => {
   assert.equal(sessionExpired({ role: 'worker', userId: 4, issuedAt: old }, now), false);
 });
 
-test('the founder sessions and anything without an issue time are not given the short window', () => {
+test('founder sessions get the short window too, and a session with no issue time is expired', () => {
   const now = Date.now();
-  // Founder sessions (no userId) keep the 7 day server window; the browser
-  // holds them per tab only.
-  assert.equal(sessionExpired({ role: 'admin', issuedAt: now - 24 * 60 * 60 * 1000 }, now), false);
-  assert.equal(sessionExpired({ role: 'supervisor', issuedAt: now - 24 * 60 * 60 * 1000 }, now), false);
+  const day = 24 * 60 * 60 * 1000;
+  assert.equal(sessionExpired({ role: 'admin', issuedAt: now - day }, now), true);
+  assert.equal(sessionExpired({ role: 'admin', issuedAt: now - 60_000 }, now), false);
+  assert.equal(sessionExpired({ role: 'supervisor', founder: true, issuedAt: now - day }, now), true);
   assert.equal(sessionExpired({ role: 'worker' }, now), true);
   assert.equal(sessionExpired(null, now), true);
+});
+
+function signToken(payload) {
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(data).digest('base64url');
+  return `${data}.${sig}`;
+}
+async function callData(body) {
+  const out = { statusCode: null, body: null };
+  await companyData({ method: 'POST', body, headers: {} }, {
+    status(code) { out.statusCode = code; return this; },
+    json(payload) { out.body = payload; return this; },
+  });
+  return out;
+}
+
+test('a leftover shared-code session (supervisor, no userId, no founder flag) is refused', async () => {
+  const token = signToken({ role: 'supervisor', companyId: 1, companyName: 'ABC', suspended: false, issuedAt: Date.now() });
+  const out = await callData({ action: 'list_roster', token });
+  assert.equal(out.statusCode, 401);
+});
+
+test('a founder session opened on a company is still accepted', async () => {
+  const token = signToken({ role: 'supervisor', founder: true, companyId: 1, companyName: 'ABC', suspended: false, issuedAt: Date.now() });
+  const out = await callData({ action: 'list_roster', token });
+  assert.notEqual(out.statusCode, 401);
+});
+
+test('a search with * wildcards cannot get under the 3 letter minimum', async () => {
+  const out = await call({ action: 'search_companies', query: 'a**' });
+  assert.deepEqual(out.body.companies, []);
+  assert.equal(seen.some(r => r.table === 'companies'), false);
+});
+
+test('the name list is throttled per IP', async () => {
+  const search = await call({ action: 'search_companies', query: 'abc' });
+  throttleCount = 100000;
+  const out = await call({ action: 'list_roster_names', companyTicket: search.body.companies[0].companyTicket });
+  assert.equal(out.statusCode, 429);
+});
+
+test('a lock that has run out starts a fresh set of attempts', async () => {
+  const salt = 'abcd';
+  const hash = crypto.scryptSync('482913', salt, 64).toString('hex');
+  rosterRows = [{ id: 11, name: 'Jamie Worker', role: 'worker', active: true, company_id: 1, failed_pin_attempts: 8, pin_locked_until: new Date(Date.now() - 60_000).toISOString(), pin_salt: salt, pin_hash: hash, totp_enabled: false, departments: [] }];
+  const search = await call({ action: 'search_companies', query: 'abc' });
+  seen = [];
+  const out = await call({ action: 'roster_login', companyTicket: search.body.companies[0].companyTicket, rosterId: 11, pin: '000999' });
+  assert.equal(out.statusCode, 401);
+  const resetIdx = seen.findIndex(r => r.table === 'roster' && r.body.includes('"failed_pin_attempts":0'));
+  const claimIdx = seen.findIndex(r => r.table === 'rpc/claim_pin_attempt');
+  assert.ok(resetIdx >= 0, 'the expired lock was cleared');
+  assert.ok(resetIdx < claimIdx, 'and cleared before the new attempt was counted');
+});
+
+test('a lock that is still running is left alone', async () => {
+  const salt = 'abcd';
+  rosterRows = [{ id: 11, name: 'Jamie Worker', role: 'worker', active: true, company_id: 1, failed_pin_attempts: 8, pin_locked_until: new Date(Date.now() + 600_000).toISOString(), pin_salt: salt, pin_hash: 'x', totp_enabled: false, departments: [] }];
+  const search = await call({ action: 'search_companies', query: 'abc' });
+  seen = [];
+  const out = await call({ action: 'roster_login', companyTicket: search.body.companies[0].companyTicket, rosterId: 11, pin: '000999' });
+  assert.equal(out.statusCode, 403);
+  assert.equal(seen.some(r => r.table === 'roster' && r.body.includes('failed_pin_attempts')), false);
+});
+
+test('PINs an attacker tries first are refused at set time', () => {
+  for (const p of ['000000', '111111', '123456', '654321', '234567', '121212', '123123', '112233', '696969']) {
+    assert.equal(isWeakPin(p), true, p);
+  }
+  for (const p of ['482913', '730194', '905317']) assert.equal(isWeakPin(p), false, p);
+});
+
+test('a worker cannot pick a trivial PIN from their setup link', async () => {
+  const { signPinLinkTicket, hashJti } = await import('../../server-lib/setupLinks.js');
+  rosterRows = [{ id: 1, company_id: 7, name: 'New Hire', role: 'worker', active: true, email: null, departments: [], totp_enabled: false, is_owner: false, pin_link_jti_hash: hashJti('j'), pin_link_expires_at: new Date(Date.now() + 3600_000).toISOString() }];
+  const out = await call({ action: 'pin_link_set_pin', linkToken: signPinLinkTicket({ rosterId: 1, companyId: 7, jti: 'j' }), pin: '123456' });
+  assert.equal(out.statusCode, 400);
+  assert.match(out.body.error, /too easy/);
 });

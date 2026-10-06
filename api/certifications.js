@@ -11,6 +11,7 @@ import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { encryptField, withDecryptedEmail, keyProblemMessage } from '../server-lib/fieldCrypto.js';
 import { isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -88,7 +89,12 @@ async function verifySession(token) {
   // sessions carry no userId — there's no individual roster row to tie a
   // cert wallet to, so those callers can never use this endpoint for
   // anything but an admin-scoped list.
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
 
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
@@ -405,6 +411,7 @@ export default async function handler(req, res) {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const { pin } = req.body;
       if (!/^\d{6}$/.test(String(pin || ''))) return res.status(400).json({ error: 'Enter a 6-digit PIN.' });
+      if (isWeakPin(pin)) return res.status(400).json({ error: WEAK_PIN_MESSAGE });
       const salt = genSalt();
       const { error } = await supabaseAdmin
         .from('roster')
