@@ -344,3 +344,15 @@ test('an IPv6 caller is counted by its /64, so rotating addresses inside it buys
   assert.equal(ipBucket('::ffff:203.0.113.7'), '::ffff:203.0.113.7'); // IPv4-mapped stays as is
   assert.equal(ipBucket(undefined), 'unknown');
 });
+
+test('an auto-generated company code is always one the login page accepts', async () => {
+  const { codePrefix } = await import('../../server-lib/onboardingApproval.js');
+  const shape = /^[A-Z0-9-]{6,32}$/;
+  const names = ["O'Brien", 'Étoile Haulage', '(1) Ltd Co', 'Acme Corp', '', '   ', '日本建設', 'A', '---', 'North & South Builders Ltd.'];
+  for (const name of names) {
+    const code = `${codePrefix(name)}ABCDE`;
+    assert.match(code, shape, `${JSON.stringify(name)} -> ${code}`);
+  }
+  assert.equal(codePrefix('Étoile Haulage'), 'EH');
+  assert.equal(codePrefix("O'Brien"), 'OBR');
+});

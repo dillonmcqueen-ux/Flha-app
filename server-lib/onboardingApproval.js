@@ -63,12 +63,15 @@ function randomSuffix(len = 3) {
   for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
-function codePrefix(name) {
-  const clean = (name || '').trim().toUpperCase();
-  if (!clean) return 'CO';
-  const words = clean.split(/\s+/).filter(Boolean);
+// Letters and digits only, because find_company (api/login.js) rejects anything
+// else: a company called "O'Brien" or "Étoile Haulage" must not get a code its own
+// staff cannot type. Accents are folded to their plain letter first.
+export function codePrefix(name) {
+  const plain = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const words = plain.split(/\s+/).map((w) => w.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
+  if (words.length === 0) return 'CO';
   if (words.length === 1) return words[0].slice(0, 3);
-  return words.map(w => w[0]).join('').slice(0, 3);
+  return words.map((w) => w[0]).join('').slice(0, 3);
 }
 // 6 digits (1,000,000 possible values), not 4 — see PIN_LOCKOUT_AFTER_ATTEMPTS
 // in api/login.js and docs/security/soc2-readiness-gaps.md item 8. Bumped
