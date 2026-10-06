@@ -133,7 +133,7 @@ export default async function handler(req, res) {
 
       collected.sort((a, b) => new Date(b.r.created_at) - new Date(a.r.created_at));
       const top = collected.slice(0, MAX_RESULTS);
-      const signed = await signRows(supabaseAdmin, top.map((c) => ({ id: `${c.type}:${c.r.id}`, pdf_url: c.r.pdf_url })), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const signed = await signRows(supabaseAdmin, top.map((c) => ({ id: `${c.type}:${c.r.id}`, pdf_url: c.r.pdf_url })), [{ key: 'pdf_url', bucket: 'flha-reports' }], 300);
       const pdfById = new Map(signed.map((s) => [s.id, s.pdf_url]));
       return res.status(200).json({
         documents: top.map((c) => ({

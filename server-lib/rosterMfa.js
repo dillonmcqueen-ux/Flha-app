@@ -197,7 +197,7 @@ export function canResetMfa(session, target) {
   if (session.userId && String(session.userId) === String(target.id)) return false;
   if (session.companyId !== target.company_id) return false;
   if (target.is_owner) return false;
-  if (isOwner(session)) return target.role === 'worker' || target.role === 'supervisor';
+  if (isOwner(session)) return target.role === 'worker' || target.role === 'supervisor' || target.role === 'auditor';
   if (session.role === 'supervisor') return target.role === 'worker';
   return false;
 }

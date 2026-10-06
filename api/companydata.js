@@ -1083,6 +1083,9 @@ export default async function handler(req, res) {
       const effectiveRole = 'role' in req.body ? req.body.role : target.role;
       if ('role' in req.body) {
         if (req.body.role !== 'worker' && req.body.role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+        // An auditor row is outside the seat count, so turning one into a
+        // worker or supervisor would add an uncounted seat.
+        if (target.role === 'auditor') return res.status(400).json({ error: "An auditor can't be changed to another role. Remove the auditor and add the person again." });
         // Demoting an Owner would leave an Owner who is not a supervisor, which
         // the gates do not recognise. Remove ownership first.
         const staysOwner = 'isOwner' in req.body ? req.body.isOwner === true : target.is_owner === true;
@@ -1558,6 +1561,8 @@ export default async function handler(req, res) {
         }
         const allowed = await checkIpThrottle(supabaseAdmin, `auditoraccess:${companyId}`, 20, 60 * 60 * 1000);
         if (!allowed) return res.status(429).json({ error: 'Too many access emails this hour. Try again later.' });
+        const memberAllowed = await checkIpThrottle(supabaseAdmin, `sendauditor:${target.id}`, 5, 60 * 60 * 1000);
+        if (!memberAllowed) return res.status(429).json({ error: 'That auditor was sent access too many times this hour. Try again later.' });
         const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
         const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';
         const expiresAt = new Date(Date.now() + AUDITOR_ACCESS_MS).toISOString();

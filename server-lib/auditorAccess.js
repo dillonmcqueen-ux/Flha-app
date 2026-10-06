@@ -140,6 +140,9 @@ export async function listAuditableDocuments(supabase, companyId, labels) {
  * `{ error, status }`.
  */
 export async function validateAuditorScope(supabase, companyId, input, labels) {
+  for (const k of ['divisionIds', 'siteIds', 'documentKeys']) {
+    if (input[k] != null && !Array.isArray(input[k])) return { status: 400, error: 'Invalid selection.' };
+  }
   const divisions = await sanitizeDivisionIds(supabase, companyId, input.divisionIds || []);
   if (!divisions) return { status: 400, error: 'Pick your own divisions.' };
 
