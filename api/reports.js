@@ -11,7 +11,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
-import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT } from '../server-lib/documentAccess.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -213,7 +213,7 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
-      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT, { asOf: req.body.queuedAt });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT, { asOf: queuedAsOf(req.body) });
       if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {

@@ -146,3 +146,24 @@ test('a missing document_assignments table (SQL not applied yet) changes nothing
     assignmentsTableExists = true;
   }
 });
+
+test('a backdated queuedAt without a clientSubmissionId does not buy a bypass', async () => {
+  assignments = [asg({ audience_type: 'individual', audience_value: '99', created_at: new Date(Date.now() - 3600 * 1000).toISOString() })];
+  const out = await call({ action: 'submit', token: asRoster(5, 'worker'), queuedAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(), ...SUBMIT_BODY });
+  assert.equal(out.statusCode, 403);
+});
+
+test('a real queue replay (with clientSubmissionId) filled in before the row existed is accepted', async () => {
+  assignments = [asg({ audience_type: 'individual', audience_value: '99', created_at: new Date(Date.now() - 3600 * 1000).toISOString() })];
+  const out = await call({
+    action: 'submit', token: asRoster(5, 'worker'), clientSubmissionId: 'q-1',
+    queuedAt: new Date(Date.now() - 5 * 3600 * 1000).toISOString(), ...SUBMIT_BODY,
+  });
+  assert.notEqual(out.statusCode, 403, JSON.stringify(out.body));
+});
+
+test('the pre-trip style equipment lookup is held to the assignment', async () => {
+  assignments = [asg({ audience_type: 'individual', audience_value: '99' })];
+  const out = await call({ action: 'check_equipment', token: asRoster(5, 'worker'), equipmentLabel: 'A' });
+  assert.equal(out.statusCode, 403);
+});

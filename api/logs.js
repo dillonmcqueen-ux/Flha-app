@@ -13,7 +13,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
-import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT } from '../server-lib/documentAccess.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -333,6 +333,10 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      // The pre-trip lookup hands back earlier inspections' defects and
+      // notes, so it is held to the same assignment as filling one in.
+      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT);
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { equipmentLabel } = req.body;
       if (!equipmentLabel) return res.status(400).json({ error: 'Missing equipment.' });
 
@@ -362,7 +366,7 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
-      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT, { asOf: req.body.queuedAt });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT, { asOf: queuedAsOf(req.body) });
       if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
@@ -753,13 +757,22 @@ export default async function handler(req, res) {
       const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabaseAdmin
         .from('toolbox_talks')
-        .select('id, presenter_name, meeting_type, site, topic, attendees_json, created_at')
+        .select('id, presenter_name, meeting_type, site, site_id, submitted_by_roster_id, topic, attendees_json, created_at')
         .eq('company_id', session.companyId)
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(30);
       if (error) return res.status(500).json({ error: 'Could not load recent toolbox talks.' });
-      const talks = (data || []).map(t => ({ ...t, signedCount: (t.attendees_json || []).length }));
+      // A worker looks for the talk they were at, so workers see the
+      // company's recent talks (the sign-in sheet is the point). A
+      // supervisor is held to their own scope like every other list.
+      let visibleTalks = data || [];
+      if (session.role === 'supervisor') {
+        const scoped = await listVisibleRecords(supabaseAdmin, session, table.docKey, visibleTalks);
+        if (scoped.denied) return res.status(scoped.denied.status).json({ error: scoped.denied.error });
+        visibleTalks = scoped.records;
+      }
+      const talks = visibleTalks.map(({ site_id, submitted_by_roster_id, ...t }) => ({ ...t, signedCount: (t.attendees_json || []).length }));
       return res.status(200).json({ talks });
     }
 
@@ -781,6 +794,9 @@ export default async function handler(req, res) {
         ? await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT)
         : await requireRecordsAccess(supabaseAdmin, session, table.docKey, [record]);
       if (detailDenied) return res.status(detailDenied.status).json({ error: detailDenied.error });
+      // Supervisor notes are for supervisors; the sign-later screen has no
+      // use for them.
+      if (session.role === 'worker') delete record.supervisor_notes_json;
       record.pdf_url = await signStoredUrl(record.pdf_url, 'flha-reports');
       const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, logo_url').eq('id', record.company_id).limit(1);
       return res.status(200).json({ record, company: coRows && coRows[0] });
@@ -833,11 +849,15 @@ export default async function handler(req, res) {
       const { id, name, signature, pdfUrl } = req.body;
       if (!id || !name || !signature) return res.status(400).json({ error: 'Missing details.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('toolbox_talks').select('id, company_id, attendees_json').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('toolbox_talks').select('id, company_id, site_id, submitted_by_roster_id, attendees_json').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
       const existing = rows[0];
       if (existing.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
-      const lateDenied = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT);
+      // A supervisor adding a signature is held to their scope over the talk,
+      // a worker to the assignment.
+      const lateDenied = session.role === 'worker'
+        ? await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT)
+        : await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing]);
       if (lateDenied) return res.status(lateDenied.status).json({ error: lateDenied.error });
 
       // Individually-identified (roster) sessions have a real authenticated

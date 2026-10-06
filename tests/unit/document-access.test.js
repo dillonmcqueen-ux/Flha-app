@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 
 const {
   matchesAudience, activeRowsAsOf, evaluateAccess, clampAsOf, recordInScope,
-  requireAssignment, scopeRecords, requireRecordsAccess, menuAccessFor, isAssignableKey,
+  requireAssignment, scopeRecords, requireRecordsAccess, menuAccessFor, isAssignableKey, isAssignableAction, queuedAsOf,
   GRACE_MS, SUBMIT, VIEW,
 } = await import('../../server-lib/documentAccess.js');
 
@@ -283,4 +283,20 @@ test('only enforced documents are assignable', () => {
   for (const k of ['timeclock', 'certifications', 'maintenance', 'equipment_reports', 'equipment_compliance', 'custom_', 'custom_x', 'portal_', '']) {
     assert.equal(isAssignableKey(k), false, k);
   }
+});
+
+test('queuedAt only counts alongside a clientSubmissionId, and the grace window is 48 hours', () => {
+  assert.equal(queuedAsOf({ queuedAt: '2026-10-01T00:00:00Z' }), undefined, 'a bare queuedAt is ignored');
+  assert.equal(queuedAsOf({ queuedAt: '2026-10-01T00:00:00Z', clientSubmissionId: '' }), undefined);
+  assert.equal(queuedAsOf({ queuedAt: '2026-10-01T00:00:00Z', clientSubmissionId: 'abc' }), '2026-10-01T00:00:00Z');
+  assert.equal(queuedAsOf(null), undefined);
+  assert.equal(GRACE_MS, 48 * 60 * 60 * 1000);
+});
+
+test('Portal documents are assignable for submit only, never view', () => {
+  assert.equal(isAssignableAction('portal_3', 'submit'), true);
+  assert.equal(isAssignableAction('portal_3', 'view'), false);
+  assert.equal(isAssignableAction('flha', 'view'), true);
+  assert.equal(isAssignableAction('timeclock', 'submit'), false);
+  assert.equal(isAssignableAction('flha', 'edit'), false);
 });

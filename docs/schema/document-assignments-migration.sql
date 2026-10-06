@@ -45,7 +45,14 @@ create table if not exists public.document_assignments (
   created_by bigint references public.roster(id) on delete set null,
   created_at timestamptz not null default now(),
   ended_at timestamptz,
-  check ((audience_type = 'everyone') = (audience_value is null))
+  check ((audience_type = 'everyone') = (audience_value is null)),
+  -- Only documents whose handlers enforce assignments. A row on anything
+  -- else (time clock, certifications, maintenance, ...) would be accepted
+  -- and do nothing. Keep in step with ENFORCED_BUILTIN_KEYS in
+  -- server-lib/documentAccess.js.
+  check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|fuellog|custom_[0-9]+|portal_[0-9]+)$'),
+  -- Portal supervisor reads are routed by department and ignore view rows.
+  check (not (document_key like 'portal\_%' and action = 'view'))
 );
 
 create index if not exists document_assignments_company_doc_idx
@@ -56,9 +63,10 @@ create index if not exists document_assignments_company_doc_idx
 alter table public.document_assignments enable row level security;
 
 -- A site belongs to at most one division (a division is the "business
--- unit"). Nullable: a site with no division behaves exactly as before. The
--- application validates that the division belongs to the site's own company
--- (api/companydata.js); a DB foreign key alone cannot.
+-- unit"). Nullable: a site with no division behaves exactly as before. Nothing
+-- in the app writes this column yet (the Owner screen that does ships in
+-- PR 2, and it must check the division belongs to the site's own company; a
+-- DB foreign key alone cannot). Until then it is set by hand.
 alter table public.sites
   add column if not exists division_id bigint references public.company_divisions(id) on delete set null;
 

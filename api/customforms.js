@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireCustomDocKey } from '../server-lib/docKeyGate.js';
-import { requireAssignment, requireRecordsAccess, listVisibleRecordsMulti, menuAccessFor, SUBMIT } from '../server-lib/documentAccess.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecordsMulti, menuAccessFor, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -563,7 +563,7 @@ export default async function handler(req, res) {
       }
       const deniedCustom = await requireCustomDocKey(supabaseAdmin, session, formRows[0].id);
       if (deniedCustom) return res.status(deniedCustom.status).json({ error: deniedCustom.error });
-      const notAssigned = await requireAssignment(supabaseAdmin, session, `custom_${formRows[0].id}`, SUBMIT, { asOf: req.body.queuedAt });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `custom_${formRows[0].id}`, SUBMIT, { asOf: queuedAsOf(req.body) });
       if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
 
       // Idempotency (docs/scope-offline-capability.md Phase 1) — same

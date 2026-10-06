@@ -31,9 +31,11 @@
 // time ships with the worker-menu change; until then asOf is always "now".
 //
 // DB FAILURE POSTURE
-//   - missing table or column (migration not applied yet): behave as before,
-//     no rows, nothing narrowed. Shipping this file ahead of the SQL must
-//     not break submissions.
+//   - missing document_assignments table or sites.division_id (migration not
+//     applied yet): behave as before, no rows, nothing narrowed. Shipping
+//     this file ahead of the SQL must not break submissions. The roster
+//     columns it reads (is_owner, divisions, default_site_id) already exist
+//     live; a database without them fails closed with 503.
 //   - any other read error: fail CLOSED with 503, which the offline queue
 //     keeps and retries (403 would drop it). Same reasoning as docKeyGate.
 
@@ -43,7 +45,7 @@ function isFounderSession(session) {
 
 export const SUBMIT = 'submit';
 export const VIEW = 'view';
-export const GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+export const GRACE_MS = 48 * 60 * 60 * 1000;
 
 // The document types whose handlers actually call requireAssignment. An
 // assignment on any other key (time clock, certifications, equipment
@@ -56,10 +58,32 @@ export const ENFORCED_BUILTIN_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss
 export function isAssignableKey(key) {
   return ENFORCED_BUILTIN_KEYS.includes(key) || /^custom_\d+$/.test(String(key)) || /^portal_\d+$/.test(String(key));
 }
+// Portal documents are enforced on submit only: their supervisor reads are
+// routed by department in api/portal.js and do not consult view rows (break
+// #47 in docs/feature-interaction-map.md). A view row there would be accepted
+// and do nothing, so it is not offered.
+export function isAssignableAction(key, action) {
+  if (!isAssignableKey(key)) return false;
+  if (action !== SUBMIT && action !== VIEW) return false;
+  return !(/^portal_\d+$/.test(String(key)) && action === VIEW);
+}
 
 const MISSING_RELATION_CODES = new Set(['42P01', '42703', 'PGRST205', 'PGRST204']);
 function isMissingSchema(error) {
   return !!error && MISSING_RELATION_CODES.has(String(error.code || ''));
+}
+
+/**
+ * The queued time a submit may be judged by. Only an offline-queue replay
+ * carries a clientSubmissionId, so a bare `queuedAt` on its own is ignored.
+ * This is a speed bump, not a proof: anyone holding a token can add both
+ * fields. What it bounds is the damage (GRACE_MS, a submit only, never a
+ * read). The real fix is a server-signed "opened at" stamp the client echoes
+ * back, which ships with the client change in PR 2.
+ */
+export function queuedAsOf(body) {
+  if (!body || typeof body.clientSubmissionId !== 'string' || !body.clientSubmissionId) return undefined;
+  return body.queuedAt;
 }
 
 /** Turns a client-supplied queued time into a safe evaluation instant. */
