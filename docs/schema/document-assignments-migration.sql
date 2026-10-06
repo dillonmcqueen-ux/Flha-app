@@ -63,6 +63,23 @@ create table if not exists public.document_assignments (
   check (action = 'submit' or restricts)
 );
 
+-- Idempotent catch-up for a database that created the table from an earlier
+-- version of this file (before `restricts` existed). `create table if not
+-- exists` adds no column to a table that is already there, so the column and
+-- its check are added separately. A no-op on a fresh install.
+alter table public.document_assignments
+  add column if not exists restricts boolean not null default false;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.document_assignments'::regclass and conname = 'document_assignments_view_restricts'
+  ) then
+    alter table public.document_assignments
+      add constraint document_assignments_view_restricts check (action = 'submit' or restricts);
+  end if;
+end $$;
+
 create index if not exists document_assignments_company_doc_idx
   on public.document_assignments (company_id, document_key)
   where ended_at is null;
