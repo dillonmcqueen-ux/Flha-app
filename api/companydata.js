@@ -1372,7 +1372,7 @@ export default async function handler(req, res) {
         const [documents, rowsRes, peopleRes] = await Promise.all([
           listAssignableDocuments(supabaseAdmin, companyId),
           supabaseAdmin.from('document_assignments')
-            .select('id, document_key, audience_type, audience_value, action, due_at, created_at')
+            .select('id, document_key, audience_type, audience_value, action, restricts, due_at, created_at')
             .eq('company_id', companyId).is('ended_at', null).order('created_at', { ascending: true }),
           supabaseAdmin.from('roster').select('id, role, departments, divisions, default_site_id').eq('company_id', companyId).eq('active', true),
         ]);
@@ -1408,7 +1408,7 @@ export default async function handler(req, res) {
           console.error('create_document_assignment failed:', error.message);
           return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't save the assignment." });
         }
-        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'create_document_assignment', companyId, targetType: 'document_assignment', targetId: created.id, details: { document_key: r.document_key, audience_type: r.audience_type, audience_value: r.audience_value, assignment_action: r.action, by_roster_id: session.userId || null } });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'create_document_assignment', companyId, targetType: 'document_assignment', targetId: created.id, details: { document_key: r.document_key, audience_type: r.audience_type, audience_value: r.audience_value, assignment_action: r.action, restricts: r.restricts, by_roster_id: session.userId || null } });
         return res.status(200).json({ ok: true, id: created.id });
       }
 

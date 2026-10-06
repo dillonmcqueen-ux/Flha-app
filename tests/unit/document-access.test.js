@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const {
-  matchesAudience, activeRowsAsOf, evaluateAccess, clampAsOf, recordInScope,
+  matchesAudience, activeRowsAsOf, evaluateAccess, isRestricting, clampAsOf, recordInScope,
   requireAssignment, scopeRecords, requireRecordsAccess, menuAccessFor, isAssignableKey, isAssignableAction, queuedAsOf,
   GRACE_MS, SUBMIT, VIEW,
 } = await import('../../server-lib/documentAccess.js');
@@ -343,4 +343,48 @@ test('menuAccessFor hides every unassigned document for a hidden person and list
   assert.deepEqual([...out.allowedKeys].sort(), ['flha', 'timeclock']);
   assert.equal(out.assigned[0].documentKey, 'flha');
   assert.ok(out.assigned[0].since);
+});
+
+// ── tasks versus restrictions ────────────────────────────────────────────
+
+test('a task never narrows; only a restricting row does', () => {
+  const task = [row({ audience_type: 'individual', audience_value: '99', restricts: false })];
+  assert.equal(evaluateAccess(task, actor({ rosterId: 5 }), SUBMIT, NOW).allowed, true, 'a task for someone else takes nothing from this person');
+  assert.equal(evaluateAccess(task, actor({ rosterId: 5 }), SUBMIT, NOW).narrowed, false);
+  const restrict = [row({ audience_type: 'individual', audience_value: '99', restricts: true })];
+  assert.equal(evaluateAccess(restrict, actor({ rosterId: 5 }), SUBMIT, NOW).allowed, false);
+  // A row from before the switch existed has no field and restricts, as it always did.
+  const legacy = [row({ audience_type: 'individual', audience_value: '99' })];
+  assert.equal(isRestricting(legacy[0]), true);
+  assert.equal(evaluateAccess(legacy, actor({ rosterId: 5 }), SUBMIT, NOW).allowed, false);
+});
+
+test('a task and a restriction on the same document: the restriction still decides', () => {
+  const rows = [
+    row({ audience_type: 'role', audience_value: 'supervisor', restricts: true }),
+    row({ audience_type: 'individual', audience_value: '5', restricts: false }),
+  ];
+  assert.equal(evaluateAccess(rows, actor({ rosterId: 5, role: 'worker' }), SUBMIT, NOW).allowed, false, 'being given a task does not get past a restriction');
+  assert.equal(evaluateAccess(rows, actor({ rosterId: 6, role: 'supervisor' }), SUBMIT, NOW).allowed, true);
+});
+
+test('a hidden person is allowed what a task names', () => {
+  const task = [row({ audience_type: 'individual', audience_value: '5', restricts: false })];
+  assert.equal(evaluateAccess(task, actor({ hideUnassigned: true }), SUBMIT, NOW).allowed, true);
+});
+
+test('the menu lists a task for the person it names and hides nothing from anyone else', async () => {
+  const db = fakeDb({
+    roster: { data: [rosterRow()] },
+    document_assignments: { data: [row({ document_key: 'flha', audience_type: 'individual', audience_value: '99', restricts: false })] },
+  });
+  const out = await menuAccessFor(db, session(), ['flha']);
+  assert.equal(out.allowedKeys.has('flha'), true, 'someone else\'s task hides nothing');
+  assert.deepEqual(out.assigned, [], 'and it is not on this person\'s list');
+  const mine = fakeDb({
+    roster: { data: [rosterRow()] },
+    document_assignments: { data: [row({ document_key: 'flha', audience_type: 'individual', audience_value: '5', restricts: false, due_at: iso(NOW + DAY) })] },
+  });
+  const out2 = await menuAccessFor(mine, session(), ['flha']);
+  assert.equal(out2.assigned[0].documentKey, 'flha');
 });

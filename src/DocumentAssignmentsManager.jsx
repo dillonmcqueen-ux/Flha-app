@@ -43,6 +43,9 @@ export default function DocumentAssignmentsManager({ token, companyId, departmen
   const [audienceType, setAudienceType] = useState("everyone");
   const [audienceValue, setAudienceValue] = useState("");
   const [dueAt, setDueAt] = useState("");
+  // false = a task (the default): it shows on the person's "Assigned to you"
+  // list and takes nothing away from anyone else. true = only these people.
+  const [restricts, setRestricts] = useState(false);
 
   const scope = companyId ? { companyId } : {};
 
@@ -89,11 +92,11 @@ export default function DocumentAssignmentsManager({ token, companyId, departmen
       action: "create_document_assignment", token, ...scope, documentKey,
       // `action` is the request's own verb, so the assignment's verb travels as assignAction.
       audienceType, audienceValue: audienceType === "everyone" ? null : audienceValue,
-      assignAction: action, dueAt: action === "submit" && dueAt ? new Date(`${dueAt}T23:59:59`).toISOString() : null,
+      assignAction: action, restricts: action === "view" ? true : restricts, dueAt: action === "submit" && dueAt ? new Date(`${dueAt}T23:59:59`).toISOString() : null,
     });
     setBusy(false);
     if (r.error) { setError(r.error); return; }
-    setAudienceValue(""); setDueAt("");
+    setAudienceValue(""); setDueAt(""); setRestricts(false);
     load();
   };
 
@@ -129,17 +132,17 @@ export default function DocumentAssignmentsManager({ token, companyId, departmen
               <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text.primary, marginBottom: 6 }}>{d.label}</div>
               {rows.map(a => (
                 <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 0", borderTop: `1px solid ${C.line}` }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: a.action === "submit" ? C.orange : C.text.muted }}>{a.action === "submit" ? "Fill in" : "Read"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: a.action === "submit" ? C.orange : C.text.muted }}>{a.action === "submit" ? (a.restricts ? "Only these fill in" : "Task") : "Only these read"}</span>
                   <span style={{ fontSize: 13, color: C.text.body, fontWeight: 600 }}>{audienceLabel(a)}</span>
                   {a.dueAt && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, color: C.text.muted }}><CalendarClock size={12} />Due {new Date(a.dueAt).toLocaleDateString("en-CA")}</span>}
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: a.reaches === 0 ? C.status.danger.text : C.text.faint }}>
-                    {a.reaches === 0 ? "Reaches nobody right now" : `Reaches ${a.reaches} ${a.reaches === 1 ? "person" : "people"}`}
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: a.reaches === 0 && a.restricts ? C.status.danger.text : C.text.faint }}>
+                    {a.reaches === 0 ? (a.restricts ? "Reaches nobody right now" : "Nobody matches yet") : `Reaches ${a.reaches} ${a.reaches === 1 ? "person" : "people"}`}
                   </span>
                   <button type="button" aria-label={`Remove assignment from ${d.label}`} disabled={busy} onClick={() => remove(a)}
                     style={{ marginLeft: "auto", background: "transparent", border: "none", cursor: "pointer", color: C.text.faint, display: "flex", padding: 4 }}><Trash2 size={14} /></button>
                 </div>
               ))}
-              {rows.some(a => a.action === "submit" && a.reaches === 0) && rows.every(a => a.action !== "submit" || a.reaches === 0) && (
+              {rows.some(a => a.action === "submit" && a.restricts) && rows.filter(a => a.action === "submit" && a.restricts).every(a => a.reaches === 0) && (
                 <div style={{ fontSize: 11.5, color: C.status.danger.text, marginTop: 4 }}>Nobody can fill this in right now except you.</div>
               )}
             </div>
@@ -173,10 +176,16 @@ export default function DocumentAssignmentsManager({ token, companyId, departmen
             {action === "submit" && (
               <input style={field} type="date" value={dueAt} aria-label="Due date (optional)" onChange={e => setDueAt(e.target.value)} />
             )}
+            {action === "submit" && (
+              <select style={field} value={restricts ? "only" : "task"} aria-label="Task or restriction" onChange={e => setRestricts(e.target.value === "only")}>
+                <option value="task">Just a task (everyone else keeps it)</option>
+                <option value="only">Only these people can use it</option>
+              </select>
+            )}
             <button type="button" style={{ ...addBtn, opacity: canAdd && !busy ? 1 : 0.5 }} disabled={!canAdd || busy} onClick={add}><Plus size={14} />Add</button>
           </div>
           <div style={{ fontSize: 11.5, color: C.text.faint, lineHeight: 1.5 }}>
-            Reading is for supervisors. Workers always see their own submissions. Company Portal documents can only be assigned for filling in.
+            A task puts the document first on their menu with the due date and changes nothing for anyone else. "Only these people" hides the document from everyone else, so check the count first. Reading is for supervisors and is always "only these people". Workers always see their own submissions. Company Portal documents can only be assigned for filling in.
           </div>
         </>
       )}

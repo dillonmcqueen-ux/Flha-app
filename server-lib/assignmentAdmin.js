@@ -119,7 +119,11 @@ export async function validateAssignment(supabase, companyId, input) {
   if (due.error) return { status: 400, error: due.error };
   if (due.value && action === VIEW) return { status: 400, error: 'Only a submit assignment has a due date.' };
 
-  return { row: { document_key: documentKey, audience_type: audienceType, audience_value: audienceValue, action, due_at: due.value } };
+  // Restricting is the Owner's deliberate act and is never the default: a
+  // plain assignment is a task. Reading is always restricting (a view row that
+  // restricted nothing would mean nothing).
+  const restricts = action === VIEW ? true : input.restricts === true;
+  return { row: { document_key: documentKey, audience_type: audienceType, audience_value: audienceValue, action, restricts, due_at: due.value } };
 }
 
 /**
@@ -142,6 +146,7 @@ export function describeAssignments(rows, people, siteDivision) {
     audienceType: r.audience_type,
     audienceValue: r.audience_value,
     action: r.action,
+    restricts: r.restricts !== false,
     dueAt: r.due_at,
     createdAt: r.created_at,
     reaches: actors.filter((a) => matchesAudience(r, a)).length,
@@ -160,7 +165,7 @@ export function describeAssignments(rows, people, siteDivision) {
 export async function assignmentsNamingAudience(supabase, companyId, audienceType, audienceValue) {
   const { data, error } = await supabase
     .from('document_assignments')
-    .select('document_key, action')
+    .select('document_key, action, restricts')
     .eq('company_id', companyId)
     .eq('audience_type', audienceType)
     .eq('audience_value', String(audienceValue))
@@ -169,5 +174,7 @@ export async function assignmentsNamingAudience(supabase, companyId, audienceTyp
     if (['42P01', 'PGRST205'].includes(String(error.code || ''))) return { rows: [] };
     return { error: true, rows: [] };
   }
-  return { rows: data || [] };
+  // Only a restricting row can be widened by losing its audience; a task
+  // naming a removed audience just reaches nobody and costs nothing.
+  return { rows: (data || []).filter((r) => r.restricts !== false) };
 }

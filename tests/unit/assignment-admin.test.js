@@ -214,8 +214,8 @@ test('setting a site\'s division checks both belong to the company', async () =>
 test('a division an assignment still names cannot be removed (it would open the document to everyone)', async () => {
   assignments = [];
   divisionDeleted = false;
-  await create({ audienceType: 'division', audienceValue: '4' });
-  await create({ audienceType: 'role', audienceValue: 'worker' });
+  await create({ audienceType: 'division', audienceValue: '4', restricts: true });
+  await create({ audienceType: 'role', audienceValue: 'worker', restricts: true });
   const refused = await call({ action: 'delete_division', token: OWNER(), id: 4 });
   assert.equal(refused.statusCode, 409, JSON.stringify(refused.body));
   assert.match(refused.body.error, /Document assignments/);
@@ -237,4 +237,26 @@ test('the Owner can read and change the hide switch; the profile reports it', as
   assert.equal(bad.statusCode, 400);
   const sup = await call({ action: 'update_worker_profile', token: as(2, 'supervisor'), id: 3, hideUnassigned: true });
   assert.equal(sup.statusCode, 403, 'a supervisor cannot hide documents from someone');
+});
+
+test('an assignment is a task unless the Owner says otherwise; reading always restricts', async () => {
+  assignments = [];
+  await create({});
+  assert.equal(assignments[0].restricts, false, 'default is a task');
+  await create({ documentKey: 'incident', restricts: true });
+  assert.equal(assignments[1].restricts, true);
+  await create({ documentKey: 'flha', assignAction: 'view', audienceType: 'role', audienceValue: 'supervisor', restricts: false });
+  const view = assignments.find(a => a.action === 'view');
+  assert.equal(view.restricts, true, 'a view row is forced to restrict');
+  const listed = await call({ action: 'list_document_assignments', token: OWNER() });
+  assert.deepEqual(listed.body.assignments.map(a => a.restricts), [false, true, true]);
+});
+
+test('a task naming a division does not block removing it, a restriction does', async () => {
+  assignments = [];
+  divisionDeleted = false;
+  await create({ audienceType: 'division', audienceValue: '4', restricts: false });
+  const ok = await call({ action: 'delete_division', token: OWNER(), id: 4 });
+  assert.equal(ok.statusCode, 200, JSON.stringify(ok.body));
+  assert.equal(divisionDeleted, true);
 });

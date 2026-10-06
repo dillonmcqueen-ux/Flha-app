@@ -198,18 +198,29 @@ export function evaluateAccess(rows, actor, action, asOfMs) {
   if (actor.bypass) return { narrowed: false, allowed: true };
   const active = activeRowsAsOf(rows, asOfMs).filter((r) => r.action === action);
   // "Hide everything not assigned to me": with no row naming this person the
-  // document is off for them, even when nobody else has been narrowed.
+  // document is off for them, even when nobody else has been narrowed. A task
+  // names them just as a restriction does.
   if (action === SUBMIT && actor.hideUnassigned) {
     return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
   }
-  if (active.length === 0) return { narrowed: false, allowed: true };
-  return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
+  // Only a RESTRICTING row narrows. A task (restricts = false) puts the
+  // document on someone's "assigned to you" list with a due date and takes
+  // nothing away from anyone else. A row with no `restricts` field predates
+  // the switch and restricts, as it always did.
+  const restricting = active.filter(isRestricting);
+  if (restricting.length === 0) return { narrowed: false, allowed: true };
+  return { narrowed: true, allowed: restricting.some((r) => matchesAudience(r, actor)) };
+}
+
+/** Does this row narrow access, or is it only a task? Pure. */
+export function isRestricting(row) {
+  return row.restricts !== false;
 }
 
 async function readAssignmentRows(supabase, companyId, documentKeys) {
   const { data, error } = await supabase
     .from('document_assignments')
-    .select('document_key, audience_type, audience_value, action, due_at, created_at, ended_at')
+    .select('document_key, audience_type, audience_value, action, restricts, due_at, created_at, ended_at')
     .eq('company_id', companyId)
     .in('document_key', documentKeys);
   if (error) {
