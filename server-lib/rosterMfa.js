@@ -24,7 +24,7 @@ import {
 // Roles that must use an authenticator. The Account Owner is a supervisor-role
 // row, so it is covered by 'supervisor'; requiresMfa also checks is_owner as a
 // belt-and-braces guard.
-export const MFA_REQUIRED_ROLES = ['supervisor', 'admin'];
+export const MFA_REQUIRED_ROLES = ['supervisor', 'admin', 'auditor'];
 // Departments (keys from server-lib/portalDepartments.js) that must use one
 // regardless of role. The Owner will be able to extend this per company.
 export const MFA_SENSITIVE_DEPARTMENTS = ['safety', 'hr', 'payroll'];

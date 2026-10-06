@@ -26,6 +26,7 @@ import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
 import { verifyPinLinkTicket, hashJti, setupOrigin, PIN_LINK_MFA_TTL_MS, issueAndEmailPinLink, unlockLinkEmail } from '../server-lib/setupLinks.js';
 import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode } from '../server-lib/rosterMfa.js';
+import { auditorAccessLive } from '../server-lib/auditorAccess.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -439,6 +440,12 @@ async function sendSubmitterConfirmation(req, record, editToken) {
 // The one place a roster login turns into a session, after the PIN and (when
 // it applies) the authenticator have both passed.
 async function mintRosterSession(member, ticket, suspended) {
+  // An auditor's login is time-limited: no session once the access the
+  // account owner sent has run out (or was never sent), whatever the PIN and
+  // authenticator say. Checked again on every request in api/audit.js.
+  if (member.role === 'auditor' && !auditorAccessLive(member.auditor_access_expires_at)) {
+    return { denied: 'Your audit access has ended. Ask the account owner to send you new access.' };
+  }
   await supabaseAdmin
     .from('roster')
     .update({ last_login_at: new Date().toISOString() })
@@ -682,6 +689,12 @@ async function loginHandler(req, res) {
       .update({ failed_pin_attempts: 0, pin_locked_until: null })
       .eq('id', member.id);
 
+    // An auditor whose access has ended goes no further: no authenticator
+    // prompt, no enrollment email, no session.
+    if (member.role === 'auditor' && !auditorAccessLive(member.auditor_access_expires_at)) {
+      return res.status(403).json({ error: 'Your audit access has ended. Ask the account owner to send you new access.' });
+    }
+
     // Second factor, after the PIN. Enrolled people must present a code (or
     // a backup code). Someone who is required to use an authenticator but
     // has not set one up is sent to enrollment and gets no session until
@@ -722,7 +735,9 @@ async function loginHandler(req, res) {
       return res.status(200).json({ stage: 'enroll_link_sent', emailHint: maskEmail(email) });
     }
 
-    return res.status(200).json(await mintRosterSession(member, ticket, suspended));
+    const rosterSession = await mintRosterSession(member, ticket, suspended);
+    if (rosterSession.denied) return res.status(403).json({ error: rosterSession.denied });
+    return res.status(200).json(rosterSession);
   }
 
   // ── Forced authenticator enrollment (runs after a correct PIN) ──────────
@@ -768,6 +783,7 @@ async function loginHandler(req, res) {
     const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', enroll.companyId).limit(1);
     const suspended = !!(coRows && coRows[0] && coRows[0].suspended);
     const minted = await mintRosterSession(member, { companyId: enroll.companyId, companyName: enroll.companyName }, suspended);
+    if (minted.denied) return res.status(403).json({ error: minted.denied });
     // Tell the person, so an enrollment they did not do does not go unnoticed.
     const notifyTo = (withDecryptedEmail(member).email || '').trim();
     if (notifyTo) {
@@ -880,6 +896,7 @@ async function loginHandler(req, res) {
       return res.status(200).json({ stage: 'enroll', enrollTicket: signEnrollTicket(member, ticket, jti) });
     }
     const minted = await mintRosterSession(member, ticket, !!company.suspended);
+    if (minted.denied) return res.status(403).json({ error: minted.denied });
     const certs = await readDocKeySetting(supabaseAdmin, company.id, 'certifications');
     return res.status(200).json({ stage: 'session', ...minted, certificationsEnabled: certs.unavailable ? null : certs.active });
   }

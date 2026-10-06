@@ -20,6 +20,8 @@ export function sessionTtlMs(payload) {
   if (!payload) return WORKER_SESSION_TTL_MS;
   // Founder sessions reach every company, so they get the short window too.
   if (payload.role === 'admin' || payload.founder === true) return SUPERVISOR_SESSION_TTL_MS;
+  // An auditor is an outside reader with a time-limited login: same short window as a supervisor.
+  if (payload.role === 'auditor' && payload.userId) return SUPERVISOR_SESSION_TTL_MS;
   return payload.role === 'supervisor' && payload.userId ? SUPERVISOR_SESSION_TTL_MS : WORKER_SESSION_TTL_MS;
 }
 

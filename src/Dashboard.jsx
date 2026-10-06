@@ -16,6 +16,7 @@ import WorkerMenu from "./WorkerMenu";
 import WorkerProfileDrawer from "./WorkerProfileDrawer";
 import CompanyStructureManager from "./CompanyStructureManager.jsx";
 import DocumentAssignmentsManager from "./DocumentAssignmentsManager.jsx";
+import AuditorsManager from "./AuditorsManager.jsx";
 import useCompanyStructure from "./useCompanyStructure.js";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
 import { generateEquipmentAnalyticsPDF } from "./generateEquipmentAnalyticsPDF";
@@ -7863,7 +7864,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                 <StatStrip items={[
                   { icon: HardHat, value: rosterList.filter(m => m.role === "supervisor" && m.active).length, label: "Supervisors", tone: "neutral" },
                   { icon: CircleUserRound, value: rosterList.filter(m => m.role === "worker" && m.active).length, label: "Workers", tone: "neutral" },
-                  { icon: Users, value: rosterList.filter(m => m.active).length, label: "Total active", tone: "accent" },
+                  { icon: Users, value: rosterList.filter(m => m.active && m.role !== "auditor").length, label: "Total active", tone: "accent" },
                 ]} />
               )}
 
@@ -7875,6 +7876,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   divisions={companyStructure.divisions}
                   sites={companyStructure.sites}
                   onChanged={companyStructure.reload}
+                />
+              )}
+
+              {canManageCompany && (
+                <AuditorsManager
+                  token={token}
+                  companyId={selectedCompany}
+                  divisions={companyStructure.divisions}
+                  sites={companyStructure.sites}
                 />
               )}
 
