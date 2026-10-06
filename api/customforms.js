@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireCustomDocKey } from '../server-lib/docKeyGate.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecordsMulti, menuAccessFor, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -391,7 +392,21 @@ export default async function handler(req, res) {
 
       const activeCustoms = (customForms || []).filter(f => settingsMap[`custom_${f.id}`] !== false);
 
-      return res.status(200).json({ builtinActive, customForms: activeCustoms });
+      // Assignments only ever narrow what module gating already allows, and
+      // this is presentation: every submit handler enforces for real. On a
+      // read failure show everything rather than lock a worker out of the
+      // menu (same posture as the client's own fail-open).
+      const switchedOn = [
+        ...BUILTIN_DOC_KEYS.filter(key => builtinActive[key]),
+        ...activeCustoms.map(f => `custom_${f.id}`),
+      ];
+      const access = await menuAccessFor(supabaseAdmin, session, switchedOn);
+      if (access.allowedKeys) {
+        BUILTIN_DOC_KEYS.forEach(key => { if (builtinActive[key] && !access.allowedKeys.has(key)) builtinActive[key] = false; });
+        const visibleCustoms = activeCustoms.filter(f => access.allowedKeys.has(`custom_${f.id}`));
+        return res.status(200).json({ builtinActive, customForms: visibleCustoms, assigned: access.assigned });
+      }
+      return res.status(200).json({ builtinActive, customForms: activeCustoms, assigned: [] });
     }
 
     // ── Worker: find MY OWN past submissions across every document type ──
@@ -501,6 +516,8 @@ export default async function handler(req, res) {
       // setting is off; a saved URL must not open it either.
       const denied = await requireCustomDocKey(supabaseAdmin, session, form.id);
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `custom_${form.id}`, SUBMIT);
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
 
       const { data: questions, error: qErr } = await supabaseAdmin
         .from('custom_form_questions')
@@ -546,6 +563,8 @@ export default async function handler(req, res) {
       }
       const deniedCustom = await requireCustomDocKey(supabaseAdmin, session, formRows[0].id);
       if (deniedCustom) return res.status(deniedCustom.status).json({ error: deniedCustom.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `custom_${formRows[0].id}`, SUBMIT, { asOf: queuedAsOf(req.body) });
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
 
       // Idempotency (docs/scope-offline-capability.md Phase 1) — same
       // reasoning as api/monthly.js's submit_monthly: this is a multi-step
@@ -630,12 +649,15 @@ export default async function handler(req, res) {
       const formIds = (forms || []).map(f => f.id);
       if (formIds.length === 0) return res.status(200).json({ records: [] });
 
-      const { data: records, error: recErr } = await supabaseAdmin
+      const { data: allRecords, error: recErr } = await supabaseAdmin
         .from('custom_form_records')
         .select('*')
         .in('form_id', formIds)
         .order('created_at', { ascending: false });
       if (recErr) return res.status(500).json({ error: 'Could not load records.' });
+      const visible = await listVisibleRecordsMulti(supabaseAdmin, session, allRecords || [], (r) => `custom_${r.form_id}`);
+      if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
+      const records = visible.records;
 
       const siteIds = [...new Set((records || []).map(r => r.site_id))];
       const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
@@ -668,6 +690,8 @@ export default async function handler(req, res) {
       const form = formRows && formRows[0];
       if (!form) return res.status(404).json({ error: 'Form not found.' });
       if (session.role === 'supervisor' && form.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      const detailDenied = await requireRecordsAccess(supabaseAdmin, session, `custom_${form.id}`, [record]);
+      if (detailDenied) return res.status(detailDenied.status).json({ error: detailDenied.error });
 
       const { data: siteRows } = await supabaseAdmin.from('sites').select('id, name').eq('id', record.site_id).limit(1);
 
@@ -698,7 +722,7 @@ export default async function handler(req, res) {
       const { recordId, answers, aiSummary, pdfUrl } = req.body;
       if (!recordId || !Array.isArray(answers)) return res.status(400).json({ error: 'Missing details.' });
 
-      const { data: recordRows, error: recErr } = await supabaseAdmin.from('custom_form_records').select('id, form_id').eq('id', recordId).limit(1);
+      const { data: recordRows, error: recErr } = await supabaseAdmin.from('custom_form_records').select('id, form_id, site_id, submitted_by_roster_id').eq('id', recordId).limit(1);
       if (recErr || !recordRows || recordRows.length === 0) return res.status(404).json({ error: 'Record not found.' });
       const record = recordRows[0];
 
@@ -708,6 +732,8 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor' && form.company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed to edit this record.' });
       }
+      const editDenied = await requireRecordsAccess(supabaseAdmin, session, `custom_${form.id}`, [record]);
+      if (editDenied) return res.status(editDenied.status).json({ error: editDenied.error });
 
       // Only ever touch answer rows that actually belong to this record —
       // never trust a client-supplied answer id blindly.

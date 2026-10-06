@@ -8,6 +8,7 @@ import { authorRosterId, stampAuthorName } from '../server-lib/authorStamp.js';
 import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
+import { requireAssignment, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import crypto from 'crypto';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
@@ -78,7 +79,7 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
-const LIST_COLUMNS = 'id, created_at, company_id, equipment_id, equipment_label, worker_name, hour_reading, reading_unit, quantity, quantity_unit, cost, site_id';
+const LIST_COLUMNS = 'id, created_at, company_id, equipment_id, equipment_label, worker_name, hour_reading, reading_unit, quantity, quantity_unit, cost, site_id, submitted_by_roster_id';
 
 // Column allow-list for client-supplied `record` bodies on submit. The
 // `update` action has always whitelisted its fields so a client "can't
@@ -120,6 +121,8 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, 'fuellog');
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, 'fuellog', SUBMIT);
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { equipmentLabel } = req.body;
       if (!equipmentLabel) return res.status(400).json({ error: 'Missing equipment.' });
 
@@ -160,6 +163,8 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, 'fuellog');
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, 'fuellog', SUBMIT, { asOf: queuedAsOf(req.body) });
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -296,7 +301,12 @@ export default async function handler(req, res) {
         return { ...f, burn_rate: burnRate };
       });
 
-      return res.status(200).json({ records });
+      // Burn rates above were computed from every row on purpose (a prior
+      // reading on someone else's log still anchors this one); only the rows
+      // handed back are narrowed.
+      const visible = await listVisibleRecords(supabaseAdmin, session, 'fuellog', records);
+      if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
+      return res.status(200).json({ records: visible.records });
     }
 
     return res.status(400).json({ error: 'Unknown action.' });

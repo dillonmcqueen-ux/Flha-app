@@ -35,6 +35,7 @@ import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { validDepartmentKeys } from '../server-lib/companyStructure.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { requireAssignment, menuAccessFor, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -468,9 +469,8 @@ Rules:
 
     // ══ WORKER: submission ═══════════════════════════════════════════════
 
-    // Not yet department- or assignment-scoped (phase 3/4) — every active
-    // document for the company is shown to every worker, same interim
-    // behavior custom_forms already has.
+    // Narrowed by assignment rows (submit only) and nothing else: every other
+    // active document for the company is shown, same as custom forms.
     if (action === 'get_worker_portal_documents') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { data, error } = await supabaseAdmin
@@ -480,7 +480,14 @@ Rules:
         .eq('is_active', true)
         .order('created_at', { ascending: true });
       if (error) return res.status(500).json({ error: 'Could not load documents.' });
-      return res.status(200).json({ documents: data || [] });
+      // On a read failure show everything (the menu is presentation,
+      // submit_portal and get_active_portal_document enforce for real).
+      const access = await menuAccessFor(supabaseAdmin, session, (data || []).map(d => `portal_${d.id}`));
+      if (!access.allowedKeys) return res.status(200).json({ documents: data || [], assigned: [] });
+      return res.status(200).json({
+        documents: (data || []).filter(d => access.allowedKeys.has(`portal_${d.id}`)),
+        assigned: access.assigned,
+      });
     }
 
     if (action === 'get_active_portal_document') {
@@ -497,6 +504,8 @@ Rules:
       if (!document || document.company_id !== session.companyId || !document.is_active) {
         return res.status(404).json({ error: 'This document is not available.' });
       }
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `portal_${documentId}`, SUBMIT);
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: questions, error: qErr } = await supabaseAdmin
         .from('portal_questions').select('*').eq('document_id', documentId).order('sort_order', { ascending: true });
       if (qErr) return res.status(500).json({ error: 'Could not load questions.' });
@@ -545,6 +554,8 @@ Rules:
       if (!docRows[0].is_active) {
         return res.status(403).json({ error: 'This document has been switched off for your company.' });
       }
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `portal_${documentId}`, SUBMIT, { asOf: queuedAsOf(req.body) });
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
 
       if (clientSubmissionId) {
         const { data: existingRows } = await supabaseAdmin
