@@ -333,7 +333,7 @@ function EditToggleButton({ onClick }) {
   );
 }
 
-function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSupName = "" }) {
+export function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSupName = "" }) {
   const h = flha.hazards_json || {};
   const isPending = flha.status === "pending_approval";
   const canvasRef = useRef(null);
@@ -3567,6 +3567,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             // Only sent when changed, so saving an unrelated field never
             // depends on the hide_unassigned column existing.
             ...(draft.hideUnassigned !== draft.hideUnassignedLoaded ? { hideUnassigned: draft.hideUnassigned } : {}),
+            ...(draft.isLead !== draft.isLeadLoaded ? { isLead: draft.isLead } : {}),
           } : {}),
         }),
       });

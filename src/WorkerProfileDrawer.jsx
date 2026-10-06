@@ -30,7 +30,7 @@ export default function WorkerProfileDrawer({
   // Owner or founder. Everyone else sees the structural fields read-only.
   canManage = false, departments = [], divisions = [], sites = [],
 }) {
-  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", isOwner: false, title: "", departments: [], divisions: [], defaultSiteId: "", hideUnassigned: false, hideUnassignedLoaded: false });
+  const [draft, setDraft] = useState({ email: "", phone: "", role: "worker", isOwner: false, title: "", departments: [], divisions: [], defaultSiteId: "", hideUnassigned: false, hideUnassignedLoaded: false, isLead: false, isLeadLoaded: false });
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -41,6 +41,7 @@ export default function WorkerProfileDrawer({
         title: m.title || "", departments: m.departments || [], divisions: m.divisions || [],
         defaultSiteId: m.defaultSiteId || "",
         hideUnassigned: m.hideUnassigned === true, hideUnassignedLoaded: m.hideUnassigned === true,
+        isLead: m.isLead === true, isLeadLoaded: m.isLead === true,
       });
       setDirty(false);
     }
@@ -118,7 +119,7 @@ export default function WorkerProfileDrawer({
                   <select
                     style={{ ...inputStyle, marginBottom: 10, cursor: "pointer" }}
                     value={draft.role}
-                    onChange={(e) => { const role = e.target.value; setDraft(d => ({ ...d, role, isOwner: role === "supervisor" ? d.isOwner : false })); setDirty(true); }}
+                    onChange={(e) => { const role = e.target.value; setDraft(d => ({ ...d, role, isOwner: role === "supervisor" ? d.isOwner : false, isLead: role === "worker" ? d.isLead : false })); setDirty(true); }}
                   >
                     <option value="worker">Worker</option>
                     <option value="supervisor">Supervisor</option>
@@ -162,6 +163,18 @@ export default function WorkerProfileDrawer({
                     )}
                   </div>
 
+                  {draft.role === "worker" && (
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: C.text.body, cursor: "pointer" }}>
+                        <input type="checkbox" checked={draft.isLead} onChange={e => { setDraft(d => ({ ...d, isLead: e.target.checked })); setDirty(true); }} />
+                        Crew lead
+                      </label>
+                      <div style={{ fontSize: 11, color: C.text.faint, marginTop: 4, lineHeight: 1.5 }}>
+                        Sees their crew's documents, signs off extreme-risk FLHAs for them, gives them tasks and can fill in a Daily Report or Fuel Log for them. Still a worker for sign-in and the seat count. Their crew is whoever shares their department, division or site.
+                      </div>
+                    </div>
+                  )}
+
                   {!draft.isOwner && (
                     <div style={{ marginBottom: 10 }}>
                       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: C.text.body, cursor: "pointer" }}>
@@ -187,6 +200,7 @@ export default function WorkerProfileDrawer({
                   <div><span style={{ color: C.text.faint }}>Departments:</span> {(member.departments || []).length ? member.departments.map(deptLabel).join(", ") : "None"}</div>
                   <div><span style={{ color: C.text.faint }}>Divisions:</span> {(member.divisions || []).length ? member.divisions.map(divName).filter(Boolean).join(", ") : "None"}</div>
                   <div><span style={{ color: C.text.faint }}>Default site:</span> {member.defaultSiteId ? siteName(member.defaultSiteId) || "Set" : "None"}</div>
+                  {member.isLead && <div><span style={{ color: C.text.faint }}>Crew lead:</span> Yes</div>}
                   {member.hideUnassigned && <div><span style={{ color: C.text.faint }}>Documents:</span> Only the ones assigned to them</div>}
                   <div style={{ fontSize: 11, color: C.text.faint, marginTop: 4 }}>Only the account owner can change these.</div>
                 </div>

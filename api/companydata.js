@@ -28,7 +28,8 @@ import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode, resetMfa, canResetMfa } from '../server-lib/rosterMfa.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
-import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned } from '../server-lib/documentAccess.js';
+import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned, readRosterFlags } from '../server-lib/documentAccess.js';
+import { requireLead, loadCrew } from '../server-lib/leadAccess.js';
 import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
 
 const supabaseAdmin = createClient(
@@ -1012,7 +1013,7 @@ export default async function handler(req, res) {
           departments: member.departments || [],
           isOwner: member.is_owner === true, title: member.title || '',
           divisions: member.divisions || [], defaultSiteId: member.default_site_id || null,
-          hideUnassigned: await readHideUnassigned(supabaseAdmin, companyId, member.id),
+          ...(await readRosterFlags(supabaseAdmin, companyId, member.id)),
           mfaEnabled: member.totp_enabled === true,
         },
         documents: signedDocuments,
@@ -1045,7 +1046,7 @@ export default async function handler(req, res) {
       }
       const target = rows[0];
       const manager = canManageCompany(session);
-      const structural = ['role', 'isOwner', 'title', 'departments', 'divisions', 'defaultSiteId', 'hideUnassigned'].filter(k => k in req.body);
+      const structural = ['role', 'isOwner', 'title', 'departments', 'divisions', 'defaultSiteId', 'hideUnassigned', 'isLead'].filter(k => k in req.body);
       if (structural.length > 0 && !manager) {
         return res.status(403).json({ error: 'Only the account owner can change roles, titles, departments, divisions or default sites.' });
       }
@@ -1123,6 +1124,17 @@ export default async function handler(req, res) {
       if ('hideUnassigned' in req.body) {
         if (typeof req.body.hideUnassigned !== 'boolean') return res.status(400).json({ error: 'Invalid setting.' });
         updates.hide_unassigned = req.body.hideUnassigned;
+      }
+      if ('isLead' in req.body) {
+        if (typeof req.body.isLead !== 'boolean') return res.status(400).json({ error: 'Invalid setting.' });
+        // A crew lead is a worker the Owner flagged; an Owner or supervisor is
+        // never one.
+        if (req.body.isLead && effectiveRole !== 'worker') return res.status(400).json({ error: 'Only a worker can be a crew lead.' });
+        updates.is_lead = req.body.isLead;
+      } else if ('role' in req.body && req.body.role === 'supervisor' && (await readRosterFlags(supabaseAdmin, target.company_id, target.id)).isLead) {
+        // Promoting a lead to supervisor ends the lead flag, so a later
+        // demotion cannot quietly bring it back.
+        updates.is_lead = false;
       }
       if ('defaultSiteId' in req.body) {
         const siteId = await sanitizeDefaultSite(supabaseAdmin, target.company_id, req.body.defaultSiteId);
@@ -1444,6 +1456,87 @@ export default async function handler(req, res) {
       }
     }
 
+    // ══ CREW LEAD ═══════════════════════════════════════════════════════════
+    // A crew lead is a worker the Owner flagged (roster.is_lead, read live in
+    // server-lib/leadAccess.js). They get their crew's list for the pickers,
+    // and may give their crew TASKS: a due date and a menu entry, never a
+    // restriction (only the Owner restricts a document).
+    if (action === 'get_my_crew') {
+      if (!session.userId) return res.status(200).json({ isLead: false, crew: [] });
+      const { actor, denied } = await requireLead(supabaseAdmin, session);
+      if (denied) {
+        // Not a lead is the normal answer for almost everyone, and forms ask
+        // it on load, so it is a 200. A failed check is a failure.
+        return res.status(denied.status === 403 ? 200 : denied.status).json(denied.status === 403 ? { isLead: false, crew: [] } : { error: denied.error });
+      }
+      const { crew, error } = await loadCrew(supabaseAdmin, session, actor);
+      if (error) return res.status(500).json({ error: 'Could not load your crew.' });
+      return res.status(200).json({ isLead: true, crew: crew.map(p => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name)) });
+    }
+
+    if (action === 'lead_assign_task' || action === 'lead_end_task' || action === 'lead_list_tasks') {
+      const lead = await requireLead(supabaseAdmin, session);
+      if (lead.denied) return res.status(lead.denied.status).json({ error: lead.denied.error });
+      const companyId = session.companyId;
+      const missingTable = (e) => !!e && ['42P01', 'PGRST205'].includes(String(e.code || ''));
+      const SETUP_MSG = "Tasks aren't switched on for this database yet. Contact FORA support.";
+
+      if (action === 'lead_list_tasks') {
+        const { data, error } = await supabaseAdmin.from('document_assignments')
+          .select('id, document_key, audience_value, due_at, created_at')
+          .eq('company_id', companyId).eq('created_by', session.userId).eq('restricts', false).eq('action', 'submit').is('ended_at', null)
+          .order('created_at', { ascending: false });
+        if (error && !missingTable(error)) return res.status(500).json({ error: 'Could not load tasks.' });
+        const documents = await listAssignableDocuments(supabaseAdmin, companyId);
+        return res.status(200).json({
+          documents: documents.filter(d => d.actions.includes('submit')).map(d => ({ key: d.key, label: d.label })),
+          tasks: (data || []).map(t => ({ id: t.id, documentKey: t.document_key, personId: Number(t.audience_value), dueAt: t.due_at })),
+        });
+      }
+
+      if (action === 'lead_assign_task') {
+        const { crew, error: crewErr } = await loadCrew(supabaseAdmin, session, lead.actor);
+        if (crewErr) return res.status(500).json({ error: "Couldn't check your crew. Try again." });
+        const personId = Number(req.body.personId);
+        if (!crew.some(p => Number(p.id) === personId)) return res.status(403).json({ error: 'That person is not on your crew.' });
+        // Always a task, always one named person on the crew: a lead cannot
+        // narrow a document, and cannot reach past their crew.
+        const checked = await validateAssignment(supabaseAdmin, companyId, {
+          documentKey: req.body.documentKey, action: 'submit', audienceType: 'individual', audienceValue: personId, restricts: false, dueAt: req.body.dueAt,
+        });
+        if (checked.error) return res.status(checked.status).json({ error: checked.error });
+        const r = { ...checked.row, restricts: false };
+        const { data: mine, error: readErr } = await supabaseAdmin.from('document_assignments')
+          .select('id, document_key, audience_value').eq('company_id', companyId).eq('created_by', session.userId).is('ended_at', null);
+        if (readErr) return res.status(500).json({ error: missingTable(readErr) ? SETUP_MSG : "Couldn't save the task." });
+        if ((mine || []).length >= 200) return res.status(400).json({ error: 'Task limit reached. Remove some first.' });
+        if ((mine || []).some(t => t.document_key === r.document_key && String(t.audience_value) === String(r.audience_value))) {
+          return res.status(409).json({ error: 'That person already has this task from you.' });
+        }
+        const { data: created, error } = await supabaseAdmin.from('document_assignments')
+          .insert({ ...r, company_id: companyId, created_by: session.userId }).select('id').single();
+        if (error) {
+          console.error('lead_assign_task failed:', error.message);
+          return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't save the task." });
+        }
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'lead_assign_task', companyId, targetType: 'document_assignment', targetId: created.id, details: { document_key: r.document_key, person_id: personId, by_roster_id: session.userId } });
+        return res.status(200).json({ ok: true, id: created.id });
+      }
+
+      if (action === 'lead_end_task') {
+        const id = Number(req.body.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'Missing id.' });
+        // Only a task this lead created, never an Owner's assignment.
+        const { data: ended, error } = await supabaseAdmin.from('document_assignments')
+          .update({ ended_at: new Date().toISOString() })
+          .eq('id', id).eq('company_id', companyId).eq('created_by', session.userId).eq('restricts', false).is('ended_at', null).select('id');
+        if (error) return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't remove the task." });
+        if (!ended || ended.length === 0) return res.status(404).json({ error: 'Not found.' });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'lead_end_task', companyId, targetType: 'document_assignment', targetId: id, details: { by_roster_id: session.userId } });
+        return res.status(200).json({ ok: true });
+      }
+    }
+
     // The signed-in person's own profile, for auto-filling forms and showing
     // "Filling in as" details. Their own row only; no id accepted.
     if (action === 'get_my_profile') {
@@ -1461,6 +1554,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         applicable: true,
         name: me[0].name, role: me[0].role, isOwner: me[0].is_owner === true, title: me[0].title || '',
+        isLead: me[0].role === 'worker' && (await readRosterFlags(supabaseAdmin, session.companyId, session.userId)).isLead,
         departments: (me[0].departments || []).map(k => ({ key: k, label: deptLabel.get(k) || k })),
         divisions: (me[0].divisions || []).map(id => ({ id, name: divName.get(id) || '' })).filter(d => d.name),
         defaultSiteId: me[0].default_site_id || null,

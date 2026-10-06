@@ -9,6 +9,7 @@ import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { requireAssignment, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { resolveOnBehalf } from '../server-lib/leadAccess.js';
 import crypto from 'crypto';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
@@ -107,7 +108,7 @@ export default async function handler(req, res) {
 
   const { action, token } = req.body || {};
 
-  const session = await verifySession(token);
+  let session = await verifySession(token);
   if (!session) return res.status(401).json({ error: 'Not logged in. Please log in again.' });
 
   try {
@@ -163,6 +164,17 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, 'fuellog');
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      // A crew lead filling in a Daily Report for a crew member: the member is
+      // the author and the lead is recorded as having entered it. Fuel
+      // Logs capture no personal signature, which is why this is allowed
+      // here and nowhere else yet. Everything after this line sees the
+      // member as the signed-in person, so the assignment check and the
+      // author and name stamps all land on them.
+      if (req.body.onBehalfOfRosterId !== undefined && req.body.onBehalfOfRosterId !== null && req.body.onBehalfOfRosterId !== '') {
+        const ob = await resolveOnBehalf(supabaseAdmin, session, req.body.onBehalfOfRosterId);
+        if (ob.denied) return res.status(ob.denied.status).json({ error: ob.denied.error });
+        session = ob.session;
+      }
       const notAssigned = await requireAssignment(supabaseAdmin, session, 'fuellog', SUBMIT, { asOf: queuedAsOf(req.body) });
       if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
@@ -231,7 +243,7 @@ export default async function handler(req, res) {
       const { data, error } = await supabaseAdmin
         .from('fuel_logs')
         // Break #3 — author from the session, never the request.
-        .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session) })
+        .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session), ...(session.enteredBy ? { entered_by_roster_id: session.enteredBy } : {}) })
         .select('id')
         .limit(1);
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
