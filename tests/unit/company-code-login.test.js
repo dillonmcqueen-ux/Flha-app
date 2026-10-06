@@ -51,6 +51,7 @@ test.after(() => new Promise(r => server.close(r)));
 const { default: handler } = await import('../../api/login.js');
 const { default: companyData } = await import('../../api/companydata.js');
 const { isWeakPin } = await import('../../server-lib/weakPins.js');
+const { ipBucket } = await import('../../server-lib/ipThrottle.js');
 const { sessionExpired, SUPERVISOR_SESSION_TTL_MS, WORKER_SESSION_TTL_MS } = await import('../../server-lib/sessionTtl.js');
 
 async function call(body) {
@@ -74,14 +75,14 @@ const find = (code) => call({ action: 'find_company', code });
 const bumps = () => seen.filter(r => r.table === 'rpc/bump_ip_throttle').map(r => JSON.parse(r.body).p_key.split(':')[0]);
 
 test('the right code gives back the company name and a ticket, and never a list', async () => {
-  const out = await find('  abc ');
+  const out = await find('  abcworks ');
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
   assert.equal(out.body.companyName, 'ABC Earthworks Company');
   assert.ok(out.body.companyTicket);
   assert.equal(out.body.companies, undefined);
   assert.equal(out.body.id, undefined); // never a raw company id
   const q = seen.find(r => r.table === 'companies').query;
-  assert.equal(q.company_code, 'ilike.ABC'); // trimmed, upper-cased, exact
+  assert.equal(q.company_code, 'ilike.ABCWORKS'); // trimmed, upper-cased, exact
   assert.equal(q.limit, '1');
 });
 
@@ -93,12 +94,12 @@ test('an unknown code is a 401 and spends the failure budget; a right one does n
 
   seen = [];
   companies = [{ id: 1, name: 'ABC Earthworks Company' }];
-  await find('ABC');
+  await find('ABCWORKS');
   assert.equal(bumps().includes('ccode'), false, 'a hit is not counted against the failure budget');
 });
 
 test('codes with wildcards or odd characters never reach the database', async () => {
-  for (const bad of ['%%%', 'A_C', 'a*b', '', 'ab', 'x'.repeat(33), "ABC'; --"]) {
+  for (const bad of ['%%%', 'A_C', 'a*b', '', 'ab', 'ABC', 'ABCDE', 'x'.repeat(33), "ABC'; --"]) {
     const out = await find(bad);
     assert.equal(out.statusCode, 401, bad);
   }
@@ -107,20 +108,20 @@ test('codes with wildcards or odd characters never reach the database', async ()
 
 test('a spent failure budget refuses the next guess before looking anything up', async () => {
   missRow = { window_start: new Date().toISOString(), count: 20 };
-  const out = await find('ABC');
+  const out = await find('ABCWORKS');
   assert.equal(out.statusCode, 429);
   assert.equal(seen.some(r => r.table === 'companies'), false);
 });
 
 test('an expired failure window starts fresh', async () => {
   missRow = { window_start: new Date(Date.now() - 3600_000).toISOString(), count: 20 };
-  const out = await find('ABC');
+  const out = await find('ABCWORKS');
   assert.equal(out.statusCode, 200);
 });
 
 test('the lookup volume is throttled per IP', async () => {
   throttleCount = 100000;
-  const out = await find('ABC');
+  const out = await find('ABCWORKS');
   assert.equal(out.statusCode, 429);
   assert.equal(seen.some(r => r.table === 'companies'), false);
 });
@@ -132,7 +133,7 @@ test('the old company search is gone', async () => {
 });
 
 test('a company ticket opens the name list, which carries names only', async () => {
-  const found = await find('ABC');
+  const found = await find('ABCWORKS');
   const out = await call({ action: 'list_roster_names', companyTicket: found.body.companyTicket });
   assert.equal(out.statusCode, 200);
   assert.equal(out.body.companyName, 'ABC Earthworks Company');
@@ -222,7 +223,7 @@ test('a founder session opened on a company is still accepted', async () => {
 });
 
 test('the name list is throttled per IP', async () => {
-  const found = await find('ABC');
+  const found = await find('ABCWORKS');
   throttleCount = 100000;
   const out = await call({ action: 'list_roster_names', companyTicket: found.body.companyTicket });
   assert.equal(out.statusCode, 429);
@@ -232,7 +233,7 @@ test('a lock that has run out starts a fresh set of attempts', async () => {
   const salt = 'abcd';
   const hash = crypto.scryptSync('482913', salt, 64).toString('hex');
   rosterRows = [{ id: 11, name: 'Jamie Worker', role: 'worker', active: true, company_id: 1, failed_pin_attempts: 8, pin_locked_until: new Date(Date.now() - 60_000).toISOString(), pin_salt: salt, pin_hash: hash, totp_enabled: false, departments: [] }];
-  const found = await find('ABC');
+  const found = await find('ABCWORKS');
   seen = [];
   const out = await call({ action: 'roster_login', companyTicket: found.body.companyTicket, rosterId: 11, pin: '000999' });
   assert.equal(out.statusCode, 401);
@@ -245,7 +246,7 @@ test('a lock that has run out starts a fresh set of attempts', async () => {
 test('a lock that is still running is left alone', async () => {
   const salt = 'abcd';
   rosterRows = [{ id: 11, name: 'Jamie Worker', role: 'worker', active: true, company_id: 1, failed_pin_attempts: 8, pin_locked_until: new Date(Date.now() + 600_000).toISOString(), pin_salt: salt, pin_hash: 'x', totp_enabled: false, departments: [] }];
-  const found = await find('ABC');
+  const found = await find('ABCWORKS');
   seen = [];
   const out = await call({ action: 'roster_login', companyTicket: found.body.companyTicket, rosterId: 11, pin: '000999' });
   assert.equal(out.statusCode, 403);
@@ -281,7 +282,7 @@ function ownerRow(over = {}) {
 }
 const unlockCall = async (row) => {
   rosterRows = [row];
-  const found = await find('ABC');
+  const found = await find('ABCWORKS');
   seen = [];
   const out = await call({ action: 'request_unlock_link', companyTicket: found.body.companyTicket, rosterId: row.id });
   const issued = seen.some(r => r.table === 'roster' && r.body.includes('pin_link_jti_hash'));
@@ -324,8 +325,22 @@ test('an authenticator lockout counts too', async () => {
 test('the unlock link needs a real ticket and is throttled per IP', async () => {
   assert.equal((await call({ action: 'request_unlock_link', companyTicket: 'x.y', rosterId: 21 })).statusCode, 401);
   rosterRows = [ownerRow()];
-  const found = await find('ABC');
+  const found = await find('ABCWORKS');
   throttleCount = 100000;
   const out = await call({ action: 'request_unlock_link', companyTicket: found.body.companyTicket, rosterId: 21 });
   assert.equal(out.statusCode, 429);
+});
+
+
+test('an IPv6 caller is counted by its /64, so rotating addresses inside it buys nothing', () => {
+  assert.equal(ipBucket('203.0.113.7'), '203.0.113.7');
+  const a = ipBucket('2001:db8:abcd:12:1111:2222:3333:4444');
+  const b = ipBucket('2001:0db8:abcd:0012:ffff:eeee:dddd:cccc');
+  assert.equal(a, b);
+  assert.equal(a, '2001:db8:abcd:12::/64');
+  assert.equal(ipBucket('2001:db8::1'), '2001:db8:0:0::/64');
+  assert.equal(ipBucket('::1'), '0:0:0:0::/64');
+  assert.notEqual(ipBucket('2001:db8:abcd:13::1'), a); // a different /64 is a different customer
+  assert.equal(ipBucket('::ffff:203.0.113.7'), '::ffff:203.0.113.7'); // IPv4-mapped stays as is
+  assert.equal(ipBucket(undefined), 'unknown');
 });

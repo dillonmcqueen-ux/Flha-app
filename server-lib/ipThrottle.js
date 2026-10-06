@@ -61,3 +61,18 @@ export async function peekIpThrottle(supabaseAdmin, key, maxAttempts, windowMs) 
   if (Date.now() - new Date(row.window_start).getTime() > windowMs) return true;
   return row.count < maxAttempts;
 }
+
+// The key a caller's address is counted under. IPv4 is the address itself. A
+// single IPv6 customer owns a whole /64 (2^64 addresses), so counting each
+// address separately would hand a scripted client a fresh budget per request;
+// everything in the same /64 shares one bucket instead.
+export function ipBucket(ip) {
+  const raw = String(ip || 'unknown').trim().toLowerCase();
+  if (!raw.includes(':') || raw.includes('.')) return raw; // IPv4, or IPv4-mapped IPv6
+  const [head, tail = ''] = raw.split('::');
+  const first = head ? head.split(':') : [];
+  const last = raw.includes('::') && tail ? tail.split(':') : [];
+  const missing = raw.includes('::') ? Math.max(0, 8 - first.length - last.length) : 0;
+  const groups = [...first, ...Array(missing).fill('0'), ...last];
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '') || '0').join(':') + '::/64';
+}

@@ -14,7 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
-import { checkIpThrottle as sharedCheckIpThrottle, peekIpThrottle } from '../server-lib/ipThrottle.js';
+import { checkIpThrottle as sharedCheckIpThrottle, peekIpThrottle, ipBucket } from '../server-lib/ipThrottle.js';
 import { validateOnboardingIntake, randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
@@ -101,12 +101,15 @@ const COMPANY_CODE_THROTTLE_MAX_FAILURES = 30;
 // budget, and a spent budget refuses the next guess BEFORE the lookup (a
 // correct code from a busy jobsite address is never what runs it down). Every
 // lookup also counts against a larger volume ceiling.
-const COMPANY_CODE_MIN_LENGTH = 3;
+const COMPANY_CODE_MIN_LENGTH = 6; // the Admin Panel enforces the same floor when a code is saved
 const COMPANY_CODE_MAX_LENGTH = 32;
 const COMPANY_CODE_MISS_WINDOW_MS = 15 * 60 * 1000;
 const COMPANY_CODE_MISS_MAX = 20;
 const COMPANY_LOOKUP_WINDOW_MS = 15 * 60 * 1000;
-const COMPANY_LOOKUP_MAX = 200;
+// The miss budget is read before a lookup and counted after it, so a burst of
+// parallel requests can all pass the read. This volume cap is atomic and is what
+// bounds that burst, so it stays close to the miss budget.
+const COMPANY_LOOKUP_MAX = 60;
 
 // Per-IP ceiling on PIN guesses. The per-account lockout is the primary
 // control; this is what stops an attacker spreading guesses across many
@@ -503,7 +506,7 @@ async function loginHandler(req, res) {
   // short-lived ticket that opens its name list and nothing else. No search, no
   // list of companies: a wrong or unknown code answers the same way every time.
   if (action === 'find_company') {
-    const ip = clientIp(req);
+    const ip = ipBucket(clientIp(req));
     const volumeOk = await checkIpThrottle(`clookup:${ip}`, COMPANY_LOOKUP_MAX, COMPANY_LOOKUP_WINDOW_MS);
     if (!volumeOk) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
     const budgetLeft = await peekIpThrottle(supabaseAdmin, `ccode:${ip}`, COMPANY_CODE_MISS_MAX, COMPANY_CODE_MISS_WINDOW_MS);
@@ -533,7 +536,7 @@ async function loginHandler(req, res) {
     const { companyTicket } = req.body;
     const ticket = verifyTicket(companyTicket);
     if (!ticket) return res.status(401).json({ error: 'That took too long. Please start over.' });
-    const namesAllowed = await checkIpThrottle(`rnames:${clientIp(req)}`, COMPANY_LOOKUP_MAX, COMPANY_LOOKUP_WINDOW_MS);
+    const namesAllowed = await checkIpThrottle(`rnames:${ipBucket(clientIp(req))}`, COMPANY_LOOKUP_MAX, COMPANY_LOOKUP_WINDOW_MS);
     if (!namesAllowed) return res.status(429).json({ error: 'Too many requests. Please wait and try again.' });
 
     const { data, error } = await supabaseAdmin
@@ -559,7 +562,7 @@ async function loginHandler(req, res) {
     const { companyTicket, rosterId } = req.body;
     const ticket = verifyTicket(companyTicket);
     if (!ticket) return res.status(401).json({ error: 'That took too long. Please start over.' });
-    const ipOk = await checkIpThrottle(`unlock:${clientIp(req)}`, 10, 15 * 60 * 1000);
+    const ipOk = await checkIpThrottle(`unlock:${ipBucket(clientIp(req))}`, 10, 15 * 60 * 1000);
     if (!ipOk) return res.status(429).json({ error: 'Too many requests. Please wait and try again.' });
     const answer = () => res.status(200).json({ ok: true });
     if (!rosterId) return answer();
@@ -592,7 +595,7 @@ async function loginHandler(req, res) {
     if (!ticket) return res.status(401).json({ error: 'That took too long — please start over.' });
     if (!rosterId || !pin) return res.status(400).json({ error: 'Missing details.' });
 
-    const pinIpAllowed = await checkIpThrottle(`pin:${clientIp(req)}`, PIN_IP_THROTTLE_MAX_FAILURES, PIN_IP_THROTTLE_WINDOW_MS);
+    const pinIpAllowed = await checkIpThrottle(`pin:${ipBucket(clientIp(req))}`, PIN_IP_THROTTLE_MAX_FAILURES, PIN_IP_THROTTLE_WINDOW_MS);
     if (!pinIpAllowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
 
     const { data: rows, error } = await supabaseAdmin
