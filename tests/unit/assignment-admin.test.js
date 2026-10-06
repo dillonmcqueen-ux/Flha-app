@@ -98,7 +98,9 @@ const server = http.createServer(async (req, res) => {
       hit.forEach(a => { a.ended_at = payload.ended_at; });
       return send(200, hit.map(a => ({ id: a.id })));
     }
-    return send(200, byCompany(assignments).filter(a => !a.ended_at));
+    return send(200, byCompany(assignments).filter(a => !a.ended_at
+      && (!param(url, 'audience_type') || a.audience_type === eq(param(url, 'audience_type')))
+      && (!param(url, 'audience_value') || a.audience_value === eq(param(url, 'audience_value')))));
   }
   return send(req.method === 'POST' ? 201 : 200, []);
 });
@@ -209,14 +211,22 @@ test('setting a site\'s division checks both belong to the company', async () =>
   assert.equal((await call({ action: 'set_site_division', token: OWNER(), siteId: 9, divisionId: null })).statusCode, 200);
 });
 
-test('removing a division ends the assignments that named it', async () => {
+test('a division an assignment still names cannot be removed (it would open the document to everyone)', async () => {
   assignments = [];
+  divisionDeleted = false;
   await create({ audienceType: 'division', audienceValue: '4' });
   await create({ audienceType: 'role', audienceValue: 'worker' });
-  const out = await call({ action: 'delete_division', token: OWNER(), id: 4 });
-  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
-  assert.ok(assignments.find(a => a.audience_type === 'division').ended_at, 'the division assignment is ended');
-  assert.equal(assignments.find(a => a.audience_type === 'role').ended_at, null, 'others are untouched');
+  const refused = await call({ action: 'delete_division', token: OWNER(), id: 4 });
+  assert.equal(refused.statusCode, 409, JSON.stringify(refused.body));
+  assert.match(refused.body.error, /Document assignments/);
+  assert.equal(divisionDeleted, false, 'nothing was deleted');
+  assert.equal(assignments.every(a => a.ended_at === null), true, 'and no assignment was ended behind the Owner\'s back');
+  // Once the Owner removes the assignment on purpose, the division can go.
+  const divRow = assignments.find(a => a.audience_type === 'division');
+  assert.equal((await call({ action: 'end_document_assignment', token: OWNER(), id: divRow.id })).statusCode, 200);
+  const done = await call({ action: 'delete_division', token: OWNER(), id: 4 });
+  assert.equal(done.statusCode, 200, JSON.stringify(done.body));
+  assert.equal(divisionDeleted, true);
 });
 
 test('the Owner can read and change the hide switch; the profile reports it', async () => {

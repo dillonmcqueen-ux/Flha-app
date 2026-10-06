@@ -258,7 +258,7 @@ export async function drainQueue(formType, resubmit) {
       // was filled in, so the server judges assignments as of then rather
       // than as of this replay. Keyed by id because the form types drain in
       // parallel.
-      replayTimes.set(item.clientSubmissionId, new Date(item.createdAt).toISOString());
+      if (Number.isFinite(item.createdAt)) replayTimes.set(item.clientSubmissionId, new Date(item.createdAt).toISOString());
       let response;
       try {
         response = await resubmit(item.payload, item.clientSubmissionId);

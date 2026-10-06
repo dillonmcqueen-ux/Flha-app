@@ -149,21 +149,25 @@ export function describeAssignments(rows, people, siteDivision) {
 }
 
 /**
- * When a department, division, site or person an assignment names goes away,
- * end the assignment. Left alone it would narrow its document to nobody.
- * Best effort: a missing table (migration not applied) or a failed write must
- * never undo the delete that already succeeded.
+ * The active assignments that name a department, division or site, as
+ * [{ document_key, action }]. A department, division or site that is still
+ * named by an assignment cannot be removed: ending the assignment for the
+ * Owner would silently OPEN its document to everyone (no rows means not
+ * narrowed), and leaving it would narrow the document to nobody. Either is a
+ * surprise, so the Owner removes the assignment first, on purpose. A missing
+ * table (migration not applied) means there is nothing naming it.
  */
-export async function endAssignmentsForAudience(supabase, companyId, audienceType, audienceValue) {
-  try {
-    await supabase
-      .from('document_assignments')
-      .update({ ended_at: new Date().toISOString() })
-      .eq('company_id', companyId)
-      .eq('audience_type', audienceType)
-      .eq('audience_value', String(audienceValue))
-      .is('ended_at', null);
-  } catch (e) {
-    console.error('could not end assignments for removed audience:', e.message);
+export async function assignmentsNamingAudience(supabase, companyId, audienceType, audienceValue) {
+  const { data, error } = await supabase
+    .from('document_assignments')
+    .select('document_key, action')
+    .eq('company_id', companyId)
+    .eq('audience_type', audienceType)
+    .eq('audience_value', String(audienceValue))
+    .is('ended_at', null);
+  if (error) {
+    if (['42P01', 'PGRST205'].includes(String(error.code || ''))) return { rows: [] };
+    return { error: true, rows: [] };
   }
+  return { rows: data || [] };
 }

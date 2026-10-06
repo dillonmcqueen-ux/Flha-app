@@ -29,7 +29,7 @@ import { mfaStatus, requiresMfa, startEnrollment, confirmEnrollment, verifyLogin
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned } from '../server-lib/documentAccess.js';
-import { listAssignableDocuments, validateAssignment, describeAssignments, endAssignmentsForAudience, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
+import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -1101,6 +1101,13 @@ export default async function handler(req, res) {
         }
         if (makeOwner && !target.active) return res.status(400).json({ error: 'Reactivate this person before making them an owner.' });
         updates.is_owner = makeOwner;
+        // The hide switch does nothing on an Owner, so clear it when someone
+        // becomes one. Otherwise a later demotion would silently hide every
+        // document from them. Only written when it is actually on, so a
+        // database without the column is never asked to write it.
+        if (makeOwner && !('hideUnassigned' in req.body) && await readHideUnassigned(supabaseAdmin, target.company_id, target.id)) {
+          updates.hide_unassigned = false;
+        }
       }
       if ('title' in req.body) updates.title = cleanTitle(req.body.title) || null;
       if ('departments' in req.body) {
@@ -1288,6 +1295,11 @@ export default async function handler(req, res) {
           const names = (docsUsing || []).map(d => `"${d.title}"`).join(', ');
           return res.status(409).json({ error: `This department is still used by ${names || 'a Portal report schedule or escalation'}. Remove it there first.` });
         }
+        const deptNamed = await assignmentsNamingAudience(supabaseAdmin, companyId, 'department', key);
+        if (deptNamed.error) return res.status(500).json({ error: "Couldn't check the department's assignments. Try again." });
+        if (deptNamed.rows.length) {
+          return res.status(409).json({ error: `This department is still named by ${deptNamed.rows.length} document assignment${deptNamed.rows.length === 1 ? '' : 's'}. Remove ${deptNamed.rows.length === 1 ? 'it' : 'them'} under Document assignments first, or the document would open to everyone.` });
+        }
         const { data: gone, error } = await supabaseAdmin.from('company_departments').delete().eq('company_id', companyId).eq('key', key).select('key');
         if (error) return res.status(500).json({ error: "Couldn't remove the department." });
         if (!gone || gone.length === 0) return res.status(404).json({ error: 'Not found.' });
@@ -1296,7 +1308,6 @@ export default async function handler(req, res) {
         for (const h of holders || []) {
           await supabaseAdmin.from('roster').update({ departments: (h.departments || []).filter(d => d !== key) }).eq('id', h.id).eq('company_id', companyId);
         }
-        await endAssignmentsForAudience(supabaseAdmin, companyId, 'department', key);
         await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'delete_department', companyId, targetType: 'department', targetId: key, details: { by_roster_id: session.userId || null } });
         return res.status(200).json({ ok: true, departments: await listDepartments(supabaseAdmin, companyId) });
       }
@@ -1328,6 +1339,11 @@ export default async function handler(req, res) {
       // delete_division
       const divisionId = Number(req.body.id);
       if (!Number.isInteger(divisionId)) return res.status(400).json({ error: 'Missing id.' });
+      const divNamed = await assignmentsNamingAudience(supabaseAdmin, companyId, 'division', divisionId);
+      if (divNamed.error) return res.status(500).json({ error: "Couldn't check the division's assignments. Try again." });
+      if (divNamed.rows.length) {
+        return res.status(409).json({ error: `This division is still named by ${divNamed.rows.length} document assignment${divNamed.rows.length === 1 ? '' : 's'}. Remove ${divNamed.rows.length === 1 ? 'it' : 'them'} under Document assignments first, or the document would open to everyone.` });
+      }
       const { data: gone, error } = await supabaseAdmin.from('company_divisions').delete().eq('id', divisionId).eq('company_id', companyId).select('id');
       if (error) return res.status(500).json({ error: "Couldn't remove the division." });
       if (!gone || gone.length === 0) return res.status(404).json({ error: 'Not found.' });
@@ -1335,7 +1351,6 @@ export default async function handler(req, res) {
       for (const h of holders || []) {
         await supabaseAdmin.from('roster').update({ divisions: (h.divisions || []).filter(d => d !== divisionId) }).eq('id', h.id).eq('company_id', companyId);
       }
-      await endAssignmentsForAudience(supabaseAdmin, companyId, 'division', divisionId);
       await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'delete_division', companyId, targetType: 'division', targetId: divisionId, details: { by_roster_id: session.userId || null } });
       return res.status(200).json({ ok: true, divisions: await listDivisions(supabaseAdmin, companyId) });
     }
@@ -1503,6 +1518,9 @@ export default async function handler(req, res) {
       // Refusing with a reason beats a 500, and beats deleting the records
       // out from under someone to satisfy a tidy-up.
       const blockers = [];
+      const siteNamed = await assignmentsNamingAudience(supabaseAdmin, site.company_id, 'site', id);
+      if (siteNamed.error) return res.status(500).json({ error: "Couldn't check the site's assignments. Try again." });
+      if (siteNamed.rows.length) blockers.push(`${siteNamed.rows.length} document assignment${siteNamed.rows.length === 1 ? '' : 's'} (remove ${siteNamed.rows.length === 1 ? 'it' : 'them'} first, or the document would open to everyone)`);
       const { count: monthlyCount } = await supabaseAdmin
         .from('inspection_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
       if (monthlyCount) blockers.push(`${monthlyCount} monthly site inspection${monthlyCount === 1 ? '' : 's'}`);
@@ -1542,7 +1560,6 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('sites').delete().eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't remove site." });
-      await endAssignmentsForAudience(supabaseAdmin, site.company_id, 'site', id);
       return res.status(200).json({ ok: true });
     }
 
