@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -118,6 +119,15 @@ async function signStoredUrl(url, bucket, ttlSeconds = 3600) {
   if (!path) return null;
   const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUrl(path, ttlSeconds);
   return error ? null : data.signedUrl;
+}
+
+// Columns the access rules need to place a record. Equipment inspections
+// carry no site_id (the machine, not a site, is what they are about), so
+// they are placed by author alone.
+function scopeColumns(table) {
+  return table.name === 'inspections'
+    ? 'id, company_id, submitted_by_roster_id'
+    : 'id, company_id, site_id, submitted_by_roster_id';
 }
 
 const TABLES = {
@@ -352,6 +362,8 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT, { asOf: req.body.queuedAt });
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -627,9 +639,11 @@ export default async function handler(req, res) {
       if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin.from(table.name).select(table.listColumns).order('created_at', { ascending: false });
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
-      const { data, error } = await query;
+      const { data: allRows, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      const records = await signRows(supabaseAdmin, data, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const visible = await listVisibleRecords(supabaseAdmin, session, table.docKey, allRows || []);
+      if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
+      const records = await signRows(supabaseAdmin, visible.records, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
       return res.status(200).json({ records });
     }
 
@@ -642,10 +656,12 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
       if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select(scopeColumns(table)).eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to delete this record.' });
         }
+        const delDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing[0]]);
+        if (delDenied) return res.status(delDenied.status).json({ error: delDenied.error });
       }
       const { error } = await supabaseAdmin.from(table.name).delete().eq('id', id);
       if (error) return res.status(500).json({ error: 'Delete failed.' });
@@ -679,10 +695,12 @@ export default async function handler(req, res) {
       }
 
       if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select(scopeColumns(table)).eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to edit this record.' });
         }
+        const editDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing[0]]);
+        if (editDenied) return res.status(editDenied.status).json({ error: editDenied.error });
       }
 
       const EDITABLE_FIELDS = {
@@ -730,6 +748,8 @@ export default async function handler(req, res) {
       if (type !== 'toolbox') return res.status(400).json({ error: 'Not applicable for this record type.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT);
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabaseAdmin
         .from('toolbox_talks')
@@ -754,6 +774,13 @@ export default async function handler(req, res) {
       if (error || !data || data.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
       const record = data[0];
       if (record.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      // The sign-later screen is a worker flow, so a worker is held to the
+      // submit assignment; a supervisor reading the talk is held to view
+      // rows and their own scope.
+      const detailDenied = session.role === 'worker'
+        ? await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT)
+        : await requireRecordsAccess(supabaseAdmin, session, table.docKey, [record]);
+      if (detailDenied) return res.status(detailDenied.status).json({ error: detailDenied.error });
       record.pdf_url = await signStoredUrl(record.pdf_url, 'flha-reports');
       const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, logo_url').eq('id', record.company_id).limit(1);
       return res.status(200).json({ record, company: coRows && coRows[0] });
@@ -773,7 +800,7 @@ export default async function handler(req, res) {
       const { id, note } = req.body;
       if (!id || typeof note !== 'string' || !note.trim()) return res.status(400).json({ error: 'Missing note.' });
 
-      const { data: rows, error: findErr } = await supabaseAdmin.from('toolbox_talks').select('id, company_id, supervisor_notes_json').eq('id', id).limit(1);
+      const { data: rows, error: findErr } = await supabaseAdmin.from('toolbox_talks').select('id, company_id, site_id, submitted_by_roster_id, supervisor_notes_json').eq('id', id).limit(1);
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
       const existing = rows[0];
       // Admin sessions carry companyId: null (api/login.js) — same reason
@@ -781,6 +808,8 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor' && existing.company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed.' });
       }
+      const noteDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing]);
+      if (noteDenied) return res.status(noteDenied.status).json({ error: noteDenied.error });
 
       const notes = [...(existing.supervisor_notes_json || []), {
         // session.name rides along for individually-identified roster
@@ -808,6 +837,8 @@ export default async function handler(req, res) {
       if (findErr || !rows || rows.length === 0) return res.status(404).json({ error: 'Toolbox talk not found.' });
       const existing = rows[0];
       if (existing.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+      const lateDenied = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT);
+      if (lateDenied) return res.status(lateDenied.status).json({ error: lateDenied.error });
 
       // Individually-identified (roster) sessions have a real authenticated
       // name — use that instead of whatever the client sent, so a signed-in

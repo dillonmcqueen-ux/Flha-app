@@ -35,6 +35,7 @@ import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { validDepartmentKeys } from '../server-lib/companyStructure.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { requireAssignment, menuAccessFor, SUBMIT } from '../server-lib/documentAccess.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -338,7 +339,14 @@ Rules:
         .eq('company_id', companyId)
         .order('created_at', { ascending: false });
       if (error) return res.status(500).json({ error: 'Could not load documents.' });
-      return res.status(200).json({ documents: data || [] });
+      // Assignments only narrow; on a read failure show everything (the
+      // menu is presentation, submit_portal enforces for real).
+      const access = await menuAccessFor(supabaseAdmin, session, (data || []).map(d => `portal_${d.id}`));
+      if (!access.allowedKeys) return res.status(200).json({ documents: data || [], assigned: [] });
+      return res.status(200).json({
+        documents: (data || []).filter(d => access.allowedKeys.has(`portal_${d.id}`)),
+        assigned: access.assigned,
+      });
     }
 
     // Phase 3's read-only "Portal document library" (FORA Company Portal —
@@ -497,6 +505,8 @@ Rules:
       if (!document || document.company_id !== session.companyId || !document.is_active) {
         return res.status(404).json({ error: 'This document is not available.' });
       }
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `portal_${documentId}`, SUBMIT);
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: questions, error: qErr } = await supabaseAdmin
         .from('portal_questions').select('*').eq('document_id', documentId).order('sort_order', { ascending: true });
       if (qErr) return res.status(500).json({ error: 'Could not load questions.' });
@@ -545,6 +555,8 @@ Rules:
       if (!docRows[0].is_active) {
         return res.status(403).json({ error: 'This document has been switched off for your company.' });
       }
+      const notAssigned = await requireAssignment(supabaseAdmin, session, `portal_${documentId}`, SUBMIT, { asOf: req.body.queuedAt });
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
 
       if (clientSubmissionId) {
         const { data: existingRows } = await supabaseAdmin

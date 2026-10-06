@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, storedUrlsFromClientReceipts, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -212,6 +213,8 @@ export default async function handler(req, res) {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
+      const notAssigned = await requireAssignment(supabaseAdmin, session, table.docKey, SUBMIT, { asOf: req.body.queuedAt });
+      if (notAssigned) return res.status(notAssigned.status).json({ error: notAssigned.error });
       const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
       if (coRows && coRows[0] && coRows[0].suspended) {
         return res.status(403).json({ error: "Your company's access is suspended. Contact your administrator." });
@@ -348,9 +351,11 @@ export default async function handler(req, res) {
       if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin.from(table.name).select(table.listColumns).order('created_at', { ascending: false });
       if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
-      const { data, error } = await query;
+      const { data: allRows, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
-      const records = await signRows(supabaseAdmin, data, [
+      const visible = await listVisibleRecords(supabaseAdmin, session, table.docKey, allRows || []);
+      if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
+      const records = await signRows(supabaseAdmin, visible.records, [
         { key: 'pdf_url', bucket: 'flha-reports' },
         { key: 'signature_url', bucket: 'signatures' },
         { key: 'photo_urls', bucket: 'incident-photos' },
@@ -367,10 +372,12 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
       if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id, site_id, submitted_by_roster_id').eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to review this record.' });
         }
+        const reviewDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing[0]]);
+        if (reviewDenied) return res.status(reviewDenied.status).json({ error: reviewDenied.error });
       }
       const now = new Date().toISOString();
       const reviewedBy = (typeof reviewedByInput === 'string' && reviewedByInput.trim())
@@ -409,10 +416,12 @@ export default async function handler(req, res) {
       if (!id || !fields || typeof fields !== 'object') return res.status(400).json({ error: 'Missing details.' });
 
       if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id, site_id, submitted_by_roster_id').eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to edit this record.' });
         }
+        const editDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing[0]]);
+        if (editDenied) return res.status(editDenied.status).json({ error: editDenied.error });
       }
 
       const EDITABLE_FIELDS = {
@@ -453,10 +462,12 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
 
       if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id').eq('id', id).limit(1);
+        const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id, site_id, submitted_by_roster_id').eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to delete this record.' });
         }
+        const delDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing[0]]);
+        if (delDenied) return res.status(delDenied.status).json({ error: delDenied.error });
       }
       const { error } = await supabaseAdmin.from(table.name).delete().eq('id', id);
       if (error) return res.status(500).json({ error: 'Delete failed.' });
