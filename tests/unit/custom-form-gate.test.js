@@ -25,7 +25,7 @@ process.env.SESSION_SECRET = SESSION_SECRET;
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
 function mintToken(payload) {
-  const data = Buffer.from(JSON.stringify({ issuedAt: Date.now(), ...payload })).toString('base64url');
+  const data = Buffer.from(JSON.stringify({ issuedAt: Date.now(), founder: true, ...payload })).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url');
   return `${data}.${sig}`;
 }

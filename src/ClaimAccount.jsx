@@ -171,7 +171,7 @@ export default function ClaimAccount() {
           <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
           <div style={{ fontSize: 20, fontWeight: 700, color: "#F97316", marginBottom: 8 }}>You're all set</div>
           <div style={{ fontSize: 14, color: "#9CA3AF", lineHeight: 1.6 }}>
-            Your team can log in now with company code <span style={styles.code}>{company?.company_code}</span> and the PINs they set.
+            Your team can sign in now: search for <span style={styles.code}>{company?.name}</span>, pick your name, and enter the PIN you set.
             This link still works if you need to come back and finish anything.
           </div>
         </div>
@@ -191,7 +191,7 @@ export default function ClaimAccount() {
         <div style={styles.card}>
           <div style={styles.h1}>Welcome to FORA, {company?.name}</div>
           <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 6 }}>
-            Company code: <span style={styles.code}>{company?.company_code}</span>
+            Sign in by searching for <span style={styles.code}>{company?.name}</span>, then picking your name.
           </div>
           <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 10 }}>
             Finish setup below. No PIN is ever emailed. You were sent a link to choose your own PIN. Everyone else with an email address gets theirs when you click Send setup links on the roster in the app.

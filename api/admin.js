@@ -27,6 +27,7 @@ import {
 } from '../server-lib/totp.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { loadPlatformOverview } from '../server-lib/platformOverview.js';
+import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -35,7 +36,6 @@ const supabaseAdmin = createClient(
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -60,7 +60,7 @@ async function verifySession(token) {
   } catch (e) {
     return null;
   }
-  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+  if (sessionExpired(payload)) return null;
 
   // A login TICKET is not a session. api/login.js mints two roleless,
   // short-lived tokens with this same signature and secret — the roster
@@ -83,7 +83,12 @@ async function verifySession(token) {
 
   // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
   // no userId — nothing to live-check beyond the signature+TTL above.
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
 
   // Individually-identified (roster) sessions: re-check `active` on every
   // request, so deactivating someone takes effect on their very next call
@@ -138,11 +143,11 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── List all companies (includes codes + contact info) ─────────────
+    // ── List all companies (includes contact info) ─────────────
     if (action === 'list_companies') {
       const { data, error } = await supabaseAdmin
         .from('companies')
-        .select('id, name, app_type, worker_code, supervisor_code, company_code, roster_enabled, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number, plan_tier')
+        .select('id, name, company_code, roster_enabled, contact_name, contact_email, contact_phone, address, logo_url, suspended, account_number, plan_tier')
         .order('id');
       if (error) return res.status(500).json({ error: 'Could not load companies.' });
       return res.status(200).json({ companies: data || [] });
@@ -518,11 +523,8 @@ export default async function handler(req, res) {
     }
 
     // ── Onboard a new company ───────────────────────────────────────────
-    // New companies get only the unified company_code — no legacy
-    // worker_code/supervisor_code, since roster login is how they'll work
-    // from day one. roster_enabled defaults false until the admin (the
-    // only one with a session for a company with no roster yet) has added
-    // at least one active worker and supervisor and flips the cutover.
+    // company_code is an internal reference. People sign in by searching for
+    // the company name, then picking their own name from its roster.
     if (action === 'create_company') {
       const { name, companyCode } = req.body;
       if (!name?.trim() || !companyCode?.trim()) {
@@ -578,13 +580,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ── Edit a company's login code(s) ──────────────────────────────────
-    // company_code is always required. worker_code/supervisor_code are only
-    // validated/updated when actually sent with a non-empty value — this is
-    // a pure edit of an existing legacy code, never a way to clear one to
-    // null and strand that company's logins.
+    // ── Edit a company's internal reference code ────────────────────────
+    // company_code is an internal reference only. It is not used to sign in
+    // (people find their company by name), so changing it breaks nothing.
     if (action === 'update_company_codes') {
-      const { companyId, companyCode, workerCode, supervisorCode } = req.body;
+      const { companyId, companyCode } = req.body;
       if (!companyId || !companyCode?.trim()) {
         return res.status(400).json({ error: 'Missing company code.' });
       }
@@ -598,37 +598,8 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'That company code is already in use.' });
       }
 
-      const updates = { company_code: companyCode.trim() };
-
-      if (workerCode?.trim() || supervisorCode?.trim()) {
-        // These values are interpolated into a PostgREST `.or()` filter
-        // string, the one place in the codebase that bypasses the
-        // parameterized query builder. A `,` or `)` in the input would
-        // alter the filter's semantics and could defeat this very
-        // uniqueness check, so reject anything that isn't a plain code.
-        const CODE_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
-        for (const candidate of [workerCode, supervisorCode]) {
-          if (candidate?.trim() && !CODE_SHAPE.test(candidate.trim())) {
-            return res.status(400).json({ error: 'Codes may only contain letters, numbers, hyphens and underscores.' });
-          }
-        }
-        const orParts = [];
-        if (workerCode?.trim()) orParts.push(`worker_code.eq.${workerCode.trim()}`, `supervisor_code.eq.${workerCode.trim()}`);
-        if (supervisorCode?.trim()) orParts.push(`worker_code.eq.${supervisorCode.trim()}`, `supervisor_code.eq.${supervisorCode.trim()}`);
-        const { data: legacyClash } = await supabaseAdmin
-          .from('companies')
-          .select('id')
-          .or(orParts.join(','))
-          .neq('id', companyId);
-        if (legacyClash && legacyClash.length > 0) {
-          return res.status(400).json({ error: 'One of those codes is already in use.' });
-        }
-        if (workerCode?.trim()) updates.worker_code = workerCode.trim();
-        if (supervisorCode?.trim()) updates.supervisor_code = supervisorCode.trim();
-      }
-
-      const { error } = await supabaseAdmin.from('companies').update(updates).eq('id', companyId);
-      if (error) { console.error("update codes failed:", error.message); return res.status(500).json({ error: "Couldn't update codes. Try again." }); }
+      const { error } = await supabaseAdmin.from('companies').update({ company_code: companyCode.trim() }).eq('id', companyId);
+      if (error) { console.error("update codes failed:", error.message); return res.status(500).json({ error: "Couldn't update the code. Try again." }); }
       await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'update_company_codes', companyId, targetType: 'company', targetId: companyId });
       return res.status(200).json({ ok: true });
     }

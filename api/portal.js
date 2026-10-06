@@ -27,13 +27,14 @@ import { signRows } from '../server-lib/signedUrls.js';
 import { sendEmail } from '../server-lib/email.js';
 import { portalEscalationSignal } from '../server-lib/portalSignals.js';
 import { recordPlatformEvent, anthropicUsageMetrics } from '../server-lib/platformEvents.js';
-import { withDecryptedEmail, encryptField } from '../server-lib/fieldCrypto.js';
+import { withDecryptedEmail, encryptField, keyProblemMessage } from '../server-lib/fieldCrypto.js';
 import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { readRecipients, runSchedule, emailRecordToDepartment } from '../server-lib/portalReports.js';
 import { applyRuleToExistingRoster } from '../server-lib/portalAssignments.js';
 import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { validDepartmentKeys } from '../server-lib/companyStructure.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
+import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -47,7 +48,6 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Same construction as every other api/*.js file's session check
 // (api/customforms.js, api/generate-flha.js, ...) — duplicated rather than
@@ -72,11 +72,16 @@ async function verifySession(token) {
   } catch (e) {
     return null;
   }
-  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+  if (sessionExpired(payload)) return null;
   // See api/customforms.js's verifySession for why this check exists — a
   // login TICKET (purpose: 'roster' | 'master') must never be accepted here.
   if (payload.purpose) return null;
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
     .select('active, role, company_id, name')
@@ -1330,6 +1335,6 @@ Rules:
     return res.status(400).json({ error: 'Unknown action.' });
   } catch (e) {
     console.error('portal handler failed:', e.message);
-    return res.status(500).json({ error: 'Server error. Please try again.' });
+    return res.status(500).json({ error: keyProblemMessage(e) || 'Server error. Please try again.' });
   }
 }

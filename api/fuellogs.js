@@ -9,13 +9,13 @@ import { resolveEquipmentId } from '../server-lib/equipmentScope.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import crypto from 'crypto';
+import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -40,7 +40,7 @@ async function verifySession(token) {
   } catch (e) {
     return null;
   }
-  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+  if (sessionExpired(payload)) return null;
 
   // A login TICKET is not a session. api/login.js mints two roleless,
   // short-lived tokens with this same signature and secret — the roster
@@ -61,7 +61,12 @@ async function verifySession(token) {
   // handler: the next endpoint added without a role check inherits it.
   if (payload.purpose) return null;
 
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
 
   const { data: rows, error } = await supabaseAdmin
     .from('roster')

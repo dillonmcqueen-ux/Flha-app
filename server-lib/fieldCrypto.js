@@ -25,12 +25,36 @@ import crypto from 'crypto';
 
 const PREFIX = 'enc:v1:';
 
+// A missing or malformed key is a server setup problem, not a database or
+// connection problem, and it used to surface as a generic "connection error".
+// This error type lets a handler answer in plain words instead (see
+// keyProblemMessage). The message never contains the key itself.
+export class KeyConfigError extends Error {
+  constructor(message) { super(message); this.name = 'KeyConfigError'; }
+}
+
+const KEY_PROBLEM_MESSAGE = 'Server setup problem: the encryption key (FIELD_ENCRYPTION_KEY) is missing or the wrong length. The founder needs to fix it in Vercel.';
+
 function loadKey() {
   const raw = (process.env.FIELD_ENCRYPTION_KEY || '').trim();
-  if (!raw) throw new Error('FIELD_ENCRYPTION_KEY is not set.');
+  if (!raw) throw new KeyConfigError('FIELD_ENCRYPTION_KEY is not set.');
   const key = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
-  if (key.length !== 32) throw new Error('FIELD_ENCRYPTION_KEY must decode to exactly 32 bytes.');
+  if (key.length !== 32) throw new KeyConfigError('FIELD_ENCRYPTION_KEY must decode to exactly 32 bytes.');
   return key;
+}
+
+// null when the key is usable, otherwise the plain-words problem. Cheap, so a
+// health check can call it.
+export function encryptionKeyProblem() {
+  try { loadKey(); return null; } catch (e) { return e instanceof KeyConfigError ? KEY_PROBLEM_MESSAGE : e.message; }
+}
+
+// For a handler's top-level catch: if `e` is the key problem, log it in plain
+// words and return the message to send back; otherwise null.
+export function keyProblemMessage(e) {
+  if (!(e instanceof KeyConfigError)) return null;
+  console.error(`${KEY_PROBLEM_MESSAGE} (${e.message})`);
+  return KEY_PROBLEM_MESSAGE;
 }
 
 export function isEncrypted(value) {

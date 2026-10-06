@@ -43,7 +43,7 @@ const server = http.createServer(async (req, res) => {
       pin_link_expires_at: new Date(Date.now() + 86400000).toISOString(),
     }]);
   }
-  if (table === 'companies') return send(200, [{ id: Number(eq('id')), name: 'Test Co', app_type: 'safety', suspended: false }]);
+  if (table === 'companies') return send(200, [{ id: Number(eq('id')), name: 'Test Co', suspended: false }]);
   if (table === 'company_document_settings') {
     const companyId = Number(eq('company_id'));
     if (companyId === 10) return send(500, { message: 'connection reset' });

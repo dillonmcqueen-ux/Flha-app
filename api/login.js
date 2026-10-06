@@ -4,12 +4,10 @@
 // This means the actual database check can never be bypassed from someone's
 // browser.
 //
-// Worker/supervisor login is now a per-company roster of individually
-// PIN'd people, not two shared company-wide codes — but a company only
-// moves onto that once its `roster_enabled` flag is flipped (from Admin
-// Panel, once someone has built out that company's roster). Until then,
-// this file's legacy branch behaves exactly as it always has, so no
-// existing company is disrupted by this change landing.
+// Worker/supervisor login is a per-company roster of individually PIN'd
+// people: search the company by name, pick your name, enter your PIN, then your
+// authenticator if your role needs one. There are no shared company codes.
+// The only codes left are the founder's: ADMIN_CODE and the master code.
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -19,12 +17,13 @@ import { checkIpThrottle as sharedCheckIpThrottle } from '../server-lib/ipThrott
 import { validateOnboardingIntake, randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
-import { withDecryptedEmail, encryptField, decryptField } from '../server-lib/fieldCrypto.js';
+import { withDecryptedEmail, encryptField, decryptField, keyProblemMessage } from '../server-lib/fieldCrypto.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
 import { canAutoApprove, provisionCompanyFromRequest } from '../server-lib/onboardingApproval.js';
 import { readDocKeySetting } from '../server-lib/docKeyGate.js';
 import { verifyTotpCode, consumeBackupCode } from '../server-lib/totp.js';
 import { verifyPinLinkTicket, hashJti, setupOrigin, PIN_LINK_MFA_TTL_MS } from '../server-lib/setupLinks.js';
+import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { requiresMfa, startEnrollment, confirmEnrollment, verifyLoginCode } from '../server-lib/rosterMfa.js';
 
 const supabaseAdmin = createClient(
@@ -38,12 +37,9 @@ const ROSTER_TICKET_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_LOCKOUT_AFTER_ATTEMPTS = 8;
 const PIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-// Real company/worker/supervisor codes observed live top out at 13
-// characters — anything at or above this length can't be a legitimate
-// company code, so throttling attempts at this length can never catch
-// ordinary worker/supervisor login traffic (see the comment on
-// verifyMasterCode for why the shared login endpoint itself isn't
-// rate-limited). Codes below this length are never counted at all.
+// Anything at or above this length could be a plausible master-code guess, so
+// attempts at this length are throttled per IP. Shorter wrong entries are
+// counted separately as failures (COMPANY_CODE_THROTTLE_* below).
 const MASTER_CODE_THROTTLE_MIN_LENGTH = 14;
 const MASTER_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MASTER_CODE_THROTTLE_MAX_ATTEMPTS = 20;
@@ -93,15 +89,18 @@ async function checkMasterCodeThrottle(ip) {
   return checkIpThrottle(ip, MASTER_CODE_THROTTLE_MAX_ATTEMPTS, MASTER_CODE_THROTTLE_WINDOW_MS);
 }
 
-// Counts only FAILED company-code attempts, and only short ones — the
-// length band the master-code throttle above deliberately ignores. That
-// exemption left auto-provisioned company codes (3 derivable initials +
-// 3 random chars, so ~29,791 candidates) enumerable at full speed, and a
-// valid code hands back a ticket that lists the whole roster. The cap is
-// set high so a jobsite full of workers behind one NAT address never
-// reaches it on ordinary typos; a scripted sweep does, immediately.
+// Counts every founder-code attempt per IP, before the compare.
 const COMPANY_CODE_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
-const COMPANY_CODE_THROTTLE_MAX_FAILURES = 50;
+const COMPANY_CODE_THROTTLE_MAX_FAILURES = 30;
+
+// Per-IP ceiling on company-name searches. The search is public (a worker has
+// no session yet) and its result is a company name plus a short-lived ticket,
+// so it is capped hard: 3+ letters, 8 results, and this limit. Set high enough
+// that a crew behind one jobsite address never notices.
+const COMPANY_SEARCH_MIN_LENGTH = 3;
+const COMPANY_SEARCH_MAX_RESULTS = 8;
+const COMPANY_SEARCH_THROTTLE_WINDOW_MS = 15 * 60 * 1000;
+const COMPANY_SEARCH_THROTTLE_MAX = 120;
 
 // Per-IP ceiling on PIN guesses. The per-account lockout is the primary
 // control; this is what stops an attacker spreading guesses across many
@@ -183,10 +182,10 @@ function signSession(payload) {
   return `${data}.${sig}`;
 }
 
-// A short-lived, roleless ticket that proves "this browser already knows a
-// valid code for this company" without handing back a raw companyId (which
-// would let the name-picker step be probed by guessing IDs) and without
-// granting any of the access a real session would.
+// A short-lived, roleless ticket that proves "this browser found this company
+// through search_companies" without handing back a raw companyId (which would
+// let the name-picker step be probed by guessing IDs) and without granting any
+// of the access a real session would.
 //
 // This used to claim a ticket "can never be replayed as a session" because
 // every protected endpoint gates on session.role. That was wrong, and the
@@ -195,14 +194,14 @@ function signSession(payload) {
 // "admin or legacy session" short-circuit and returned it as a session for
 // that file's 7-day TTL, and the handlers scoped by company rather than by
 // role (list_equipment, list_sops, list_sites, list_custom_fields,
-// get_company_logo) answered it. Anyone holding a company code could read
-// that company's reference data before entering a PIN.
+// get_company_logo) answered it. Anyone who could search a company's name could
+// read that company's reference data before entering a PIN.
 //
 // Every verifySession in api/ now rejects any payload carrying `purpose`,
 // which is the only thing that makes the sentence above true. Nothing that
 // is genuinely a session sets it.
-function signTicket(companyId, companyName, appType) {
-  return signSession({ purpose: 'roster', companyId, companyName, appType, issuedAt: Date.now() });
+function signTicket(companyId, companyName) {
+  return signSession({ purpose: 'roster', companyId, companyName, issuedAt: Date.now() });
 }
 
 // Issued after a CORRECT PIN to someone who must use an authenticator but has
@@ -218,7 +217,6 @@ function signEnrollTicket(member, ticket, jti) {
     rosterId: member.id,
     companyId: ticket.companyId,
     companyName: ticket.companyName,
-    appType: ticket.appType || 'safety',
     issuedAt: Date.now(),
   });
 }
@@ -440,7 +438,6 @@ async function mintRosterSession(member, ticket, suspended) {
     role: member.role,
     companyId: ticket.companyId,
     companyName: ticket.companyName,
-    appType: ticket.appType || 'safety',
     userId: member.id,
     userName: member.name,
     suspended,
@@ -450,7 +447,19 @@ async function mintRosterSession(member, ticket, suspended) {
   return { session: payload, token };
 }
 
+// A missing or wrong-length FIELD_ENCRYPTION_KEY used to reach the browser as a
+// generic connection error. Answer it in plain words instead.
 export default async function handler(req, res) {
+  try {
+    return await loginHandler(req, res);
+  } catch (e) {
+    const keyProblem = keyProblemMessage(e);
+    if (keyProblem) return res.status(500).json({ error: keyProblem });
+    throw e;
+  }
+}
+
+async function loginHandler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -483,21 +492,50 @@ export default async function handler(req, res) {
     return res.status(200).json(response);
   }
 
+  // ── Step 1: company search (public, no ticket yet) ──────────────────────
+  // Type 3+ letters of the company name, get back up to 8 names, each with its
+  // own short-lived ticket that opens that company's name list. A throttle per
+  // IP bounds enumeration; the ticket carries no access beyond the name list.
+  if (action === 'search_companies') {
+    const allowed = await checkIpThrottle(`csearch:${clientIp(req)}`, COMPANY_SEARCH_THROTTLE_MAX, COMPANY_SEARCH_THROTTLE_WINDOW_MS);
+    if (!allowed) return res.status(429).json({ error: 'Too many searches. Please wait and try again.' });
+    // PostgREST reads * in an ilike value as a wildcard, same as %, so it is
+    // stripped like the LIKE wildcards are escaped below.
+    const q = String(req.body.query || '').replace(/\*/g, '').trim().slice(0, 60);
+    if (q.length < COMPANY_SEARCH_MIN_LENGTH) return res.status(200).json({ companies: [] });
+    // % and _ are LIKE wildcards; searching for them literally would otherwise
+    // let one character match every company name.
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    const { data, error } = await supabaseAdmin
+      .from('companies')
+      .select('id, name')
+      .ilike('name', pattern)
+      .order('name', { ascending: true })
+      .limit(COMPANY_SEARCH_MAX_RESULTS);
+    if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
+    return res.status(200).json({
+      companies: (data || []).map((c) => ({ name: c.name, companyTicket: signTicket(c.id, c.name) })),
+    });
+  }
+
   // ── Step 2: name picker (ticket only, no PIN yet) ───────────────────────
+  // Names only. The role is deliberately not returned: it is not needed to pick
+  // yourself out of a list, and it would tell a stranger who the supervisors are.
   if (action === 'list_roster_names') {
     const { companyTicket } = req.body;
     const ticket = verifyTicket(companyTicket);
-    if (!ticket) return res.status(401).json({ error: 'That took too long — please start over.' });
+    if (!ticket) return res.status(401).json({ error: 'That took too long. Please start over.' });
+    const namesAllowed = await checkIpThrottle(`rnames:${clientIp(req)}`, COMPANY_SEARCH_THROTTLE_MAX, COMPANY_SEARCH_THROTTLE_WINDOW_MS);
+    if (!namesAllowed) return res.status(429).json({ error: 'Too many requests. Please wait and try again.' });
 
     const { data, error } = await supabaseAdmin
       .from('roster')
-      .select('id, name, role')
+      .select('id, name')
       .eq('company_id', ticket.companyId)
       .eq('active', true)
-      .order('role', { ascending: true })
       .order('name', { ascending: true });
     if (error) return res.status(500).json({ error: 'Could not load the roster.' });
-    return res.status(200).json({ names: data || [] });
+    return res.status(200).json({ names: data || [], companyName: ticket.companyName });
   }
 
   // ── Step 3: PIN ──────────────────────────────────────────────────────────
@@ -524,13 +562,26 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'This account is no longer active. Contact your administrator.' });
     }
     if (member.pin_locked_until && new Date(member.pin_locked_until) > new Date()) {
-      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in a few minutes.' });
+      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in 15 minutes, or ask your supervisor or Account Owner to unlock you.' });
     }
 
     const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', ticket.companyId).limit(1);
     const suspended = !!(coRows && coRows[0] && coRows[0].suspended);
     if (suspended && member.role === 'worker') {
       return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
+    }
+
+    // A lock that has run out starts a fresh set of attempts. claim_pin_attempt
+    // only counts up, so without this the counter stays at the lockout limit
+    // after the first lock and ONE wrong guess per 15 minutes would re-lock the
+    // account for good. Conditioned on the old lock time so two requests racing
+    // here cannot wipe a lock a third one just set.
+    if (member.pin_locked_until && new Date(member.pin_locked_until) <= new Date()) {
+      await supabaseAdmin
+        .from('roster')
+        .update({ failed_pin_attempts: 0, pin_locked_until: null })
+        .eq('id', member.id)
+        .eq('pin_locked_until', member.pin_locked_until);
     }
 
     // Claim this attempt BEFORE checking the PIN. The lockout check above
@@ -554,7 +605,7 @@ export default async function handler(req, res) {
       // locking everyone out.
       console.error('claim_pin_attempt RPC unavailable, counting after verification instead:', claimErr.message);
     } else if (!claimRows || claimRows.length === 0) {
-      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in a few minutes.' });
+      return res.status(403).json({ error: 'Too many incorrect attempts. Try again in 15 minutes, or ask your supervisor or Account Owner to unlock you.' });
     }
 
     if (!verifyPin(pin, member.pin_salt, member.pin_hash)) {
@@ -666,7 +717,7 @@ export default async function handler(req, res) {
     if (result.error) return res.status(result.status || 500).json({ error: result.error });
     const { data: coRows } = await supabaseAdmin.from('companies').select('suspended').eq('id', enroll.companyId).limit(1);
     const suspended = !!(coRows && coRows[0] && coRows[0].suspended);
-    const minted = await mintRosterSession(member, { companyId: enroll.companyId, companyName: enroll.companyName, appType: enroll.appType }, suspended);
+    const minted = await mintRosterSession(member, { companyId: enroll.companyId, companyName: enroll.companyName }, suspended);
     // Tell the person, so an enrollment they did not do does not go unnoticed.
     const notifyTo = (withDecryptedEmail(member).email || '').trim();
     if (notifyTo) {
@@ -714,7 +765,7 @@ export default async function handler(req, res) {
     if (requiresMfa(member) && Date.now() - link.issuedAt > PIN_LINK_MFA_TTL_MS) {
       return res.status(400).json({ error: 'This setup link has expired. Ask your employer to send a new one.' });
     }
-    const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, app_type, suspended').eq('id', member.company_id).limit(1);
+    const { data: coRows } = await supabaseAdmin.from('companies').select('id, name, suspended').eq('id', member.company_id).limit(1);
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
     if (company.suspended && member.role === 'worker') {
@@ -737,6 +788,7 @@ export default async function handler(req, res) {
 
     const pin = String(req.body.pin || '');
     if (!/^\d{6}$/.test(pin)) return res.status(400).json({ error: 'Choose a 6-digit PIN.' });
+    if (isWeakPin(pin)) return res.status(400).json({ error: WEAK_PIN_MESSAGE });
     // The address is only taken from the page when none is on file. Changing
     // an existing one stays with the people who can already edit the roster.
     let newEmail = '';
@@ -770,7 +822,7 @@ export default async function handler(req, res) {
     if (setErr) return res.status(500).json({ error: "Couldn't save your PIN. Try again." });
     if (!consumed || consumed.length === 0) return res.status(400).json({ error: 'This setup link was already used.' });
 
-    const ticket = { companyId: company.id, companyName: company.name, appType: company.app_type };
+    const ticket = { companyId: company.id, companyName: company.name };
     if (member.totp_enabled) return res.status(200).json({ stage: 'signin' });
     if (mfaNeeded) {
       return res.status(200).json({ stage: 'enroll', enrollTicket: signEnrollTicket(member, ticket, jti) });
@@ -789,7 +841,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing details.' });
     }
 
-    const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('id, name, app_type').eq('id', companyId).limit(1);
+    const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('id, name').eq('id', companyId).limit(1);
     if (coErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
     const company = coRows && coRows[0];
     if (!company) return res.status(404).json({ error: 'Company not found.' });
@@ -800,15 +852,15 @@ export default async function handler(req, res) {
 
     await supabaseAdmin.from('master_login_log').insert({ company_id: company.id, role: pickedRole });
 
-    // Legacy-shaped session, same as any pre-cutover login — deliberately
-    // ignores roster_enabled and the company's real suspended flag, since
-    // the whole point of this path is unrestricted access regardless of a
-    // given company's state.
+    // Founder session with no userId, deliberately ignoring the company's real
+    // suspended flag, since the whole point of this path is unrestricted access
+    // regardless of a given company's state. It is stored per tab and only ever
+    // reaches the founder (src/Login.jsx).
     const payload = {
       role: pickedRole,
+      founder: true, // the only userId-less session verifySession still accepts besides admin
       companyId: company.id,
       companyName: company.name,
-      appType: company.app_type || 'safety',
       suspended: false,
       issuedAt: Date.now(),
     };
@@ -980,14 +1032,14 @@ export default async function handler(req, res) {
     }
 
     if (autoApproveResult) {
-      // The claim-link email (with the actual company code + next steps)
+      // The claim-link email (with the next steps)
       // was already sent by provisionCompanyFromRequest above — no need
       // for either the "we'll review within one business day" submitter
       // confirmation or an admin review-needed email, since there's
       // nothing left for either of them to do. Still worth a Slack FYI —
       // it's a new sign-up, just one that didn't need a human click.
       try {
-        await sendSlackNotification(`:white_check_mark: *New company auto-approved* — ${record.company_name || 'Unnamed company'} (code ${autoApproveResult.companyCode}). No action needed.`);
+        await sendSlackNotification(`:white_check_mark: *New company auto-approved* — ${record.company_name || 'Unnamed company'} (${autoApproveResult.companyCode}). No action needed.`);
       } catch (e) {
         console.error('Auto-approve Slack notification failed:', e.message);
       }
@@ -1132,6 +1184,7 @@ export default async function handler(req, res) {
     if (!rosterId || !/^\d{6}$/.test(String(pin || ''))) {
       return res.status(400).json({ error: 'Enter a 6-digit PIN.' });
     }
+    if (isWeakPin(pin)) return res.status(400).json({ error: WEAK_PIN_MESSAGE });
 
     // Ownership check — this rosterId must actually belong to the company
     // this claim token resolved to, never trusted from the client alone.
@@ -1204,39 +1257,39 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
-  // ── Step 1: admin code, or company code ─────────────────────────────────
+  // ── Founder access: ADMIN_CODE or the master code ───────────────────────
+  // The only shared codes left. Everyone else signs in by company name, then
+  // their own name and PIN (search_companies, list_roster_names, roster_login).
   const { role, code } = req.body || {};
   if (!role || !code) {
     return res.status(400).json({ error: 'Missing role or code.' });
   }
+  if (role !== 'admin') {
+    return res.status(400).json({ error: 'Search for your company by name to sign in.' });
+  }
 
   const entered = String(code).trim();
 
-  // ── Admin path — checked against the secret ADMIN_CODE in Vercel ──────
-  if (role === 'admin') {
-    if (process.env.ADMIN_CODE && safeEqual(entered, process.env.ADMIN_CODE)) {
-      const mfa = await checkMfa(clientIp(req), req.body.totp);
-      if (mfa.throttled) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
-      if (mfa.required && !mfa.ok) return res.status(200).json({ stage: 'need_totp' });
-
-      const payload = { role: 'admin', companyId: null, issuedAt: Date.now() };
-      const token = signSession(payload);
-      return res.status(200).json({ session: payload, token });
-    }
-    return res.status(401).json({ error: 'Incorrect admin code.' });
-  }
-
-  if (role !== 'worker' && role !== 'supervisor') {
-    return res.status(400).json({ error: 'Invalid role.' });
-  }
-
-  // ── Master code — checked before any company lookup, for either role ────
-  // Long-code throttle only (see MASTER_CODE_THROTTLE_MIN_LENGTH above) —
-  // never applied to ordinary short company/worker/supervisor codes below.
+  // Founder codes are guessed online, so every attempt (right or wrong) is
+  // counted per IP BEFORE the compare. Counting only after a failed compare, as
+  // the old company-code check did, never slowed a guess down.
+  const founderAllowed = await checkIpThrottle(`code:${clientIp(req)}`, COMPANY_CODE_THROTTLE_MAX_FAILURES, COMPANY_CODE_THROTTLE_WINDOW_MS);
+  if (!founderAllowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
   if (entered.length >= MASTER_CODE_THROTTLE_MIN_LENGTH) {
     const allowed = await checkMasterCodeThrottle(clientIp(req));
     if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
   }
+
+  if (process.env.ADMIN_CODE && safeEqual(entered, process.env.ADMIN_CODE)) {
+    const mfa = await checkMfa(clientIp(req), req.body.totp);
+    if (mfa.throttled) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+    if (mfa.required && !mfa.ok) return res.status(200).json({ stage: 'need_totp' });
+
+    const payload = { role: 'admin', founder: true, companyId: null, issuedAt: Date.now() };
+    const token = signSession(payload);
+    return res.status(200).json({ session: payload, token });
+  }
+
   if (await verifyMasterCode(entered)) {
     const { data: companies, error: coErr } = await supabaseAdmin.from('companies').select('id, name').order('name', { ascending: true });
     if (coErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
@@ -1244,60 +1297,5 @@ export default async function handler(req, res) {
     return res.status(200).json({ stage: 'pick_company', masterTicket, companies: companies || [] });
   }
 
-  // ── Worker / Supervisor — look up the company ───────────────────────────
-  // Try the role-specific legacy column first (byte-identical to the old
-  // behavior for every company that hasn't cut over), then fall back to the
-  // unified company_code — which is how brand-new companies (created with
-  // no legacy codes at all) and post-cutover companies get found.
-  const legacyColumn = role === 'supervisor' ? 'supervisor_code' : 'worker_code';
-  const { data: legacyRows, error: legacyErr } = await supabaseAdmin
-    .from('companies')
-    .select('id, name, suspended, roster_enabled, app_type')
-    .eq(legacyColumn, entered)
-    .limit(1);
-  if (legacyErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
-
-  let company = legacyRows && legacyRows[0];
-  if (!company) {
-    const { data: codeRows, error: codeErr } = await supabaseAdmin
-      .from('companies')
-      .select('id, name, suspended, roster_enabled, app_type')
-      .eq('company_code', entered)
-      .limit(1);
-    if (codeErr) return res.status(500).json({ error: 'Connection error. Please try again.' });
-    company = codeRows && codeRows[0];
-  }
-
-  if (!company) {
-    // Count the failure before answering, so repeated wrong codes from one
-    // address burn the budget even though a correct code never does.
-    if (entered.length < MASTER_CODE_THROTTLE_MIN_LENGTH) {
-      const allowed = await checkIpThrottle(`code:${clientIp(req)}`, COMPANY_CODE_THROTTLE_MAX_FAILURES, COMPANY_CODE_THROTTLE_WINDOW_MS);
-      if (!allowed) return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
-    }
-    return res.status(401).json({ error: 'Code not recognized. Check with your supervisor.' });
-  }
-
-  if (company.suspended && role === 'worker') {
-    return res.status(403).json({ error: 'Access suspended. Please contact your administrator.' });
-  }
-
-  if (!company.roster_enabled) {
-    // Legacy path — identical to this file's original behavior.
-    const payload = {
-      role,
-      companyId: company.id,
-      companyName: company.name,
-      appType: company.app_type || 'safety',
-      suspended: !!company.suspended,
-      issuedAt: Date.now(),
-    };
-    const token = signSession(payload);
-    return res.status(200).json({ session: payload, token });
-  }
-
-  // Roster path — hand back a ticket instead of a session; the client moves
-  // on to the name picker (list_roster_names) and then the PIN (roster_login).
-  const companyTicket = signTicket(company.id, company.name, company.app_type || 'safety');
-  return res.status(200).json({ stage: 'need_identity', companyTicket, companyName: company.name });
+  return res.status(401).json({ error: 'Code not recognized.' });
 }

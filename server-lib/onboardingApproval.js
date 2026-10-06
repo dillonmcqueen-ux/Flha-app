@@ -377,7 +377,7 @@ export async function provisionCompanyFromRequest(supabaseAdmin, stripe, req, re
         to: request.contact_email,
         subject: `Your FORA account is ready — ${request.company_name}`,
         text: [
-          `Your company code: ${companyCode}`,
+          `To sign in, search for "${request.company_name}" on the FORA login page, pick your name, and enter your PIN.`,
           '',
           `Finish setup: review the equipment and SOPs we drafted from what you sent. You were emailed a link to set your own PIN. Send everyone else theirs from the roster in the app (Send setup links), or type a PIN for anyone without an email address on this page:`,
           `${siteOrigin(req)}/claim?token=${claimToken}`,

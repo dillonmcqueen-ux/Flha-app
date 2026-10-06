@@ -3516,6 +3516,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { alert("Couldn't reset the authenticator. Try again."); }
   };
 
+  const unlockRosterMember = async (id, name) => {
+    try {
+      const res = await fetch("/api/companydata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unlock_roster_pin", token, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || `Couldn't unlock ${name}.`); return; }
+      setRosterList(prev => prev.map(m => m.id === id ? { ...m, locked: false } : m));
+    } catch (e) { alert(`Couldn't unlock ${name}. Try again.`); }
+  };
+
   const openWorkerProfile = async (id) => {
     setProfileRosterId(id);
     setProfileData(null);
@@ -7945,6 +7957,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           )}
                           {m.active && (viewerRole === "admin" ? true : String(m.id) === String(userId) ? true : canManageCompany ? !m.is_owner : m.role === "worker") && (
                             <button onClick={() => sendRosterSetupLink(m.id, m.name)} style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}>{m.pin_link_sent_at && !m.pin_set_at ? "Resend setup link" : "Send setup link"}</button>
+                          )}
+                          {m.locked && (viewerRole === "admin" ? true : canManageCompany ? !m.is_owner && String(m.id) !== String(userId) : m.role === "worker") && (
+                            <button
+                              onClick={() => unlockRosterMember(m.id, m.name)}
+                              style={{ background: "transparent", border: `1.5px solid ${C.line}`, color: C.text.body, fontSize: 12, cursor: "pointer", fontWeight: 700, borderRadius: RAD.sm, padding: "6px 10px", flexShrink: 0 }}
+                              title="Too many wrong PIN or authenticator codes. Clears the lockout now instead of waiting 15 minutes."
+                            >
+                              Unlock
+                            </button>
                           )}
                           {m.totp_enabled && (viewerRole === "admin" ? true : canManageCompany ? !m.is_owner && String(m.id) !== String(userId) : m.role === "worker") && (
                             <button

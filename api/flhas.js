@@ -12,13 +12,13 @@ import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
+import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -43,7 +43,7 @@ async function verifySession(token) {
   } catch (e) {
     return null;
   }
-  if (!payload.issuedAt || Date.now() - payload.issuedAt > SESSION_TTL_MS) return null;
+  if (sessionExpired(payload)) return null;
 
   // A login TICKET is not a session. api/login.js mints two roleless,
   // short-lived tokens with this same signature and secret — the roster
@@ -66,7 +66,12 @@ async function verifySession(token) {
 
   // Admin sessions and legacy (pre-cutover) worker/supervisor sessions carry
   // no userId — nothing to live-check beyond the signature+TTL above.
-  if (payload.role === 'admin' || !payload.userId) return payload;
+  // Founder sessions (the admin code, and the master code opening a company)
+  // carry no userId and nothing to live-check. A worker or supervisor token
+  // with no userId is a leftover from the retired shared company codes and is
+  // refused: it never passed a PIN or an authenticator.
+  if (payload.role === 'admin') return payload;
+  if (!payload.userId) return payload.founder === true ? payload : null;
 
   // Individually-identified (roster) sessions: re-check `active` on every
   // request, so deactivating someone takes effect on their very next call

@@ -4,33 +4,29 @@ import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
 import MfaSetup from "./MfaSetup.jsx";
-import { HardHat, ClipboardList, KeyRound, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { KeyRound, Search, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import { setDraftUser } from "./useDraftAutosave.js";
 
-// Session storage — split by role. window.name survives a reload but not a
-// fully closed-and-reopened tab, which is exactly the case that matters most
-// for a worker relaunching the app from a home-screen icon on a jobsite with
-// no signal (docs/scope-offline-capability.md Phase 0), so worker sessions
-// still go in localStorage, which survives that.
+// Session storage. Anyone who signed in as a named person (a roster row with a
+// userId) goes in localStorage, which survives closing the browser, so a
+// supervisor signs in once per working day instead of every time the window
+// closes. How long that session lasts is bounded by the server, not the
+// browser: 12 hours for supervisors and the Account Owner, 7 days for workers
+// (server-lib/sessionTtl.js). A stale local copy just fails on the next API call.
 //
-// Supervisor and (especially) admin sessions are a different risk profile —
-// an admin session can reach every company's data, so leaving it in
-// localStorage means it's still logged in the next time anyone opens that
-// browser, indefinitely (bounded only by the server's 7-day TTL), even after
-// Chrome is fully closed and reopened. That's the exact bug reported: closed
-// Chrome while logged in as admin, reopened later, still logged in. Elevated
-// roles now go in sessionStorage instead, which Chrome clears when the
-// browser's last window/tab closes — the offline-worker case doesn't apply
-// to a supervisor/admin, who are on the portal, not the field app. Server-
-// side sessions still carry their own 7-day TTL (SESSION_TTL_MS in
-// api/*.js) — a stale local copy just fails on the next API call either way.
+// Founder sessions (the admin code, and the master code picking a company) have
+// no userId and can reach every company's data, so they stay in sessionStorage,
+// which the browser clears when its last window closes.
 const SESSION_STORAGE_KEY = "fora_session";
-function storageFor(role) {
-  return role === "worker" ? localStorage : sessionStorage;
+function isPersistable(session) {
+  return !!session && session.role !== "admin" && !!session.userId;
 }
 function saveSession(session) {
-  try { storageFor(session?.role).setItem(SESSION_STORAGE_KEY, JSON.stringify(session)); } catch (e) {}
+  try {
+    const store = isPersistable(session) ? localStorage : sessionStorage;
+    store.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch (e) {}
 }
 function loadSession() {
   try {
@@ -40,12 +36,10 @@ function loadSession() {
     const fromLocal = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!fromLocal) return null;
     const session = JSON.parse(fromLocal);
-    // A supervisor/admin session found in localStorage is either a leftover
-    // from before this fix, or (impossible under the current saveSession,
-    // but checked defensively) otherwise misplaced — either way, elevated
-    // roles are never meant to persist past a closed browser. Clear it and
-    // sign the user out rather than silently restoring an admin session.
-    if (session && session.role !== "worker") {
+    // Anything in localStorage that is not a named person's session (an old
+    // founder or shared-code session left over from before this change) is
+    // cleared rather than silently restored.
+    if (!isPersistable(session)) {
       localStorage.removeItem(SESSION_STORAGE_KEY);
       return null;
     }
@@ -61,18 +55,23 @@ function clearSession() {
 
 export default function Login() {
   const [session, setSession] = useState(null);
-  const [role, setRole] = useState(null); // "worker" | "supervisor" | "admin" — only used to pick the code-entry copy/legacy lookup column; the actual logged-in role comes back from the server
+  const [role, setRole] = useState(null); // null (company search) or "admin" (founder access). The logged-in role always comes back from the server.
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
   const [adminDashCompany, setAdminDashCompany] = useState(null); // admin viewing a specific company's dashboard
 
-  // Roster login (companies that have cut over from the shared code)
+  // Company search (step 1 for everyone except the founder)
+  const [companyQuery, setCompanyQuery] = useState("");
+  const [companyResults, setCompanyResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  // Roster login
   const [companyTicket, setCompanyTicket] = useState(null);
   const [rosterCompanyName, setRosterCompanyName] = useState("");
   const [rosterNames, setRosterNames] = useState([]);
   const [nameFilter, setNameFilter] = useState("");
-  const [selectedRoster, setSelectedRoster] = useState(null); // { id, name, role }
+  const [selectedRoster, setSelectedRoster] = useState(null); // { id, name }
   const [pin, setPin] = useState("");
 
   // Master-code login (picks any company, either role)
@@ -80,6 +79,7 @@ export default function Login() {
   const [masterCompanies, setMasterCompanies] = useState([]);
   const [companyFilter, setCompanyFilter] = useState("");
   const [pendingMasterCompanyId, setPendingMasterCompanyId] = useState(null);
+  const [masterRole, setMasterRole] = useState("supervisor"); // which role the founder opens the company as
 
   // MFA (TOTP) — required on the admin role and master-code paths once
   // enrolled from the Admin Panel. See api/login.js's checkMfa.
@@ -100,7 +100,6 @@ export default function Login() {
       const setupToken = params.get("mfa_setup");
       if (setupToken) {
         window.history.replaceState({}, "", window.location.pathname);
-        setRole("worker");
         setEnrollTicket(setupToken);
         return;
       }
@@ -109,8 +108,36 @@ export default function Login() {
     if (s && s.role) setSession(s);
   }, []);
 
+  // Type 3+ letters of the company name; results come back after a short pause.
+  useEffect(() => {
+    const q = companyQuery.trim();
+    if (q.length < 3) { setCompanyResults([]); setSearching(false); return; }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "search_companies", query: q }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setError(data.error || "Something went wrong. Please try again."); setCompanyResults([]); }
+        else { setError(""); setCompanyResults(data.companies || []); }
+      } catch (e) {
+        if (!cancelled) setError("Connection error. Please try again.");
+      }
+      if (!cancelled) setSearching(false);
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [companyQuery]);
+
   const resetToRolePick = () => {
     setRole(null);
+    setCompanyQuery("");
+    setCompanyResults([]);
+    setMasterRole("supervisor");
     setCode("");
     setError("");
     setCompanyTicket(null);
@@ -135,7 +162,7 @@ export default function Login() {
     const entered = code.trim();
 
     if (!entered) {
-      setError("Please enter a code.");
+      setError("Please enter your code.");
       setChecking(false);
       return;
     }
@@ -174,36 +201,35 @@ export default function Login() {
         return;
       }
 
-      if (data.stage === "need_identity") {
-        // This company has moved to individual roster logins — fetch the
-        // active name list and move on to the picker instead of logging in.
-        setCompanyTicket(data.companyTicket);
-        setRosterCompanyName(data.companyName || "");
-        try {
-          const namesRes = await fetch("/api/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "list_roster_names", companyTicket: data.companyTicket }),
-          });
-          const namesData = await namesRes.json();
-          if (!namesRes.ok) {
-            setError(namesData.error || "Something went wrong. Please try again.");
-            setChecking(false);
-            return;
-          }
-          setRosterNames(namesData.names || []);
-        } catch (e) {
-          setError("Connection error. Please try again.");
-        }
-        setChecking(false);
-        return;
-      }
-
       // data.session holds the role/company info; data.token is the signed
       // pass we'll use so other pages can prove this login was real.
       const s = { ...data.session, token: data.token };
       saveSession(s);
       setSession(s);
+    } catch (e) {
+      setError("Connection error. Please try again.");
+    }
+    setChecking(false);
+  };
+
+  const pickCompany = async (company) => {
+    setError("");
+    setChecking(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_roster_names", companyTicket: company.companyTicket }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+        setChecking(false);
+        return;
+      }
+      setCompanyTicket(company.companyTicket);
+      setRosterCompanyName(company.name || "");
+      setRosterNames(data.names || []);
     } catch (e) {
       setError("Connection error. Please try again.");
     }
@@ -225,7 +251,7 @@ export default function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "master_login", masterTicket, companyId, role,
+          action: "master_login", masterTicket, companyId, role: masterRole,
           ...(totpRequired ? { totp: totpCode } : {}),
         }),
       });
@@ -427,11 +453,7 @@ export default function Login() {
     }),
   };
 
-  const roleMeta = {
-    worker: { icon: HardHat, title: "Worker", desc: "Complete a hazard assessment", accent: C.orange },
-    supervisor: { icon: ClipboardList, title: "Supervisor / Safety", desc: "View your company dashboard", accent: C.status.info.solid },
-    admin: { icon: KeyRound, title: "Admin", desc: "Access all companies", accent: "#7C3AED" },
-  };
+  const adminAccent = "#7C3AED";
 
   const filteredNames = rosterNames.filter(m => m.name.toLowerCase().includes(nameFilter.trim().toLowerCase()));
   const filteredMasterCompanies = masterCompanies.filter(c => c.name.toLowerCase().includes(companyFilter.trim().toLowerCase()));
@@ -448,33 +470,7 @@ export default function Login() {
           <div style={{ fontSize: 13, color: C.text.muted }}>AI-powered field documentation portal</div>
         </div>
 
-        {!role ? (
-          <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.text.muted, marginBottom: 12, textAlign: "center" }}>
-              Select your role to continue
-            </div>
-            {["worker", "supervisor"].map(r => {
-              const m = roleMeta[r];
-              const RoleIcon = m.icon;
-              return (
-                <button key={r} style={styles.roleBtn(m.accent)} onClick={() => { setRole(r); setError(""); setCode(""); }}>
-                  <RoleIcon size={26} strokeWidth={2} color={m.accent} />
-                  <span>
-                    <span style={{ display: "block", fontFamily: FONT.heading, fontWeight: 700, fontSize: 15, color: m.accent }}>{m.title}</span>
-                    <span style={{ display: "block", fontSize: 12, color: C.text.muted }}>{m.desc}</span>
-                  </span>
-                </button>
-              );
-            })}
-
-            <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
-              <button style={styles.adminBtn(roleMeta.admin.accent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>
-                <roleMeta.admin.icon size={15} strokeWidth={2.25} color={roleMeta.admin.accent} />
-                <span style={{ fontWeight: 600, fontSize: 12, color: C.text.muted }}>{roleMeta.admin.title}</span>
-              </button>
-            </div>
-          </>
-        ) : enrollLinkHint ? (
+        {enrollLinkHint ? (
           // ── PIN accepted, but an authenticator must be set up first. The
           // link is in the person's inbox, not on this screen. ─────────────
           <>
@@ -550,7 +546,12 @@ export default function Login() {
           // ── Master code: pick any company ──────────────────────────
           <>
             <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Master login</div>
-            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Pick a company to log into as {role}.</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 10 }}>Pick a company, and whether to open it as a worker or a supervisor.</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {["supervisor", "worker"].map(r => (
+                <button key={r} style={{ ...styles.nameBtn(masterRole === r), justifyContent: "center", marginBottom: 0, textTransform: "capitalize" }} onClick={() => setMasterRole(r)}>{r}</button>
+              ))}
+            </div>
 
             <input
               style={styles.input}
@@ -604,7 +605,6 @@ export default function Login() {
                 filteredNames.map(m => (
                   <button key={m.id} style={styles.nameBtn(false)} onClick={() => pickRosterName(m)}>
                     <span>{m.name}</span>
-                    <span style={{ fontSize: 11, color: C.text.muted, textTransform: "uppercase" }}>{m.role}</span>
                   </button>
                 ))
               )}
@@ -656,31 +656,26 @@ export default function Login() {
               <ChevronLeft size={14} /> Not {selectedRoster.name}?
             </button>
           </>
-        ) : (
-          // ── Step 1: admin code, or company code ─────────────────────
+        ) : role === "admin" ? (
+          // ── Founder access: admin code or master code ───────────────
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              {(() => { const RoleIcon = roleMeta[role].icon; return <RoleIcon size={26} strokeWidth={2} color={roleMeta[role].accent} />; })()}
+              <KeyRound size={26} strokeWidth={2} color={adminAccent} />
               <div>
-                <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange }}>{roleMeta[role].title}</div>
-                <div style={{ fontSize: 12, color: C.text.muted }}>
-                  {role === "admin" ? "Enter your admin code" : "Enter your company code"}
-                </div>
+                <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange }}>Founder access</div>
+                <div style={{ fontSize: 12, color: C.text.muted }}>Enter your admin code</div>
               </div>
             </div>
 
             <input
               style={styles.input}
-              type="text"
-              placeholder={role === "admin" ? "Admin code" : "Company code"}
+              type="password"
+              placeholder="Admin code"
               value={code}
               onChange={e => setCode(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
               autoFocus
             />
-            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 12 }}>
-              Codes are case sensitive — enter it exactly as given.
-            </div>
 
             {error && (
               <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
@@ -694,6 +689,55 @@ export default function Login() {
             <button style={styles.backBtn} onClick={resetToRolePick}>
               <ChevronLeft size={14} /> Back
             </button>
+          </>
+        ) : (
+          // ── Step 1: find your company by name ───────────────────────
+          <>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.orange, marginBottom: 2 }}>Sign in</div>
+            <div style={{ fontSize: 12, color: C.text.muted, marginBottom: 16 }}>Search for your company by name.</div>
+
+            <div style={{ position: "relative" }}>
+              <input
+                style={{ ...styles.input, paddingLeft: 40 }}
+                type="text"
+                placeholder="Company name"
+                value={companyQuery}
+                onChange={e => { setCompanyQuery(e.target.value); setError(""); }}
+                autoComplete="off"
+                autoFocus
+              />
+              <Search size={16} color={C.text.muted} style={{ position: "absolute", left: 14, top: 15 }} />
+            </div>
+
+            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              {companyQuery.trim().length < 3 ? (
+                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>Type at least 3 letters.</div>
+              ) : searching && companyResults.length === 0 ? (
+                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>Searching…</div>
+              ) : companyResults.length === 0 && !error ? (
+                <div style={{ fontSize: 13, color: C.text.muted, textAlign: "center", padding: "12px 0" }}>No company found. Check the spelling, or ask your supervisor.</div>
+              ) : (
+                companyResults.map(c => (
+                  <button key={c.companyTicket} style={styles.nameBtn(false)} disabled={checking} onClick={() => pickCompany(c)}>
+                    <span>{c.name}</span>
+                    <ChevronRight size={16} color={C.text.muted} />
+                  </button>
+                ))
+              )}
+            </div>
+
+            {error && (
+              <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "12px 0", fontSize: 13, color: C.status.danger.text, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+              <button style={styles.adminBtn(adminAccent)} onClick={() => { setRole("admin"); setError(""); setCode(""); }}>
+                <KeyRound size={15} strokeWidth={2.25} color={adminAccent} />
+                <span style={{ fontWeight: 600, fontSize: 12, color: C.text.muted }}>Founder access</span>
+              </button>
+            </div>
           </>
         )}
       </div>

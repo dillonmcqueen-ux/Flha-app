@@ -536,7 +536,7 @@ is the first real consumer.** Read directly:
 |---|---|
 | Consumed — dashboard scoping | `api/portal.js:587-590` (`list_portal_records`) and `:634-637` (`get_portal_record_detail`) — only for an **individually-identified** supervisor session (`session.role === 'supervisor' && session.userId`); each looks up that caller's own `roster.departments` and keeps only `portal_documents` rows whose `departments` array intersects it (`.some(dep => myDepartments.includes(dep))`) |
 | Consumed — submission email | `api/portal.js`'s `submit_portal` — queries `roster` for `company_id`-scoped, active, `role: 'supervisor'` rows with an email on file, then filters to those whose `departments` intersect the submitted document's `departments`, and emails only that set |
-| Fallback (not a bug) | A **shared-code** supervisor session (no `session.userId` — a pre-cutover company login) has no individual roster row to scope by, so both read actions fall back to unfiltered-within-company, same as every other document type already shows a shared-code supervisor |
+| Fallback (not a bug) | **Updated 2026-10-06 (`b2044ee`):** the shared company-code login is deleted, so the only supervisor session without `session.userId` left is the founder's `master_login` company-entry session (`api/login.js:837-849`, role picked by the founder, stored per tab, `src/Login.jsx:19`). It has no individual roster row to scope by, so both read actions fall back to unfiltered-within-company, same as before. Real customer supervisors always carry `userId` (`mintRosterSession`, `api/login.js:437-445`) |
 
 This closes the "no consumer yet" note phase 1 recorded above. The two
 re-check items flagged at that time are now answered:
@@ -776,7 +776,7 @@ lands in two shapes:
 So the new FK does not close break #2; for five forms it is one more id-to-string
 conversion at the client. Not a new break (nothing is lost today); #2's scope is unchanged.
 Also `list_sites` returns `defaultSiteId` only to a session with `session.userId`
-(`:1102`); a shared-code session gets `null` and no preselect, which is expected.
+(`:1102`; line now `companydata.js:1179`, `b2044ee`); a no-userId session (today only the founder's `master_login` entry, `api/login.js:837-849`) gets `null` and no preselect, which is expected.
 
 ### `roster_id` → `roster.id` (the person)
 | Feature | Link |
@@ -1036,7 +1036,7 @@ no new key of its own.
 Manager scoping matches the neighbouring Portal actions: an
 individually-identified supervisor only manages schedules for departments on
 their own roster row (`portal.js:1017-1034`, `:1072-1073`), missing and foreign
-ids get the same 403, shared-code supervisors have no department limit.
+ids get the same 403, no-userId supervisors have no department limit (since `b2044ee` that is only the founder's `master_login` session, `api/login.js:837-849`; the shared company-code login is gone).
 Surfaces: `src/PortalReports.jsx` (Portal "Reports" sub-tab,
 `Dashboard.jsx:6271,6380-6381`) and the "Email to department" button in
 `PortalRecordCard` (`Dashboard.jsx:1610,1651`, department picker limited to
@@ -1426,6 +1426,24 @@ Replaces the plaintext wallet invite. `create_wallet_invite` and `redeem_wallet_
 
 **Tenant scope:** every lookup is by `id` **and** `company_id` (`login.js:699-700,760-761`, `setupLinks.js:76-77`). `send_pin_setup_link` fetches by `id` alone (`companydata.js:726`) but then requires either self in the same company (`:729`) or `canResetMfa`, which rejects a different company unless founder (`server-lib/rosterMfa.js:196-198`). Read, so not a break.
 
+### Login and session (`b2044ee`, 2026-10-06)
+
+**Key:** a customer signs in as `companies.id` (via an HMAC `companyTicket`, `api/login.js:515`) then `roster.id` + `roster.company_id` (`:550-551`) then PIN, plus authenticator where `requiresMfa`. There is no company-wide code any more.
+
+| Piece | Where |
+|---|---|
+| Step 1, company-name search (`ilike`, 8 results, IP throttle) | `api/login.js:499-517`; UI `src/Login.jsx:122` |
+| Step 2, active names only, no role returned | `api/login.js:522-535`; UI `src/Login.jsx:222`; same action name reused by `src/App.jsx:461`, `src/Incident.jsx:250`, `src/ToolboxTalk.jsx:150` with a session token, served by `api/companydata.js:1156` (a different handler, not the ticket one) |
+| Step 3, PIN, lockout `pin_locked_until`, session via `mintRosterSession` | `api/login.js:538-616`, `:432-448`; UI `src/Login.jsx:300` |
+| Founder entry, still no `userId` | `master_login` `api/login.js:818-849` |
+| Unlock a locked person | `unlock_roster_pin` `api/companydata.js:710-729` (rank rule via `canResetMfa`, audit-logged); the derived `locked` flag (PIN or authenticator lock, timestamps never sent) `companydata.js:357,369-373`; read by `src/Dashboard.jsx:3523,7961`, `src/AdminPanel.jsx:329,2390` |
+| Session lifetime: supervisor with `userId` 12h, everyone else 7d | `server-lib/sessionTtl.js:16-28`, `sessionExpired` imported by 13 api files (monthly, logs, reports, equipmentreports, customforms, certifications, generate-flha, admin, portal, flhas, maintenance, fuellogs, companydata) |
+| Browser storage: named non-admin sessions in `localStorage`, admin and no-`userId` in `sessionStorage` | `src/Login.jsx:12-51` |
+| `companies.company_code` | kept as an internal reference only: `api/admin.js:521-598`, `server-lib/onboardingApproval.js:180-194`, shown `src/AdminPanel.jsx:1432`; no login reads it |
+| `worker_code`, `supervisor_code`, `app_type` | dropped by `docs/schema/company-name-login-migration.sql:14-16`, **not verified applied live**; no reader left in `api/`, `src/`, `server-lib/` |
+
+`set_roster_cutover` and the legacy no-`userId` worker/supervisor session path are gone. Several api files still carry `!session.userId` guards (e.g. `api/certifications.js:138`, `api/companydata.js:656`); they now only ever catch the founder's `master_login` session, so they are dead-ish but harmless and not filed.
+
 ## 3. Interaction matrix
 
 `✅` verified working · `⚠️` partial/lossy · `❌` expected but absent
@@ -1656,6 +1674,11 @@ stamped from the session, which is authoritative rather than inferred.
 Two of three companies are on shared logins with no roster rows, so their
 records stay text-only — the same graceful degradation as #2's "other site"
 path, which is why the column is nullable.
+**Stale as of 2026-10-06 (`b2044ee`):** shared logins no longer exist
+(`api/login.js:499-616` is the only customer login: company search, name, PIN).
+Whether those two companies have roster rows now is live data this map cannot
+see, marked `?` in the changelog row. If they have none, nobody at them can
+sign in at all.
 
 **Correction, 2026-09-30 (branch `claude/step1-autofill-name-stamp`): the
 "all nine document tables" claim above was wrong for FLHA until this branch.**
@@ -4154,8 +4177,9 @@ Do **not** flag these. They are decisions, not gaps.
 
 - **Gatehouse is gone, not a non-connection.** Removed 2026-09-30 by
   Dillon's decision (it belongs in a separate project). Do not file its
-  absence as a missing link. `companies.app_type` is kept for now and login
-  still passes appType `'safety'`; that column has no second consumer.
+  absence as a missing link. `companies.app_type` was dropped by
+  `docs/schema/company-name-login-migration.sql:16` (`b2044ee`, run after
+  deploy); `grep -rn app_type api src server-lib` returns nothing, 2026-10-06.
 - **Equipment Inspection makes no AI call.** It is checklist-driven, so it
   correctly does not import `companyProfile.js`. "7 of 8 generators" in
   CLAUDE.md counts AI-calling generators; Inspection is the 8th form, not
@@ -4519,3 +4543,4 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-09-30 | branch `claude/step1-autofill-name-stamp` | **Break #3 coverage corrected for FLHA; name stamp placed.** The map said `submitted_by_roster_id` was on all nine document tables since PR #118, but `api/flhas.js` never wrote it until this branch (`:426`, import `:10`). Also new: `stampAuthorName` overwrites free-text name columns with the roster name on every submit handler (`server-lib/authorStamp.js:57-63`; call sites listed under #3). `incidents`/`near_misses` `occurred_at` is now a datetime-local string for new rows (`src/occurredAt.js`, column stays text; `api/reports.js:173-174` allowlist unchanged), so old and new rows differ in shape: a consumer that parses it must tolerate both (no consumer of `occurred_at` for date math verified, `?`). No new break filed. Map only, no code touched. |
 | 2026-09-30 | branch `claude/step3-owner-profile` (uncommitted) | **Owner profile, company structure and default site placed on the map.** New roster columns `is_owner`, `title`, `divisions`, `default_site_id`; new tables `company_departments`, `company_divisions`. (1) `roster.departments` now accepts per-company `c_` keys (`server-lib/companyStructure.js:38-60`), Portal validation follows (`api/portal.js:95-100`); the phase-1 rows in that section are marked stale. (2) **Closed:** onboarding approval used to write no `departments`; it now does (`onboardingApproval.js:313`, `onboardingRoster.js`), so a new Portal customer's supervisors route from day one. (3) New join key `roster.default_site_id` -> `sites.id` (§2 site section): nine forms preselect it, but five copy the site name into free text, so break #2 is unchanged. (4) New weak links W1-W4 in the `roster.departments` section (W1: deleting a custom department leaves its key on Portal documents, escalations and schedules, `companydata.js:1157-1169`). (5) `roster.divisions` has no consumer, filed as pending link P2. (6) Onboarding also seeds the contact as Account Owner (`onboardingRoster.js:34-51`). Owner-only gating of profile edits (`companydata.js:953-955`) is tenant-scope territory and was not reviewed here. No matrix cell changed. |
 | 2026-09-30 | branch `claude/step-pin-setup-links`, `624ef31` | **Set-your-own-PIN link placed on the map.** New surface #25 and a §2 section with the producer/consumer table. `create_wallet_invite` / `redeem_wallet_invite` are gone; the stale references were re-anchored, not deleted: #24's flag row and test row (`api/login.js:774-775`, `src/WalletInvite.jsx:81,124-125,304,368`), the §5 wallet-invite bullet, the #3 pointer to `WalletInvite.jsx`, and the `last_login_at` writer, which was stale map-wide (`login.js:514`, now `mintRosterSession` at `:437`; the "wallet redemption mints a session without setting it" weak point is fixed because the link's session stage goes through `mintRosterSession`, `:772`). Five new §5 non-connections. **New break #43** (`pin_set_at` has one writer, so typed, reset and pre-existing PINs show "Waiting for PIN"). Not verified: migration applied live; `tests/wallet-invite.spec.js` against this commit. `send_pin_setup_link` fetches by `id` alone (`companydata.js:726`) but is company-checked by `canResetMfa` (`rosterMfa.js:198`), so not filed. All line numbers are against commit `624ef31`; commit `6c30667` (another session, landed after this pass read the code) changed `api/companydata.js` adds a 30 per hour per company throttle on `onboard_new_employee` and clears the link on deactivate; `server-lib/setupLinks.js` sanitises name and company in the email), which shifts `companydata.js` lines after about `:488` by 5. Re-anchor those. Not built, not approved. |
+| 2026-10-06 | branch `claude/step4-company-name-login`, `b2044ee` | **Company-name login placed on the map.** New §2 section "Login and session" with file:line for search_companies, list_roster_names, roster_login, master_login, unlock_roster_pin plus the derived `locked` flag, `server-lib/sessionTtl.js` (supervisor 12h, other 7d, 13 api files) and supervisor localStorage persistence. Stale entries rewritten: Portal shared-code fallback (§2 Portal scoping), `list_sites` defaultSiteId note, Portal-reports shared-code note, break #3 'two of three companies on shared logins' (now `?`: live roster counts unknown), and the §5 `app_type` note. Mechanical checks run, no new break. Line numbers cited elsewhere for `api/login.js` after about :430 (e.g. `last_login_at` is now :435, not :437; `pin_link_*` lines shifted) and `companydata.js` after about :700 are against older commits, re-anchor on next sweep. Map only, no code touched. |
