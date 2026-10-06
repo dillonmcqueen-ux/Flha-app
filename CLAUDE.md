@@ -21,6 +21,24 @@ period, a comma, or start a new sentence instead. Check your own draft
 copy for the `—` character before calling it done, the same way you'd
 check code compiles.
 
+## Test company: ABC Earthworks
+
+**ABC Earthworks (`ABC Earthworks Company`, company code `abcworker`) is a TEST-ONLY
+company.** None of its data is real, and it does not represent a real company or
+customer. Dillon's standing instruction (2026-10-06):
+
+- Claude may create, edit, delete and populate data for this company freely whenever
+  needed: testing features, exercising workflows, taking screenshots, demos, and
+  verifying a fix end to end.
+- When testing any new feature, workflow or change that needs a company, **always use
+  ABC Earthworks.** Never test against a real company's data.
+- Populate **only** this company. Writing, seeding, resetting or deleting rows for any
+  other company is not covered by this permission and needs Dillon's explicit yes first.
+- Before any write, confirm the target row's `company_id` is ABC Earthworks. Scope every
+  query and SQL statement to it explicitly.
+- Nothing on ABC Earthworks is factual, so it must never be quoted as real customer
+  data in marketing, case studies, proposals or reports.
+
 ## Agent delegation
 
 This project uses specialized subagents (`.claude/agents/*.md`) for review
