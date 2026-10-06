@@ -1317,7 +1317,7 @@ async function loginHandler(req, res) {
     return res.status(400).json({ error: 'Missing role or code.' });
   }
   if (role !== 'admin') {
-    return res.status(400).json({ error: 'Search for your company by name to sign in.' });
+    return res.status(400).json({ error: 'Enter your company code, then pick your name and enter your PIN to sign in.' });
   }
 
   const entered = String(code).trim();
