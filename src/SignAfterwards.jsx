@@ -120,6 +120,18 @@ function UnsignedFlha({ flha, token, companyName, companyLogo, userName, onSigne
       {flha.task_description && (
         <div style={{ fontSize: 13, color: C.text.body, marginBottom: 10, lineHeight: 1.45 }}>{flha.task_description}</div>
       )}
+      {hazards.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: C.text.primary, marginBottom: 6 }}>Hazards and controls, as they are now</div>
+          {hazards.map((hz, i) => (
+            <div key={i} style={{ borderTop: `1px solid ${C.line}`, padding: "8px 0", fontSize: 13, color: C.text.body, lineHeight: 1.4 }}>
+              <div><strong>{hz.hazard}</strong>{hz.risk ? ` · ${hz.risk}` : ""}</div>
+              {hz.task && <div style={{ color: C.text.muted }}>Task: {hz.task}</div>}
+              {hz.control && <div style={{ color: C.text.muted }}>Control: {hz.control}</div>}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 10 }}>
         By signing, I confirm I have reviewed this FLHA and understand the hazards and controls.
       </div>

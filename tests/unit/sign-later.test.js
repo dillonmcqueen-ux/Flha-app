@@ -85,6 +85,8 @@ await new Promise(r => server.listen(0, '127.0.0.1', r));
 process.env.SUPABASE_URL = `http://127.0.0.1:${server.address().port}`;
 const { default: flhas } = await import('../../api/flhas.js');
 const signLater = await import('../../server-lib/signLater.js');
+const { signUploadReceipt } = await import('../../server-lib/uploadUrls.js');
+const receipt = () => signUploadReceipt('flha-reports', '7/signed-copy.pdf', 7);
 test.after(() => new Promise(r => server.close(r)));
 
 function fakeRes() {
@@ -177,32 +179,32 @@ test('my_unsigned lists only the caller\'s own unsigned FLHAs', async () => {
 
 test('sign_now: only the author signs, once, and the signature is checked', async () => {
   reset();
-  const wrongPerson = await run({ action: 'sign_now', token: as(12, 'worker'), id: 201, signature: PNG });
+  const wrongPerson = await run({ action: 'sign_now', token: as(12, 'worker'), id: 201, signature: PNG, pdfUrl: receipt() });
   assert.equal(wrongPerson.statusCode, 403);
-  const aLead = await run({ action: 'sign_now', token: as(10, 'worker'), id: 201, signature: PNG });
+  const aLead = await run({ action: 'sign_now', token: as(10, 'worker'), id: 201, signature: PNG, pdfUrl: receipt() });
   assert.equal(aLead.statusCode, 403, 'not even a crew lead signs for someone');
-  const sup = await run({ action: 'sign_now', token: as(2, 'supervisor'), id: 201, signature: PNG });
+  const sup = await run({ action: 'sign_now', token: as(2, 'supervisor'), id: 201, signature: PNG, pdfUrl: receipt() });
   assert.equal(sup.statusCode, 403);
   const junk = await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: 'not a signature' });
   assert.equal(junk.statusCode, 400);
   assert.equal(FLHAS.find(f => f.id === 201).awaiting_signature, true, 'nothing changed yet');
 
-  const ok = await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG });
+  const ok = await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG, pdfUrl: receipt() });
   assert.equal(ok.statusCode, 200, JSON.stringify(ok.body));
   const row = FLHAS.find(f => f.id === 201);
   assert.equal(row.awaiting_signature, false);
   assert.equal(row.worker_signature, PNG);
   assert.ok(row.worker_signed_at);
 
-  const again = await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG });
+  const again = await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG, pdfUrl: receipt() });
   assert.equal(again.statusCode, 409, 'already signed');
-  const notAwaiting = await run({ action: 'sign_now', token: as(11, 'worker'), id: 202, signature: PNG });
+  const notAwaiting = await run({ action: 'sign_now', token: as(11, 'worker'), id: 202, signature: PNG, pdfUrl: receipt() });
   assert.equal(notAwaiting.statusCode, 409);
 });
 
 test('once signed, the supervisor can approve it', async () => {
   reset();
-  await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG });
+  await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG, pdfUrl: receipt() });
   const out = await run({ action: 'approve', token: as(2, 'supervisor'), id: 201, supName: 'Sup Sam', supSignature: 'data:image/png;base64,AAAA' });
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
 });
@@ -219,4 +221,23 @@ test('an amendment cannot put a signature on an awaiting record, nor can a same-
   const twin = await run({ action: 'submit', token: as(99, 'worker'), amendingId: 203, record: { job_site: 'Hijack' } });
   assert.equal(twin.statusCode, 403);
   ROSTER.pop();
+});
+
+test('an ordinary submit without a real signature is saved as sign-later, never as complete-and-unsigned', async () => {
+  reset(); inserts.length = 0;
+  for (const bad of [null, '', 'x', 'data:text/html;base64,AAAA']) {
+    const out = await run({ action: 'submit', token: as(11, 'worker'), record: record({ worker_signature: bad }) });
+    assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  }
+  assert.equal(inserts.length, 4);
+  assert.ok(inserts.every(r => r.awaiting_signature === true && r.worker_signature === null));
+  const founder = await run({ action: 'submit', token: mintToken({ role: 'supervisor', founder: true, companyId: 7 }), record: record({ worker_signature: null }) });
+  assert.equal(founder.statusCode, 400, 'no identity, no unsigned record');
+});
+
+test('sign_now needs the signed PDF to have uploaded', async () => {
+  reset();
+  const noPdf = await run({ action: 'sign_now', token: as(11, 'worker'), id: 201, signature: PNG });
+  assert.equal(noPdf.statusCode, 400);
+  assert.equal(FLHAS.find(f => f.id === 201).awaiting_signature, true, 'still awaiting');
 });

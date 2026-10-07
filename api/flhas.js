@@ -339,6 +339,12 @@ export default async function handler(req, res) {
         // it is stamped to (not a same-name colleague), and an amendment never
         // writes the signature: sign_now is the one way an awaiting record
         // gets signed.
+        if (Object.prototype.hasOwnProperty.call(amendUpdate, 'worker_signature')) {
+          // Only a real drawn signature replaces the stored one; anything else
+          // leaves it as it was (an amendment never blanks a signature).
+          const drawnAmend = cleanSignature(amendUpdate.worker_signature);
+          if (drawnAmend) amendUpdate.worker_signature = drawnAmend; else delete amendUpdate.worker_signature;
+        }
         const amendSignState = await loadSignState(supabaseAdmin, 'flhas', amendingId, session.companyId);
         if (amendSignState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
         if (amendSignState.found && amendSignState.awaiting) {
@@ -457,7 +463,17 @@ export default async function handler(req, res) {
         // needs a real sign-in (somebody has to be the one who signs), and it
         // never carries a signature image: whatever the request sent in
         // worker_signature is dropped so an unsigned record can't look signed.
-        const signLater = record.sign_later === true;
+        // A normal submit carries a drawn signature. One that is missing or
+        // isn't a real PNG of sane size is not stored as a signature: with an
+        // individual sign-in it becomes a sign-later record (flagged, blocked
+        // from approval) rather than a record that looks complete and isn't.
+        const drawn = cleanSignature(recordToInsert.worker_signature);
+        let signLater = record.sign_later === true;
+        if (!signLater && !drawn) {
+          if (!session.userId) return res.status(400).json({ error: 'Draw your signature first.' });
+          signLater = true;
+        }
+        if (!signLater) recordToInsert.worker_signature = drawn;
         if (signLater) {
           if (!session.userId) return res.status(400).json({ error: 'Signing afterwards needs your own sign-in.' });
           recordToInsert.worker_signature = null;
@@ -533,8 +549,10 @@ export default async function handler(req, res) {
       const png = cleanSignature(signature);
       if (!id || !png) return res.status(400).json({ error: 'Draw your signature first.' });
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
-      const update = { worker_signature: png };
-      if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      // The record is not marked signed until the signed PDF has replaced the
+      // one saying AWAITING WORKER SIGNATURE.
+      if (!resolvedPdfUrl) return res.status(400).json({ error: "Your signed copy didn't upload. Check your connection and sign again." });
+      const update = { worker_signature: png, pdf_url: resolvedPdfUrl };
       const done = await completeSignature(supabaseAdmin, { table: 'flhas', id, session, update, nowIso: new Date().toISOString() });
       if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
       const { data: after } = await supabaseAdmin.from('flhas').select('pdf_url, status').eq('id', id).limit(1);
