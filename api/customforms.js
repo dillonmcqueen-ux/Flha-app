@@ -8,8 +8,9 @@ import { authorRosterId, sessionDisplayName } from '../server-lib/authorStamp.js
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
-import { requireCustomDocKey } from '../server-lib/docKeyGate.js';
-import { requireAssignment, requireRecordsAccess, listVisibleRecordsMulti, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { requireCustomDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
+import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecords, listVisibleRecordsMulti, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -422,6 +423,94 @@ export default async function handler(req, res) {
     // "resume" action already matches worker_name, not treated as an
     // authorization boundary since it only ever narrows this company's own
     // already-company-scoped data down to a name, never widens it.
+    // ── Crew lead: what my crew has submitted (read only) ────────────────
+    // A crew lead is a worker the Owner flagged (server-lib/leadAccess.js).
+    // They see a short list of their crew's recent documents with a PDF link
+    // each, held to the same view rows and crew scope a supervisor with the
+    // same tags would be (documentAccess.js rule A). Summaries only: nothing
+    // here edits or deletes anything.
+    if (action === 'get_crew_documents') {
+      const lead = await requireLead(supabaseAdmin, session);
+      if (lead.denied) return res.status(lead.denied.status).json({ error: lead.denied.error });
+      const LIMIT = 100;
+      const missingCol = (e) => !!e && ['42703', 'PGRST204'].includes(String(e.code || ''));
+      const companyId = session.companyId;
+
+      const SOURCES = [
+        { type: 'flha', key: 'flha', table: 'flhas', title: 'FLHA', cols: 'id, job_site, site_id, created_at, pdf_url, status, submitted_by_roster_id', sub: r => r.job_site },
+        { type: 'inspection', key: 'inspection', table: 'inspections', title: 'Equipment Inspection', cols: 'id, equipment_label, created_at, pdf_url, submitted_by_roster_id', sub: r => r.equipment_label },
+        { type: 'toolbox', key: 'toolbox', table: 'toolbox_talks', title: 'Toolbox Talk', cols: 'id, topic, site_id, created_at, pdf_url, submitted_by_roster_id', sub: r => r.topic },
+        { type: 'daily', key: 'daily', table: 'daily_reports', title: 'Daily Report', cols: 'id, site, site_id, created_at, pdf_url, submitted_by_roster_id', enteredBy: true, sub: r => r.site },
+        { type: 'incident', key: 'incident', table: 'incidents', title: 'Incident Report', cols: 'id, site, site_id, created_at, pdf_url, submitted_by_roster_id', sub: r => r.site },
+        { type: 'nearmiss', key: 'nearmiss', table: 'near_misses', title: 'Near Miss Report', cols: 'id, site, site_id, created_at, pdf_url, submitted_by_roster_id', sub: r => r.site },
+        { type: 'fuellog', key: 'fuellog', table: 'fuel_logs', title: 'Fuel Log', cols: 'id, equipment_label, site_id, created_at, pdf_url, submitted_by_roster_id', enteredBy: true, sub: r => r.equipment_label },
+      ];
+
+      const collected = [];
+      for (const src of SOURCES) {
+        if (!(await isDocKeyActive(supabaseAdmin, companyId, src.key))) continue;
+        // entered_by_roster_id exists only once the lead migration has run.
+        let res1 = await supabaseAdmin.from(src.table).select(src.enteredBy ? `${src.cols}, entered_by_roster_id` : src.cols)
+          .eq('company_id', companyId).order('created_at', { ascending: false }).limit(LIMIT);
+        if (res1.error && src.enteredBy && missingCol(res1.error)) {
+          res1 = await supabaseAdmin.from(src.table).select(src.cols).eq('company_id', companyId).order('created_at', { ascending: false }).limit(LIMIT);
+        }
+        if (res1.error) return res.status(500).json({ error: 'Could not load your crew\'s documents.' });
+        const visible = await listVisibleRecords(supabaseAdmin, session, src.key, res1.data || []);
+        if (visible.denied) { if (visible.denied.status === 403) continue; return res.status(visible.denied.status).json({ error: visible.denied.error }); }
+        visible.records.forEach(r => collected.push({ ...r, _src: src }));
+      }
+
+      // Monthly inspections and custom documents have no company_id of their
+      // own, so they are reached through their forms (this company's).
+      if (await isDocKeyActive(supabaseAdmin, companyId, 'monthly')) {
+        const { data: forms } = await supabaseAdmin.from('inspection_forms').select('id, title').eq('company_id', companyId);
+        const formIds = (forms || []).map(f => f.id);
+        if (formIds.length) {
+          const { data: recs } = await supabaseAdmin.from('inspection_records')
+            .select('id, form_id, site_id, created_at, pdf_url, submitted_by_roster_id').in('form_id', formIds).order('created_at', { ascending: false }).limit(LIMIT);
+          const visible = await listVisibleRecords(supabaseAdmin, session, 'monthly', recs || []);
+          if (!visible.denied) visible.records.forEach(r => collected.push({ ...r, _src: { type: 'monthly', title: (forms.find(f => f.id === r.form_id) || {}).title || 'Monthly Inspection', sub: () => '' } }));
+        }
+      }
+      {
+        const { data: forms } = await supabaseAdmin.from('custom_forms').select('id, title').eq('company_id', companyId);
+        const formIds = (forms || []).map(f => f.id);
+        if (formIds.length) {
+          const { data: recs } = await supabaseAdmin.from('custom_form_records')
+            .select('id, form_id, site_id, created_at, pdf_url, submitted_by_roster_id').in('form_id', formIds).order('created_at', { ascending: false }).limit(LIMIT);
+          const visible = await listVisibleRecordsMulti(supabaseAdmin, session, recs || [], (r) => `custom_${r.form_id}`);
+          if (!visible.denied) visible.records.forEach(r => collected.push({ ...r, _src: { type: 'customform', title: (forms.find(f => f.id === r.form_id) || {}).title || 'Custom Document', sub: () => '' } }));
+        }
+      }
+
+      // Only what the crew itself wrote. Rule A also places a record by its
+      // site, which would let a lead see a supervisor's or an Owner's record
+      // at their site, or an anonymous or unstamped one.
+      const crewIds = await crewIdSet(supabaseAdmin, session, lead.actor);
+      if (crewIds.error) return res.status(503).json({ error: "Couldn't check your crew. Please try again." });
+      const crewOnly = collected.filter(r => crewIds.ids.has(Number(r.submitted_by_roster_id)));
+      crewOnly.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const top = crewOnly.slice(0, 150);
+      const ids = [...new Set(top.flatMap(r => [r.submitted_by_roster_id, r.entered_by_roster_id]).filter(v => v != null))];
+      const nameOf = new Map();
+      if (ids.length) {
+        const { data: people } = await supabaseAdmin.from('roster').select('id, name').eq('company_id', companyId).in('id', ids);
+        (people || []).forEach(p => nameOf.set(p.id, p.name));
+      }
+      const signed = await signRows(supabaseAdmin, top.map(r => ({ id: `${r._src.type}:${r.id}`, pdf_url: r.pdf_url })), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const pdfById = new Map(signed.map(r => [r.id, r.pdf_url]));
+      return res.status(200).json({
+        documents: top.map(r => ({
+          id: r.id, type: r._src.type, title: r._src.title, subtitle: r._src.sub(r) || '',
+          createdAt: r.created_at, status: r.status || null,
+          author: r.submitted_by_roster_id != null ? (nameOf.get(r.submitted_by_roster_id) || '') : 'Anonymous',
+          enteredBy: r.entered_by_roster_id != null ? (nameOf.get(r.entered_by_roster_id) || '') : '',
+          pdf_url: pdfById.get(`${r._src.type}:${r.id}`) || null,
+        })),
+      });
+    }
+
     if (action === 'get_my_documents') {
       if (session.role !== 'worker' && session.role !== 'supervisor' && session.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
       const { workerName } = req.body;

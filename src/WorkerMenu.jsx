@@ -12,6 +12,7 @@ import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import FieldService, { resubmitFieldService } from "./FieldService.jsx";
 import MyDocuments from "./MyDocuments.jsx";
+import CrewScreen from "./CrewScreen.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
 import WorkerCertifications from "./WorkerCertifications.jsx";
 import { drainQueue } from "./offlineQueue.js";
@@ -19,7 +20,7 @@ import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW 
 import {
   ClipboardList, ClipboardCheck, Hammer, AlertTriangle, Siren, CalendarClock,
   Clock, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
-  HardHat, Wrench, Layers, ShieldCheck,
+  HardHat, Wrench, Layers, ShieldCheck, Users,
 } from "lucide-react";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
@@ -93,6 +94,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [assignedBuiltin, setAssignedBuiltin] = useState([]);
   const [assignedPortal, setAssignedPortal] = useState([]);
   const [showMyDocs, setShowMyDocs] = useState(false);
+  // A crew lead is a worker the Owner flagged. The server decides; this only
+  // decides whether to show the "My crew" card.
+  const [crewInfo, setCrewInfo] = useState({ isLead: false, crew: [] });
+  const [showCrew, setShowCrew] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
@@ -138,6 +143,19 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       } catch (e) { /* leave list empty on a transient error */ }
     }
     loadPortalDocs();
+
+    async function loadCrew() {
+      if (!userId) return;
+      try {
+        const res = await fetch("/api/companydata", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_my_crew", token }),
+        });
+        const data = await res.json();
+        if (res.ok && data.isLead) setCrewInfo({ isLead: true, crew: data.crew || [] });
+      } catch (e) { /* not a lead, or offline: no crew card */ }
+    }
+    loadCrew();
   }, [token]);
 
   // Certification expiry notification (onboarding wallet, Phase 3) — only
@@ -216,6 +234,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
 
   if (showSecurity) {
     return <AccountSecurity token={token} onBack={() => setShowSecurity(false)} />;
+  }
+
+  if (showCrew) {
+    return <CrewScreen token={token} userId={userId} userName={userName} companyName={companyName} crew={crewInfo.crew} onBack={() => setShowCrew(false)} />;
   }
 
   if (showMyDocs) {
@@ -589,6 +611,27 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
               {openShiftWhileOff ? "You're still clocked in. Tap to clock out." : "Clock in and out"}
             </div>
           </button>
+        )}
+
+        {crewInfo.isLead && (
+          <div
+            onClick={() => setShowCrew(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+              background: `linear-gradient(160deg, ${C.panelRaised} 0%, ${C.panel} 100%)`,
+              border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px",
+              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
+            }}
+          >
+            <div style={s.iconTile(C.orange)}>
+              <Users size={22} color={C.orange} strokeWidth={2.25} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>My crew</div>
+              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>Sign-offs, tasks and your crew's documents</div>
+            </div>
+            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+          </div>
         )}
 
         <div

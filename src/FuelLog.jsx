@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
+import FillingInFor from "./FillingInFor.jsx";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle } from "./FormKit";
 import { ArrowLeft, Fuel, Loader2, CheckCircle2, WifiOff, AlertTriangle } from "lucide-react";
@@ -15,7 +16,7 @@ function newClientSubmissionId() {
 // from failure. Exported so WorkerMenu.jsx can drain this form's queue
 // without the FuelLog component mounted.
 export async function resubmitFuelLog(payload, clientSubmissionId, tokenForRequest) {
-  const { equipmentLabel, equipmentId, workerName, hourReading, readingUnit, quantity, quantityUnit, cost, siteId } = payload;
+  const { equipmentLabel, equipmentId, workerName, hourReading, readingUnit, quantity, quantityUnit, cost, siteId, onBehalfOfRosterId } = payload;
   const record = {
     equipment_label: equipmentLabel,
     equipment_id: equipmentId || null,
@@ -33,7 +34,7 @@ export async function resubmitFuelLog(payload, clientSubmissionId, tokenForReque
     res = await fetch("/api/fuellogs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "submit", token: tokenForRequest, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId), record }),
+      body: JSON.stringify({ action: "submit", token: tokenForRequest, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId), ...(onBehalfOfRosterId ? { onBehalfOfRosterId } : {}), record }),
     });
   } catch (networkErr) {
     networkErr.isNetworkFailure = true;
@@ -60,6 +61,8 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
   const [selectedEqId, setSelectedEqId] = useState("");
   const [freeEqLabel, setFreeEqLabel] = useState("");
   const [workerName, setWorkerName] = useState(loginUserName);
+  // A crew lead filling this in for someone on their crew: { id, name } or null.
+  const [actingFor, setActingFor] = useState(null);
   const [readingUnit, setReadingUnit] = useState("Hours");
   const [hourReading, setHourReading] = useState("");
   const [lastReading, setLastReading] = useState(null);
@@ -161,8 +164,9 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
     const payload = {
       equipmentLabel: equipmentLabel(),
       equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
-      workerName, hourReading, readingUnit, quantity, quantityUnit,
+      workerName: actingFor ? actingFor.name : workerName, hourReading, readingUnit, quantity, quantityUnit,
       cost: cost || null, siteId: siteId || null,
+      onBehalfOfRosterId: actingFor ? actingFor.id : null,
     };
 
     if (!navigator.onLine) {
@@ -237,7 +241,7 @@ export default function FuelLog({ companyId, userName: loginUserName = "", onBac
 
           <div style={s.card}>
             {loginUserName ? (
-              <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+              <><div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div><FillingInFor token={token} value={actingFor} onChange={setActingFor} /></>
             ) : (
               <>
               <label style={s.label}>Your name</label>

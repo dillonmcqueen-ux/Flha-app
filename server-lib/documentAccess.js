@@ -118,17 +118,20 @@ export async function loadActor(supabase, session) {
   }
   if (!session.userId) return { actor: null, error: false };
 
-  // hide_unassigned arrived after the other columns. A database that does not
-  // have it yet answers 42703, and the read is retried without it so a
-  // missing column never takes every submit and list down with it.
+  // hide_unassigned and is_lead arrived after the other columns. A database
+  // that does not have one yet answers 42703, and the read is retried with
+  // fewer columns so a missing column never takes every submit and list down
+  // with it.
   const BASE_COLUMNS = 'id, role, is_owner, departments, divisions, default_site_id, company_id';
-  let { data: rows, error } = await supabase
-    .from('roster')
-    .select(`${BASE_COLUMNS}, hide_unassigned`)
-    .eq('id', session.userId)
-    .limit(1);
-  if (error && isMissingSchema(error)) {
-    ({ data: rows, error } = await supabase.from('roster').select(BASE_COLUMNS).eq('id', session.userId).limit(1));
+  let rows = null;
+  let error = null;
+  for (const extra of [', hide_unassigned, is_lead', ', hide_unassigned', '']) {
+    ({ data: rows, error } = await supabase
+      .from('roster')
+      .select(`${BASE_COLUMNS}${extra}`)
+      .eq('id', session.userId)
+      .limit(1));
+    if (!(error && isMissingSchema(error))) break;
   }
   if (error) return { actor: null, error: true };
   const r = rows && rows[0];
@@ -158,6 +161,9 @@ export async function loadActor(supabase, session) {
       siteIds,
       // The Owner hid every document that is not assigned to this person.
       hideUnassigned: r.hide_unassigned === true,
+      // A crew lead: a worker the Owner flagged. Read live, never from the
+      // token. Only a worker row can be one.
+      isLead: r.is_lead === true && r.role === 'worker',
     },
     error: false,
   };
@@ -197,19 +203,25 @@ export function activeRowsAsOf(rows, asOfMs) {
 export function evaluateAccess(rows, actor, action, asOfMs) {
   if (actor.bypass) return { narrowed: false, allowed: true };
   const active = activeRowsAsOf(rows, asOfMs).filter((r) => r.action === action);
-  // "Hide everything not assigned to me": with no row naming this person the
-  // document is off for them, even when nobody else has been narrowed. A task
-  // names them just as a restriction does.
-  if (action === SUBMIT && actor.hideUnassigned) {
-    return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
-  }
   // Only a RESTRICTING row narrows. A task (restricts = false) puts the
   // document on someone's "assigned to you" list with a due date and takes
   // nothing away from anyone else. A row with no `restricts` field predates
   // the switch and restricts, as it always did.
   const restricting = active.filter(isRestricting);
+  if (restricting.length > 0 && !restricting.some((r) => matchesAudience(r, actor))) {
+    return { narrowed: true, allowed: false };
+  }
+  // "Hide everything not assigned to me": with no row naming this person the
+  // document is off for them, even when nobody else has been narrowed. A task
+  // from the Owner names them just as a restriction does, but a task from a
+  // crew lead does not: the Owner's decision to limit what this person sees
+  // is not the lead's to undo. The restriction check above has already run,
+  // so no task can get past a restriction either.
+  if (action === SUBMIT && actor.hideUnassigned) {
+    return { narrowed: true, allowed: active.some((r) => r.by_lead !== true && matchesAudience(r, actor)) };
+  }
   if (restricting.length === 0) return { narrowed: false, allowed: true };
-  return { narrowed: true, allowed: restricting.some((r) => matchesAudience(r, actor)) };
+  return { narrowed: true, allowed: true };
 }
 
 /** Does this row narrow access, or is it only a task? Pure. */
@@ -218,11 +230,21 @@ export function isRestricting(row) {
 }
 
 async function readAssignmentRows(supabase, companyId, documentKeys) {
-  const { data, error } = await supabase
+  // by_lead arrived with the crew lead migration; a database without it
+  // answers 42703 and the read is retried without it, so an unapplied
+  // migration never switches every assignment off.
+  let { data, error } = await supabase
     .from('document_assignments')
-    .select('document_key, audience_type, audience_value, action, restricts, due_at, created_at, ended_at')
+    .select('document_key, audience_type, audience_value, action, restricts, by_lead, due_at, created_at, ended_at')
     .eq('company_id', companyId)
     .in('document_key', documentKeys);
+  if (error && isMissingSchema(error) && String(error.code) === '42703') {
+    ({ data, error } = await supabase
+      .from('document_assignments')
+      .select('document_key, audience_type, audience_value, action, restricts, due_at, created_at, ended_at')
+      .eq('company_id', companyId)
+      .in('document_key', documentKeys));
+  }
   if (error) {
     if (isMissingSchema(error)) return { rows: [], error: false };
     return { rows: [], error: true };
@@ -248,10 +270,13 @@ const NOT_ALLOWED = {
 export async function requireAssignment(supabase, session, documentKey, action, { asOf } = {}) {
   if (!session) return { status: 401, error: 'Not logged in. Please log in again.' };
   if (isFounderSession(session)) return null;
-  if (action === VIEW && session.role === 'worker') return null;
   const { actor, error: actorErr } = await loadActor(supabase, session);
   if (actorErr) return { status: 503, error: "Couldn't check your access. Please try again." };
   if (!actor) return { status: 401, error: 'Not logged in. Please log in again.' };
+  // Reading is a supervisor-tier idea: an ordinary worker only ever reads
+  // their own submissions and is never narrowed by a view row. A crew lead
+  // reads their crew's, so a lead is held to the view rows.
+  if (action === VIEW && actor.role === 'worker' && !actor.isLead) return null;
   if (actor.bypass) return null;
   const { rows, error } = await readAssignmentRows(supabase, session.companyId, [documentKey]);
   if (error) return { status: 503, error: "Couldn't check your access. Please try again." };
@@ -463,4 +488,20 @@ export async function withCompletion(supabase, session, assigned) {
       return { ...a, completedAt: null };
     }
   }));
+}
+
+/**
+ * One person's Owner-set flags, tolerant of either column not existing yet
+ * (each reads false). For profile screens; enforcement reads them in
+ * loadActor.
+ */
+export async function readRosterFlags(supabase, companyId, rosterId) {
+  for (const cols of ['hide_unassigned, is_lead', 'hide_unassigned', 'is_lead']) {
+    const { data, error } = await supabase
+      .from('roster').select(cols).eq('id', rosterId).eq('company_id', companyId).limit(1);
+    if (error) { if (isMissingSchema(error)) continue; return { hideUnassigned: false, isLead: false }; }
+    const r = (data && data[0]) || {};
+    return { hideUnassigned: r.hide_unassigned === true, isLead: r.is_lead === true };
+  }
+  return { hideUnassigned: false, isLead: false };
 }

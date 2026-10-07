@@ -4,6 +4,7 @@ import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
+import FillingInFor from "./FillingInFor.jsx";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, docAccent } from "./FormKit";
@@ -22,7 +23,7 @@ function newClientSubmissionId() {
 // state itself. Exported so WorkerMenu.jsx can drain this form's queue
 // without needing the DailyReport component mounted.
 export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest) {
-  const { reporter, site, siteId, reportDate, weather, temperature, crew, equipment, equipmentIds, visitors, report, customFields, companyName, companyLogo } = payload;
+  const { reporter, site, siteId, reportDate, weather, temperature, crew, equipment, equipmentIds, visitors, report, customFields, companyName, companyLogo, onBehalfOfRosterId } = payload;
   const pdfUrl = await generateAndUploadDaily({
     reporter, site, reportDate, weather, temperature, crew, equipment, visitors, report,
     companyName, companyLogo, token: tokenForRequest,
@@ -38,6 +39,7 @@ export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest
         action: "submit",
         token: tokenForRequest,
         clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
+        ...(onBehalfOfRosterId ? { onBehalfOfRosterId } : {}),
         record: {
           reporter_name: reporter,
           site, site_id: siteId || null, report_date: reportDate, weather, temperature,
@@ -73,6 +75,8 @@ export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest
 export default function DailyReport({ companyId, companyName, userName: loginUserName = "", onBack, onLogout, token = null }) {
   const [step, setStep] = useState("setup"); // setup | notes | review | done
   const [reporter, setReporter] = useState(loginUserName);
+  // A crew lead filling this in for someone on their crew: { id, name } or null.
+  const [actingFor, setActingFor] = useState(null);
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
   const [siteMode, setSiteMode] = useState("list");
@@ -297,7 +301,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const equipment = equipmentSummary();
     const weatherStr = weatherSummary();
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporter, site, siteId: siteIdForName(sites, site, siteMode), reportDate, weather: weatherStr, temperature, crew, equipment, equipmentIds: equipmentIds(), visitors, report, customFields: cf.entries(), companyName, companyLogo };
+    const payload = { reporter: actingFor ? actingFor.name : reporter, onBehalfOfRosterId: actingFor ? actingFor.id : null, site, siteId: siteIdForName(sites, site, siteMode), reportDate, weather: weatherStr, temperature, crew, equipment, equipmentIds: equipmentIds(), visitors, report, customFields: cf.entries(), companyName, companyLogo };
 
     if (!navigator.onLine) {
       await enqueueSubmission("daily", clientSubmissionId, payload);
@@ -348,7 +352,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12, color: C.text.primary }}>Site & conditions</div>
 
           {loginUserName ? (
-            <div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div>
+            <><div style={{ fontSize: 13, color: C.text.muted, margin: "0 0 14px" }}>Filling in as <strong>{loginUserName}</strong></div><FillingInFor token={token} value={actingFor} onChange={setActingFor} /></>
           ) : (
             <>
             <label style={s.label}>Your name</label>

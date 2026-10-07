@@ -388,3 +388,17 @@ test('the menu lists a task for the person it names and hides nothing from anyon
   const out2 = await menuAccessFor(mine, session(), ['flha']);
   assert.equal(out2.assigned[0].documentKey, 'flha');
 });
+
+test('a lead\'s task never satisfies the hide switch, and no task gets past a restriction', () => {
+  const hidden = actor({ hideUnassigned: true, rosterId: 5 });
+  const leadTask = [row({ audience_type: 'individual', audience_value: '5', restricts: false, by_lead: true })];
+  assert.equal(evaluateAccess(leadTask, hidden, SUBMIT, NOW).allowed, false, 'a lead cannot undo the Owner\'s hide');
+  const ownerTask = [row({ audience_type: 'individual', audience_value: '5', restricts: false, by_lead: false })];
+  assert.equal(evaluateAccess(ownerTask, hidden, SUBMIT, NOW).allowed, true, 'the Owner\'s own task still counts');
+  const both = [
+    row({ audience_type: 'role', audience_value: 'supervisor', restricts: true }),
+    row({ audience_type: 'individual', audience_value: '5', restricts: false, by_lead: true }),
+  ];
+  assert.equal(evaluateAccess(both, actor({ rosterId: 5, role: 'worker' }), SUBMIT, NOW).allowed, false);
+  assert.equal(evaluateAccess(both, actor({ rosterId: 5, role: 'worker', hideUnassigned: true }), SUBMIT, NOW).allowed, false, 'hidden and restricted: still no');
+});

@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
@@ -461,19 +462,31 @@ export default async function handler(req, res) {
 
     // ── Supervisor / Admin: load FLHAs for the dashboard ────────────────
     if (action === 'list') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      // A crew lead (a worker the Owner flagged, read live) lists their
+      // crew's FLHAs the way a supervisor with the same tags would, so they
+      // can see which are waiting for sign-off.
+      const listLead = session.role === 'worker' ? await requireLead(supabaseAdmin, session) : null;
+      if (session.role !== 'admin' && session.role !== 'supervisor' && !(listLead && !listLead.denied)) return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, 'flha');
       if (denied) return res.status(denied.status).json({ error: denied.error });
       let query = supabaseAdmin
         .from('flhas')
         .select('id, worker_name, job_site, site_id, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature, submitted_by_roster_id')
         .order('created_at', { ascending: false });
-      if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
+      if (session.role !== 'admin') query = query.eq('company_id', session.companyId);
       const { data: allRows, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, 'flha', allRows || []);
       if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
-      const flhas = await signRows(supabaseAdmin, visible.records, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      let shown = visible.records;
+      // A lead sees what their CREW wrote, not whatever else happens to be at
+      // their site (a supervisor's or an Owner's, or an unstamped record).
+      if (listLead && !listLead.denied) {
+        const crewIds = await crewIdSet(supabaseAdmin, session, listLead.actor);
+        if (crewIds.error) return res.status(503).json({ error: "Couldn't check your crew. Please try again." });
+        shown = shown.filter(f => crewIds.ids.has(Number(f.submitted_by_roster_id)));
+      }
+      const flhas = await signRows(supabaseAdmin, shown, [{ key: 'pdf_url', bucket: 'flha-reports' }]);
       return res.status(200).json({ flhas });
     }
 
@@ -570,22 +583,49 @@ export default async function handler(req, res) {
 
     // ── Supervisor / Admin: approve an extreme-risk FLHA ────────────────
     if (action === 'approve') {
-      if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
+      // A crew lead may sign off an extreme-risk FLHA for their crew. They
+      // are held to the same company check and crew scope as a supervisor
+      // below, and to nothing else a supervisor can do (no edit, no delete).
+      const approveLead = session.role === 'worker' ? await requireLead(supabaseAdmin, session) : null;
+      if (session.role !== 'admin' && session.role !== 'supervisor' && !(approveLead && !approveLead.denied)) return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, 'flha');
       if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, supName, supSignature, pdfUrl } = req.body;
       if (!id || !supName || !supSignature) return res.status(400).json({ error: 'Missing approval details.' });
 
-      if (session.role === 'supervisor') {
-        const { data: existing, error: findErr } = await supabaseAdmin.from('flhas').select('id, company_id, site_id, submitted_by_roster_id').eq('id', id).limit(1);
+      if (session.role !== 'admin') {
+        const { data: existing, error: findErr } = await supabaseAdmin.from('flhas').select('id, company_id, site_id, submitted_by_roster_id, status, supervisor_signed_at').eq('id', id).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to approve this record.' });
         }
         const apprDenied = await requireRecordsAccess(supabaseAdmin, session, 'flha', [existing[0]]);
         if (apprDenied) return res.status(apprDenied.status).json({ error: apprDenied.error });
+        // A lead signs off their crew's FLHAs, never their own: an
+        // extreme-risk assessment approved by the person who wrote it is not
+        // an approval.
+        if (approveLead && !approveLead.denied) {
+          if (Number(existing[0].submitted_by_roster_id) === Number(session.userId)) {
+            return res.status(403).json({ error: "You can't approve your own FLHA. Ask a supervisor." });
+          }
+          // Only a crew member's FLHA (never a supervisor's, an Owner's or an
+          // unstamped one), and only one still waiting: a lead never replaces
+          // a sign-off that is already there.
+          const crewIds = await crewIdSet(supabaseAdmin, session, approveLead.actor);
+          if (crewIds.error) return res.status(503).json({ error: "Couldn't check your crew. Please try again." });
+          if (!crewIds.ids.has(Number(existing[0].submitted_by_roster_id))) return res.status(403).json({ error: 'Not allowed to approve this record.' });
+          if (crewIds.leadIds.has(Number(existing[0].submitted_by_roster_id))) return res.status(403).json({ error: "A crew lead's FLHA needs a supervisor to sign it off." });
+          if (existing[0].status !== 'pending_approval' || existing[0].supervisor_signed_at) {
+            return res.status(409).json({ error: 'This FLHA is not waiting for sign-off.' });
+          }
+        }
       }
       const now = new Date().toISOString();
-      const update = { status: 'complete', supervisor_signed_by: supName, supervisor_signed_at: now };
+      // The name on a lead's sign-off is theirs from the roster, not whatever
+      // the request carries.
+      const isLeadApproval = !!(approveLead && !approveLead.denied);
+      if (isLeadApproval && !session.name) return res.status(403).json({ error: 'Not allowed to approve this record.' });
+      const signedBy = isLeadApproval ? session.name : supName;
+      const update = { status: 'complete', supervisor_signed_by: signedBy, supervisor_signed_at: now };
       const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
       const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
