@@ -342,4 +342,5 @@ test('a failed send is not retried on the same submit and does not break the oth
   const out = await notifyOnSubmit(fakeDb(baseTables({ enabled: true, extra_roster_ids: [] })), { sendEmail: flaky, companyId: 7, documentKey: 'incident', record: rec });
   assert.equal(out.failed, 1);
   assert.equal(out.sent, 1);
+  assert.equal(out.reason, 'partial', 'some told, one failed');
 });

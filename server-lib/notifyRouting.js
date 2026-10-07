@@ -44,8 +44,11 @@
 // window. The slot is claimed atomically in the database BEFORE the send
 // (claim_notification_slot), so parallel submits cannot all pass and a timeout
 // between sending and recording cannot duplicate. A notice held past the burst
-// is counted and reported in that person's next email; it is not sent later by
-// itself, so the Dashboard stays the source of truth for every record. A claim
+// is counted and reported in that person's next email, which only goes out if
+// another notice arrives after the window ends: there is no timer that flushes
+// held notices, so the delay is unbounded and the Dashboard stays the source of
+// truth for every record. A slot is spent when it is claimed, so a send that
+// then fails is not refunded and is not counted as held. A claim
 // that fails (function or table missing, database error) sends NOTHING to that
 // person: the cooldown is what keeps a flood off the shared sender, so it is
 // never skipped.
@@ -294,9 +297,17 @@ export async function claimSlot(supabase, companyId, documentKey, rosterId) {
     p_window_seconds: COOLDOWN_SECONDS,
     p_burst: BURST_LIMIT,
   });
-  if (error) return { allowed: false, suppressed: 0, error: true };
+  if (error) {
+    // Logged: a missing function or a bad key would otherwise fail every
+    // notification closed with no trace.
+    console.error('claim_notification_slot failed:', error.code, error.message);
+    return { allowed: false, suppressed: 0, error: true };
+  }
   const row = Array.isArray(data) ? data[0] : data;
-  if (!row) return { allowed: false, suppressed: 0, error: true };
+  if (!row) {
+    console.error('claim_notification_slot returned no row');
+    return { allowed: false, suppressed: 0, error: true };
+  }
   return { allowed: row.allowed === true, suppressed: Math.max(0, Number(row.suppressed) || 0), error: false };
 }
 
@@ -341,7 +352,11 @@ export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentK
     for (let i = 0; i < routed.recipients.length; i += SEND_CONCURRENCY) {
       await Promise.all(routed.recipients.slice(i, i + SEND_CONCURRENCY).map(tell));
     }
-    return { sent, failed, held, reason: failed > 0 && sent === 0 && held === 0 ? 'error' : 'ok' };
+    // 'error' = nobody was told and something failed; 'partial' = some failed
+    // while others were told or held; callers should read `failed`, not only
+    // `reason`.
+    const reason = failed === 0 ? 'ok' : (sent === 0 && held === 0 ? 'error' : 'partial');
+    return { sent, failed, held, reason };
   } catch (e) {
     console.error('notifyOnSubmit failed:', e && e.message);
     return { sent: 0, failed: 0, held: 0, reason: 'error' };

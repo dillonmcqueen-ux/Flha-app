@@ -76,6 +76,7 @@ create or replace function public.claim_notification_slot(
   p_company bigint, p_key text, p_roster bigint, p_window_seconds integer, p_burst integer
 ) returns table (allowed boolean, suppressed integer)
 language plpgsql
+set search_path = public, pg_temp
 as $$
 declare
   r public.document_notification_state%rowtype;
