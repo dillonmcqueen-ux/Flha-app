@@ -4,7 +4,7 @@ import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes } from "./offlineQueue.js";
+import { enqueueSubmission, storePhoto, getPhoto, deletePhoto, totalPhotoBytes, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
@@ -123,7 +123,7 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
         type: "incident",
         action: "submit",
         token: tokenForRequest,
-        clientSubmissionId,
+        clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         photoReceipts: allPhotoReceipts,
         signatureReceipt,
         record: {

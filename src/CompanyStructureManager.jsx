@@ -20,7 +20,7 @@ const addBtn = {
   fontWeight: 700, fontSize: 13, minHeight: 40, background: "transparent", color: C.orange, border: `1.5px solid ${C.orange}`,
 };
 
-export default function CompanyStructureManager({ token, companyId, departments, divisions, onChanged }) {
+export default function CompanyStructureManager({ token, companyId, departments, divisions, sites = [], onChanged }) {
   const [deptName, setDeptName] = useState("");
   const [divName, setDivName] = useState("");
   const [error, setError] = useState("");
@@ -84,6 +84,26 @@ export default function CompanyStructureManager({ token, companyId, departments,
           onKeyDown={e => { if (e.key === "Enter" && divName.trim() && !busy) run({ action: "add_division", name: divName }, () => setDivName("")); }} />
         <button type="button" style={addBtn} disabled={busy || !divName.trim()} onClick={() => run({ action: "add_division", name: divName }, () => setDivName(""))}><Plus size={14} />Add</button>
       </div>
+
+      {divisions.length > 0 && sites.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text.muted, marginBottom: 2 }}>Sites by division</div>
+          <div style={{ fontSize: 12, color: C.text.faint, marginBottom: 8, lineHeight: 1.5 }}>
+            A division usually runs a set of sites. Put each site under its division so supervisors tagged with that division see those sites' records.
+          </div>
+          {sites.map(s => (
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+              <span style={{ flex: "1 1 140px", fontSize: 13, color: C.text.body, fontWeight: 600 }}>{s.name}</span>
+              <select style={{ ...input, flex: "1 1 160px" }} disabled={busy} aria-label={`Division for ${s.name}`}
+                value={s.divisionId || ""}
+                onChange={e => run({ action: "set_site_division", siteId: s.id, divisionId: e.target.value ? Number(e.target.value) : null })}>
+                <option value="">No division</option>
+                {divisions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -35,7 +35,7 @@ import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { validDepartmentKeys } from '../server-lib/companyStructure.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
-import { requireAssignment, menuAccessFor, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { requireAssignment, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -486,7 +486,7 @@ Rules:
       if (!access.allowedKeys) return res.status(200).json({ documents: data || [], assigned: [] });
       return res.status(200).json({
         documents: (data || []).filter(d => access.allowedKeys.has(`portal_${d.id}`)),
-        assigned: access.assigned,
+        assigned: await withCompletion(supabaseAdmin, session, access.assigned),
       });
     }
 

@@ -3,7 +3,7 @@ import { generateAndUploadToolbox } from "./generateToolboxPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
@@ -34,7 +34,7 @@ export async function resubmitToolboxTalk(payload, clientSubmissionId, tokenForR
         type: "toolbox",
         action: "submit",
         token: tokenForRequest,
-        clientSubmissionId,
+        clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         record: {
           presenter_name: presenter,
           meeting_type: meetingType,

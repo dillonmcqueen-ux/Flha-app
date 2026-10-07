@@ -3,7 +3,7 @@ import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { getEquipmentTemplate, isTrailerTemplate, isTowCapableTemplate } from "./equipmentInspectionTemplates";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle, docAccent } from "./FormKit";
 import { ArrowLeft, AlertTriangle, Tractor, Loader2, CheckCircle2, WifiOff, PenLine } from "lucide-react";
@@ -84,7 +84,7 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     res = await fetch("/api/logs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "inspection", action: "submit", token: tokenForRequest, clientSubmissionId, record }),
+      body: JSON.stringify({ type: "inspection", action: "submit", token: tokenForRequest, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId), record }),
     });
   } catch (networkErr) {
     networkErr.isNetworkFailure = true;

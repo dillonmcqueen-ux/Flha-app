@@ -27,8 +27,8 @@
 // at noon. Assignment rows therefore carry created_at and ended_at, and a
 // submit is evaluated AS OF the moment it was filled in (`asOf`, from the
 // client's queued time, clamped to GRACE_MS). A live submit has no queued
-// time and is evaluated as of now. The client side that sends the queued
-// time ships with the worker-menu change; until then asOf is always "now".
+// time and is evaluated as of now. Each form's request builder sends the
+// queued time on a replay (queuedAtFor in src/offlineQueue.js).
 //
 // DB FAILURE POSTURE
 //   - missing document_assignments table or sites.division_id (migration not
@@ -78,8 +78,9 @@ function isMissingSchema(error) {
  * carries a clientSubmissionId, so a bare `queuedAt` on its own is ignored.
  * This is a speed bump, not a proof: anyone holding a token can add both
  * fields. What it bounds is the damage (GRACE_MS, a submit only, never a
- * read). The real fix is a server-signed "opened at" stamp the client echoes
- * back, which ships with the client change in PR 2.
+ * read). The real fix would be a server-signed "opened at" stamp the client
+ * echoes back; it is not built, so a handcrafted request can still reach back
+ * GRACE_MS on a submit.
  */
 export function queuedAsOf(body) {
   if (!body || typeof body.clientSubmissionId !== 'string' || !body.clientSubmissionId) return undefined;
@@ -117,11 +118,18 @@ export async function loadActor(supabase, session) {
   }
   if (!session.userId) return { actor: null, error: false };
 
-  const { data: rows, error } = await supabase
+  // hide_unassigned arrived after the other columns. A database that does not
+  // have it yet answers 42703, and the read is retried without it so a
+  // missing column never takes every submit and list down with it.
+  const BASE_COLUMNS = 'id, role, is_owner, departments, divisions, default_site_id, company_id';
+  let { data: rows, error } = await supabase
     .from('roster')
-    .select('id, role, is_owner, departments, divisions, default_site_id, company_id')
+    .select(`${BASE_COLUMNS}, hide_unassigned`)
     .eq('id', session.userId)
     .limit(1);
+  if (error && isMissingSchema(error)) {
+    ({ data: rows, error } = await supabase.from('roster').select(BASE_COLUMNS).eq('id', session.userId).limit(1));
+  }
   if (error) return { actor: null, error: true };
   const r = rows && rows[0];
   if (!r || r.company_id !== session.companyId) return { actor: null, error: false };
@@ -148,6 +156,8 @@ export async function loadActor(supabase, session) {
       departments: Array.isArray(r.departments) ? r.departments : [],
       divisionIds,
       siteIds,
+      // The Owner hid every document that is not assigned to this person.
+      hideUnassigned: r.hide_unassigned === true,
     },
     error: false,
   };
@@ -187,14 +197,30 @@ export function activeRowsAsOf(rows, asOfMs) {
 export function evaluateAccess(rows, actor, action, asOfMs) {
   if (actor.bypass) return { narrowed: false, allowed: true };
   const active = activeRowsAsOf(rows, asOfMs).filter((r) => r.action === action);
-  if (active.length === 0) return { narrowed: false, allowed: true };
-  return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
+  // "Hide everything not assigned to me": with no row naming this person the
+  // document is off for them, even when nobody else has been narrowed. A task
+  // names them just as a restriction does.
+  if (action === SUBMIT && actor.hideUnassigned) {
+    return { narrowed: true, allowed: active.some((r) => matchesAudience(r, actor)) };
+  }
+  // Only a RESTRICTING row narrows. A task (restricts = false) puts the
+  // document on someone's "assigned to you" list with a due date and takes
+  // nothing away from anyone else. A row with no `restricts` field predates
+  // the switch and restricts, as it always did.
+  const restricting = active.filter(isRestricting);
+  if (restricting.length === 0) return { narrowed: false, allowed: true };
+  return { narrowed: true, allowed: restricting.some((r) => matchesAudience(r, actor)) };
+}
+
+/** Does this row narrow access, or is it only a task? Pure. */
+export function isRestricting(row) {
+  return row.restricts !== false;
 }
 
 async function readAssignmentRows(supabase, companyId, documentKeys) {
   const { data, error } = await supabase
     .from('document_assignments')
-    .select('document_key, audience_type, audience_value, action, due_at, created_at, ended_at')
+    .select('document_key, audience_type, audience_value, action, restricts, due_at, created_at, ended_at')
     .eq('company_id', companyId)
     .in('document_key', documentKeys);
   if (error) {
@@ -263,7 +289,12 @@ export async function menuAccessFor(supabase, session, documentKeys) {
     const mine = activeRowsAsOf(forKey, now).filter((r) => r.action === SUBMIT && matchesAudience(r, actor));
     if (mine.length > 0) {
       const dues = mine.map((r) => (r.due_at ? Date.parse(r.due_at) : null)).filter((t) => t !== null);
-      assigned.push({ documentKey: key, dueAt: dues.length ? new Date(Math.min(...dues)).toISOString() : null });
+      const sinceMs = Math.min(...mine.map((r) => Date.parse(r.created_at)).filter((t) => Number.isFinite(t)));
+      assigned.push({
+        documentKey: key,
+        dueAt: dues.length ? new Date(Math.min(...dues)).toISOString() : null,
+        since: Number.isFinite(sinceMs) ? new Date(sinceMs).toISOString() : null,
+      });
     }
   }
   return { allowedKeys, assigned, error: false };
@@ -378,4 +409,58 @@ export async function listVisibleRecordsMulti(supabase, session, records, keyOf,
     kept = records.filter((r) => allowedByKey.get(keyOf(r)));
   }
   return scopeRecords(supabase, session, kept, opts);
+}
+
+/**
+ * One person's hide-unassigned flag, tolerant of the column not existing yet
+ * (returns false). For profile screens; enforcement reads it in loadActor.
+ */
+export async function readHideUnassigned(supabase, companyId, rosterId) {
+  const { data, error } = await supabase
+    .from('roster').select('hide_unassigned').eq('id', rosterId).eq('company_id', companyId).limit(1);
+  if (error || !data || !data[0]) return false;
+  return data[0].hide_unassigned === true;
+}
+
+// Where each document's submissions live and how they join to the author.
+// Monthly, custom and Portal rows have no company_id of their own; they are
+// reached through their form or document, which is already this company's.
+const COMPLETION_SOURCES = {
+  flha: { table: 'flhas' },
+  inspection: { table: 'inspections' },
+  toolbox: { table: 'toolbox_talks' },
+  nearmiss: { table: 'near_misses' },
+  incident: { table: 'incidents' },
+  daily: { table: 'daily_reports' },
+  fuellog: { table: 'fuel_logs' },
+  monthly: { table: 'inspection_records' },
+};
+
+/**
+ * Adds `completedAt` to each assignment: this person's latest submission of
+ * that document made at or after the assignment began, or null. Derived from
+ * the author stamp on the record, never stored. A document whose records
+ * carry no author (an anonymous near miss) can never show as done. Best
+ * effort: any read error leaves completedAt null.
+ */
+export async function withCompletion(supabase, session, assigned) {
+  if (!session || !session.userId || assigned.length === 0) return assigned;
+  return Promise.all(assigned.map(async (a) => {
+    try {
+      let q;
+      const custom = /^custom_(\d+)$/.exec(a.documentKey);
+      const portal = /^portal_(\d+)$/.exec(a.documentKey);
+      if (custom) q = supabase.from('custom_form_records').select('created_at').eq('form_id', Number(custom[1]));
+      else if (portal) q = supabase.from('portal_records').select('created_at').eq('document_id', Number(portal[1]));
+      else if (COMPLETION_SOURCES[a.documentKey]) {
+        q = supabase.from(COMPLETION_SOURCES[a.documentKey].table).select('created_at');
+        if (a.documentKey !== 'monthly') q = q.eq('company_id', session.companyId);
+      } else return { ...a, completedAt: null };
+      if (a.since) q = q.gte('created_at', a.since);
+      const { data, error } = await q.eq('submitted_by_roster_id', session.userId).order('created_at', { ascending: false }).limit(1);
+      return { ...a, completedAt: !error && data && data[0] ? data[0].created_at : null };
+    } catch (e) {
+      return { ...a, completedAt: null };
+    }
+  }));
 }

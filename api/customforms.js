@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireCustomDocKey } from '../server-lib/docKeyGate.js';
-import { requireAssignment, requireRecordsAccess, listVisibleRecordsMulti, menuAccessFor, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecordsMulti, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -404,7 +404,7 @@ export default async function handler(req, res) {
       if (access.allowedKeys) {
         BUILTIN_DOC_KEYS.forEach(key => { if (builtinActive[key] && !access.allowedKeys.has(key)) builtinActive[key] = false; });
         const visibleCustoms = activeCustoms.filter(f => access.allowedKeys.has(`custom_${f.id}`));
-        return res.status(200).json({ builtinActive, customForms: visibleCustoms, assigned: access.assigned });
+        return res.status(200).json({ builtinActive, customForms: visibleCustoms, assigned: await withCompletion(supabaseAdmin, session, access.assigned) });
       }
       return res.status(200).json({ builtinActive, customForms: activeCustoms, assigned: [] });
     }

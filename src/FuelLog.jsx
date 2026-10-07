@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle } from "./FormKit";
 import { ArrowLeft, Fuel, Loader2, CheckCircle2, WifiOff, AlertTriangle } from "lucide-react";
@@ -33,7 +33,7 @@ export async function resubmitFuelLog(payload, clientSubmissionId, tokenForReque
     res = await fetch("/api/fuellogs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "submit", token: tokenForRequest, clientSubmissionId, record }),
+      body: JSON.stringify({ action: "submit", token: tokenForRequest, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId), record }),
     });
   } catch (networkErr) {
     networkErr.isNetworkFailure = true;

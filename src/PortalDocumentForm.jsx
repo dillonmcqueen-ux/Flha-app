@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, signatureCanvasStyle } from "./FormKit";
@@ -67,7 +67,7 @@ export async function resubmitPortalForm(payload, clientSubmissionId, tokenForRe
     res = await fetch("/api/portal", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "submit_portal", token: tokenForRequest, clientSubmissionId,
+        action: "submit_portal", token: tokenForRequest, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         siteId, documentId, submittedBy, aiSummary, aiAssisted, pdfUrl,
         answers: uploadedItems.map(it => ({ questionId: it.questionId, value: it.value, note: it.note || "" })),
       }),

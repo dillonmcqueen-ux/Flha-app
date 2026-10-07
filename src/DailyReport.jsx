@@ -3,7 +3,7 @@ import { generateAndUploadDaily } from "./generateDailyPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { siteIdForName } from "./siteLookup.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
-import { enqueueSubmission } from "./offlineQueue.js";
+import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { buildFormStyles, disabledBg, bannerStyle, docAccent } from "./FormKit";
@@ -37,7 +37,7 @@ export async function resubmitDaily(payload, clientSubmissionId, tokenForRequest
         type: "daily",
         action: "submit",
         token: tokenForRequest,
-        clientSubmissionId,
+        clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         record: {
           reporter_name: reporter,
           site, site_id: siteId || null, report_date: reportDate, weather, temperature,
