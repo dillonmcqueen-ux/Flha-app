@@ -1386,7 +1386,7 @@ export default async function handler(req, res) {
     if (action === 'list_document_assignments' || action === 'create_document_assignment'
         || action === 'end_document_assignment' || action === 'set_site_division'
         || action === 'list_document_notifications' || action === 'set_document_notification') {
-      if (!canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can change document assignments.' });
+      if (!canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can change document assignments or notifications.' });
       const companyId = resolveCompanyId(session, req.body.companyId);
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const missingTable = (e) => !!e && ['42P01', 'PGRST205'].includes(String(e.code || ''));
@@ -1424,7 +1424,7 @@ export default async function handler(req, res) {
           documentKey: req.body.documentKey, enabled: req.body.enabled, extraRosterIds: req.body.extraRosterIds, updatedBy: session.userId || null,
         });
         if (saved.error) return res.status(saved.status).json({ error: saved.error });
-        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'set_document_notification', companyId, targetType: 'document_notification', targetId: req.body.documentKey, details: { enabled: saved.row.enabled ?? null, extras: saved.row.extra_roster_ids ? saved.row.extra_roster_ids.length : null, by_roster_id: session.userId || null } });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'set_document_notification', companyId, targetType: 'document_notification', targetId: req.body.documentKey, details: { enabled: saved.row.enabled ?? null, extras: saved.row.extra_roster_ids ?? null, by_roster_id: session.userId || null } });
         return res.status(200).json({ ok: true });
       }
 

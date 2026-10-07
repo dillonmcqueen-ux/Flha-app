@@ -118,6 +118,8 @@ test('the Owner switches a document on and off, and it is audited', async () => 
   assert.equal((await set({ enabled: false })).statusCode, 200);
   assert.equal(NOTIFY[0].enabled, false);
   assert.ok(audits.some((a) => a && a.action === 'set_document_notification'));
+  await set({ extraRosterIds: [2] });
+  assert.deepEqual(audits.at(-1).details.extras, [2], 'the audit log names who was added, not just how many');
 });
 
 test('a custom form of this company can be switched on, another company\'s cannot', async () => {
@@ -140,7 +142,7 @@ test('always-tell people must be active members of this company, capped at 10', 
   NOTIFY = [];
   assert.equal((await set({ extraRosterIds: [2, 3] })).statusCode, 200);
   assert.deepEqual(NOTIFY[0].extra_roster_ids, [2, 3]);
-  for (const extraRosterIds of [[90], [4], [999], ['x'], [1.5], 'nope', [0], [-1]]) {
+  for (const extraRosterIds of [[90], [4], [999], ['x'], [1.5], 'nope', [0], [-1], [true], [[2]], [null]]) {
     assert.equal((await set({ extraRosterIds })).statusCode, 400, JSON.stringify(extraRosterIds));
   }
   assert.deepEqual(NOTIFY[0].extra_roster_ids, [2, 3], 'a refused list changes nothing');

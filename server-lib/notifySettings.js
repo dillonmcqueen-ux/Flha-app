@@ -59,8 +59,9 @@ export async function saveNotifySetting(supabase, companyId, { documentKey, enab
 
   if (extraRosterIds !== undefined) {
     if (!Array.isArray(extraRosterIds)) return { error: 'Invalid list of people.', status: 400 };
+    if (extraRosterIds.some((n) => typeof n !== 'number' && !(typeof n === 'string' && /^[0-9]{1,15}$/.test(n)))) return { error: 'Invalid list of people.', status: 400 };
     const ids = [...new Set(extraRosterIds.map(Number))];
-    if (ids.some((n) => !Number.isInteger(n) || n <= 0)) return { error: 'Invalid list of people.', status: 400 };
+    if (ids.some((n) => !Number.isInteger(n) || n <= 0 || n > Number.MAX_SAFE_INTEGER)) return { error: 'Invalid list of people.', status: 400 };
     if (ids.length > MAX_EXTRAS) return { error: `You can name up to ${MAX_EXTRAS} people.`, status: 400 };
     if (ids.length > 0) {
       const { data, error } = await supabase.from('roster').select('id').eq('company_id', companyId).eq('active', true).in('id', ids);
