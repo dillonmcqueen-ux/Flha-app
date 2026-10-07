@@ -14,6 +14,8 @@ import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { unsignedFields, missingSignColumns, completeSignature, loadSignState } from '../server-lib/signLater.js';
+import { notifyOnSubmit } from '../server-lib/notifyRouting.js';
+import { sendEmail } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -134,6 +136,40 @@ async function runReportFollowUpsUnguarded(session, type, id, record) {
     sourceId: id,
     descriptions: correctiveActionsFromReport(reportJson),
   });
+}
+
+// Tells the document's audience a new report exists, once it counts (signed).
+// Off unless the company's Owner switched Notify on for this document
+// (server-lib/notifyRouting.js). Best effort: nothing here can fail the request,
+// the report is already saved.
+//   - companyId is the session's, never the request's
+//   - author is null for an anonymous record, so it is routed by site alone
+//   - the site name in the email is looked up here from the validated site id,
+//     never taken from what the worker typed
+//   - skipped without the mail key: sendEmail would no-op and the person's
+//     email slot would be spent on nothing
+async function notifyAudience(session, type, { siteId, authorId }) {
+  try {
+    if (type !== 'incident' && type !== 'nearmiss') return;
+    if (!process.env.RESEND_API_KEY) return;
+    // sign_now does not run submit's suspended-company check, so make it here.
+    const { data: co } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
+    if (co && co[0] && co[0].suspended) return;
+    let siteName = null;
+    if (siteId != null) {
+      const { data } = await supabaseAdmin.from('sites').select('name').eq('id', siteId).eq('company_id', session.companyId).limit(1);
+      siteName = data && data[0] ? data[0].name : null;
+    }
+    await notifyOnSubmit(supabaseAdmin, {
+      sendEmail,
+      companyId: session.companyId,
+      documentKey: type,
+      record: { site_id: siteId ?? null, submitted_by_roster_id: authorId ?? null },
+      siteName,
+    });
+  } catch (e) {
+    console.error('report notification failed:', e && e.message);
+  }
 }
 
 // flha-reports/signatures/incident-photos are private buckets — the DB
@@ -386,7 +422,13 @@ export default async function handler(req, res) {
       // The Brain signal and the corrective actions follow the author's
       // signature: a report nobody has signed yet opens nothing, and a
       // sign-later one runs them from sign_now instead.
-      if (newId && !signLater) await runReportFollowUps(session, type, newId, record);
+      if (newId && !signLater) {
+        await runReportFollowUps(session, type, newId, record);
+        await notifyAudience(session, type, {
+          siteId: recordToInsert.site_id ?? null,
+          authorId: authorRosterId(session, { isAnonymous: recordToInsert.is_anonymous === true }),
+        });
+      }
 
       return res.status(200).json({ id: newId, pdfLinked, photosLinked, signatureLinked, awaitingSignature: signLater });
     }
@@ -439,11 +481,15 @@ export default async function handler(req, res) {
         nowIso: new Date().toISOString(),
       });
       if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
-      const afterCols = type === 'incident' ? 'pdf_url, incident_type, report_json' : 'pdf_url, involved, report_json';
+      const afterCols = type === 'incident' ? 'pdf_url, site_id, submitted_by_roster_id, incident_type, report_json' : 'pdf_url, site_id, submitted_by_roster_id, involved, report_json';
       const { data: after } = await supabaseAdmin.from(table.name).select(afterCols).eq('id', id).eq('company_id', session.companyId).limit(1);
       const row = after && after[0];
       // Now that it counts: its Brain signal and corrective actions.
-      if (row) await runReportFollowUps(session, type, id, row);
+      if (row) {
+        await runReportFollowUps(session, type, id, row);
+        // A sign-later report tells its audience now that it counts, not when it was saved.
+        await notifyAudience(session, type, { siteId: row.site_id ?? null, authorId: row.submitted_by_roster_id ?? null });
+      }
       const stored = row && row.pdf_url;
       const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });

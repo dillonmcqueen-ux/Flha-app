@@ -80,6 +80,7 @@ export const MAX_RECIPIENTS = 25;
 export const COOLDOWN_SECONDS = 10 * 60;
 export const BURST_LIMIT = 3;
 const SEND_CONCURRENCY = 5;
+const SEND_BUDGET_MS = 10 * 1000;
 
 export const DOCUMENT_LABELS = {
   flha: 'FLHA',
@@ -104,6 +105,18 @@ export function cleanLabel(value) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80);
+}
+
+// A site name is typed by whoever creates the site, and it lands in an email from
+// FORA's own sender. So it is only used when it is plain: letters, digits,
+// spaces and a few marks, short, and not shaped like a link, address or phone
+// number. Anything else is left out and the email simply names the document.
+export function safeSiteLabel(value) {
+  const c = cleanLabel(value);
+  if (!c || c.length > 40) return '';
+  if (!/^[A-Za-z0-9 #&'(),-]+$/.test(c)) return '';
+  if (/\d{5,}/.test(c.replace(/[ -]/g, ''))) return '';
+  return c;
 }
 
 const toIdList = (values) => (Array.isArray(values) ? values : []).map(Number).filter((n) => Number.isFinite(n));
@@ -343,7 +356,7 @@ export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentK
     if (!routed.enabled || routed.recipients.length === 0) return { sent: 0, failed: 0, held: 0, reason: routed.reason };
     // A custom form passes its own title; a built-in uses its fixed label.
     const label = DOCUMENT_LABELS[documentKey] || cleanLabel(documentLabel) || 'Custom document';
-    const cleanSite = cleanLabel(siteName);
+    const cleanSite = safeSiteLabel(siteName);
     const where = cleanSite ? ` at ${cleanSite}` : '';
     let sent = 0;
     let failed = 0;
@@ -371,7 +384,15 @@ export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentK
         await refundSlot(supabase, companyId, documentKey, r.id, { slots: 1, held: claim.suppressed });
       }
     };
+    // A slow mail provider must not hold up the worker's submit for long: stop
+    // starting new sends after the budget. Those people are not claimed, so
+    // nothing is spent on them, and the Dashboard still shows the record.
+    const startedAt = Date.now();
     for (let i = 0; i < routed.recipients.length; i += SEND_CONCURRENCY) {
+      if (Date.now() - startedAt > SEND_BUDGET_MS) {
+        console.error(`routed notification budget reached: ${routed.recipients.length - i} not told`);
+        break;
+      }
       await Promise.all(routed.recipients.slice(i, i + SEND_CONCURRENCY).map(tell));
     }
     // 'error' = nobody was told and something failed; 'partial' = some failed

@@ -19,6 +19,8 @@ import { recordPlatformEvent } from './platformEvents.js';
 // which Resend restricts to the account owner's own address only — so
 // onboarding notifications to real new customers were silently failing
 // until this domain existed.
+const SEND_TIMEOUT_MS = 8000;
+
 export async function sendEmail({ to, subject, text, from = 'FORA <notifications@reports.forafieldsolutions.com>', attachments }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn(`sendEmail skipped (RESEND_API_KEY not set): "${subject}" to ${to}`);
@@ -38,6 +40,9 @@ export async function sendEmail({ to, subject, text, from = 'FORA <notifications
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       },
       body: JSON.stringify(body),
+      // A stalled provider must not hold a function (and a worker's submit) open
+      // until the platform kills it. A timeout throws like any other failure.
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
   } catch (e) {
     await recordPlatformEvent(null, { eventType: 'email_send', status: 'error', subtype: 'network', metrics: { latency_ms: Date.now() - startedAt } });
