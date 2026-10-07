@@ -43,3 +43,11 @@ alter table public.auditor_scopes enable row level security;
 -- ── Rollback ─────────────────────────────────────────────────────────────
 -- drop table if exists public.auditor_scopes;
 -- alter table public.roster drop column if exists auditor_access_expires_at;
+
+-- roster.role is checked against ('worker', 'supervisor'). Without 'auditor'
+-- here, create_auditor's insert is rejected by the database. Applied live on
+-- 2026-10-07 (migration roster_role_allows_auditor); kept here so a fresh
+-- install matches.
+alter table public.roster drop constraint if exists roster_role_check;
+alter table public.roster
+  add constraint roster_role_check check (role = any (array['worker'::text, 'supervisor'::text, 'auditor'::text]));
