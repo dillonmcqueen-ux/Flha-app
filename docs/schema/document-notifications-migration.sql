@@ -38,30 +38,92 @@ create table if not exists public.document_notifications (
 -- Deny-by-default backstop, same as every other table (README access model).
 alter table public.document_notifications enable row level security;
 
--- Cooldown state. One row per (company, document, person): when that person was
--- last emailed about that document, and how many notices were held back since.
--- A person is emailed about a document at most once per cooldown window (10
--- minutes, server-lib/notifyRouting.js); the notices held back are counted and
--- reported in their next email ("N more since your last notice"). This is what
--- stops one worker looping submits from flooding inboxes or burning the
--- shared sender's Resend quota. It holds no report content and no address.
+-- Cooldown state. One row per (company, document, person): the current window,
+-- how many emails that person has had in it, and how many notices were held back
+-- once they reached the burst limit. A person may be emailed up to 3 times per
+-- document per 10 minutes (the burst); further notices in the window are held
+-- and counted, and the first email of the next window says how many came in
+-- ("N more since your last notice"). The burst means a junk submit cannot use
+-- up a person's only slot ahead of a real incident, and the window stops one
+-- worker looping submits from flooding inboxes or burning the shared sender's
+-- Resend quota. It holds no report content and no address.
+--
+-- The claim is ONE function, claim_notification_slot, run as a single
+-- transaction under a row lock and judged by the database's own clock, so
+-- parallel submits cannot all slip through and serverless clock skew cannot
+-- matter. The application claims BEFORE it sends, so a timeout between sending
+-- and recording can never produce a duplicate.
 create table if not exists public.document_notification_state (
   company_id bigint not null references public.companies(id) on delete cascade,
   document_key text not null,
   roster_id bigint not null references public.roster(id) on delete cascade,
-  last_sent_at timestamptz not null default now(),
-  suppressed_count integer not null default 0 check (suppressed_count >= 0),
-  primary key (company_id, document_key, roster_id)
+  window_started_at timestamptz not null default now(),
+  sent_in_window integer not null default 0 check (sent_in_window >= 0),
+  suppressed_count integer not null default 0 check (suppressed_count between 0 and 999),
+  primary key (company_id, document_key, roster_id),
+  check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|fuellog|custom_[0-9]+)$')
 );
 
+create index if not exists document_notification_state_roster_idx
+  on public.document_notification_state (roster_id);
+
 alter table public.document_notification_state enable row level security;
+
+create or replace function public.claim_notification_slot(
+  p_company bigint, p_key text, p_roster bigint, p_window_seconds integer, p_burst integer
+) returns table (allowed boolean, suppressed integer)
+language plpgsql
+as $$
+declare
+  r public.document_notification_state%rowtype;
+begin
+  insert into public.document_notification_state (company_id, document_key, roster_id, window_started_at, sent_in_window, suppressed_count)
+  values (p_company, p_key, p_roster, now(), 1, 0)
+  on conflict (company_id, document_key, roster_id) do nothing;
+  if found then
+    return query select true, 0;
+    return;
+  end if;
+
+  select * into r from public.document_notification_state
+   where company_id = p_company and document_key = p_key and roster_id = p_roster
+   for update;
+
+  if now() - r.window_started_at >= make_interval(secs => p_window_seconds) then
+    update public.document_notification_state
+       set window_started_at = now(), sent_in_window = 1, suppressed_count = 0
+     where company_id = p_company and document_key = p_key and roster_id = p_roster;
+    return query select true, r.suppressed_count;
+    return;
+  end if;
+
+  if r.sent_in_window < p_burst then
+    update public.document_notification_state
+       set sent_in_window = sent_in_window + 1
+     where company_id = p_company and document_key = p_key and roster_id = p_roster;
+    return query select true, 0;
+    return;
+  end if;
+
+  update public.document_notification_state
+     set suppressed_count = least(suppressed_count + 1, 999)
+   where company_id = p_company and document_key = p_key and roster_id = p_roster;
+  return query select false, 0;
+end;
+$$;
+
+-- Only the server (service role) may claim a slot.
+revoke all on function public.claim_notification_slot(bigint, text, bigint, integer, integer) from public, anon, authenticated;
+grant execute on function public.claim_notification_slot(bigint, text, bigint, integer, integer) to service_role;
 
 -- ── Verification ─────────────────────────────────────────────────────────
 -- select column_name from information_schema.columns
 --   where table_schema = 'public' and table_name = 'document_notifications';
 -- select relrowsecurity from pg_class where oid = 'public.document_notifications'::regclass;
 -- select relrowsecurity from pg_class where oid = 'public.document_notification_state'::regclass;
+-- select proname from pg_proc where proname = 'claim_notification_slot';
 --
 -- ── Rollback ─────────────────────────────────────────────────────────────
+-- drop function if exists public.claim_notification_slot(bigint, text, bigint, integer, integer);
 -- drop table if exists public.document_notification_state;
 -- drop table if exists public.document_notifications;

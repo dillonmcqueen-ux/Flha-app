@@ -13,7 +13,7 @@ process.env.FIELD_ENCRYPTION_KEY ||= 'a'.repeat(64);
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickRecipients, routeNotification, notifyOnSubmit, applyCooldown, cleanLabel, MAX_RECIPIENTS, COOLDOWN_MS } from '../../server-lib/notifyRouting.js';
+import { pickRecipients, routeNotification, notifyOnSubmit, cleanLabel, MAX_RECIPIENTS, COOLDOWN_SECONDS, BURST_LIMIT } from '../../server-lib/notifyRouting.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
 const P = (over) => ({ active: true, is_owner: false, is_lead: false, departments: [], divisions: [], default_site_id: null, email: null, ...over });
@@ -85,8 +85,37 @@ test('the audience is capped', () => {
 });
 
 // ── the loader, behind a stand-in database ──────────────────────────────
-function fakeDb(tables, { failTable = null, failCode = '42P01' } = {}) {
+// Stand-in for the database function claim_notification_slot, with the same
+// rules as the SQL: first claim opens a window, claims inside it are allowed up
+// to the burst, then held and counted; a new window reports the held count.
+// JavaScript runs one call at a time, so this proves the application's use of
+// the claim, not the database's locking, which is checked against the real
+// function separately.
+function claimRpc(tables, clock, args, failRpc) {
+  if (failRpc) return { data: null, error: { code: '42883', message: 'function does not exist' } };
+  const list = (tables.document_notification_state = tables.document_notification_state || []);
+  const key = (r) => r.company_id === args.p_company && r.document_key === args.p_key && r.roster_id === args.p_roster;
+  let r = list.find(key);
+  if (!r) {
+    list.push({ company_id: args.p_company, document_key: args.p_key, roster_id: args.p_roster, window_started_at: clock.now, sent_in_window: 1, suppressed_count: 0 });
+    return { data: [{ allowed: true, suppressed: 0 }], error: null };
+  }
+  if (clock.now - r.window_started_at >= args.p_window_seconds * 1000) {
+    const held = r.suppressed_count;
+    Object.assign(r, { window_started_at: clock.now, sent_in_window: 1, suppressed_count: 0 });
+    return { data: [{ allowed: true, suppressed: held }], error: null };
+  }
+  if (r.sent_in_window < args.p_burst) { r.sent_in_window += 1; return { data: [{ allowed: true, suppressed: 0 }], error: null }; }
+  r.suppressed_count = Math.min(r.suppressed_count + 1, 999);
+  return { data: [{ allowed: false, suppressed: 0 }], error: null };
+}
+
+function fakeDb(tables, { failTable = null, failCode = '42P01', failRpc = false, clock = { now: Date.parse('2026-10-07T12:00:00Z') } } = {}) {
   return {
+    rpc(name, args) {
+      assert.equal(name, 'claim_notification_slot');
+      return Promise.resolve(claimRpc(tables, clock, args, failRpc));
+    },
     from(name) {
       const filters = [];
       let limitN = null;
@@ -245,57 +274,72 @@ test('a custom form uses its own title, cleaned', async () => {
 });
 
 // ── cooldown ────────────────────────────────────────────────────────────
-test('applyCooldown: inside the window is held and counted, outside is sent', () => {
-  const now = Date.parse('2026-10-07T12:00:00Z');
-  const state = new Map([
-    [1, { last_sent_at: new Date(now - 60 * 1000).toISOString(), suppressed_count: 2 }],
-    [2, { last_sent_at: new Date(now - COOLDOWN_MS - 1000).toISOString(), suppressed_count: 3 }],
-  ]);
-  const out = applyCooldown([{ id: 1, email: 'a@x.test' }, { id: 2, email: 'b@x.test' }, { id: 3, email: 'c@x.test' }], state, now);
-  assert.deepEqual(out.hold.map((r) => r.id), [1]);
-  assert.deepEqual(out.send.map((r) => [r.id, r.suppressed]), [[2, 3], [3, 0]]);
-});
+const asSender = (sent) => async (m) => { sent.push(m); };
 
-test('a burst of submits costs each person one email and a count', async () => {
+test('burst: a person gets up to the burst limit per document per window, then notices are held', async () => {
   const sent = [];
   const tables = baseTables({ enabled: true, extra_roster_ids: [] });
   const db = fakeDb(tables);
-  const run = () => notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec, siteName: 'Pit' });
-
-  const first = await run();
-  assert.equal(first.sent, 2);
-  assert.equal(sent.length, 2);
-  const second = await run();
-  const third = await run();
-  assert.equal(second.sent + third.sent, 0, 'inside the window nothing more is sent');
-  assert.equal(second.held, 2);
-  assert.equal(sent.length, 2, 'two people, one email each');
+  const results = [];
+  for (let i = 0; i < BURST_LIMIT + 2; i += 1) results.push(await notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec, siteName: 'Pit' }));
+  assert.deepEqual(results.map((r) => r.sent), [2, 2, 2, 0, 0], 'two people, three emails each, then held');
+  assert.deepEqual(results.map((r) => r.held), [0, 0, 0, 2, 2]);
+  assert.equal(sent.length, 2 * BURST_LIMIT);
   assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 2), 'two held notices counted per person');
-
-  // Window passes: back-date the state and the next email reports the count.
-  tables.document_notification_state.forEach((r) => { r.last_sent_at = new Date(Date.now() - COOLDOWN_MS - 1000).toISOString(); });
-  const after = await run();
-  assert.equal(after.sent, 2);
-  assert.match(sent[sent.length - 1].text, /2 more Incident Reports were submitted since your last notice/);
-  assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 0), 'count resets once reported');
 });
 
-test('cooldown is per document and per person, not shared', async () => {
+test('a junk submit cannot use up the slot a real incident needs', async () => {
+  const sent = [];
+  const db = fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }));
+  await notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec });
+  const real = await notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec, siteName: 'Real incident site' });
+  assert.equal(real.sent, 2, 'the second notice still goes out');
+});
+
+test('a new window reports how many notices were held, then resets', async () => {
+  const sent = [];
+  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
+  const clock = { now: Date.parse('2026-10-07T12:00:00Z') };
+  const db = fakeDb(tables, { clock });
+  const go = () => notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec });
+  for (let i = 0; i < BURST_LIMIT + 2; i += 1) await go();
+  clock.now += COOLDOWN_SECONDS * 1000 + 1000;
+  const after = await go();
+  assert.equal(after.sent, 2);
+  assert.match(sent[sent.length - 1].text, /2 more Incident Reports were submitted since your last notice/);
+  assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 0 && r.sent_in_window === 1), 'count resets once reported');
+});
+
+test('a burst of parallel submits still sends no more than the burst limit', async () => {
+  const sent = [];
+  const db = fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }));
+  await Promise.all(Array.from({ length: 20 }, () => notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec })));
+  assert.equal(sent.length, 2 * BURST_LIMIT);
+});
+
+test('the window is per document and per person', async () => {
   const sent = [];
   const tables = baseTables({ enabled: true, extra_roster_ids: [] });
   tables.document_notifications.push({ company_id: 7, document_key: 'nearmiss', enabled: true, extra_roster_ids: [] });
   const db = fakeDb(tables);
-  const go = (documentKey) => notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey, record: rec });
-  await go('incident');
-  const other = await go('nearmiss');
+  for (let i = 0; i < BURST_LIMIT; i += 1) await notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec });
+  const other = await notifyOnSubmit(db, { sendEmail: asSender(sent), companyId: 7, documentKey: 'nearmiss', record: rec });
   assert.equal(other.sent, 2, 'a different document has its own window');
 });
 
-test('a state table that cannot be read or written sends nothing', async () => {
+test('if the claim cannot be made, nothing is sent', async () => {
   const sent = [];
-  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
-  const noState = await notifyOnSubmit(fakeDb(tables, { failTable: 'document_notification_state' }), { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec });
-  assert.equal(noState.sent, 0);
-  assert.equal(noState.reason, 'error');
-  assert.equal(sent.length, 0, 'no state, no email: the cooldown is never skipped');
+  const out = await notifyOnSubmit(fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }), { failRpc: true }), { sendEmail: asSender(sent), companyId: 7, documentKey: 'incident', record: rec });
+  assert.equal(out.sent, 0);
+  assert.equal(sent.length, 0, 'no claim, no email: the cooldown is never skipped');
+  assert.equal(out.reason, 'error');
+});
+
+test('a failed send is not retried on the same submit and does not break the others', async () => {
+  const sent = [];
+  let n = 0;
+  const flaky = async (m) => { n += 1; if (n === 1) throw new Error('boom'); sent.push(m); };
+  const out = await notifyOnSubmit(fakeDb(baseTables({ enabled: true, extra_roster_ids: [] })), { sendEmail: flaky, companyId: 7, documentKey: 'incident', record: rec });
+  assert.equal(out.failed, 1);
+  assert.equal(out.sent, 1);
 });

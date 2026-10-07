@@ -40,11 +40,15 @@
 // enabled = false, notifies nobody. A database without the table behaves the
 // same way, so shipping this ahead of the SQL changes nothing.
 //
-// COOLDOWN: document_notification_state remembers when each person was last
-// told about each document. Inside the window a notice is held back and
-// counted, and the next email says how many came in since. A state table that
-// cannot be read or written means NOTHING is sent: the cooldown is what keeps
-// a flood off the shared sender, so it is never skipped.
+// COOLDOWN: each person is emailed at most BURST_LIMIT times per document per
+// window. The slot is claimed atomically in the database BEFORE the send
+// (claim_notification_slot), so parallel submits cannot all pass and a timeout
+// between sending and recording cannot duplicate. A notice held past the burst
+// is counted and reported in that person's next email; it is not sent later by
+// itself, so the Dashboard stays the source of truth for every record. A claim
+// that fails (function or table missing, database error) sends NOTHING to that
+// person: the cooldown is what keeps a flood off the shared sender, so it is
+// never skipped.
 //
 // The email names the document and the site and nothing else: no report
 // content, no author, so incident detail never sits in an inbox. One email per
@@ -62,10 +66,15 @@ const isMissingSchema = (error) => !!error && MISSING_SCHEMA.has(String(error.co
 // burst of emails.
 export const MAX_RECIPIENTS = 25;
 
-// One email per person per document per window. A worker looping submits, or a
-// busy site, then costs each recipient one email and a count, not one per
-// submit, and the shared sender's quota is protected for every company.
-export const COOLDOWN_MS = 10 * 60 * 1000;
+// A person may be emailed up to BURST_LIMIT times per document per window.
+// Past that, notices are held and counted, and the next window's first email
+// says how many came in. The burst means a junk submit cannot use up the only
+// slot ahead of a real incident; the window stops a looping worker flooding
+// inboxes or burning the shared sender's quota. The claim itself is the
+// database function claim_notification_slot, atomic and on the database clock.
+export const COOLDOWN_SECONDS = 10 * 60;
+export const BURST_LIMIT = 3;
+const SEND_CONCURRENCY = 5;
 
 export const DOCUMENT_LABELS = {
   flha: 'FLHA',
@@ -273,80 +282,66 @@ export async function routeNotification(supabase, { companyId, documentKey, reco
 }
 
 /**
- * Splits the audience into who is emailed now and who is inside their cooldown.
- * Pure. `state` maps roster id -> { last_sent_at, suppressed_count }.
+ * Claims one email slot for one person and document, atomically in the
+ * database. Returns { allowed, suppressed, error }. On any error the caller
+ * must not send.
  */
-export function applyCooldown(recipients, state, nowMs) {
-  const send = [];
-  const hold = [];
-  for (const r of recipients) {
-    const s = state.get(Number(r.id));
-    const last = s ? Date.parse(s.last_sent_at) : NaN;
-    if (Number.isFinite(last) && nowMs - last < COOLDOWN_MS) hold.push({ ...r, suppressed: Number(s.suppressed_count) || 0 });
-    else send.push({ ...r, suppressed: s ? Number(s.suppressed_count) || 0 : 0 });
-  }
-  return { send, hold };
-}
-
-async function loadState(supabase, companyId, documentKey, rosterIds) {
-  const { data, error } = await supabase
-    .from('document_notification_state')
-    .select('roster_id, last_sent_at, suppressed_count')
-    .eq('company_id', companyId)
-    .eq('document_key', documentKey)
-    .in('roster_id', rosterIds);
-  if (error) return { state: new Map(), error: true };
-  return { state: new Map((data || []).map((r) => [Number(r.roster_id), r])), error: false };
-}
-
-async function saveState(supabase, companyId, documentKey, rosterId, lastSentAt, suppressedCount) {
-  const { error } = await supabase
-    .from('document_notification_state')
-    .upsert({ company_id: companyId, document_key: documentKey, roster_id: rosterId, last_sent_at: lastSentAt, suppressed_count: suppressedCount }, { onConflict: 'company_id,document_key,roster_id' });
-  if (error) console.error('notification state write failed:', error.message);
+export async function claimSlot(supabase, companyId, documentKey, rosterId) {
+  const { data, error } = await supabase.rpc('claim_notification_slot', {
+    p_company: companyId,
+    p_key: documentKey,
+    p_roster: rosterId,
+    p_window_seconds: COOLDOWN_SECONDS,
+    p_burst: BURST_LIMIT,
+  });
+  if (error) return { allowed: false, suppressed: 0, error: true };
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return { allowed: false, suppressed: 0, error: true };
+  return { allowed: row.allowed === true, suppressed: Math.max(0, Number(row.suppressed) || 0), error: false };
 }
 
 /**
  * Tells the audience about a new record. Never throws. Returns
  * { sent, failed, held, reason } so a caller or a test can see what happened.
  *
- * `siteName` is the label shown in the email; it falls back to "your company"
- * rather than printing nothing.
+ * `siteName` is the label shown in the email; with none, the email names the
+ * document alone.
  */
 export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentKey, record, siteName, documentLabel }) {
   try {
     const routed = await routeNotification(supabase, { companyId, documentKey, record });
     if (!routed.enabled || routed.recipients.length === 0) return { sent: 0, failed: 0, held: 0, reason: routed.reason };
-    const now = Date.now();
-    const st = await loadState(supabase, companyId, documentKey, routed.recipients.map((r) => r.id));
-    if (st.error) return { sent: 0, failed: 0, held: 0, reason: 'error' };
-    const { send, hold } = applyCooldown(routed.recipients, st.state, now);
-    for (const h of hold) {
-      const prev = st.state.get(h.id);
-      await saveState(supabase, companyId, documentKey, h.id, prev.last_sent_at, h.suppressed + 1);
-    }
     // A custom form passes its own title; a built-in uses its fixed label.
     const label = DOCUMENT_LABELS[documentKey] || cleanLabel(documentLabel) || 'Custom document';
     const cleanSite = cleanLabel(siteName);
     const where = cleanSite ? ` at ${cleanSite}` : '';
     let sent = 0;
     let failed = 0;
-    for (const r of send) {
+    let held = 0;
+
+    const tell = async (r) => {
+      const claim = await claimSlot(supabase, companyId, documentKey, r.id);
+      if (claim.error) { failed += 1; return; }
+      if (!claim.allowed) { held += 1; return; }
       try {
-        const more = r.suppressed > 0 ? `\n\n${r.suppressed} more ${label}${r.suppressed === 1 ? ' was' : 's were'} submitted since your last notice.` : '';
+        const more = claim.suppressed > 0
+          ? `\n\n${claim.suppressed >= 999 ? '999+' : claim.suppressed} more ${label}${claim.suppressed === 1 ? ' was' : 's were'} submitted since your last notice.`
+          : '';
         await sendEmail({
           to: r.email,
           subject: `New ${label}${where}`,
           text: `A new ${label} was submitted${where}.${more}\n\nLog in to FORA to view it.`,
         });
-        await saveState(supabase, companyId, documentKey, r.id, new Date(now).toISOString(), 0);
         sent += 1;
       } catch (e) {
         failed += 1;
         console.error('routed notification email failed:', e && e.message);
       }
+    };
+    for (let i = 0; i < routed.recipients.length; i += SEND_CONCURRENCY) {
+      await Promise.all(routed.recipients.slice(i, i + SEND_CONCURRENCY).map(tell));
     }
-    return { sent, failed, held: hold.length, reason: 'ok' };
+    return { sent, failed, held, reason: failed > 0 && sent === 0 && held === 0 ? 'error' : 'ok' };
   } catch (e) {
     console.error('notifyOnSubmit failed:', e && e.message);
     return { sent: 0, failed: 0, held: 0, reason: 'error' };
