@@ -5899,7 +5899,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             </div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
-                            {f.awaiting_signature === true && <span title={f.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>{rec.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
+                            {f.awaiting_signature === true && <span title={f.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>{f.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
                             {f.status === "pending_approval" && f.awaiting_signature !== true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.danger.solid, padding: "3px 9px", borderRadius: RAD.pill }}>NEEDS SIGN-OFF</span>}
                             {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                             {highRisk > 0 && <RiskBadge risk="High" />}
@@ -6040,7 +6040,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
-                          {insp.awaiting_signature === true && <span title={insp.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>{rec.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
+                          {insp.awaiting_signature === true && <span title={insp.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>{insp.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
                           {def > 0
                             ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{def} defective</span>
                             : mon > 0
