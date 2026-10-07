@@ -69,7 +69,7 @@ export default function CrewScreen({ token, userId, userName, companyName, crew,
   const docLabel = (key) => taskDocs.find(d => d.key === key)?.label || key;
   // Saved by a crew member to sign afterwards: nothing to sign off yet. After a
   // day it is flagged so the lead can nudge them.
-  const unsigned = flhas.filter(f => f.awaiting_signature === true);
+  const unsigned = flhas.filter(f => f.awaiting_signature === true && !f.unsigned_closed_at);
   const isOverdue = (f) => f.signature_requested_at && Date.now() - new Date(f.signature_requested_at).getTime() > 24 * 60 * 60 * 1000;
   const waiting = flhas.filter(f => f.status === "pending_approval" && f.awaiting_signature !== true && Number(f.submitted_by_roster_id) !== Number(userId));
 
@@ -197,7 +197,7 @@ export default function CrewScreen({ token, userId, userName, companyName, crew,
                 <div style={{ fontWeight: 700, fontSize: 14.5 }}>{d.title}{d.subtitle ? ` · ${d.subtitle}` : ""}</div>
                 <div style={{ fontSize: 12.5, color: C.text.muted }}>
                   {d.author || "Unknown"}{d.enteredBy ? ` (entered by ${d.enteredBy})` : ""} · {new Date(d.createdAt).toLocaleDateString("en-CA")}
-                  {d.awaitingSignature ? " · not signed by the worker yet" : d.status === "pending_approval" ? " · waiting for sign-off" : ""}
+                  {d.awaitingSignature ? (d.unsignedClosed ? " · closed unsigned" : " · not signed by the worker yet") : d.status === "pending_approval" ? " · waiting for sign-off" : ""}
                 </div>
               </div>
               {d.pdf_url && (

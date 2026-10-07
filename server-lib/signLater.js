@@ -13,6 +13,8 @@
 // rather than quietly storing an unsigned record that nothing blocks.
 
 export const SIGN_LATER_OVERDUE_MS = 24 * 60 * 60 * 1000;
+// An unsigned record is closed (kept, never counted, no longer signable) after this long.
+export const UNSIGNED_CLOSE_MS = 10 * 24 * 60 * 60 * 1000;
 
 // Tables that can carry the flag. A table name from a request is never used;
 // callers pass one of these constants.
@@ -50,7 +52,7 @@ export async function loadSignState(supabase, table, id, companyId) {
   if (!SIGN_LATER_TABLES.includes(table)) return { error: true };
   const wide = await supabase
     .from(table)
-    .select('id, company_id, submitted_by_roster_id, awaiting_signature, signature_requested_at')
+    .select('id, company_id, submitted_by_roster_id, awaiting_signature, signature_requested_at, unsigned_closed_at')
     .eq('id', id)
     .eq('company_id', companyId)
     .limit(1);
@@ -71,6 +73,7 @@ export async function loadSignState(supabase, table, id, companyId) {
   return {
     found: true,
     awaiting: row.awaiting_signature === true,
+    closed: !!row.unsigned_closed_at,
     requestedAt: row.signature_requested_at || null,
     authorId: row.submitted_by_roster_id == null ? null : Number(row.submitted_by_roster_id),
     companyId: row.company_id,
@@ -89,6 +92,7 @@ export async function completeSignature(supabase, { table, id, session, update, 
   if (!state.found || state.authorId == null || state.authorId !== Number(session.userId)) {
     return { denied: { status: 403, error: 'That is not yours to sign.' } };
   }
+  if (state.closed) return { denied: { status: 409, error: 'This record was closed unsigned after 10 days and can no longer be signed. Ask your supervisor.' } };
   if (!state.awaiting) return { denied: { status: 409, error: 'That record is already signed.' } };
   const { data, error } = await supabase
     .from(table)
@@ -97,6 +101,7 @@ export async function completeSignature(supabase, { table, id, session, update, 
     .eq('company_id', session.companyId)
     .eq('submitted_by_roster_id', Number(session.userId))
     .eq('awaiting_signature', true)
+    .is('unsigned_closed_at', null)
     .select('id');
   if (error) return { denied: { status: 500, error: 'Could not save your signature. Try again.' } };
   // A second, simultaneous signature matches nothing: report it, don't claim a write.

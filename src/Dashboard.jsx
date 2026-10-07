@@ -552,9 +552,9 @@ export function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSu
 
         {awaitingSig && (
           <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {flha.worker_name || "the worker"}'s signature</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>{flha.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${flha.worker_name || "the worker"}'s signature`}</div>
             <div style={{ fontSize: 13, color: "#A1A1AA" }}>
-              {flha.worker_name || "The worker"} saved this FLHA to sign afterwards{flha.signature_requested_at ? ` on ${new Date(flha.signature_requested_at).toLocaleString("en-CA")}` : ""}. {isPending ? "It can be signed off once they have signed it." : ""}
+              {flha.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(flha.unsigned_closed_at).toLocaleDateString("en-CA")}. It can no longer be signed and it is not counted. ` : ""}{flha.worker_name || "The worker"} saved this FLHA to sign afterwards{flha.signature_requested_at ? ` on ${new Date(flha.signature_requested_at).toLocaleString("en-CA")}` : ""}. {isPending ? "It can be signed off once they have signed it." : ""}
             </div>
           </div>
         )}
@@ -651,8 +651,8 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         {insp.awaiting_signature === true && (
           <div style={{ background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 13, color: "#FBBF24" }}>Awaiting {insp.worker_name || "the inspector"}'s signature</div>
-            <div style={{ fontSize: 12.5, color: "#D4D4D8", marginTop: 2 }}>Saved to sign afterwards. Its reading doesn't count toward maintenance or fuel until they sign, and it can be edited once they have.</div>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#FBBF24" }}>{insp.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${insp.worker_name || "the inspector"}'s signature`}</div>
+            <div style={{ fontSize: 12.5, color: "#D4D4D8", marginTop: 2 }}>{insp.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(insp.unsigned_closed_at).toLocaleDateString("en-CA")} and can no longer be signed. ` : ""}Saved to sign afterwards. Its reading doesn't count toward maintenance or fuel until they sign, and it can be edited once they have.</div>
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -1139,8 +1139,8 @@ function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewer
           </div>
         ) : nm.awaiting_signature === true ? (
           <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {nm.reporter_name || "the reporter"}'s signature</div>
-            <div style={{ fontSize: 13, color: "#A1A1AA" }}>Saved to sign afterwards{nm.signature_requested_at ? ` on ${new Date(nm.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>{nm.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${nm.reporter_name || "the reporter"}'s signature`}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{nm.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(nm.unsigned_closed_at).toLocaleDateString("en-CA")} and can no longer be signed. ` : ""}Saved to sign afterwards{nm.signature_requested_at ? ` on ${new Date(nm.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
           </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #B45309", marginTop: 8, paddingTop: 14 }}>
@@ -1339,8 +1339,8 @@ function IncidentCard({ inc, onClose, onDelete, onReview, onSave, defaultReviewe
           </div>
         ) : inc.awaiting_signature === true ? (
           <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {inc.reporter_name || "the reporter"}'s signature</div>
-            <div style={{ fontSize: 13, color: "#A1A1AA" }}>Saved to sign afterwards{inc.signature_requested_at ? ` on ${new Date(inc.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>{inc.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${inc.reporter_name || "the reporter"}'s signature`}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{inc.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(inc.unsigned_closed_at).toLocaleDateString("en-CA")} and can no longer be signed. ` : ""}Saved to sign afterwards{inc.signature_requested_at ? ` on ${new Date(inc.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
           </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #F87171", marginTop: 8, paddingTop: 14 }}>
@@ -5745,10 +5745,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     const tone = feedTone(type, doc);
                     let statusLabel = "Logged", statusColor = C.text.muted;
                     if (type === "flha") {
-                      statusLabel = doc.awaiting_signature === true ? "Awaiting worker signature" : doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
+                      statusLabel = doc.unsigned_closed_at ? "Closed unsigned" : doc.awaiting_signature === true ? "Awaiting worker signature" : doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
                       statusColor = doc.awaiting_signature === true || doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
                     } else if (type === "nearmiss" || type === "incident") {
-                      statusLabel = doc.awaiting_signature === true ? "Awaiting signature" : doc.reviewed ? "Reviewed" : "Pending review";
+                      statusLabel = doc.unsigned_closed_at ? "Closed unsigned" : doc.awaiting_signature === true ? "Awaiting signature" : doc.reviewed ? "Reviewed" : "Pending review";
                       statusColor = doc.reviewed && doc.awaiting_signature !== true ? C.text.muted : C.status.warning.text;
                     } else if (type === "certification") {
                       statusLabel = doc.status === "expired" ? "Expired" : doc.status === "expiring_soon" ? "Expiring soon" : doc.unverified ? "Unverified" : "Uploaded";
