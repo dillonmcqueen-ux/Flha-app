@@ -58,10 +58,10 @@ export const ENFORCED_BUILTIN_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss
 export function isAssignableKey(key) {
   return ENFORCED_BUILTIN_KEYS.includes(key) || /^custom_\d+$/.test(String(key)) || /^portal_\d+$/.test(String(key));
 }
-// Portal documents are enforced on submit only: their supervisor reads are
-// routed by department in api/portal.js and do not consult view rows (break
-// #47 in docs/feature-interaction-map.md). A view row there would be accepted
-// and do nothing, so it is not offered.
+// Portal documents take submit assignments only. Their supervisor reads are
+// picked by department in api/portal.js and then narrowed by the site and
+// author rule (rule A, break #47), but they do not consult view rows, so a view
+// row there would be accepted and do nothing, and it is not offered.
 export function isAssignableAction(key, action) {
   if (!isAssignableKey(key)) return false;
   if (action !== SUBMIT && action !== VIEW) return false;
