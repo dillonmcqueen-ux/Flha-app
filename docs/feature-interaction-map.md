@@ -15,7 +15,7 @@ paying for, and nobody finds out.
 two features already talk. Every claim below is annotated with the file and
 line that proves it, so it can be re-verified rather than trusted.
 
-**Near Miss follow-ups closed 2026-10-07 (`0a1d7db`): NM-1 to NM-7 and W-S3/W-S4 re-verified in code, see the sign-afterwards section; one new weak point NM-8 (the new `awaiting_signature` selects have no missing-column fallback). The "NM-1 to NM-7 open" wording elsewhere is history.**
+**Near Miss follow-ups closed 2026-10-07 (`0a1d7db`): NM-1 to NM-7 and W-S3/W-S4 re-verified in code, see the sign-afterwards section; one new weak point NM-8 (the new `awaiting_signature` selects have no missing-column fallback). NM-8 is low risk: the live database was checked on 2026-10-07 and all four tables (`flhas`, `inspections`, `incidents`, `near_misses`) carry the three sign-later columns, so the unguarded selects work; it only matters for an environment without the migration. The "NM-1 to NM-7 open" wording elsewhere is history.**
 
 **Near Miss sign-afterwards placed 2026-10-07 (`baa69e9`): NM-1 to NM-7 in the sign-afterwards section; the FLHA-only wording there is stale (Incident, Inspection and Near Miss write the state too).**
 
