@@ -648,6 +648,12 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000B3", zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        {insp.awaiting_signature === true && (
+          <div style={{ background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#FBBF24" }}>Awaiting {insp.worker_name || "the inspector"}'s signature</div>
+            <div style={{ fontSize: 12.5, color: "#D4D4D8", marginTop: 2 }}>Saved to sign afterwards. Its reading doesn't count toward maintenance or fuel until they sign, and it can be edited once they have.</div>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -6008,6 +6014,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
+                          {insp.awaiting_signature === true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>AWAITING SIGNATURE</span>}
                           {def > 0
                             ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{def} defective</span>
                             : mon > 0
