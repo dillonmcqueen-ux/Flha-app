@@ -47,7 +47,7 @@ const reset = () => {
   };
 };
 reset();
-const inserts = { incidents: [], near_misses: [] };
+const inserts = { incidents: [], near_misses: [], company_signals: [], corrective_actions: [] };
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -83,6 +83,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'DELETE') return send(200, []);
     return send(200, filt(ROWS[table]));
+  }
+  if (table === 'company_signals' || table === 'corrective_actions') {
+    if (req.method === 'POST') { (Array.isArray(payload) ? payload : [payload]).forEach(r => inserts[table].push(r)); return send(201, []); }
+    return send(200, []);
   }
   if (table === 'document_assignments') return send(200, []);
   if (table === 'audit_log') return send(201, []);
@@ -224,13 +228,54 @@ test('an unsigned report cannot be edited under its author, and an admin lookup 
   assert.equal(signedEdit.statusCode, 200, JSON.stringify(signedEdit.body));
 });
 
-test('a near miss without a signature still saves as it did (no sign screen yet), and is_anonymous is a strict boolean', async () => {
+test('a named near miss without a signature waits for one, an anonymous one never does, and is_anonymous is a strict boolean', async () => {
   reset(); inserts.near_misses.length = 0;
-  const out = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: false, site: 'Pit', involved: 'x', report_json: {} } });
-  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
-  assert.notEqual(inserts.near_misses[0].awaiting_signature, true);
+  const named = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: false, site: 'Pit', involved: 'x', report_json: {} } });
+  assert.equal(named.statusCode, 200, JSON.stringify(named.body));
+  assert.equal(named.body.awaitingSignature, true);
+  assert.equal(inserts.near_misses[0].awaiting_signature, true);
+  const anon = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'Anonymous', is_anonymous: true, site: 'Pit', involved: 'x', report_json: {} } });
+  assert.equal(anon.statusCode, 200, JSON.stringify(anon.body));
+  assert.notEqual(inserts.near_misses[1].awaiting_signature, true, 'anonymous takes no signature and never waits');
+  const anonLater = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'Anonymous', is_anonymous: true, site: 'Pit', involved: 'x', report_json: {}, sign_later: true } });
+  assert.equal(anonLater.statusCode, 400, 'anonymous can never be sign-later');
   const str = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: 'true', site: 'Pit', involved: 'x', report_json: {}, sign_later: true } });
   assert.equal(str.statusCode, 200, JSON.stringify(str.body));
-  assert.equal(inserts.near_misses[1].is_anonymous, false, 'a string is not truthy anonymity');
+  assert.equal(inserts.near_misses[2].is_anonymous, false, 'a string is not truthy anonymity');
 });
 
+test('a sign-later near miss opens no signal or corrective action until it is signed; a signed one does at once', async () => {
+  reset();
+  for (const k of Object.keys(inserts)) inserts[k].length = 0;
+  const report = { severity: 'High', correctiveActions: ['Fit a backup alarm'] };
+  const later = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: false, site: 'Pit', involved: 'Loader', report_json: report, sign_later: true } });
+  assert.equal(later.statusCode, 200, JSON.stringify(later.body));
+  assert.equal(inserts.company_signals.length, 0, 'no Brain signal while unsigned');
+  assert.equal(inserts.corrective_actions.length, 0, 'no corrective action while unsigned');
+
+  ROWS.near_misses.find(r => r.id === 301).report_json = report;
+  ROWS.near_misses.find(r => r.id === 301).involved = 'Loader';
+  const signedNow = await run({ type: 'nearmiss', action: 'sign_now', token: as(11, 'worker'), id: 301, signatureReceipt: sigReceipt(), pdfUrl: pdfReceipt() });
+  assert.equal(signedNow.statusCode, 200, JSON.stringify(signedNow.body));
+  assert.equal(inserts.company_signals.length, 1, 'signal written on signing');
+  assert.equal(inserts.company_signals[0].source_type, 'near_miss');
+  assert.equal(inserts.corrective_actions.length, 1, 'corrective action opened on signing');
+
+  const anon = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'Anonymous', is_anonymous: true, site: 'Pit', involved: 'Loader', report_json: report } });
+  assert.equal(anon.statusCode, 200, JSON.stringify(anon.body));
+  assert.equal(inserts.company_signals.length, 2, 'an anonymous near miss is never unsigned, so it emits at submit');
+});
+
+test('a sign-later incident follows the same rule', async () => {
+  reset();
+  for (const k of Object.keys(inserts)) inserts[k].length = 0;
+  const out = await run({ type: 'incident', action: 'submit', token: as(11, 'worker'), record: incident({ sign_later: true, report_json: { correctiveActions: ['Retrain'] } }) });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.equal(inserts.company_signals.length + inserts.corrective_actions.length, 0);
+  ROWS.incidents.find(r => r.id === 201).report_json = { correctiveActions: ['Retrain'] };
+  ROWS.incidents.find(r => r.id === 201).incident_type = 'Near hit';
+  const signedNow = await run({ type: 'incident', action: 'sign_now', token: as(11, 'worker'), id: 201, signatureReceipt: sigReceipt(), pdfUrl: pdfReceipt() });
+  assert.equal(signedNow.statusCode, 200, JSON.stringify(signedNow.body));
+  assert.equal(inserts.company_signals.length, 1);
+  assert.equal(inserts.corrective_actions.length, 1);
+});

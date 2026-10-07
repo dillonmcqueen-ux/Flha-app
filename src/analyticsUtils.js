@@ -32,7 +32,11 @@ export function reviewBacklog(nearMisses, incidents) {
   const all = [...nearMisses, ...incidents];
   const reviewed = all.filter(r => r.reviewed).length;
   const total = all.length;
-  return { reviewed, outstanding: total - reviewed, total, pct: pct(reviewed, total), caughtUp: total > 0 && reviewed === total };
+  // Counted the same as the review tabs count them, so the numbers reconcile;
+  // `awaitingSignature` says how many of the outstanding ones cannot be
+  // reviewed yet because their author has not signed.
+  const awaitingSignature = all.filter(r => !r.reviewed && r.awaiting_signature === true).length;
+  return { reviewed, outstanding: total - reviewed, awaitingSignature, total, pct: pct(reviewed, total), caughtUp: total > 0 && reviewed === total };
 }
 
 // Matches the FLHA tab's own `highRiskCount` definition exactly (High only,

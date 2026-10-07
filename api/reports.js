@@ -91,6 +91,51 @@ async function verifySession(token) {
   return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
+// What a named incident or near miss sets in motion once it counts: its
+// company_signals row (docs/scope-company-brain.md Phase 3) and the trackable
+// corrective actions (Break #5). Run at submit for a signed report and from
+// sign_now for one saved to sign afterwards. `record` carries incident_type,
+// involved and report_json. Best-effort: the report is already saved, so a
+// failure here is logged and never turned into a failed request. Safe to run
+// twice for one report: the signal is checked first and
+// openCorrectiveActions skips descriptions it already holds.
+async function runReportFollowUps(session, type, id, record) {
+  try {
+    await runReportFollowUpsUnguarded(session, type, id, record);
+  } catch (e) {
+    console.error('report follow-ups failed for', type, id, e && e.message);
+  }
+}
+
+async function runReportFollowUpsUnguarded(session, type, id, record) {
+  if (type !== 'incident' && type !== 'nearmiss') return;
+  const sourceType = type === 'incident' ? 'incident' : 'near_miss';
+  const shortStr = (v) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 200) : null;
+  const reportJson = record && record.report_json;
+  const signalJson = type === 'incident'
+    ? { category: shortStr(record && record.incident_type) }
+    : { involved: shortStr(record && record.involved), severity: shortStr(reportJson && reportJson.severity) };
+  if (Object.values(signalJson).some((v) => v !== null)) {
+    const { data: have } = await supabaseAdmin.from('company_signals').select('id')
+      .eq('company_id', session.companyId).eq('source_type', sourceType).eq('source_id', String(id)).limit(1);
+    if (!have || have.length === 0) {
+      const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+        company_id: session.companyId,
+        source_type: sourceType,
+        source_id: String(id),
+        signal_json: signalJson,
+      });
+      if (signalErr) console.error('company_signals insert failed for', type, id, signalErr.message);
+    }
+  }
+  await openCorrectiveActions(supabaseAdmin, {
+    companyId: session.companyId,
+    sourceType,
+    sourceId: id,
+    descriptions: correctiveActionsFromReport(reportJson),
+  });
+}
+
 // flha-reports/signatures/incident-photos are private buckets — the DB
 // still stores a "public"-shaped URL (upload code never changed), but that
 // string is never itself a working link. Every value handed to a client is
@@ -310,9 +355,9 @@ export default async function handler(req, res) {
       const anonymous = recordToInsert.is_anonymous === true;
       let signLater = record.sign_later === true;
       if (signLater && anonymous) return res.status(400).json({ error: "An anonymous report can't be signed afterwards." });
-      // Near Miss gets the automatic rule when its own sign screen exists; until
-      // then a near miss without a signature saves as it always did.
-      if (!signLater && !anonymous && type === 'incident' && !recordToInsert.signature_url) signLater = true;
+      // A named near miss follows the same rule as an incident: no signature on
+      // it means it waits for one. Anonymous never does.
+      if (!signLater && !anonymous && (type === 'incident' || type === 'nearmiss') && !recordToInsert.signature_url) signLater = true;
       if (signLater) {
         if (!session.userId) return res.status(400).json({ error: 'Signing afterwards needs your own sign-in.' });
         recordToInsert.signature_url = null;
@@ -338,48 +383,10 @@ export default async function handler(req, res) {
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
       const newId = data?.[0]?.id || null;
 
-      // docs/scope-company-brain.md Phase 3 — log the category/topic of
-      // every incident and near-miss as a company_signals row, same
-      // best-effort discipline as api/flhas.js's FLHA-edit signal: never
-      // allowed to affect the report submission itself, which is already
-      // saved by the time this runs.
-      if (newId && (type === 'incident' || type === 'nearmiss')) {
-        const shortStr = (v) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 200) : null;
-        const signalJson = type === 'incident'
-          ? { category: shortStr(record.incident_type) }
-          : { involved: shortStr(record.involved), severity: shortStr(record.report_json?.severity) };
-        if (Object.values(signalJson).some((v) => v !== null)) {
-          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
-            company_id: session.companyId,
-            source_type: type === 'incident' ? 'incident' : 'near_miss',
-            source_id: String(newId),
-            signal_json: signalJson,
-          });
-          if (signalErr) console.error('company_signals insert failed for', type, newId, signalErr.message);
-        }
-      }
-
-      // Break #5 — until now, an incident's corrective actions existed only
-      // as free text inside report_json: AI-drafted, edited by whoever wrote
-      // the report, printed on the PDF by src/generateIncidentPDF.js, and
-      // then nothing. No owner, no target date, no status, and never counted
-      // in the dashboard's Open Corrective Actions. The one document type
-      // that most obviously demands follow-up was the one that could not
-      // have a tracked one, because corrective_actions.answer_id was NOT
-      // NULL against a monthly inspection.
-      //
-      // The text stays exactly where it is — the PDF is a legal record and
-      // is not changing shape. These rows are a parallel, trackable copy.
-      // Best-effort: the report is already saved, and a failure here is
-      // logged inside the helper, never turned into a failed submit.
-      if (newId && (type === 'incident' || type === 'nearmiss')) {
-        await openCorrectiveActions(supabaseAdmin, {
-          companyId: session.companyId,
-          sourceType: type === 'incident' ? 'incident' : 'near_miss',
-          sourceId: newId,
-          descriptions: correctiveActionsFromReport(record.report_json),
-        });
-      }
+      // The Brain signal and the corrective actions follow the author's
+      // signature: a report nobody has signed yet opens nothing, and a
+      // sign-later one runs them from sign_now instead.
+      if (newId && !signLater) await runReportFollowUps(session, type, newId, record);
 
       return res.status(200).json({ id: newId, pdfLinked, photosLinked, signatureLinked, awaitingSignature: signLater });
     }
@@ -432,8 +439,12 @@ export default async function handler(req, res) {
         nowIso: new Date().toISOString(),
       });
       if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
-      const { data: after } = await supabaseAdmin.from(table.name).select('pdf_url').eq('id', id).limit(1);
-      const stored = after && after[0] && after[0].pdf_url;
+      const afterCols = type === 'incident' ? 'pdf_url, incident_type, report_json' : 'pdf_url, involved, report_json';
+      const { data: after } = await supabaseAdmin.from(table.name).select(afterCols).eq('id', id).eq('company_id', session.companyId).limit(1);
+      const row = after && after[0];
+      // Now that it counts: its Brain signal and corrective actions.
+      if (row) await runReportFollowUps(session, type, id, row);
+      const stored = row && row.pdf_url;
       const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
     }
@@ -560,7 +571,9 @@ export default async function handler(req, res) {
       if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
       const pdfLinked = !receiptWasDropped(pdfUrl, resolvedPdfUrl);
 
-      const { error } = await supabaseAdmin.from(table.name).update(update).eq('id', id);
+      let editWrite = supabaseAdmin.from(table.name).update(update).eq('id', id);
+      if (session.role === 'supervisor') editWrite = editWrite.eq('company_id', session.companyId);
+      const { error } = await editWrite;
       if (error) return res.status(500).json({ error: 'Update failed.' });
       // Sign the pdf_url now stored on the row, not the `pdfUrl` string the
       // client sent. Signing a request-supplied path turned this endpoint
@@ -591,7 +604,9 @@ export default async function handler(req, res) {
         const delDenied = await requireRecordsAccess(supabaseAdmin, session, table.docKey, [existing[0]]);
         if (delDenied) return res.status(delDenied.status).json({ error: delDenied.error });
       }
-      const { error } = await supabaseAdmin.from(table.name).delete().eq('id', id);
+      let deleteWrite = supabaseAdmin.from(table.name).delete().eq('id', id);
+      if (session.role === 'supervisor') deleteWrite = deleteWrite.eq('company_id', session.companyId);
+      const { error } = await deleteWrite;
       if (error) return res.status(500).json({ error: 'Delete failed.' });
       return res.status(200).json({ ok: true });
     }

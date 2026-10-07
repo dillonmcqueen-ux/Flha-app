@@ -979,6 +979,7 @@ function ReportRow({ rec, last, onClick, kind }) {
             <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "2px 9px", borderRadius: RAD.pill, border: sev === "Critical" ? "none" : `1px solid ${sc.border}` }}>{sev.toUpperCase()}</span>
             {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "2px 8px", borderRadius: RAD.pill }}>{rec.incident_type}</span>}
             <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{rec.site}</div>
+            {rec.awaiting_signature === true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "2px 9px", borderRadius: RAD.pill }}>AWAITING SIGNATURE</span>}
           </div>
           <div style={{ fontSize: 13, color: C.text.body }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
           <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{who}{rec.occurred_at ? ` · ${formatOccurredAt(rec.occurred_at)}` : ""}</div>
@@ -1077,7 +1078,7 @@ function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewer
             {onDelete && (
               <button onClick={() => onDelete(nm.id)} style={{ background: "rgba(239,68,68,0.14)", color: "#DC2626", border: "1.5px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>🗑 Delete</button>
             )}
-            {onSave && !editing && <EditToggleButton onClick={startEdit} />}
+            {onSave && !editing && nm.awaiting_signature !== true && <EditToggleButton onClick={startEdit} />}
             <button onClick={onClose} style={{ background: "#1D1D1D", border: "1px solid #242424", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✕ Close</button>
           </div>
         </div>
@@ -1134,6 +1135,11 @@ function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewer
             <div style={{ fontSize: 12, fontWeight: 700, color: "#4ADE80" }}>✓ REVIEWED BY {(nm.reviewed_by || "").toUpperCase()}</div>
             <div style={{ fontSize: 12, color: "#D4D4D8", marginTop: 2 }}>{nm.reviewed_at ? new Date(nm.reviewed_at).toLocaleString("en-CA") : ""}</div>
             {nm.review_notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 6 }}><strong>Action taken:</strong> {nm.review_notes}</div>}
+          </div>
+        ) : nm.awaiting_signature === true ? (
+          <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {nm.reporter_name || "the reporter"}'s signature</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>Saved to sign afterwards{nm.signature_requested_at ? ` on ${new Date(nm.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
           </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #B45309", marginTop: 8, paddingTop: 14 }}>
@@ -1932,6 +1938,11 @@ function CorrectiveActionRow({ ca, onUpdate }) {
       {ca.source_label && (
         <div style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: "#A1A1AA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 999, padding: "2px 8px", marginBottom: 6 }}>
           {ca.source_label}
+        </div>
+      )}
+      {ca.awaiting_signature === true && (
+        <div style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: "#fff", background: C.status.warning.solid, borderRadius: 999, padding: "2px 8px", marginBottom: 6, marginLeft: 6 }}>
+          Report awaiting signature
         </div>
       )}
       {ca.recurrence && ca.recurrence.count >= 2 && (
@@ -4389,6 +4400,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   const reviewNearMiss = async (id, notes, reviewerName) => {
     const record = nearMisses.find(n => n.id === id);
+    if (record && record.awaiting_signature === true) { window.alert("The reporter hasn't signed this report yet."); return; }
     const reviewedBy = (reviewerName || "").trim() || userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
     // record.pdf_url is already a signed URL (the list load signed it) —
@@ -4408,6 +4420,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           companyName: co?.name || "",
           companyLogo: co?.logo_url || "",
           signatureDataUrl: record.signature_url || null,
+          awaitingSignature: record.awaiting_signature === true,
           customFields: record.report_json?.customFields || [],
           reviewed: { by: reviewedBy, at: reviewedAt, notes: notes || null },
           token,
@@ -4663,6 +4676,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const saveNearMissEdit = async (id, edited) => {
     const record = nearMisses.find(n => n.id === id);
     if (!record) return;
+    if (record.awaiting_signature === true) { window.alert("The reporter hasn't signed this report yet. Edit it once they have."); return; }
     const co = companies.find(c => c.id === record.company_id);
     let pdfUrl = null;
     try {
