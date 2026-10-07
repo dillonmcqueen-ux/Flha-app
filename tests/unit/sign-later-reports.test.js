@@ -224,13 +224,18 @@ test('an unsigned report cannot be edited under its author, and an admin lookup 
   assert.equal(signedEdit.statusCode, 200, JSON.stringify(signedEdit.body));
 });
 
-test('a near miss without a signature still saves as it did (no sign screen yet), and is_anonymous is a strict boolean', async () => {
+test('a named near miss without a signature waits for one, an anonymous one never does, and is_anonymous is a strict boolean', async () => {
   reset(); inserts.near_misses.length = 0;
-  const out = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: false, site: 'Pit', involved: 'x', report_json: {} } });
-  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
-  assert.notEqual(inserts.near_misses[0].awaiting_signature, true);
+  const named = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: false, site: 'Pit', involved: 'x', report_json: {} } });
+  assert.equal(named.statusCode, 200, JSON.stringify(named.body));
+  assert.equal(named.body.awaitingSignature, true);
+  assert.equal(inserts.near_misses[0].awaiting_signature, true);
+  const anon = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'Anonymous', is_anonymous: true, site: 'Pit', involved: 'x', report_json: {} } });
+  assert.equal(anon.statusCode, 200, JSON.stringify(anon.body));
+  assert.notEqual(inserts.near_misses[1].awaiting_signature, true, 'anonymous takes no signature and never waits');
+  const anonLater = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'Anonymous', is_anonymous: true, site: 'Pit', involved: 'x', report_json: {}, sign_later: true } });
+  assert.equal(anonLater.statusCode, 400, 'anonymous can never be sign-later');
   const str = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: 'true', site: 'Pit', involved: 'x', report_json: {}, sign_later: true } });
   assert.equal(str.statusCode, 200, JSON.stringify(str.body));
-  assert.equal(inserts.near_misses[1].is_anonymous, false, 'a string is not truthy anonymity');
+  assert.equal(inserts.near_misses[2].is_anonymous, false, 'a string is not truthy anonymity');
 });
-

@@ -169,12 +169,13 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
           return r.ok ? await r.json() : {};
         };
-        const [f, i, n] = await Promise.all([
+        const [f, i, n, nm] = await Promise.all([
           call("/api/flhas", { action: "my_unsigned", token }),
           call("/api/reports", { type: "incident", action: "my_unsigned", token }),
           call("/api/logs", { type: "inspection", action: "my_unsigned", token }),
+          call("/api/reports", { type: "nearmiss", action: "my_unsigned", token }),
         ]);
-        setUnsignedCount((f.flhas || []).length + (i.records || []).length + (n.records || []).length);
+        setUnsignedCount((f.flhas || []).length + (i.records || []).length + (n.records || []).length + (nm.records || []).length);
       } catch (e) { /* offline: no card */ }
     }
     loadUnsigned();

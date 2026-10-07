@@ -23,10 +23,10 @@ function newClientSubmissionId() {
 // caller can tell success from failure. Exported so WorkerMenu.jsx can
 // drain this form's queue without the component mounted.
 export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequest) {
-  const { reporterLabel, anonymous, site, siteId, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig } = payload;
+  const { reporterLabel, anonymous, site, siteId, occurredAt, involved, report, customFields, companyName, companyLogo, companyId, sig, signLater = false } = payload;
 
   let signatureReceipt = null;
-  if (sig) {
+  if (sig && !signLater) {
     try {
       const blob = await (await fetch(sig)).blob();
       const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
@@ -37,9 +37,15 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
       signatureReceipt = receipt || null;
     } catch (e) { /* signature upload failure shouldn't block submission */ }
   }
+  // The signature never reached storage: save the report to be signed
+  // afterwards rather than as a report that looks signed and is not (the
+  // server flags such a report awaiting its signature anyway). An anonymous
+  // near miss takes no signature and is never one of these.
+  const savingUnsigned = !anonymous && (signLater || (!!sig && !signatureReceipt));
 
   const pdfUrl = await generateAndUploadNearMiss({
-    reporter: reporterLabel, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: sig, customFields, token: tokenForRequest,
+    reporter: reporterLabel, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl: savingUnsigned ? null : sig, customFields,
+    awaitingSignature: savingUnsigned, token: tokenForRequest,
   });
 
   let res;
@@ -63,6 +69,7 @@ export async function resubmitNearMiss(payload, clientSubmissionId, tokenForRequ
           report_json: { ...report, customFields },
           signed_by: reporterLabel,
           pdf_url: pdfUrl || null,
+          ...(savingUnsigned ? { sign_later: true } : {}),
         },
       }),
     });
@@ -125,6 +132,8 @@ export default function NearMiss({ companyId, companyName, userName: loginUserNa
   const [signed, setSigned] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  // Saved to be signed afterwards: the done screen says so.
+  const [savedUnsigned, setSavedUnsigned] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -283,12 +292,13 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   // queued and retried automatically once back online instead of silently
   // discarding the report; a real server-side rejection shows an error and
   // lets the worker retry manually.
-  const submit = async () => {
+  const submit = async (signLater = false) => {
     setSigned(true);
     setSaving(true); setSaveError(false);
-    const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+    setSavedUnsigned(signLater);
+    const sig = !signLater && !anonymous && hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const clientSubmissionId = newClientSubmissionId();
-    const payload = { reporterLabel: reporterLabel(), anonymous, site, siteId: siteIdForName(sites, site, siteMode), occurredAt, involved, report, customFields: cf.entries(), companyName, companyLogo, companyId, sig };
+    const payload = { reporterLabel: reporterLabel(), anonymous, site, siteId: siteIdForName(sites, site, siteMode), occurredAt, involved, report, customFields: cf.entries(), companyName, companyLogo, companyId, sig, signLater };
 
     if (!navigator.onLine) {
       await enqueueSubmission("nearmiss", clientSubmissionId, payload);
@@ -299,7 +309,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     }
 
     try {
-      await resubmitNearMiss(payload, clientSubmissionId, token);
+      const saved = await resubmitNearMiss(payload, clientSubmissionId, token);
+      if (saved && saved.awaitingSignature) setSavedUnsigned(true);
       setSaving(false);
       clearDraft("nearmiss", companyId);
       setStep("done");
@@ -524,9 +535,17 @@ Respond ONLY with valid JSON (no markdown, no backticks):
               <span>Couldn't save this report. Check your connection and try again.</span>
             </div>
           )}
-          <button style={s.btn(saving ? disabledBg(C) : (anonymous || hasSignature) ? C.status.success.solid : disabledBg(C))} disabled={saving || (!anonymous && !hasSignature)} onClick={submit}>
+          <button style={s.btn(saving ? disabledBg(C) : (anonymous || hasSignature) ? C.status.success.solid : disabledBg(C))} disabled={saving || (!anonymous && !hasSignature)} onClick={() => submit(false)}>
             {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting…</> : saveError ? "Try Again" : <><CheckCircle2 size={16} strokeWidth={2.25} /> {anonymous ? "Submit Report" : "Sign & Submit Report"}</>}
           </button>
+          {token && !anonymous && !saving && (
+            <>
+              <button style={{ ...s.ghost, marginTop: 8 }} onClick={() => submit(true)}>I'll sign afterwards</button>
+              <div style={{ fontSize: 11.5, color: C.text.faint, textAlign: "center", margin: "6px 0 10px", lineHeight: 1.4 }}>
+                Can't sign right now? Save it and sign from your menu later. Your supervisor can't review it until you do.
+              </div>
+            </>
+          )}
           <button style={s.ghost} onClick={() => setStep("review")}><ArrowLeft size={15} strokeWidth={2.5} /> Back</button>
         </div>
       )}
@@ -549,9 +568,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
         <div style={s.card}>
           <div style={{ textAlign: "center", padding: "20px 0" }}>
             <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />
-            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>Near Miss Reported</div>
+            <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>{savedUnsigned ? "Saved. Sign It Next" : "Near Miss Reported"}</div>
             <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 8 }}>{site} · {reporterLabel()}</div>
-            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>Thank you for reporting. Near-miss reports help prevent injuries before they happen.</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 20 }}>{savedUnsigned ? "This report is saved but not signed yet. Open Needs your signature on your menu and sign it. Your supervisor can't review it until you have." : "Thank you for reporting. Near-miss reports help prevent injuries before they happen."}</div>
             <button style={s.btn(accent)} onClick={onBack}>Back to menu</button>
           </div>
         </div>

@@ -310,9 +310,9 @@ export default async function handler(req, res) {
       const anonymous = recordToInsert.is_anonymous === true;
       let signLater = record.sign_later === true;
       if (signLater && anonymous) return res.status(400).json({ error: "An anonymous report can't be signed afterwards." });
-      // Near Miss gets the automatic rule when its own sign screen exists; until
-      // then a near miss without a signature saves as it always did.
-      if (!signLater && !anonymous && type === 'incident' && !recordToInsert.signature_url) signLater = true;
+      // A named near miss follows the same rule as an incident: no signature on
+      // it means it waits for one. Anonymous never does.
+      if (!signLater && !anonymous && (type === 'incident' || type === 'nearmiss') && !recordToInsert.signature_url) signLater = true;
       if (signLater) {
         if (!session.userId) return res.status(400).json({ error: 'Signing afterwards needs your own sign-in.' });
         recordToInsert.signature_url = null;

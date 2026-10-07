@@ -10,7 +10,7 @@ function wrap(doc, text, x, y, maxW, lh, limit = 276) {
   return y;
 }
 
-export async function generateAndUploadNearMiss({ reporter, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl, customFields, reviewed, token }) {
+export async function generateAndUploadNearMiss({ reporter, site, occurredAt, involved, report, companyName, companyLogo, signatureDataUrl, customFields, reviewed, awaitingSignature = false, token }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, margin = 16, contentW = W - margin * 2;
@@ -118,7 +118,12 @@ export async function generateAndUploadNearMiss({ reporter, site, occurredAt, in
   y += 2; doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(margin, y, W - margin, y); y += 8;
   doc.setTextColor(30, 41, 59); doc.setFont("helvetica", "bold"); doc.setFontSize(9);
   doc.text("Reported By", margin, y); y += 4;
-  if (signatureDataUrl) {
+  if (awaitingSignature) {
+    // Saved to be signed afterwards: say so where the signature will go.
+    doc.setTextColor(180, 83, 9); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text("AWAITING REPORTER SIGNATURE", margin, y + 11);
+    doc.setFont("helvetica", "normal");
+  } else if (signatureDataUrl) {
     try {
       let sigSrc = signatureDataUrl;
       if (!sigSrc.startsWith("data:")) {
