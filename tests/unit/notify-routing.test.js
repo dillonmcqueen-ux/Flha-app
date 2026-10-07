@@ -113,6 +113,11 @@ function claimRpc(tables, clock, args, failRpc) {
 function fakeDb(tables, { failTable = null, failCode = '42P01', failRpc = false, clock = { now: Date.parse('2026-10-07T12:00:00Z') } } = {}) {
   return {
     rpc(name, args) {
+      if (name === 'refund_notification_slot') {
+        const r = (tables.document_notification_state || []).find((x) => x.company_id === args.p_company && x.document_key === args.p_key && x.roster_id === args.p_roster);
+        if (r) { r.sent_in_window = Math.max(r.sent_in_window - Math.max(args.p_slots, 0), 0); r.suppressed_count = Math.min(r.suppressed_count + Math.max(args.p_held, 0), 999); }
+        return Promise.resolve({ data: null, error: null });
+      }
       assert.equal(name, 'claim_notification_slot');
       return Promise.resolve(claimRpc(tables, clock, args, failRpc));
     },
@@ -343,4 +348,18 @@ test('a failed send is not retried on the same submit and does not break the oth
   assert.equal(out.failed, 1);
   assert.equal(out.sent, 1);
   assert.equal(out.reason, 'partial', 'some told, one failed');
+});
+
+test('a failed send gives back the slot it spent and the held count the claim had reset', async () => {
+  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
+  const clock = { now: Date.parse('2026-10-07T12:00:00Z') };
+  const db = fakeDb(tables, { clock });
+  const ok = async () => {};
+  for (let i = 0; i < BURST_LIMIT + 2; i += 1) await notifyOnSubmit(db, { sendEmail: ok, companyId: 7, documentKey: 'incident', record: rec });
+  assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 2));
+  clock.now += COOLDOWN_SECONDS * 1000 + 1000; // new window: the next claim resets the held count
+  const out = await notifyOnSubmit(db, { sendEmail: async () => { throw new Error('boom'); }, companyId: 7, documentKey: 'incident', record: rec });
+  assert.equal(out.failed, 2);
+  assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 2), 'held count restored, not lost');
+  assert.ok(tables.document_notification_state.every((r) => r.sent_in_window === 0), 'the spent slot is returned');
 });
