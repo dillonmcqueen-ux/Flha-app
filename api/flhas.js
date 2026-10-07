@@ -16,6 +16,7 @@ import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { unsignedFields, missingSignColumns, completeSignature, cleanSignature, loadSignState } from '../server-lib/signLater.js';
+import { notifyAudience } from '../server-lib/notifyAudience.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -306,7 +307,7 @@ export default async function handler(req, res) {
         if (record.sign_later === true) return res.status(400).json({ error: 'An amendment is confirmed with your signature.' });
         // Confirm this record actually belongs to the worker's own company first.
         const { data: existing, error: findErr } = await supabaseAdmin
-          .from('flhas').select('id, company_id, worker_name, hazards_json, created_at').eq('id', amendingId).limit(1);
+          .from('flhas').select('id, company_id, worker_name, hazards_json, created_at, status, site_id').eq('id', amendingId).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
@@ -403,6 +404,15 @@ export default async function handler(req, res) {
         const { error } = await supabaseAdmin
           .from('flhas').update(amendUpdate).eq('id', amendingId).eq('company_id', session.companyId);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
+        // An amendment that newly sends the record back for sign-off is the
+        // notice that matters most, so the audience is told once, on that
+        // transition only. Ordinary edits stay quiet.
+        if (amendUpdate.status === 'pending_approval' && existing[0].status !== 'pending_approval') {
+          await notifyAudience(supabaseAdmin, session, 'flha', {
+            siteId: Object.prototype.hasOwnProperty.call(amendUpdate, 'site_id') ? amendUpdate.site_id : (existing[0].site_id ?? null),
+            authorId: authorRosterId(session),
+          });
+        }
         return res.status(200).json({ id: amendingId, status: amendUpdate.status, pdfLinked: amendPdfLinked });
       } else {
         // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued
@@ -508,6 +518,15 @@ export default async function handler(req, res) {
           if (signalErr) console.error('company_signals insert failed for FLHA', newId, signalErr.message);
         }
 
+        // Tell the FLHA's audience once it counts. A sign-later FLHA is told
+        // about when it is signed (sign_now), not when it is saved.
+        if (newId && !signLater) {
+          await notifyAudience(supabaseAdmin, session, 'flha', {
+            siteId: recordToInsert.site_id ?? null,
+            authorId: authorRosterId(session),
+          });
+        }
+
         return res.status(200).json({ id: newId, status: data?.[0]?.status || null, pdfLinked });
       }
     }
@@ -555,7 +574,12 @@ export default async function handler(req, res) {
       const update = { worker_signature: png, pdf_url: resolvedPdfUrl };
       const done = await completeSignature(supabaseAdmin, { table: 'flhas', id, session, update, nowIso: new Date().toISOString() });
       if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
-      const { data: after } = await supabaseAdmin.from('flhas').select('pdf_url, status').eq('id', id).limit(1);
+      const { data: after } = await supabaseAdmin.from('flhas').select('pdf_url, status, site_id, submitted_by_roster_id').eq('id', id).eq('company_id', session.companyId).limit(1);
+      // Now that it counts, tell its audience (completeSignature has already
+      // proved this is the signer's own record in this company).
+      if (after && after[0]) {
+        await notifyAudience(supabaseAdmin, session, 'flha', { siteId: after[0].site_id ?? null, authorId: after[0].submitted_by_roster_id ?? null });
+      }
       const stored = after && after[0] && after[0].pdf_url;
       const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
       return res.status(200).json({ ok: true, status: (after && after[0] && after[0].status) || null, pdfUrl: signedPdfUrl, pdfLinked: !receiptWasDropped(pdfUrl, resolvedPdfUrl) });

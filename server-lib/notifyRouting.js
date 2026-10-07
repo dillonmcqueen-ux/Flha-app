@@ -162,8 +162,10 @@ export function pickRecipients({ record, roster, author = null, divisionSites = 
   // someone the Owner asked for by name.
   const chosen = new Map();
   const mayView = (person) => evaluateAccess(viewRows, actorFor(person, divisionSites), VIEW, nowMs).allowed;
+  // Someone who typed the record in on the author's behalf already knows of it.
+  const skipId = record.skip_roster_id != null ? Number(record.skip_roster_id) : null;
   const add = (person) => {
-    if (person && Number(person.id) !== authorId && mayView(person)) chosen.set(Number(person.id), person);
+    if (person && Number(person.id) !== authorId && Number(person.id) !== skipId && mayView(person)) chosen.set(Number(person.id), person);
   };
   const byId = new Map(roster.map((p) => [Number(p.id), p]));
   for (const id of toIdList(extraRosterIds)) add(byId.get(id));
@@ -180,7 +182,7 @@ export function pickRecipients({ record, roster, author = null, divisionSites = 
 
   if (chosen.size === 0) {
     // The Owner sees everything, so no view row can leave them out.
-    roster.filter((p) => p.is_owner === true && p.role === 'supervisor' && Number(p.id) !== authorId)
+    roster.filter((p) => p.is_owner === true && p.role === 'supervisor' && Number(p.id) !== authorId && Number(p.id) !== skipId)
       .forEach((p) => chosen.set(Number(p.id), p));
   }
 
