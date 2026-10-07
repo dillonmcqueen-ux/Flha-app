@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { authorRosterId, sessionDisplayName } from '../server-lib/authorStamp.js';
+import { notifyAudience } from '../server-lib/notifyAudience.js';
 import { openCorrectiveActions } from '../server-lib/correctiveActions.js';
 import { annotateRecurrence, patternsByEquipment, RECURRENCE_THRESHOLD, RECURRENCE_WINDOW_DAYS } from '../server-lib/recurrence.js';
 import crypto from 'crypto';
@@ -494,6 +495,12 @@ export default async function handler(req, res) {
           console.error('company_signals capture failed for monthly inspection', record.id, e.message);
         }
       }
+
+      // Tell the document's audience (a no-op unless the Owner switched it on).
+      await notifyAudience(supabaseAdmin, session, 'monthly', {
+        siteId,
+        authorId: authorRosterId(session),
+      });
 
       return res.status(200).json({ id: record.id, pdfLinked });
     }

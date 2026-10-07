@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { authorRosterId, sessionDisplayName } from '../server-lib/authorStamp.js';
+import { notifyAudience } from '../server-lib/notifyAudience.js';
 import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
@@ -646,7 +647,7 @@ export default async function handler(req, res) {
       if (!siteRows || siteRows.length === 0 || siteRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed for this site.' });
       }
-      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('id, company_id, is_active').eq('id', formId).limit(1);
+      const { data: formRows } = await supabaseAdmin.from('custom_forms').select('id, company_id, is_active, title').eq('id', formId).limit(1);
       if (!formRows || formRows.length === 0 || formRows[0].company_id !== session.companyId) {
         return res.status(403).json({ error: 'Not allowed for this form.' });
       }
@@ -728,6 +729,12 @@ export default async function handler(req, res) {
           record_id: record.id, question_id: a.questionId, answer: !!a.answer, notes: a.note || null,
         });
       }
+
+      await notifyAudience(supabaseAdmin, session, `custom_${formRows[0].id}`, {
+        siteId,
+        authorId: authorRosterId(session),
+        documentLabel: formRows[0].title,
+      });
 
       return res.status(200).json({ id: record.id, pdfLinked });
     }

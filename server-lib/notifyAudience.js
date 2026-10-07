@@ -21,11 +21,13 @@
 import { notifyOnSubmit } from './notifyRouting.js';
 import { sendEmail } from './email.js';
 
-export const WIRED_DOCUMENT_KEYS = new Set(['incident', 'nearmiss', 'flha', 'inspection', 'toolbox', 'daily']);
+export const WIRED_DOCUMENT_KEYS = new Set(['incident', 'nearmiss', 'flha', 'inspection', 'toolbox', 'daily', 'monthly']);
+// A company's own document: custom_<formId>. Its name comes from the form title.
+const CUSTOM_KEY = /^custom_[0-9]+$/;
 
-export async function notifyAudience(supabase, session, documentKey, { siteId, authorId, skipId } = {}) {
+export async function notifyAudience(supabase, session, documentKey, { siteId, authorId, skipId, documentLabel } = {}) {
   try {
-    if (!WIRED_DOCUMENT_KEYS.has(documentKey)) return;
+    if (!WIRED_DOCUMENT_KEYS.has(documentKey) && !CUSTOM_KEY.test(documentKey)) return;
     if (!session || !session.companyId) return;
     if (!process.env.RESEND_API_KEY) return;
     const { data: co } = await supabase.from('companies').select('suspended').eq('id', session.companyId).limit(1);
@@ -41,6 +43,7 @@ export async function notifyAudience(supabase, session, documentKey, { siteId, a
       documentKey,
       record: { site_id: siteId ?? null, submitted_by_roster_id: authorId ?? null, skip_roster_id: skipId ?? null },
       siteName,
+      documentLabel,
     });
   } catch (e) {
     console.error('report notification failed:', e && e.message);
