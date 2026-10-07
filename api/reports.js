@@ -13,6 +13,7 @@ import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { unsignedFields, missingSignColumns, completeSignature, loadSignState } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -184,6 +185,13 @@ const SUBMITTABLE_FIELDS = {
   nearmiss: ['reporter_name', 'is_anonymous', 'site', 'site_id', 'occurred_at', 'involved', 'report_json', 'signed_by', 'pdf_url'],
 };
 
+// Which company a report belongs to, for the founder/admin path that has none
+// of its own. null when the row is not found.
+async function companyOfRecord(tableName, id) {
+  const { data } = await supabaseAdmin.from(tableName).select('company_id').eq('id', id).limit(1);
+  return (data && data[0] && data[0].company_id) || null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -286,6 +294,22 @@ export default async function handler(req, res) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }
 
+      // "I'll sign afterwards": saved now, signed later by the person it is
+      // stamped to. A report with no signature on it (none sent, or the
+      // signature upload failed) is saved the same way rather than as a
+      // finished-looking record nobody signed. An anonymous near miss takes no
+      // signature by design and is never one of these: it has no author who
+      // could sign it later.
+      const anonymous = recordToInsert.is_anonymous === true;
+      let signLater = record.sign_later === true;
+      if (signLater && anonymous) return res.status(400).json({ error: "An anonymous report can't be signed afterwards." });
+      if (!signLater && !anonymous && !recordToInsert.signature_url) signLater = true;
+      if (signLater) {
+        if (!session.userId) return res.status(400).json({ error: 'Signing afterwards needs your own sign-in.' });
+        recordToInsert.signature_url = null;
+        Object.assign(recordToInsert, unsignedFields(new Date().toISOString()));
+      }
+
       const { data, error } = await supabaseAdmin
         .from(table.name)
         // Break #3 — author from the session, never the request. The
@@ -299,6 +323,9 @@ export default async function handler(req, res) {
         })
         .select('id')
         .limit(1);
+      if (error && signLater && missingSignColumns(error)) {
+        return res.status(503).json({ error: "Signing afterwards isn't switched on yet. Sign now, or ask your Owner." });
+      }
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
       const newId = data?.[0]?.id || null;
 
@@ -345,7 +372,61 @@ export default async function handler(req, res) {
         });
       }
 
-      return res.status(200).json({ id: newId, pdfLinked, photosLinked, signatureLinked });
+      return res.status(200).json({ id: newId, pdfLinked, photosLinked, signatureLinked, awaitingSignature: signLater });
+    }
+
+    // ── Worker: my reports saved to sign afterwards ──────────────────
+    // The caller's OWN unsigned reports only (roster id from the session). The
+    // full report comes back because signing regenerates the PDF with the
+    // signature on it.
+    if (action === 'my_unsigned') {
+      if ((session.role !== 'worker' && session.role !== 'supervisor') || !session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { data, error } = await supabaseAdmin
+        .from(table.name)
+        .select(table.listColumns + ', signature_requested_at')
+        .eq('company_id', session.companyId)
+        .eq('submitted_by_roster_id', Number(session.userId))
+        .eq('awaiting_signature', true)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) {
+        if (missingSignColumns(error)) return res.status(200).json({ records: [] });
+        return res.status(500).json({ error: 'Could not load your unsigned reports.' });
+      }
+      const records = await signRows(supabaseAdmin, data || [], [
+        { key: 'pdf_url', bucket: 'flha-reports' },
+        { key: 'photo_urls', bucket: 'incident-photos' },
+      ]);
+      return res.status(200).json({ records });
+    }
+
+    // ── Worker: sign a report I saved to sign afterwards ─────────────
+    // Only the roster member it is stamped to, checked against the row. The
+    // signature arrives as an upload receipt like everywhere else here, and
+    // the signed PDF must have uploaded too before the record counts as
+    // signed.
+    if (action === 'sign_now') {
+      if ((session.role !== 'worker' && session.role !== 'supervisor') || !session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { id, signatureReceipt, pdfUrl } = req.body;
+      if (!id) return res.status(400).json({ error: 'Missing record id.' });
+      const signatureUrl = storedUrlFromClientReceipt(signatureReceipt, session.companyId, 'signatures');
+      if (!signatureUrl) return res.status(400).json({ error: "Your signature didn't upload. Check your connection and sign again." });
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (!resolvedPdfUrl) return res.status(400).json({ error: "Your signed copy didn't upload. Check your connection and sign again." });
+      const done = await completeSignature(supabaseAdmin, {
+        table: table.name, id, session,
+        update: { signature_url: signatureUrl, pdf_url: resolvedPdfUrl },
+        nowIso: new Date().toISOString(),
+      });
+      if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
+      const { data: after } = await supabaseAdmin.from(table.name).select('pdf_url').eq('id', id).limit(1);
+      const stored = after && after[0] && after[0].pdf_url;
+      const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
     }
 
     // ── Supervisor / Admin: load reports for the dashboard ──────────
@@ -353,9 +434,15 @@ export default async function handler(req, res) {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
-      let query = supabaseAdmin.from(table.name).select(table.listColumns).order('created_at', { ascending: false });
-      if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
-      const { data: allRows, error } = await query;
+      const runList = (columns) => {
+        let q = supabaseAdmin.from(table.name).select(columns).order('created_at', { ascending: false });
+        if (session.role === 'supervisor') q = q.eq('company_id', session.companyId);
+        return q;
+      };
+      // The sign-later columns ride along; a database without them has no
+      // unsigned reports, so the read is retried without.
+      let { data: allRows, error } = await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`);
+      if (error && missingSignColumns(error)) ({ data: allRows, error } = await runList(table.listColumns));
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, table.docKey, allRows || []);
       if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
@@ -374,6 +461,14 @@ export default async function handler(req, res) {
       if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, notes, pdfUrl, reviewedBy: reviewedByInput } = req.body;
       if (!id) return res.status(400).json({ error: 'Missing record id.' });
+
+      // Nobody marks a report reviewed before its author has signed it.
+      {
+        const reviewCompany = session.role === 'admin' ? await companyOfRecord(table.name, id) : session.companyId;
+        const signState = await loadSignState(supabaseAdmin, table.name, id, reviewCompany);
+        if (signState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
+        if (signState.found && signState.awaiting) return res.status(409).json({ error: "The author hasn't signed this report yet." });
+      }
 
       if (session.role === 'supervisor') {
         const { data: existing, error: findErr } = await supabaseAdmin.from(table.name).select('id, company_id, site_id, submitted_by_roster_id').eq('id', id).limit(1);
