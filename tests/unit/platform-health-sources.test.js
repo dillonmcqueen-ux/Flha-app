@@ -44,8 +44,10 @@ test('every cron file that records cron_run is scheduled in vercel.json', () => 
 
 test('CRONS cadence roughly matches the vercel.json schedule', () => {
   for (const c of vercelCrons) {
-    const [, , dom, , dow] = c.schedule.split(' ');
-    const expected = dow !== '*' ? 168 : dom !== '*' ? 720 : 24;
+    const [min, , dom, , dow] = c.schedule.split(' ');
+    // A "*/N * * * *" schedule runs every N minutes.
+    const everyMinutes = /^\*\/(\d+)$/.exec(min);
+    const expected = everyMinutes ? Number(everyMinutes[1]) / 60 : dow !== '*' ? 168 : dom !== '*' ? 720 : 24;
     const sub = CRONS.find((x) => c.path.endsWith(x.subtype.replace(/_/g, '-')));
     assert.ok(sub, `no CRONS entry for ${c.path}`);
     assert.equal(sub.cadenceHours, expected, `${c.path} runs "${c.schedule}" but CRONS says ${sub.cadenceHours}h`);

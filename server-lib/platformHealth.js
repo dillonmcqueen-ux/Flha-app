@@ -41,6 +41,7 @@ export const CRONS = [
   { subtype: 'equipment_reports', label: 'Weekly equipment and time clock reports', cadenceHours: 168 },
   { subtype: 'company_brain_summary', label: 'Company Brain summary', cadenceHours: 24 },
   { subtype: 'portal_reports', label: 'Portal department reports', cadenceHours: 24 },
+  { subtype: 'notification_digest', label: 'Held-notice digest', cadenceHours: 10 / 60 },
 ];
 
 export const AI_LABELS = {
