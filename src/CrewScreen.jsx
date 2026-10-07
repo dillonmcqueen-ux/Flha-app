@@ -67,11 +67,16 @@ export default function CrewScreen({ token, userId, userName, companyName, crew,
 
   const personName = (id) => crew.find(p => p.id === id)?.name || "Someone";
   const docLabel = (key) => taskDocs.find(d => d.key === key)?.label || key;
-  const waiting = flhas.filter(f => f.status === "pending_approval" && Number(f.submitted_by_roster_id) !== Number(userId));
+  // Saved by a crew member to sign afterwards: nothing to sign off yet. After a
+  // day it is flagged so the lead can nudge them.
+  const unsigned = flhas.filter(f => f.awaiting_signature === true);
+  const isOverdue = (f) => f.signature_requested_at && Date.now() - new Date(f.signature_requested_at).getTime() > 24 * 60 * 60 * 1000;
+  const waiting = flhas.filter(f => f.status === "pending_approval" && f.awaiting_signature !== true && Number(f.submitted_by_roster_id) !== Number(userId));
 
   const approve = async (record, supName, supSignature) => {
     const now = new Date();
     let pdfUrl = null;
+    if (record.awaiting_signature === true) { setError("The worker hasn't signed this FLHA yet."); return; }
     try {
       pdfUrl = await generateAndUploadFLHA({
         flha: record.hazards_json, workerName: record.worker_name, jobSite: record.job_site, signName: record.worker_name,
@@ -116,6 +121,22 @@ export default function CrewScreen({ token, userId, userName, companyName, crew,
         </button>
         <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 24, margin: "4px 0 14px" }}>My crew</div>
         {error && <div style={{ fontSize: 13.5, color: C.status.danger.text, marginBottom: 12 }}>{error}</div>}
+
+        {unsigned.length > 0 && (
+          <div style={section}>
+            <div style={heading}>Not signed by the worker yet</div>
+            <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 6 }}>Saved to sign afterwards. They sign from their own menu; nobody can sign for them.</div>
+            {unsigned.map(f => (
+              <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 0", borderTop: `1px solid ${C.line}`, minHeight: 48 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{f.worker_name}</div>
+                  <div style={{ fontSize: 13, color: C.text.muted }}>{f.job_site || "FLHA"} · saved {new Date(f.signature_requested_at || f.created_at).toLocaleString("en-CA")}</div>
+                </div>
+                {isOverdue(f) && <span style={{ fontSize: 12, fontWeight: 800, color: C.status.warning.text }}>Over a day. Remind them.</span>}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div style={section}>
           <div style={heading}>Waiting for your sign-off</div>

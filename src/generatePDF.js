@@ -15,7 +15,7 @@ function wrapText(doc, text, x, y, maxWidth, lineHeight) {
   return y;
 }
 
-export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval, crewSignatures, token = null }) {
+export async function generateAndUploadFLHA({ flha, workerName, jobSite, signName, companyName, signatureDataUrl, companyLogo, amendedNote, pendingApproval, supervisorApproval, crewSignatures, awaitingSignature = false, token = null }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -329,7 +329,14 @@ export async function generateAndUploadFLHA({ flha, workerName, jobSite, signNam
   doc.text("Worker Signature", margin, y);
   y += 4;
 
-  if (signatureDataUrl) {
+  if (awaitingSignature) {
+    // Saved to be signed afterwards: say so where the signature will go.
+    doc.setTextColor(180, 83, 9);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("AWAITING WORKER SIGNATURE", margin, y + 12);
+    doc.setFont("helvetica", "normal");
+  } else if (signatureDataUrl) {
     try {
       doc.addImage(signatureDataUrl, "PNG", margin, y, 70, 21);
     } catch (e) {}

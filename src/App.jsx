@@ -25,13 +25,14 @@ function newClientSubmissionId() {
 // state itself. Exported so WorkerMenu.jsx can drain this form's queue
 // without needing the FLHA component mounted.
 export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest) {
-  const { flha, workerName, jobSite, siteId, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal } = payload;
+  const { flha, workerName, jobSite, siteId, taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal, signLater = false } = payload;
   const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
   const newStatus = hasExtreme ? "pending_approval" : "complete";
 
   const pdfUrl = await generateAndUploadFLHA({
     flha, workerName, jobSite, signName: workerName, companyName, signatureDataUrl, companyLogo,
     amendedNote: null, pendingApproval: newStatus === "pending_approval", crewSignatures: crew,
+    awaitingSignature: signLater,
     token: tokenForRequest,
   });
 
@@ -57,8 +58,9 @@ export async function resubmitFLHA(payload, clientSubmissionId, tokenForRequest)
           signed_by: workerName,
           pdf_url: pdfUrl || null,
           status: newStatus,
-          worker_signature: signatureDataUrl || null,
+          worker_signature: signLater ? null : (signatureDataUrl || null),
           crew_signatures: crew,
+          ...(signLater ? { sign_later: true } : {}),
         },
       }),
     });
@@ -627,6 +629,9 @@ export default function FLHAApp({ forcedCompanyId = null, companyName: propCompa
   // Set when the server saved the FLHA but couldn't attach its PDF — see
   // receiptWasDropped() in server-lib/uploadUrls.js. The record is safe;
   // only the link is missing, and re-saving from the dashboard rebuilds it.
+  // Saved to be signed afterwards: the done screen says so, and the worker
+  // finds it under "Needs your signature" on their menu.
+  const [savedUnsigned, setSavedUnsigned] = useState(false);
   const [pdfUnlinked, setPdfUnlinked] = useState(false);
   const [resumeName, setResumeName] = useState("");
   const [resumeError, setResumeError] = useState("");
@@ -858,12 +863,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     setStep("voice");
   };
 
-  const saveFLHA = async () => {
+  const saveFLHA = async (signLater = false) => {
     if (!flha) return false;
     setSavingFLHA(true);
     setSaveError(false);
 
-    const signatureDataUrl = amendingId ? amendSignature : getSignatureDataUrl();
+    const signatureDataUrl = signLater ? null : (amendingId ? amendSignature : getSignatureDataUrl());
     const amendedNote = amendingId ? `Amended ${new Date().toLocaleString("en-CA")}` : null;
 
     const hasExtreme = (flha.hazards || []).some(h => h.risk === "Extreme");
@@ -955,7 +960,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
     // (one task AI-generated, another added manually via continueWithoutAI)
     // can't be cleanly attributed to "the AI's version" as a single baseline.
     const aiEditSignal = flha.ai_assisted ? computeFlhaEditSignal(aiBaselineRef.current, flha.hazards) : null;
-    const payload = { flha: flhaWithCustom, workerName, jobSite, siteId: siteIdForName(sites, jobSite, siteMode), taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal };
+    const payload = { flha: flhaWithCustom, workerName, jobSite, siteId: siteIdForName(sites, jobSite, siteMode), taskDescription, signatureDataUrl, companyName, companyLogo, crew, aiEditSignal, signLater };
 
     if (!navigator.onLine) {
       await enqueueSubmission("flha", clientSubmissionId, payload);
@@ -1570,6 +1575,24 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
                     ? <><CheckCircle2 size={16} /> Signed</>
                     : `Sign & Submit FLHA${crew.length > 0 ? ` (${crew.length + 1} signed)` : ""}`}
               </button>
+              {token && !signed && (
+                <button
+                  style={{ ...styles.ghost, marginTop: 8 }}
+                  disabled={savingFLHA}
+                  onClick={async () => {
+                    setSignName(workerName);
+                    setSavedUnsigned(true);
+                    const result = await saveFLHA(true);
+                    if (result === true) setStep("done");
+                    else if (result === "queued") setStep("queued");
+                    else setSavedUnsigned(false);
+                  }}>
+                  I'll sign afterwards
+                </button>
+              )}
+              <div style={{ fontSize: 11.5, color: C.text.faint, textAlign: "center", margin: "6px 0 10px", lineHeight: 1.4 }}>
+                Can't sign right now? Save it and sign from your menu later. Your supervisor can't approve it until you do.
+              </div>
               <button style={styles.ghost} onClick={() => setStep("review")}><ChevronLeft size={14} /> Back to review</button>
             </>
           )}
@@ -1595,7 +1618,12 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
             {pendingApproval
               ? <AlertTriangle size={56} color={C.status.warning.text} style={{ marginBottom: 12 }} />
               : <CheckCircle2 size={56} color={C.status.success.text} style={{ marginBottom: 12 }} />}
-            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>{pendingApproval ? "Awaiting Supervisor Sign-Off" : "FLHA Complete"}</div>
+            <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>{savedUnsigned ? "Saved. Sign It Next" : pendingApproval ? "Awaiting Supervisor Sign-Off" : "FLHA Complete"}</div>
+            {savedUnsigned && (
+              <div style={{ fontSize: 13, color: C.text.body, lineHeight: 1.5, marginBottom: 14 }}>
+                Your FLHA is saved but not signed yet. Open <strong>Needs your signature</strong> on your menu and sign it. {pendingApproval ? "A supervisor can't sign it off until you have." : ""}
+              </div>
+            )}
             <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 20 }}>
               Submitted {new Date().toLocaleString("en-CA")} by <strong style={{ color: C.text.body }}>{workerName}</strong>{crew.length > 0 ? ` + ${crew.length} crew` : ""}
             </div>
@@ -1643,7 +1671,7 @@ Respond ONLY with a valid JSON object (no markdown, no backticks):
               padding: "12px 20px", fontWeight: 700, fontSize: 15, textDecoration: "none",
               marginBottom: 10, textAlign: "center", minHeight: 48, boxSizing: "border-box",
             }}>View Dashboard <ChevronRight size={16} /></a>
-            <button style={styles.ghost} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setPdfUnlinked(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
+            <button style={styles.ghost} onClick={() => { clearDraft("flha", forcedCompanyId); setStep("company"); setTranscript(""); setTaskDesc(""); setFlha(null); aiBaselineRef.current = []; setSigned(false); setSignName(""); setHasSignature(false); setWorkerName(""); setJobSite(""); setPendingApproval(false); setPdfUnlinked(false); setSavedUnsigned(false); setAmendingId(null); setCrew([]); setSiteMode(sites.length > 0 ? "list" : "other"); }}>
               Start New FLHA
             </button>
           </div>
