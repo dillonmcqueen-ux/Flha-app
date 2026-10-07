@@ -35,7 +35,7 @@ create table if not exists public.document_notifications (
   updated_by bigint references public.roster(id) on delete set null,
   updated_at timestamptz not null default now(),
   unique (company_id, document_key),
-  check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|fuellog|custom_[0-9]+)$')
+  check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|custom_[0-9]+)$')
 );
 
 -- Deny-by-default backstop, same as every other table (README access model).
@@ -64,7 +64,7 @@ create table if not exists public.document_notification_state (
   sent_in_window integer not null default 0 check (sent_in_window >= 0),
   suppressed_count integer not null default 0 check (suppressed_count between 0 and 999),
   primary key (company_id, document_key, roster_id),
-  check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|fuellog|custom_[0-9]+)$')
+  check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|custom_[0-9]+)$')
 );
 
 create index if not exists document_notification_state_roster_idx
@@ -131,3 +131,11 @@ grant execute on function public.claim_notification_slot(bigint, text, bigint, i
 -- drop function if exists public.claim_notification_slot(bigint, text, bigint, integer, integer);
 -- drop table if exists public.document_notification_state;
 -- drop table if exists public.document_notifications;
+
+-- 2026-10-07: Fuel Log was removed from the notify list (nothing sends a notice for
+-- it). Databases created from an earlier version of this file carry 'fuellog' in the
+-- two document_key checks; this was applied live as notifications_drop_fuellog_key:
+--   alter table public.document_notifications drop constraint document_notifications_document_key_check;
+--   alter table public.document_notifications add constraint document_notifications_document_key_check
+--     check (document_key ~ '^(flha|inspection|toolbox|nearmiss|incident|daily|monthly|custom_[0-9]+)$');
+--   (and the same for document_notification_state_document_key_check)

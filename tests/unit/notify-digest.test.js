@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { runDigest, isPermanentRejection, DIGEST_BATCH } from '../../server-lib/notifyDigest.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
-function fakeDb({ held = [], settings = [], roster = [], companies = [], failClaim = false, failLookup = false } = {}) {
+function fakeDb({ held = [], settings = [], roster = [], companies = [], forms = [], failClaim = false, failLookup = false } = {}) {
   const refunds = [];
   const table = (rows) => ({
     cur: rows,
@@ -36,6 +36,7 @@ function fakeDb({ held = [], settings = [], roster = [], companies = [], failCla
       if (name === 'document_notifications') return table(settings);
       if (name === 'roster') return table(roster);
       if (name === 'companies') return table(companies);
+      if (name === 'custom_forms') return table(forms);
       throw new Error('unexpected table ' + name);
     },
   };
@@ -55,6 +56,20 @@ test('one email per person with the count, no report content', async () => {
   assert.equal(sent[0].to, 'p1@x.test');
   assert.equal(sent[0].subject, 'Incident Report: 3 new');
   assert.match(sent[0].text, /3 more Incident Reports were submitted since your last notice/);
+});
+
+test('a company\'s own document is named after its form, never another company\'s form', async () => {
+  const { sent, sendEmail } = collect();
+  const out = await runDigest(fakeDb(base({
+    held: [row(1, { document_key: 'custom_5' })],
+    settings: [{ company_id: 7, document_key: 'custom_5', enabled: true }],
+    forms: [{ id: 5, company_id: 7, title: 'Hot Work Permit' }, { id: 5, company_id: 8, title: 'Other Co Form' }],
+  })), { sendEmail });
+  assert.equal(out.sent, 1);
+  assert.equal(sent[0].subject, 'Hot Work Permit: 3 new');
+  const none = collect();
+  await runDigest(fakeDb(base({ held: [row(1, { document_key: 'custom_6' })], settings: [{ company_id: 7, document_key: 'custom_6', enabled: true }], forms: [] })), { sendEmail: none.sendEmail });
+  assert.equal(none.sent[0].subject, 'Custom document: 3 new', 'a form that cannot be found falls back to a generic name');
 });
 
 test('singular wording and the 999 cap', async () => {
