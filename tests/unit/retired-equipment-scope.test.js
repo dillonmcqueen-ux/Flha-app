@@ -113,7 +113,8 @@ function applyFilter(rows, column, expr) {
   const op = rest.slice(0, dot);
   const raw = decodeURIComponent(rest.slice(dot + 1));
   const test_ = (row) => {
-    const v = row[column];
+    // The real column defaults to false; these fixtures predate it.
+    const v = (row[column] === undefined && column === 'awaiting_signature') ? false : row[column];
     switch (op) {
       case 'eq': return String(v) === raw;
       case 'neq': return String(v) !== raw;

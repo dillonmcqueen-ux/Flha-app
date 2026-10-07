@@ -12,6 +12,7 @@ import { requireAssignment, listVisibleRecords, SUBMIT, queuedAsOf } from '../se
 import { resolveOnBehalf } from '../server-lib/leadAccess.js';
 import crypto from 'crypto';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { readSignedOnly } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -139,13 +140,15 @@ export default async function handler(req, res) {
           .eq('equipment_label', equipmentLabel)
           .order('created_at', { ascending: false })
           .limit(1),
-        supabaseAdmin
+        // An inspection still waiting for its author's signature does not
+        // count as a reading.
+        readSignedOnly(() => supabaseAdmin
           .from('inspections')
           .select('start_reading, end_reading, reading_unit, created_at, trip_type')
           .eq('company_id', session.companyId)
           .eq('equipment_label', equipmentLabel)
           .order('created_at', { ascending: false })
-          .limit(1),
+          .limit(1)),
       ]);
 
       const fuelReading = fuelRows && fuelRows[0]
@@ -277,10 +280,10 @@ export default async function handler(req, res) {
 
       let inspRows = [];
       if (companyIds.length > 0) {
-        const { data } = await supabaseAdmin
+        const { data } = await readSignedOnly(() => supabaseAdmin
           .from('inspections')
           .select('company_id, equipment_label, start_reading, end_reading, reading_unit, created_at, trip_type')
-          .in('company_id', companyIds);
+          .in('company_id', companyIds));
         inspRows = data || [];
       }
 

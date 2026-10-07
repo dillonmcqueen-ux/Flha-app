@@ -108,3 +108,16 @@ export function signatureOverdue(requestedAt, nowMs = Date.now()) {
   const t = new Date(requestedAt).getTime();
   return Number.isFinite(t) && nowMs - t > SIGN_LATER_OVERDUE_MS;
 }
+
+/**
+ * Runs a read that must not count a record still awaiting its author's
+ * signature (readings that feed maintenance and fuel, for example).
+ * `buildQuery` returns a fresh query each call. A database without the
+ * sign-later columns has no unsigned records, so the read is retried without
+ * the filter.
+ */
+export async function readSignedOnly(buildQuery) {
+  const filtered = await buildQuery().eq('awaiting_signature', false);
+  if (filtered.error && missingSignColumns(filtered.error)) return await buildQuery();
+  return filtered;
+}
