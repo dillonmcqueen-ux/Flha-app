@@ -44,7 +44,13 @@ export function reviewBacklog(nearMisses, incidents) {
 
 // Matches the FLHA tab's own `highRiskCount` definition exactly (High only,
 // not Extreme) so this number always reconciles with the one shown there.
-export function highRiskFlhaRate(flhas) {
+// A record its author has not signed yet (or that closed unsigned) is not yet a
+// submitted document, so the rates and leaderboards below leave it out. The
+// review backlog (reviewBacklog) handles those separately.
+const signedOnly = (rows) => (rows || []).filter(r => r.awaiting_signature !== true);
+
+export function highRiskFlhaRate(allFlhas) {
+  const flhas = signedOnly(allFlhas);
   const total = flhas.length;
   const highRisk = flhas.filter(f => (f.hazards_json?.hazards || []).some(h => h.risk === "High")).length;
   return { total, highRisk, pct: pct(highRisk, total) };
@@ -126,7 +132,8 @@ function siteBucketKey(siteId, rawSite) {
 // Analytics tab and its PDF, where custom safety docs already appear in the
 // scheduled-sites table) is unchanged and nothing is counted twice. Portal
 // records carry a real site_id; custom docs carry site_id and site_name.
-export function fieldSiteActivity(flhas, toolbox, daily, nearMisses, incidents, siteNames = {}, extras = {}) {
+export function fieldSiteActivity(allFlhas, toolbox, daily, allNearMisses, allIncidents, siteNames = {}, extras = {}) {
+  const flhas = signedOnly(allFlhas), nearMisses = signedOnly(allNearMisses), incidents = signedOnly(allIncidents);
   const buckets = {};
   const bump = (rawSite, siteId, field) => {
     const key = siteBucketKey(siteId, rawSite);
@@ -302,7 +309,8 @@ export function correctiveActionAging(monthlyActions) {
 
 // Positive framing on purpose — this is meant to recognize engagement, not
 // call out low performers.
-export function reporterLeaderboard(flhas, inspections, toolbox) {
+export function reporterLeaderboard(allFlhas, allInspections, toolbox) {
+  const flhas = signedOnly(allFlhas), inspections = signedOnly(allInspections);
   const counts = {};
   const bump = (name) => {
     const n = (name || "").trim();

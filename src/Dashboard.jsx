@@ -2505,11 +2505,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   const exportSelected = () => {
-    const toExport = companyFlhas.filter(f => selectedIds.has(f.id) && f.pdf_url);
+    // An FLHA its worker has not signed yet has a PDF stamped "awaiting signature":
+    // it is not exported into a package an auditor or client might receive.
+    const picked = companyFlhas.filter(f => selectedIds.has(f.id));
+    const unsignedPicked = picked.filter(f => f.awaiting_signature === true).length;
+    const toExport = picked.filter(f => f.pdf_url && f.awaiting_signature !== true);
     if (!toExport.length) {
-      alert("No PDFs available for selected FLHAs. PDFs are only generated for FLHAs submitted after this feature was added.");
+      alert(unsignedPicked > 0
+        ? "The selected FLHAs have not been signed by their workers yet, so they can't be exported."
+        : "No PDFs available for selected FLHAs. PDFs are only generated for FLHAs submitted after this feature was added.");
       return;
     }
+    if (unsignedPicked > 0) alert(`${unsignedPicked} selected FLHA${unsignedPicked === 1 ? " was" : "s were"} left out because the worker hasn't signed ${unsignedPicked === 1 ? "it" : "them"} yet.`);
     toExport.forEach((f, i) => {
       setTimeout(() => {
         const a = document.createElement("a");
@@ -4340,13 +4347,15 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // everywhere else on this screen (and, for reviewBacklog/fieldSiteActivity,
   // the exact analyticsUtils functions the Analytics tab uses — so nothing
   // here can drift from what Analytics reports for the same company).
-  const flhaReviewStats = { total: companyFlhas.length, signedOff: companyFlhas.length - awaitingSignOff };
+  // An FLHA its worker has not signed yet is neither signed off nor waiting on a supervisor.
+  const signedFlhaCount = companyFlhas.filter(f => f.awaiting_signature !== true).length;
+  const flhaReviewStats = { total: signedFlhaCount, signedOff: signedFlhaCount - awaitingSignOff };
   const reportReviewStats = reviewBacklog(companyNearMisses, companyIncidents);
 
   const overviewAllDocs = [
     ...companyFlhas, ...companyInspections, ...companyToolbox, ...companyNearMisses,
     ...companyIncidents, ...companyDaily, ...companyMonthlyRecords, ...companyCustomDocs,
-  ];
+  ].filter(d => d.awaiting_signature !== true);
   const docsSpark = bucketByDay(overviewAllDocs, 7);
   const correctiveSpark = bucketByDay(companyMonthlyActions, 7);
   // docs/scope-fuel-log-tracker.md Phase 4 — the "machines flagged" list
@@ -5577,7 +5586,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
           const feedTone = (type, doc) => {
             if (type === "incident") return C.status.danger;
             if (type === "nearmiss") return C.status.warning;
-            if (type === "flha") return doc.status === "pending_approval" ? C.status.warning : C.status.success;
+            if (type === "flha") return doc.status === "pending_approval" || doc.awaiting_signature === true ? C.status.warning : C.status.success;
             if (type === "toolbox" || type === "monthly") return orangeTone;
             if (type === "inspection" || type === "daily") return C.status.info;
             if (type === "certification") return doc.status === "expired" ? C.status.danger : doc.status === "expiring_soon" || doc.unverified ? C.status.warning : C.status.success;
@@ -5879,7 +5888,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         style={{ marginTop: 11, flexShrink: 0, width: 16, height: 16, cursor: "pointer", accentColor: C.orange }}
                         onClick={e => e.stopPropagation()}
                       />
-                      <RowIconTile icon={ClipboardList} color={f.status === "pending_approval" ? C.status.warning.text : C.status.success.text} />
+                      <RowIconTile icon={ClipboardList} color={f.status === "pending_approval" || f.awaiting_signature === true ? C.status.warning.text : C.status.success.text} />
                       <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelectedFlha(f)}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div style={{ minWidth: 0 }}>

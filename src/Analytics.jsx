@@ -156,7 +156,7 @@ export function SafetyAnalyticsPanel({
     <div>
       <SectionCard title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><HardHat size={17} color={C.orange} strokeWidth={2.25} />{`Safety Analytics — ${companyName || "Company"}`}</span>} subtitle={isAdvanced ? "Advanced tier — set by your admin" : "Basic tier — set by your admin"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <StatTile label="Total FLHAs" value={flhas.length} />
+          <StatTile label="Total FLHAs" value={flhas.filter(f => f.awaiting_signature !== true).length} />
           <StatTile label="Incidents" value={incidents.length} tone={incidents.length > 0 ? "bad" : "good"} />
           <StatTile label="Near Misses" value={nearMisses.length} tone={nearMisses.length > 0 ? "warn" : "good"} />
           <StatTile label="Near-Miss : Incident" value={ratio.ratioLabel} />
