@@ -1,6 +1,9 @@
 -- docs/schema/document-notifications-migration.sql
 --
--- Notification routing, PR 1. NOT YET APPLIED: needs Dillon's yes first.
+-- Notification routing, PR 1. APPLIED LIVE 2026-10-07 (project FORA) with Dillon's
+-- yes, as migration document_notifications_and_claim_slot. Verified: RLS on, no
+-- policies, claim_notification_slot executable by service_role only, burst and
+-- window rollover checked against the real function on ABC Earthworks.
 --
 -- One row = "this company has decided how <document_key> notifies people".
 -- No row means notifications are OFF for that document, which is also what
