@@ -3,6 +3,7 @@ import App from "./App.jsx";
 import Dashboard from "./Dashboard.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import WorkerMenu from "./WorkerMenu.jsx";
+import AuditorView from "./AuditorView.jsx";
 import MfaSetup from "./MfaSetup.jsx";
 import { KeyRound, AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
@@ -20,7 +21,7 @@ import { setDraftUser } from "./useDraftAutosave.js";
 // which the browser clears when its last window closes.
 const SESSION_STORAGE_KEY = "fora_session";
 function isPersistable(session) {
-  return !!session && session.role !== "admin" && !!session.userId;
+  return !!session && session.role !== "admin" && session.role !== "auditor" && !!session.userId; // an outside auditor never stays signed in after the window closes
 }
 function saveSession(session) {
   try {
@@ -379,6 +380,13 @@ export default function Login() {
   // Drafts are keyed per signed-in user; set before any child form mounts.
   setDraftUser(session ? session.userId : null);
   if (session) {
+    // An auditor is an outside reader. They get the read-only audit view and
+    // nothing else, never the supervisor dashboard the fall-through below
+    // would hand any other role.
+    if (session.role === "auditor") {
+      return <AuditorView token={session.token} companyName={session.companyName} userName={session.userName || ""} onLogout={logout} />;
+    }
+
     if (session.role === "worker") {
       return <WorkerMenu companyId={session.companyId} companyName={session.companyName} userName={session.userName || ""} userId={session.userId || null} onLogout={logout} token={session.token} />;
     }

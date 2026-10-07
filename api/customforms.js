@@ -10,6 +10,7 @@ import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireCustomDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
+import { DIRECT_SOURCES, INSPECTION_SOURCE } from '../server-lib/documentSources.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, listVisibleRecordsMulti, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
@@ -82,6 +83,10 @@ async function verifySession(token) {
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
+  // An auditor reads through api/audit.js only. Every other endpoint treats
+  // an auditor session as no session at all, so a handler that never checked
+  // the role still cannot answer one.
+  if (rows[0].role === 'auditor') return null;
   return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 
@@ -436,15 +441,7 @@ export default async function handler(req, res) {
       const missingCol = (e) => !!e && ['42703', 'PGRST204'].includes(String(e.code || ''));
       const companyId = session.companyId;
 
-      const SOURCES = [
-        { type: 'flha', key: 'flha', table: 'flhas', title: 'FLHA', cols: 'id, job_site, site_id, created_at, pdf_url, status, submitted_by_roster_id', sub: r => r.job_site },
-        { type: 'inspection', key: 'inspection', table: 'inspections', title: 'Equipment Inspection', cols: 'id, equipment_label, created_at, pdf_url, submitted_by_roster_id', sub: r => r.equipment_label },
-        { type: 'toolbox', key: 'toolbox', table: 'toolbox_talks', title: 'Toolbox Talk', cols: 'id, topic, site_id, created_at, pdf_url, submitted_by_roster_id', sub: r => r.topic },
-        { type: 'daily', key: 'daily', table: 'daily_reports', title: 'Daily Report', cols: 'id, site, site_id, created_at, pdf_url, submitted_by_roster_id', enteredBy: true, sub: r => r.site },
-        { type: 'incident', key: 'incident', table: 'incidents', title: 'Incident Report', cols: 'id, site, site_id, created_at, pdf_url, submitted_by_roster_id', sub: r => r.site },
-        { type: 'nearmiss', key: 'nearmiss', table: 'near_misses', title: 'Near Miss Report', cols: 'id, site, site_id, created_at, pdf_url, submitted_by_roster_id', sub: r => r.site },
-        { type: 'fuellog', key: 'fuellog', table: 'fuel_logs', title: 'Fuel Log', cols: 'id, equipment_label, site_id, created_at, pdf_url, submitted_by_roster_id', enteredBy: true, sub: r => r.equipment_label },
-      ];
+      const SOURCES = [...DIRECT_SOURCES, INSPECTION_SOURCE];
 
       const collected = [];
       for (const src of SOURCES) {

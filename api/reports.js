@@ -83,6 +83,10 @@ async function verifySession(token) {
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
+  // An auditor reads through api/audit.js only. Every other endpoint treats
+  // an auditor session as no session at all, so a handler that never checked
+  // the role still cannot answer one.
+  if (rows[0].role === 'auditor') return null;
   return { ...payload, role: rows[0].role, name: rows[0].name };
 }
 

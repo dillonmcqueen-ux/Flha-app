@@ -30,7 +30,8 @@ import { logAuditEvent } from '../server-lib/auditLog.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned, readRosterFlags, requireAssignment, SUBMIT as ASSIGN_SUBMIT } from '../server-lib/documentAccess.js';
 import { requireLead, loadCrew } from '../server-lib/leadAccess.js';
-import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
+import { auditorAccessLive, auditorAccessEmail, validateAuditorScope, listAuditableDocuments, AUDITOR_ACCESS_MS } from '../server-lib/auditorAccess.js';
+import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, BUILTIN_DOCUMENT_LABELS, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -106,6 +107,10 @@ async function verifySession(token) {
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
   if (rows[0].company_id !== payload.companyId) return null;
+  // An auditor reads through api/audit.js only. Every other endpoint treats
+  // an auditor session as no session at all, so a handler that never checked
+  // the role still cannot answer one.
+  if (rows[0].role === 'auditor') return null;
   return { ...payload, role: rows[0].role, name: rows[0].name, isOwner: rows[0].is_owner === true };
 }
 
@@ -371,7 +376,7 @@ export default async function handler(req, res) {
       const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', companyId).limit(1);
       if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
-      const activeSeatCount = (members || []).filter(m => m.active).length;
+      const activeSeatCount = (members || []).filter(m => m.active && m.role !== 'auditor').length;
 
       const nowMs = Date.now();
       const withMfa = (members || []).map(({ pin_locked_until, totp_locked_until, ...m }) => ({
@@ -414,9 +419,9 @@ export default async function handler(req, res) {
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
       const cap = effectiveSeatCap(tier);
 
-      const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized').eq('company_id', companyId).eq('active', true);
+      const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized, role').eq('company_id', companyId).eq('active', true);
       if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
-      if ((activeRows || []).length >= cap) {
+      if ((activeRows || []).filter(r => r.role !== 'auditor').length >= cap) {
         return res.status(400).json({ error: `Seat limit reached for this plan (${cap} on ${tier === 'advanced' ? 'Advanced' : 'Basic'}). Upgrade the plan or deactivate someone first.` });
       }
       if ((activeRows || []).some(r => r.name_normalized === name.toLowerCase())) {
@@ -480,9 +485,9 @@ export default async function handler(req, res) {
       const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
       const cap = effectiveSeatCap(tier);
 
-      const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized').eq('company_id', companyId).eq('active', true);
+      const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized, role').eq('company_id', companyId).eq('active', true);
       if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
-      if ((activeRows || []).length >= cap) {
+      if ((activeRows || []).filter(r => r.role !== 'auditor').length >= cap) {
         return res.status(400).json({ error: `Seat limit reached for this plan (${cap} on ${tier === 'advanced' ? 'Advanced' : 'Basic'}). Upgrade the plan or deactivate someone first.` });
       }
       if ((activeRows || []).some(r => r.name_normalized === name.toLowerCase())) {
@@ -606,14 +611,14 @@ export default async function handler(req, res) {
       }
 
       const activating = action === 'reactivate_roster_member';
-      if (activating) {
+      if (activating && member.role !== 'auditor') {
         const { data: coRows, error: coErr } = await supabaseAdmin.from('companies').select('plan_tier').eq('id', member.company_id).limit(1);
         if (coErr) return res.status(500).json({ error: 'Could not load plan tier.' });
         const tier = (coRows && coRows[0] && coRows[0].plan_tier) || 'basic';
         const cap = effectiveSeatCap(tier);
-        const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id').eq('company_id', member.company_id).eq('active', true);
+        const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, role').eq('company_id', member.company_id).eq('active', true);
         if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
-        if ((activeRows || []).length >= cap) {
+        if ((activeRows || []).filter(r => r.role !== 'auditor').length >= cap) {
           return res.status(400).json({ error: `Seat limit reached for this plan (${cap} on ${tier === 'advanced' ? 'Advanced' : 'Basic'}). Upgrade the plan or deactivate someone first.` });
         }
       }
@@ -778,6 +783,7 @@ export default async function handler(req, res) {
       // hour is left alone, so a second click cannot kill a link still in flight.
       const recentlySent = Date.now() - 60 * 60 * 1000;
       const waiting = (people || []).filter((m) => !m.pin_set_at && !m.last_login_at
+        && m.role !== 'auditor' // an auditor's link is sent with their access, which sets its 14 day window
         && canResetMfa(session, m)
         && !(m.pin_link_sent_at && new Date(m.pin_link_sent_at).getTime() > recentlySent));
       const withEmail = waiting.filter((m) => (withDecryptedEmail(m).email || '').trim());
@@ -1077,6 +1083,9 @@ export default async function handler(req, res) {
       const effectiveRole = 'role' in req.body ? req.body.role : target.role;
       if ('role' in req.body) {
         if (req.body.role !== 'worker' && req.body.role !== 'supervisor') return res.status(400).json({ error: 'Invalid role.' });
+        // An auditor row is outside the seat count, so turning one into a
+        // worker or supervisor would add an uncounted seat.
+        if (target.role === 'auditor') return res.status(400).json({ error: "An auditor can't be changed to another role. Remove the auditor and add the person again." });
         // Demoting an Owner would leave an Owner who is not a supervisor, which
         // the gates do not recognise. Remove ownership first.
         const staysOwner = 'isOwner' in req.body ? req.body.isOwner === true : target.is_owner === true;
@@ -1452,6 +1461,129 @@ export default async function handler(req, res) {
           return res.status(500).json({ error: ['42703', 'PGRST204'].includes(String(error.code || '')) ? SETUP_MSG : "Couldn't save the site's division." });
         }
         await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'set_site_division', companyId, targetType: 'site', targetId: siteId, details: { division_id: divisionId, by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true });
+      }
+    }
+
+    // ══ AUDITORS (the Owner's side) ═════════════════════════════════════════
+    // An auditor is an outside reader with a 14 day login and a read-only
+    // window onto chosen document types at chosen sites (server-lib/
+    // auditorAccess.js, api/audit.js). They never count toward the seat cap.
+    // Owner and founder only.
+    if (action === 'list_auditors' || action === 'create_auditor' || action === 'set_auditor_scope'
+        || action === 'send_auditor_access' || action === 'revoke_auditor_access') {
+      if (!canManageCompany(session)) return res.status(403).json({ error: 'Only the account owner can manage auditors.' });
+      const companyId = resolveCompanyId(session, req.body.companyId);
+      if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
+      const missingTable = (e) => !!e && ['42P01', 'PGRST205', '42703', 'PGRST204'].includes(String(e.code || ''));
+      const SETUP_MSG = "Auditor access isn't switched on for this database yet. Contact FORA support.";
+
+      const loadAuditorRow = async (rosterId) => {
+        const id = Number(rosterId);
+        if (!Number.isInteger(id)) return null;
+        const { data } = await supabaseAdmin.from('roster')
+          .select('id, company_id, name, role, active, email, auditor_access_expires_at, totp_enabled, pin_set_at')
+          .eq('id', id).eq('company_id', companyId).eq('role', 'auditor').limit(1);
+        return (data && data[0]) || null;
+      };
+
+      if (action === 'list_auditors') {
+        const { data: people, error } = await supabaseAdmin.from('roster')
+          .select('id, name, active, email, auditor_access_expires_at, totp_enabled, pin_set_at')
+          .eq('company_id', companyId).eq('role', 'auditor').order('name', { ascending: true });
+        if (error) return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : 'Could not load auditors.' });
+        const ids = (people || []).map(p => p.id);
+        const { data: scopes } = ids.length
+          ? await supabaseAdmin.from('auditor_scopes').select('roster_id, division_ids, site_ids, document_keys').in('roster_id', ids)
+          : { data: [] };
+        const byId = new Map((scopes || []).map(s => [s.roster_id, s]));
+        const documents = await listAuditableDocuments(supabaseAdmin, companyId, BUILTIN_DOCUMENT_LABELS);
+        const now = Date.now();
+        return res.status(200).json({
+          documents,
+          auditors: (people || []).map(p => {
+            const sc = byId.get(p.id) || {};
+            return {
+              id: p.id, name: p.name, active: p.active, email: (withDecryptedEmail(p).email || ''),
+              expiresAt: p.auditor_access_expires_at, live: auditorAccessLive(p.auditor_access_expires_at, now),
+              mfaEnabled: p.totp_enabled === true, pinSet: !!p.pin_set_at,
+              divisionIds: sc.division_ids || [], siteIds: sc.site_ids || [], documentKeys: sc.document_keys || [],
+            };
+          }),
+        });
+      }
+
+      if (action === 'create_auditor') {
+        const name = (req.body.name || '').trim();
+        const email = (req.body.email || '').trim();
+        if (!name) return res.status(400).json({ error: 'Enter a name.' });
+        if (!isValidEmail(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+        const { data: activeRows, error: activeErr } = await supabaseAdmin.from('roster').select('id, name_normalized, role').eq('company_id', companyId).eq('active', true);
+        if (activeErr) return res.status(500).json({ error: 'Could not check the roster.' });
+        if ((activeRows || []).some(r => r.name_normalized === name.toLowerCase())) {
+          return res.status(400).json({ error: `"${name}" is already active on this roster. Add a last initial to tell them apart.` });
+        }
+        const allowed = await checkIpThrottle(supabaseAdmin, `addauditor:${companyId}`, 20, 60 * 60 * 1000);
+        if (!allowed) return res.status(429).json({ error: 'Too many auditors added this hour. Try again later.' });
+        const salt = genSalt();
+        const { data, error } = await supabaseAdmin.from('roster')
+          .insert({ company_id: companyId, name, role: 'auditor', email: encryptField(email), pin_hash: hashPin(genPin(), salt), pin_salt: salt, wallet_enabled: false })
+          .select('id, name').single();
+        if (error) { console.error('create_auditor failed:', error.message); return res.status(500).json({ error: "Couldn't add the auditor. Try again." }); }
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'create_auditor', companyId, targetType: 'roster', targetId: data.id, details: { by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true, id: data.id });
+      }
+
+      if (action === 'set_auditor_scope') {
+        const target = await loadAuditorRow(req.body.rosterId);
+        if (!target) return res.status(404).json({ error: 'Auditor not found.' });
+        const checked = await validateAuditorScope(supabaseAdmin, companyId, req.body, BUILTIN_DOCUMENT_LABELS);
+        if (checked.error) return res.status(checked.status).json({ error: checked.error });
+        const { error } = await supabaseAdmin.from('auditor_scopes').upsert(
+          { roster_id: target.id, company_id: companyId, ...checked.scope, updated_by: session.userId || null, updated_at: new Date().toISOString() },
+          { onConflict: 'roster_id' });
+        if (error) { console.error('set_auditor_scope failed:', error.message); return res.status(500).json({ error: missingTable(error) ? SETUP_MSG : "Couldn't save what they can read." }); }
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'set_auditor_scope', companyId, targetType: 'roster', targetId: target.id, details: { ...checked.scope, by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true });
+      }
+
+      if (action === 'send_auditor_access') {
+        const target = await loadAuditorRow(req.body.rosterId);
+        if (!target || !target.active) return res.status(404).json({ error: 'Auditor not found.' });
+        const email = (withDecryptedEmail(target).email || '').trim();
+        if (!email) return res.status(400).json({ error: 'This auditor has no email address.' });
+        // Access is granted, never assumed: nothing to read, nothing to send.
+        const { data: scopeRows, error: scopeErr } = await supabaseAdmin.from('auditor_scopes').select('division_ids, site_ids, document_keys').eq('roster_id', target.id).limit(1);
+        if (scopeErr && !missingTable(scopeErr)) return res.status(500).json({ error: "Couldn't check what they can read." });
+        const sc = (scopeRows && scopeRows[0]) || {};
+        if (!(sc.document_keys || []).length || !((sc.site_ids || []).length || (sc.division_ids || []).length)) {
+          return res.status(400).json({ error: 'Choose the documents and the sites or divisions they can read first.' });
+        }
+        const allowed = await checkIpThrottle(supabaseAdmin, `auditoraccess:${companyId}`, 20, 60 * 60 * 1000);
+        if (!allowed) return res.status(429).json({ error: 'Too many access emails this hour. Try again later.' });
+        const memberAllowed = await checkIpThrottle(supabaseAdmin, `sendauditor:${target.id}`, 5, 60 * 60 * 1000);
+        if (!memberAllowed) return res.status(429).json({ error: 'That auditor was sent access too many times this hour. Try again later.' });
+        const { data: coRows } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).limit(1);
+        const companyName = (coRows && coRows[0] && coRows[0].name) || 'your employer';
+        const expiresAt = new Date(Date.now() + AUDITOR_ACCESS_MS).toISOString();
+        const { error: upErr } = await supabaseAdmin.from('roster').update({ auditor_access_expires_at: expiresAt }).eq('id', target.id).eq('company_id', companyId);
+        if (upErr) { console.error('send_auditor_access failed:', upErr.message); return res.status(500).json({ error: missingTable(upErr) ? SETUP_MSG : "Couldn't send access." }); }
+        const sent = await issueAndEmailPinLink({
+          supabaseAdmin, sendEmail, member: { ...target, email }, email, companyName, needsAuthenticator: true,
+          buildEmail: (args) => auditorAccessEmail({ ...args, expiresAt }),
+        });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'send_auditor_access', companyId, targetType: 'roster', targetId: target.id, details: { expires_at: expiresAt, email_sent: sent.sent, by_roster_id: session.userId || null } });
+        return res.status(200).json({ ok: true, expiresAt, emailSent: sent.sent });
+      }
+
+      if (action === 'revoke_auditor_access') {
+        const target = await loadAuditorRow(req.body.rosterId);
+        if (!target) return res.status(404).json({ error: 'Auditor not found.' });
+        const { error } = await supabaseAdmin.from('roster')
+          .update({ auditor_access_expires_at: new Date().toISOString(), pin_link_jti_hash: null, pin_link_expires_at: null })
+          .eq('id', target.id).eq('company_id', companyId);
+        if (error) return res.status(500).json({ error: "Couldn't end their access." });
+        await logAuditEvent(supabaseAdmin, { actorRole: session.role, action: 'revoke_auditor_access', companyId, targetType: 'roster', targetId: target.id, details: { by_roster_id: session.userId || null } });
         return res.status(200).json({ ok: true });
       }
     }
