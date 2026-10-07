@@ -165,12 +165,15 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     async function loadUnsigned() {
       if (!userId) return;
       try {
-        const res = await fetch("/api/flhas", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "my_unsigned", token }),
-        });
-        const data = await res.json();
-        if (res.ok) setUnsignedCount((data.flhas || []).length);
+        const call = async (url, body) => {
+          const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          return r.ok ? await r.json() : {};
+        };
+        const [f, i] = await Promise.all([
+          call("/api/flhas", { action: "my_unsigned", token }),
+          call("/api/reports", { type: "incident", action: "my_unsigned", token }),
+        ]);
+        setUnsignedCount((f.flhas || []).length + (i.records || []).length);
       } catch (e) { /* offline: no card */ }
     }
     loadUnsigned();
