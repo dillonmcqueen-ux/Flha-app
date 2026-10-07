@@ -90,7 +90,6 @@ export const DOCUMENT_LABELS = {
   incident: 'Incident Report',
   daily: 'Daily Report',
   monthly: 'Monthly Inspection',
-  fuellog: 'Fuel Log',
 };
 
 const SINGLE_ADDRESS = /^[^\s@,;<>"']+@[^\s@,;<>"']+\.[^\s@,;<>"']+$/;

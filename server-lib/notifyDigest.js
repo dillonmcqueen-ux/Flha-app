@@ -18,7 +18,7 @@
 // decrypted (a broken or missing key) is handed back, not dropped: that is a
 // fault to fix, not a person who cannot be told. Never throws; returns counts.
 
-import { DOCUMENT_LABELS, COOLDOWN_SECONDS, refundSlot } from './notifyRouting.js';
+import { DOCUMENT_LABELS, COOLDOWN_SECONDS, refundSlot, cleanLabel } from './notifyRouting.js';
 import { withDecryptedEmail } from './fieldCrypto.js';
 
 const SINGLE_ADDRESS = /^[^\s@,;<>"']+@[^\s@,;<>"']+\.[^\s@,;<>"']+$/;
@@ -72,6 +72,16 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
     const hadEmail = new Map((people.data || []).map((p) => [`${p.company_id}:${p.id}`, !!p.email]));
     const person = new Map(withDecryptedEmail(people.data || []).map((p) => [`${p.company_id}:${p.id}`, p]));
 
+    // A company's own document is named after its form. Looked up here because
+    // the state row stores only the key; a failed lookup falls back to a generic
+    // name rather than holding the digest back.
+    const customIds = [...new Set(rows.map((r) => /^custom_([0-9]+)$/.exec(r.document_key)).filter(Boolean).map((m) => Number(m[1])))];
+    const formTitle = new Map();
+    if (customIds.length > 0) {
+      const { data: forms } = await supabase.from('custom_forms').select('id, company_id, title').in('id', customIds).in('company_id', companyIds);
+      for (const f of forms || []) formTitle.set(`${f.company_id}:custom_${f.id}`, cleanLabel(f.title));
+    }
+
     const tell = async (row) => {
       const company = Number(row.company_id);
       const roster = Number(row.roster_id);
@@ -89,7 +99,7 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
         out.dropped += 1;
         return;
       }
-      const label = DOCUMENT_LABELS[row.document_key] || 'Custom document';
+      const label = DOCUMENT_LABELS[row.document_key] || formTitle.get(`${company}:${row.document_key}`) || 'Custom document';
       const n = held >= 999 ? '999+' : String(held);
       try {
         await sendEmail({
