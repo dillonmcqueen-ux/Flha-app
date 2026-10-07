@@ -15,6 +15,7 @@ import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, qu
 import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { unsignedFields, missingSignColumns, completeSignature, cleanSignature, loadSignState } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -228,6 +229,13 @@ function sanitizeAiEditSignal(raw) {
   return { added, removed, riskChanged };
 }
 
+// Which company an FLHA belongs to, for the founder/admin path that has no
+// company of its own. null when the row is not found.
+async function companyOfFlha(id) {
+  const { data } = await supabaseAdmin.from('flhas').select('company_id').eq('id', id).limit(1);
+  return (data && data[0] && data[0].company_id) || null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -295,6 +303,7 @@ export default async function handler(req, res) {
       if (!record) return res.status(400).json({ error: 'Missing record.' });
 
       if (amendingId) {
+        if (record.sign_later === true) return res.status(400).json({ error: 'An amendment is confirmed with your signature.' });
         // Confirm this record actually belongs to the worker's own company first.
         const { data: existing, error: findErr } = await supabaseAdmin
           .from('flhas').select('id, company_id, worker_name, hazards_json, created_at').eq('id', amendingId).limit(1);
@@ -434,6 +443,16 @@ export default async function handler(req, res) {
           pdfLinked = !receiptWasDropped(submitted, recordToInsert.pdf_url);
         }
         recordToInsert.status = deriveFlhaStatus(recordToInsert.hazards_json);
+        // "I'll sign afterwards": the worker saves it now and signs later. It
+        // needs a real sign-in (somebody has to be the one who signs), and it
+        // never carries a signature image: whatever the request sent in
+        // worker_signature is dropped so an unsigned record can't look signed.
+        const signLater = record.sign_later === true;
+        if (signLater) {
+          if (!session.userId) return res.status(400).json({ error: 'Signing afterwards needs your own sign-in.' });
+          recordToInsert.worker_signature = null;
+          Object.assign(recordToInsert, unsignedFields(new Date().toISOString()));
+        }
         const { data, error } = await supabaseAdmin
           .from('flhas')
           // Break #3 — author from the session, never the request. FLHA was
@@ -441,6 +460,9 @@ export default async function handler(req, res) {
           .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session) })
           .select('id, status')
           .limit(1);
+        if (error && signLater && missingSignColumns(error)) {
+          return res.status(503).json({ error: "Signing afterwards isn't switched on yet. Sign now, or ask your Owner." });
+        }
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
         const newId = data?.[0]?.id || null;
 
@@ -464,6 +486,53 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Worker: FLHAs I saved to sign afterwards ────────────────────────
+    // The caller's OWN unsigned FLHAs, from the roster id on the session. The
+    // full hazard data comes back because signing regenerates the PDF with
+    // the signature on it.
+    if (action === 'my_unsigned') {
+      if ((session.role !== 'worker' && session.role !== 'supervisor') || !session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { data, error } = await supabaseAdmin
+        .from('flhas')
+        .select('id, worker_name, job_site, site_id, created_at, hazards_json, task_description, crew_signatures, pdf_url, status, signature_requested_at')
+        .eq('company_id', session.companyId)
+        .eq('submitted_by_roster_id', Number(session.userId))
+        .eq('awaiting_signature', true)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) {
+        // No sign-later columns yet means nothing is waiting.
+        if (missingSignColumns(error)) return res.status(200).json({ flhas: [] });
+        return res.status(500).json({ error: 'Could not load your unsigned FLHAs.' });
+      }
+      const flhas = await signRows(supabaseAdmin, data || [], [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      return res.status(200).json({ flhas });
+    }
+
+    // ── Worker: sign an FLHA I saved to sign afterwards ─────────────────
+    // Only the roster member the record is stamped to can sign it, checked
+    // against the database row, never the request. The name on the record
+    // stays the roster name it was saved under.
+    if (action === 'sign_now') {
+      if ((session.role !== 'worker' && session.role !== 'supervisor') || !session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, 'flha');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { id, signature, pdfUrl } = req.body;
+      const png = cleanSignature(signature);
+      if (!id || !png) return res.status(400).json({ error: 'Draw your signature first.' });
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      const update = { worker_signature: png };
+      if (resolvedPdfUrl) update.pdf_url = resolvedPdfUrl;
+      const done = await completeSignature(supabaseAdmin, { table: 'flhas', id, session, update, nowIso: new Date().toISOString() });
+      if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
+      const { data: after } = await supabaseAdmin.from('flhas').select('pdf_url, status').eq('id', id).limit(1);
+      const stored = after && after[0] && after[0].pdf_url;
+      const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, status: (after && after[0] && after[0].status) || null, pdfUrl: signedPdfUrl, pdfLinked: !receiptWasDropped(pdfUrl, resolvedPdfUrl) });
+    }
+
     // ── Supervisor / Admin: load FLHAs for the dashboard ────────────────
     if (action === 'list') {
       // A crew lead (a worker the Owner flagged, read live) lists their
@@ -473,12 +542,16 @@ export default async function handler(req, res) {
       if (session.role !== 'admin' && session.role !== 'supervisor' && !(listLead && !listLead.denied)) return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, 'flha');
       if (denied) return res.status(denied.status).json({ error: denied.error });
-      let query = supabaseAdmin
-        .from('flhas')
-        .select('id, worker_name, job_site, site_id, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature, submitted_by_roster_id')
-        .order('created_at', { ascending: false });
-      if (session.role !== 'admin') query = query.eq('company_id', session.companyId);
-      const { data: allRows, error } = await query;
+      const listColumns = 'id, worker_name, job_site, site_id, created_at, hazards_json, signed_by, company_id, pdf_url, status, supervisor_signed_by, supervisor_signed_at, worker_signature, submitted_by_roster_id';
+      const runList = (columns) => {
+        let q = supabaseAdmin.from('flhas').select(columns).order('created_at', { ascending: false });
+        if (session.role !== 'admin') q = q.eq('company_id', session.companyId);
+        return q;
+      };
+      // awaiting_signature rides along; a database without the sign-later
+      // columns has no unsigned records, so the read is retried without them.
+      let { data: allRows, error } = await runList(`${listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`);
+      if (error && missingSignColumns(error)) ({ data: allRows, error } = await runList(listColumns));
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, 'flha', allRows || []);
       if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
@@ -596,6 +669,15 @@ export default async function handler(req, res) {
       if (denied) return res.status(denied.status).json({ error: denied.error });
       const { id, supName, supSignature, pdfUrl } = req.body;
       if (!id || !supName || !supSignature) return res.status(400).json({ error: 'Missing approval details.' });
+
+      // Nobody signs off a record its author has not signed yet, a founder
+      // or admin included: the supervisor's signature would sit on a document
+      // with no worker signature on it.
+      {
+        const signState = await loadSignState(supabaseAdmin, 'flhas', id, session.role === 'admin' ? await companyOfFlha(id) : session.companyId);
+        if (signState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
+        if (signState.found && signState.awaiting) return res.status(409).json({ error: "The worker hasn't signed this FLHA yet." });
+      }
 
       if (session.role !== 'admin') {
         const { data: existing, error: findErr } = await supabaseAdmin.from('flhas').select('id, company_id, site_id, submitted_by_roster_id, status, supervisor_signed_at').eq('id', id).limit(1);
