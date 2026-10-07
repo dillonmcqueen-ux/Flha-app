@@ -28,12 +28,15 @@ const as = (userId, role) => mintToken({ role, userId, companyId: 7 });
 
 // ── mail provider interception ──────────────────────────────────────────
 const emails = [];
+const resendInits = [];
+let COMPANY_SUSPENDED = false;
 let resendStatus = 200;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   if (String(url).includes('api.resend.com')) {
     if (resendStatus !== 200) return new Response('{"message":"down"}', { status: resendStatus });
     emails.push(JSON.parse(init.body));
+    resendInits.push(init);
     return new Response('{"id":"x"}', { status: 200 });
   }
   return realFetch(url, init);
@@ -51,10 +54,10 @@ const ROSTER = [
   P({ id: 12, name: 'Other Oz', role: 'worker', departments: ['yard'], email: em('oz@x.test') }),
 ];
 const SETTINGS = ['incident', 'nearmiss'].map((k) => ({ company_id: 7, document_key: k, is_active: true }));
-const SITES = [{ id: 50, company_id: 7, name: 'Hwy 2 Pit', division_id: null }, { id: 51, company_id: 8, name: 'Other Co Yard', division_id: null }];
+const SITES = [{ id: 50, company_id: 7, name: 'Hwy 2 Pit', division_id: null }, { id: 52, company_id: 7, name: 'URGENT alert evil.example/verify', division_id: null }, { id: 51, company_id: 8, name: 'Other Co Yard', division_id: null }];
 let NOTIFY, STATE, ROWS;
 const reset = () => {
-  emails.length = 0; resendStatus = 200;
+  emails.length = 0; resendInits.length = 0; resendStatus = 200; COMPANY_SUSPENDED = false;
   NOTIFY = [{ company_id: 7, document_key: 'incident', enabled: true, extra_roster_ids: [] }, { company_id: 7, document_key: 'nearmiss', enabled: true, extra_roster_ids: [] }];
   STATE = [];
   ROWS = { incidents: [], near_misses: [] };
@@ -90,6 +93,7 @@ const server = http.createServer(async (req, res) => {
   if (path === 'roster') return wantsObject ? send(200, filt(ROSTER)[0] || {}) : send(200, filt(ROSTER));
   if (path === 'company_document_settings') return send(200, filt(SETTINGS));
   if (path === 'document_notifications') return send(200, filt(NOTIFY));
+  if (path === 'companies') return send(200, [{ id: 7, suspended: COMPANY_SUSPENDED }]);
   if (path === 'sites') return send(200, filt(SITES));
   if (path === 'incidents' || path === 'near_misses') {
     if (req.method === 'POST') {
@@ -220,4 +224,32 @@ test('the burst limit holds across repeated submits', async () => {
   for (let i = 0; i < 6; i += 1) await run({ type: 'incident', action: 'submit', token: as(11, 'worker'), signatureReceipt: sig(), record: incident() });
   assert.equal(emails.length, 3 * 3, 'three people, three emails each, then held');
   assert.ok(STATE.every((r) => r.held === 3));
+});
+
+test('a site named by a worker with link or phishing text never reaches an email', async () => {
+  reset();
+  const out = await run({ type: 'incident', action: 'submit', token: as(11, 'worker'), signatureReceipt: sig(), record: incident({ site_id: 52, site: 'x' }) });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.ok(emails.length > 0);
+  for (const e of emails) {
+    assert.equal(e.subject, 'New Incident Report');
+    assert.ok(!/evil|URGENT/.test(JSON.stringify(e)));
+  }
+});
+
+test('every send to the mail provider carries a timeout', async () => {
+  reset();
+  await run({ type: 'incident', action: 'submit', token: as(11, 'worker'), signatureReceipt: sig(), record: incident() });
+  assert.ok(resendInits.length > 0);
+  for (const init of resendInits) assert.ok(init.signal instanceof AbortSignal, 'a stalled provider cannot hold a submit open');
+});
+
+test('signing a saved report after the company is suspended notifies nobody', async () => {
+  reset();
+  const saved = await run({ type: 'incident', action: 'submit', token: as(11, 'worker'), record: incident({ sign_later: true }) });
+  assert.equal(saved.statusCode, 200, JSON.stringify(saved.body));
+  COMPANY_SUSPENDED = true;
+  const signed = await run({ type: 'incident', action: 'sign_now', token: as(11, 'worker'), id: saved.body.id, signatureReceipt: sig(), pdfUrl: pdf() });
+  assert.equal(signed.statusCode, 200, JSON.stringify(signed.body));
+  assert.equal(emails.length, 0);
 });

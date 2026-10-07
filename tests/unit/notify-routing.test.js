@@ -13,7 +13,7 @@ process.env.FIELD_ENCRYPTION_KEY ||= 'a'.repeat(64);
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickRecipients, routeNotification, notifyOnSubmit, cleanLabel, MAX_RECIPIENTS, COOLDOWN_SECONDS, BURST_LIMIT } from '../../server-lib/notifyRouting.js';
+import { pickRecipients, routeNotification, notifyOnSubmit, cleanLabel, safeSiteLabel, MAX_RECIPIENTS, COOLDOWN_SECONDS, BURST_LIMIT } from '../../server-lib/notifyRouting.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
 const P = (over) => ({ active: true, is_owner: false, is_lead: false, departments: [], divisions: [], default_site_id: null, email: null, ...over });
@@ -343,4 +343,32 @@ test('a failed send is not retried on the same submit and does not break the oth
   assert.equal(out.failed, 1);
   assert.equal(out.sent, 1);
   assert.equal(out.reason, 'partial', 'some told, one failed');
+});
+
+test('only a plain site name is ever put in an email', () => {
+  assert.equal(safeSiteLabel('Hwy 2 Pit'), 'Hwy 2 Pit');
+  assert.equal(safeSiteLabel("Yard #3 (north) - Bay & Co's"), "Yard #3 (north) - Bay & Co's");
+  for (const bad of [
+    'URGENT security alert evil.example/verify',
+    'Log in at evil.com',
+    'reply to boss@evil.test',
+    'Call 780 555 1234 now',
+    'Call 7805551234',
+    'Pit <b>x</b>',
+    'a'.repeat(41),
+    'https://evil.example',
+    '',
+    null,
+  ]) assert.equal(safeSiteLabel(bad), '', String(bad));
+});
+
+test('a site with an unsafe name is left out and the email names the document alone', async () => {
+  const sent = [];
+  const db = fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }));
+  await notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec, siteName: 'URGENT alert evil.example/verify' });
+  assert.ok(sent.length > 0);
+  for (const m of sent) {
+    assert.equal(m.subject, 'New Incident Report');
+    assert.ok(!/evil|URGENT/.test(JSON.stringify(m)));
+  }
 });

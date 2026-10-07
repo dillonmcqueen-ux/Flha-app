@@ -152,6 +152,9 @@ async function notifyAudience(session, type, { siteId, authorId }) {
   try {
     if (type !== 'incident' && type !== 'nearmiss') return;
     if (!process.env.RESEND_API_KEY) return;
+    // sign_now does not run submit's suspended-company check, so make it here.
+    const { data: co } = await supabaseAdmin.from('companies').select('suspended').eq('id', session.companyId).limit(1);
+    if (co && co[0] && co[0].suspended) return;
     let siteName = null;
     if (siteId != null) {
       const { data } = await supabaseAdmin.from('sites').select('name').eq('id', siteId).eq('company_id', session.companyId).limit(1);
