@@ -44,7 +44,11 @@ export default async function handler(req, res) {
   }
   const result = await runDigest(supabaseAdmin, { sendEmail });
   // Records that stayed unsigned: a heads-up at 24 hours, closed at 10 days.
-  const alerts = await alertOverdueUnsigned(supabaseAdmin, { sendEmail });
+  // Hourly, not every run: one email per person per document type per hour is plenty
+  // and a worker saving many records cannot turn it into a stream of emails.
+  const alerts = new Date().getUTCMinutes() < 10
+    ? await alertOverdueUnsigned(supabaseAdmin, { sendEmail })
+    : { alerted: 0, emailed: 0, failed: 0 };
   const closed = await closeStaleUnsigned(supabaseAdmin);
   await recordPlatformEvent(supabaseAdmin, {
     eventType: 'cron_run', subtype: 'notification_digest', status: result.error || result.failed > 0 || alerts.failed > 0 ? 'error' : 'ok',

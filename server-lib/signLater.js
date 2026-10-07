@@ -59,6 +59,17 @@ export async function loadSignState(supabase, table, id, companyId) {
   let rows = wide.data;
   if (wide.error) {
     if (!missingSignColumns(wide.error)) return { error: true };
+    // Keep awaiting_signature even when only the newer unsigned_closed_at column is
+    // missing: dropping it would make every unsigned record look signed.
+    const mid = await supabase
+      .from(table)
+      .select('id, company_id, submitted_by_roster_id, awaiting_signature, signature_requested_at')
+      .eq('id', id)
+      .eq('company_id', companyId)
+      .limit(1);
+    if (!mid.error) rows = mid.data;
+  }
+  if (wide.error && rows === wide.data) {
     const narrow = await supabase
       .from(table)
       .select('id, company_id, submitted_by_roster_id')

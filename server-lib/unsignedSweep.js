@@ -20,9 +20,15 @@
 // again. Never throws; returns counts.
 
 import { routeNotification, cleanLabel, DOCUMENT_LABELS } from './notifyRouting.js';
+import { isPermanentRejection } from './notifyDigest.js';
 import { SIGN_LATER_OVERDUE_MS, UNSIGNED_CLOSE_MS, missingSignColumns } from './signLater.js';
 
-export const ALERT_BATCH = 10;
+export const ALERT_BATCH = 50;
+// Rows looked at per table per run: more than ALERT_BATCH so rows that are skipped
+// (a suspended company) cannot hold up everyone behind them.
+export const ALERT_SCAN = 100;
+// Stop starting sends after this long; the function limit is 60 seconds.
+export const SEND_BUDGET_MS = 35 * 1000;
 
 const SOURCES = [
   { table: 'flhas', documentKey: 'flha', siteColumn: true },
@@ -42,6 +48,8 @@ export async function closeStaleUnsigned(supabase, { nowMs = Date.now() } = {}) 
       .update({ unsigned_closed_at: new Date(nowMs).toISOString() })
       .eq('awaiting_signature', true)
       .is('unsigned_closed_at', null)
+      // Only a record the heads-up stage has already looked at: nothing is closed in silence.
+      .not('unsigned_alerted_at', 'is', null)
       .lt('signature_requested_at', isoAgo(UNSIGNED_CLOSE_MS, nowMs))
       .select('id');
     if (error) {
@@ -63,6 +71,13 @@ export async function alertOverdueUnsigned(supabase, { sendEmail, nowMs = Date.n
     // person -> documentKey -> count; and per record who it went to, for the retry rule
     const perPerson = new Map();
     const claimed = [];
+    // Many records from one author at one site share an audience: work it out once.
+    const routeCache = new Map();
+    const routeOnce = async (args) => {
+      const k = `${args.companyId}:${args.documentKey}:${args.record.site_id}:${args.record.submitted_by_roster_id}`;
+      if (!routeCache.has(k)) routeCache.set(k, await routeNotification(supabase, args));
+      return routeCache.get(k);
+    };
 
     for (const src of SOURCES) {
       const cols = ['id', 'company_id', 'submitted_by_roster_id']
@@ -76,7 +91,7 @@ export async function alertOverdueUnsigned(supabase, { sendEmail, nowMs = Date.n
         .is('unsigned_alerted_at', null)
         .lt('signature_requested_at', isoAgo(SIGN_LATER_OVERDUE_MS, nowMs))
         .order('signature_requested_at', { ascending: true })
-        .limit(ALERT_BATCH);
+        .limit(ALERT_SCAN);
       if (error) {
         if (!missingSignColumns(error)) console.error(`unsigned alert lookup failed for ${src.table}:`, error.message);
         continue;
@@ -88,8 +103,15 @@ export async function alertOverdueUnsigned(supabase, { sendEmail, nowMs = Date.n
       if (coErr) { console.error('unsigned alert company lookup failed'); continue; }
       const suspended = new Set((cos || []).filter((c) => c.suspended === true).map((c) => Number(c.id)));
 
+      let routedCount = 0;
       for (const row of rows) {
-        if (suspended.has(Number(row.company_id))) continue;
+        if (routedCount >= ALERT_BATCH) break;
+        if (suspended.has(Number(row.company_id))) {
+          // Nobody is told for a suspended company; leave the queue so it cannot hold up others.
+          await supabase.from(src.table).update({ unsigned_alerted_at: new Date(nowMs).toISOString() })
+            .eq('id', row.id).eq('company_id', row.company_id).is('unsigned_alerted_at', null);
+          continue;
+        }
         // Claim first: only one run can win this record.
         const { data: won, error: claimErr } = await supabase
           .from(src.table)
@@ -102,10 +124,11 @@ export async function alertOverdueUnsigned(supabase, { sendEmail, nowMs = Date.n
           .select('id');
         if (claimErr || !won || won.length === 0) continue;
         out.alerted += 1;
+        routedCount += 1;
 
         // An anonymous near miss is placed by its site alone, never by who filed it.
         const authorId = src.anonymous && row.is_anonymous === true ? null : (row.submitted_by_roster_id ?? null);
-        const routed = await routeNotification(supabase, {
+        const routed = await routeOnce({
           companyId: row.company_id,
           documentKey: src.documentKey,
           record: { site_id: src.siteColumn ? (row.site_id ?? null) : null, submitted_by_roster_id: authorId },
@@ -130,8 +153,11 @@ export async function alertOverdueUnsigned(supabase, { sendEmail, nowMs = Date.n
 
     // One email per person per document type.
     const sentTo = new Set();
+    const sendStart = Date.now();
     for (const [key, person] of perPerson) {
       for (const [documentKey, n] of person.counts) {
+        // Out of time: whoever has not been told is handed back below and tried next run.
+        if (Date.now() - sendStart > SEND_BUDGET_MS) break;
         const label = cleanLabel(DOCUMENT_LABELS[documentKey]) || 'document';
         const plural = `${label}${n === 1 ? '' : 's'}`;
         try {
@@ -145,6 +171,9 @@ export async function alertOverdueUnsigned(supabase, { sendEmail, nowMs = Date.n
         } catch (e) {
           out.failed += 1;
           console.error('unsigned heads-up email failed:', e && e.message);
+          // A permanent rejection (a bad address) will not succeed on a retry: treat it as
+          // handled so one bad address cannot keep a record at the head of the queue.
+          if (isPermanentRejection(e)) sentTo.add(`${key}:${documentKey}`);
         }
       }
     }

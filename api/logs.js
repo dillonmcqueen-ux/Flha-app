@@ -775,6 +775,7 @@ export default async function handler(req, res) {
       let { data: allRows, error } = type === 'inspection'
         ? await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at, unsigned_closed_at`)
         : await runList(table.listColumns);
+      if (error && type === 'inspection' && missingSignColumns(error)) ({ data: allRows, error } = await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`));
       if (error && type === 'inspection' && missingSignColumns(error)) ({ data: allRows, error } = await runList(table.listColumns));
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, table.docKey, allRows || []);

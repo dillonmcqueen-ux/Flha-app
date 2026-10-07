@@ -348,6 +348,7 @@ export default async function handler(req, res) {
         }
         const amendSignState = await loadSignState(supabaseAdmin, 'flhas', amendingId, session.companyId);
         if (amendSignState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
+        if (amendSignState.found && amendSignState.closed) return res.status(403).json({ error: 'This FLHA was closed unsigned and can no longer be changed.' });
         if (amendSignState.found && amendSignState.awaiting) {
           if (amendSignState.authorId !== Number(session.userId)) return res.status(403).json({ error: 'Not allowed to amend this record.' });
           delete amendUpdate.worker_signature;
@@ -604,6 +605,8 @@ export default async function handler(req, res) {
       // awaiting_signature rides along; a database without the sign-later
       // columns has no unsigned records, so the read is retried without them.
       let { data: allRows, error } = await runList(`${listColumns}, awaiting_signature, signature_requested_at, worker_signed_at, unsigned_closed_at`);
+      // Without the newer unsigned_closed_at column, still say which are unsigned.
+      if (error && missingSignColumns(error)) ({ data: allRows, error } = await runList(`${listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`));
       if (error && missingSignColumns(error)) ({ data: allRows, error } = await runList(listColumns));
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, 'flha', allRows || []);
