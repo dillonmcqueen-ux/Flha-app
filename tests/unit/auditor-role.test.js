@@ -57,6 +57,7 @@ const FLHAS = [
   { id: 4, company_id: 7, job_site: 'Nowhere', site_id: null, created_at: '2026-10-04T10:00:00Z', pdf_url: null, status: 'complete', submitted_by_roster_id: 3 },
   { id: 5, company_id: 8, job_site: 'Other', site_id: 50, created_at: '2026-10-05T10:00:00Z', pdf_url: null, status: 'complete', submitted_by_roster_id: 90 },
 ];
+FLHAS.push({ id: 6, company_id: 7, job_site: 'Pit', site_id: 9, created_at: '2026-10-06T10:00:00Z', pdf_url: null, status: 'complete', submitted_by_roster_id: 3, awaiting_signature: true });
 const INCIDENTS = [{ id: 7, company_id: 7, site: 'Pit', site_id: 9, created_at: '2026-10-02T11:00:00Z', pdf_url: null, submitted_by_roster_id: 3 }];
 const CUSTOM_FORMS = [{ id: 11, company_id: 7, title: 'Yard Walk' }, { id: 12, company_id: 8, title: 'Other Form' }];
 const CUSTOM_RECORDS = [{ id: 31, form_id: 11, site_id: 10, created_at: '2026-10-03T09:00:00Z', pdf_url: null }, { id: 32, form_id: 11, site_id: 11, created_at: '2026-10-03T08:00:00Z', pdf_url: null }];
@@ -77,6 +78,7 @@ const server = http.createServer(async (req, res) => {
     (eq('company_id') === null || String(r.company_id) === eq('company_id')) &&
     (eq('active') === null || String(r.active) === eq('active')) &&
     (eq('role') === null || r.role === eq('role')) &&
+    (eq('awaiting_signature') === null || String(r.awaiting_signature === true) === eq('awaiting_signature')) &&
     (eq('roster_id') === null || String(r.roster_id) === eq('roster_id')) &&
     (inList('id') === null || inList('id').includes(String(r.id))) &&
     (inList('site_id') === null || inList('site_id').includes(String(r.site_id))) &&
@@ -264,4 +266,12 @@ test('an auditor whose access has ended cannot sign in', async () => {
   assert.equal(out.statusCode, 403, JSON.stringify(out.body));
   assert.match(out.body.error, /audit access has ended/);
   assert.equal(out.body.token, undefined);
+});
+
+test('an auditor is never handed a record still awaiting its author\'s signature', async () => {
+  const out = await run(audit, { action: 'list_audit_documents', token: AUDITOR(), documentKey: 'flha' });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  const ids = out.body.documents.map(d => d.id);
+  assert.ok(!ids.includes(6), 'the unsigned FLHA at an allowed site is hidden');
+  assert.ok(ids.includes(1), 'signed ones at the same site still show');
 });

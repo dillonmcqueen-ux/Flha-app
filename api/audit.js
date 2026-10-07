@@ -20,6 +20,7 @@ import { signRows } from '../server-lib/signedUrls.js';
 import { isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { loadAuditor } from '../server-lib/auditorAccess.js';
 import { DIRECT_SOURCES } from '../server-lib/documentSources.js';
+import { missingSignColumns } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -102,8 +103,13 @@ export default async function handler(req, res) {
       for (const src of DIRECT_SOURCES) {
         if (!keys.includes(src.key)) continue;
         if (!(await isDocKeyActive(supabaseAdmin, companyId, src.key))) continue;
-        const { data, error } = await supabaseAdmin.from(src.table).select(src.cols)
+        const readSource = () => supabaseAdmin.from(src.table).select(src.cols)
           .eq('company_id', companyId).in('site_id', sites).order('created_at', { ascending: false }).limit(LIMIT_PER_SOURCE);
+        // A report its author has not signed yet is not handed to an auditor.
+        // A database without the sign-later columns has none, so the read is
+        // retried without the filter.
+        let { data, error } = src.signable ? await readSource().eq('awaiting_signature', false) : await readSource();
+        if (error && src.signable && missingSignColumns(error)) ({ data, error } = await readSource());
         if (error) return res.status(500).json({ error: 'Could not load documents.' });
         (data || []).forEach((r) => collected.push({ r, type: src.type, title: src.title, subtitle: src.sub(r) || '' }));
       }

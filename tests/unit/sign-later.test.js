@@ -241,3 +241,17 @@ test('sign_now needs the signed PDF to have uploaded', async () => {
   assert.equal(noPdf.statusCode, 400);
   assert.equal(FLHAS.find(f => f.id === 201).awaiting_signature, true, 'still awaiting');
 });
+
+test('every table that can hold an unsigned record is marked signable for the auditor and lead lists', async () => {
+  const { DIRECT_SOURCES, INSPECTION_SOURCE } = await import('../../server-lib/documentSources.js');
+  const marked = [...DIRECT_SOURCES, INSPECTION_SOURCE].filter(s => s.signable).map(s => s.table).sort();
+  const expected = [...signLater.SIGN_LATER_TABLES].sort();
+  assert.deepEqual(marked, expected, 'a table in SIGN_LATER_TABLES without signable: true would leak unsigned rows to auditors');
+});
+
+test('missingSignColumns trusts the error code, not the message', () => {
+  assert.equal(signLater.missingSignColumns({ code: '42703', message: 'x' }), true);
+  assert.equal(signLater.missingSignColumns({ code: 'PGRST204', message: 'x' }), true);
+  assert.equal(signLater.missingSignColumns({ code: '57014', message: 'canceling statement, awaiting_signature' }), false);
+  assert.equal(signLater.missingSignColumns(null), false);
+});
