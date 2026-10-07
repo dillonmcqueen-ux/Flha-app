@@ -446,11 +446,17 @@ export default async function handler(req, res) {
       const collected = [];
       for (const src of SOURCES) {
         if (!(await isDocKeyActive(supabaseAdmin, companyId, src.key))) continue;
-        // entered_by_roster_id exists only once the lead migration has run.
-        let res1 = await supabaseAdmin.from(src.table).select(src.enteredBy ? `${src.cols}, entered_by_roster_id` : src.cols)
-          .eq('company_id', companyId).order('created_at', { ascending: false }).limit(LIMIT);
-        if (res1.error && src.enteredBy && missingCol(res1.error)) {
-          res1 = await supabaseAdmin.from(src.table).select(src.cols).eq('company_id', companyId).order('created_at', { ascending: false }).limit(LIMIT);
+        // entered_by_roster_id and the sign-later columns exist only once their
+        // migrations have run, so the read steps down to what the database has.
+        const withEntered = src.enteredBy ? `${src.cols}, entered_by_roster_id` : src.cols;
+        const attempts = [];
+        if (src.signable) attempts.push(`${withEntered}, awaiting_signature, signature_requested_at`);
+        attempts.push(withEntered);
+        if (src.enteredBy) attempts.push(src.cols);
+        let res1;
+        for (const columns of attempts) {
+          res1 = await supabaseAdmin.from(src.table).select(columns).eq('company_id', companyId).order('created_at', { ascending: false }).limit(LIMIT);
+          if (!res1.error || !missingCol(res1.error)) break;
         }
         if (res1.error) return res.status(500).json({ error: 'Could not load your crew\'s documents.' });
         const visible = await listVisibleRecords(supabaseAdmin, session, src.key, res1.data || []);
@@ -501,6 +507,9 @@ export default async function handler(req, res) {
         documents: top.map(r => ({
           id: r.id, type: r._src.type, title: r._src.title, subtitle: r._src.sub(r) || '',
           createdAt: r.created_at, status: r.status || null,
+          // Saved to sign afterwards and not yet signed: labelled, not hidden.
+          awaitingSignature: r.awaiting_signature === true,
+          signatureRequestedAt: r.signature_requested_at || null,
           author: r.submitted_by_roster_id != null ? (nameOf.get(r.submitted_by_roster_id) || '') : 'Anonymous',
           enteredBy: r.entered_by_roster_id != null ? (nameOf.get(r.entered_by_roster_id) || '') : '',
           pdf_url: pdfById.get(`${r._src.type}:${r.id}`) || null,

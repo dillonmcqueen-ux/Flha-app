@@ -68,6 +68,7 @@ const server = http.createServer(async (req, res) => {
     (eq('company_id') === null || String(r.company_id) === eq('company_id')) &&
     (eq('active') === null || String(r.active) === eq('active')) &&
     (eq('role') === null || r.role === eq('role')) &&
+    (eq('awaiting_signature') === null || String(r.awaiting_signature === true) === eq('awaiting_signature')) &&
     (inList('id') === null || inList('id').includes(String(r.id))));
 
   if (table === 'roster') return wantsObject ? send(200, filt(ROSTER)[0] || {}) : send(200, filt(ROSTER));
@@ -265,4 +266,20 @@ test('the crew documents list is for leads only', async () => {
   const out = await run(customforms, { action: 'get_crew_documents', token: LEAD() });
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
   assert.ok(Array.isArray(out.body.documents));
+});
+
+test('a crew document saved to sign afterwards is labelled for the lead, not hidden', async () => {
+  const row = FLHAS.find(f => f.id === 101);
+  row.awaiting_signature = true; row.signature_requested_at = '2026-10-01T10:00:00Z';
+  try {
+    const out = await run(customforms, { action: 'get_crew_documents', token: LEAD() });
+    assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+    const hit = out.body.documents.find(d => d.type === 'flha' && d.id === 101);
+    assert.ok(hit, 'still listed');
+    assert.equal(hit.awaitingSignature, true);
+    const signed = out.body.documents.find(d => d.type === 'flha' && d.id === 105);
+    if (signed) assert.equal(signed.awaitingSignature, false);
+  } finally {
+    delete row.awaiting_signature; delete row.signature_requested_at;
+  }
 });
