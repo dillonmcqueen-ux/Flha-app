@@ -44,11 +44,13 @@
 // window. The slot is claimed atomically in the database BEFORE the send
 // (claim_notification_slot), so parallel submits cannot all pass and a timeout
 // between sending and recording cannot duplicate. A notice held past the burst
-// is counted and reported in that person's next email, which only goes out if
-// another notice arrives after the window ends: there is no timer that flushes
-// held notices, so the delay is unbounded and the Dashboard stays the source of
-// truth for every record. A slot is spent when it is claimed, so a send that
-// then fails is not refunded and is not counted as held. A claim
+// is counted and reported in that person's next email, or by the digest cron
+// (api/cron-notification-digest.js, server-lib/notifyDigest.js) once the window
+// ends, so a held notice is always reported within about one window plus one
+// cron interval; the Dashboard stays the source of
+// truth for every record. A slot is spent when it is claimed; a send that then
+// fails gives it back (refund_notification_slot), so a failed send neither locks
+// the person out of the window nor loses their held count. A claim
 // that fails (function or table missing, database error) sends NOTHING to that
 // person: the cooldown is what keeps a flood off the shared sender, so it is
 // never skipped.
@@ -325,6 +327,23 @@ export async function claimSlot(supabase, companyId, documentKey, rosterId) {
 }
 
 /**
+ * Puts back what a failed email spent: `slots` of the burst and `held` notices
+ * that the claim or digest had already taken off the count. Best effort and
+ * logged: the worst outcome of a failed refund is the old behaviour.
+ */
+export async function refundSlot(supabase, companyId, documentKey, rosterId, { slots = 0, held = 0 } = {}) {
+  if (slots <= 0 && held <= 0) return;
+  try {
+    const { error } = await supabase.rpc('refund_notification_slot', {
+      p_company: companyId, p_key: documentKey, p_roster: rosterId, p_slots: slots, p_held: held,
+    });
+    if (error) console.error('refund_notification_slot failed:', error.code, error.message);
+  } catch (e) {
+    console.error('refund_notification_slot threw:', e && e.message);
+  }
+}
+
+/**
  * Tells the audience about a new record. Never throws. Returns
  * { sent, failed, held, reason } so a caller or a test can see what happened.
  *
@@ -360,6 +379,9 @@ export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentK
       } catch (e) {
         failed += 1;
         console.error('routed notification email failed:', e && e.message);
+        // The email never went, so give back the slot it spent and any held
+        // count the rollover claim had just reset.
+        await refundSlot(supabase, companyId, documentKey, r.id, { slots: 1, held: claim.suppressed });
       }
     };
     // A slow mail provider must not hold up the worker's submit for long: stop
