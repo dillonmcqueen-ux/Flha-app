@@ -35,7 +35,7 @@ import { PORTAL_DEPARTMENTS } from '../server-lib/portalDepartments.js';
 import { validDepartmentKeys } from '../server-lib/companyStructure.js';
 import { PORTAL_FIELD_TYPE_KEYS, fieldTypeNeedsOptions, fieldTypeCanEscalate, validateEditedPortalAnswer } from '../server-lib/portalFieldTypes.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
-import { requireAssignment, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { requireAssignment, menuAccessFor, withCompletion, SUBMIT, queuedAsOf, scopeRecords, requireRecordScope } from '../server-lib/documentAccess.js';
 
 export const config = {
   // Matches api/generate-flha.js — the AI draft step (ai_draft_document)
@@ -769,9 +769,16 @@ Rules:
       const docIds = visibleDocuments.map(d => d.id);
       if (docIds.length === 0) return res.status(200).json({ records: [] });
 
-      const { data: records, error: recErr } = await supabaseAdmin
+      const { data: allRecords, error: recErr } = await supabaseAdmin
         .from('portal_records').select('*').in('document_id', docIds).order('created_at', { ascending: false });
       if (recErr) return res.status(500).json({ error: 'Could not load records.' });
+      // Department routing picks the documents; then the same site and author
+      // rules every other document uses (rule A) pick the records, so a
+      // supervisor scoped to one site does not read another site's Portal
+      // records. The Owner and the founder see everything (break #47).
+      const scoped = await scopeRecords(supabaseAdmin, session, allRecords || []);
+      if (scoped.denied) return res.status(scoped.denied.status).json({ error: scoped.denied.error });
+      const records = scoped.records;
 
       const siteIds = [...new Set((records || []).map(r => r.site_id))];
       const { data: sites } = await supabaseAdmin.from('sites').select('id, name').in('id', siteIds.length ? siteIds : [0]);
@@ -818,6 +825,11 @@ Rules:
           return res.status(403).json({ error: 'Not allowed.' });
         }
       }
+
+      // Then site and author (rule A), with the same generic 403 so the answer
+      // never says which check failed.
+      const outOfScope = await requireRecordScope(supabaseAdmin, session, record);
+      if (outOfScope) return res.status(outOfScope.status).json({ error: outOfScope.status === 403 ? 'Not allowed.' : outOfScope.error });
 
       const { data: siteRows } = await supabaseAdmin.from('sites').select('id, name').eq('id', record.site_id).limit(1);
       const { data: answers, error: ansErr } = await supabaseAdmin.from('portal_answers').select('*').eq('record_id', recordId);
@@ -1096,7 +1108,7 @@ Rules:
     // with one generic 403 for missing/foreign/out-of-department.
     async function loadManageableRecord(recordId) {
       const denied = { status: 403, error: 'Not allowed.' };
-      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id').eq('id', recordId).limit(1);
+      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, site_id, submitted_by_roster_id').eq('id', recordId).limit(1);
       const record = recordRows && recordRows[0];
       if (!record) return session.role === 'admin' ? { status: 404, error: 'Record not found.' } : denied;
       const { data: docRows } = await supabaseAdmin.from('portal_documents').select('id, company_id, departments').eq('id', record.document_id).limit(1);
@@ -1108,6 +1120,10 @@ Rules:
         const mine = (me && me[0] && me[0].departments) || [];
         if (!(document.departments || []).some(dep => mine.includes(dep))) return denied;
       }
+      // Site and author (rule A) as well: a supervisor may change or delete
+      // only a record they could have listed.
+      const outOfScope = await requireRecordScope(supabaseAdmin, session, record);
+      if (outOfScope) return outOfScope.status === 403 ? denied : outOfScope;
       return { record, document };
     }
 
@@ -1321,7 +1337,7 @@ Rules:
       if (!recordId) return res.status(400).json({ error: 'Missing record id.' });
       if (typeof department !== 'string' || !department) return res.status(400).json({ error: 'Pick a department.' });
 
-      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, submitted_by, created_at, pdf_url').eq('id', recordId).limit(1);
+      const { data: recordRows } = await supabaseAdmin.from('portal_records').select('id, document_id, site_id, submitted_by_roster_id, submitted_by, created_at, pdf_url').eq('id', recordId).limit(1);
       const record = recordRows && recordRows[0];
       const denied = () => res.status(403).json({ error: 'Not allowed.' });
       if (!record) return session.role === 'admin' ? res.status(404).json({ error: 'Record not found.' }) : denied();
@@ -1333,6 +1349,9 @@ Rules:
       if (!(await validDepartmentKeys(supabaseAdmin, doc.company_id)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
       const mine = await myDepartmentList();
       if (mine && !(doc.departments || []).some(dep => mine.includes(dep))) return denied();
+      // Only a record the supervisor could have listed (site and author, rule A).
+      const outOfScope = await requireRecordScope(supabaseAdmin, session, record);
+      if (outOfScope) return outOfScope.status === 403 ? denied() : res.status(outOfScope.status).json({ error: outOfScope.error });
       // A supervisor can only send a record to a department the document is
       // actually routed to, so this can't be used to push a document at a
       // department that isn't meant to see it. Admin is unrestricted.
