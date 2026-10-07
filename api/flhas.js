@@ -624,6 +624,13 @@ export default async function handler(req, res) {
       }
       const editDenied = await requireRecordsAccess(supabaseAdmin, session, 'flha', [existing[0]]);
       if (editDenied) return res.status(editDenied.status).json({ error: editDenied.error });
+      // Not edited under a worker who has not signed it yet: they would sign
+      // content they never saw. Edit it once it is signed.
+      {
+        const signState = await loadSignState(supabaseAdmin, 'flhas', id, existing[0].company_id);
+        if (signState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
+        if (signState.found && signState.awaiting) return res.status(409).json({ error: "The worker hasn't signed this FLHA yet. Edit it once they have." });
+      }
 
       const EDITABLE_FIELDS = ['worker_name', 'job_site', 'hazards_json'];
       const update = {};

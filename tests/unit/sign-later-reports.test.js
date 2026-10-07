@@ -211,3 +211,26 @@ test('a near miss is signed the same way', async () => {
   const wrong = await run({ type: 'nearmiss', action: 'sign_now', token: as(12, 'worker'), id: 301, signatureReceipt: sigReceipt(), pdfUrl: pdfReceipt() });
   assert.equal(wrong.statusCode, 403);
 });
+
+test('an unsigned report cannot be edited under its author, and an admin lookup that finds nothing is a 404', async () => {
+  reset();
+  for (const [type, id] of [['incident', 201], ['nearmiss', 301]]) {
+    const out = await run({ type, action: 'update', token: as(2, 'supervisor'), id, fields: { site: 'Edited' } });
+    assert.equal(out.statusCode, 409, `${type} ${JSON.stringify(out.body)}`);
+  }
+  const gone = await run({ type: 'incident', action: 'review', token: mintToken({ role: 'admin', founder: true }), id: 99999, notes: 'x' });
+  assert.equal(gone.statusCode, 404);
+  const signedEdit = await run({ type: 'incident', action: 'update', token: as(2, 'supervisor'), id: 202, fields: { site: 'Edited' } });
+  assert.equal(signedEdit.statusCode, 200, JSON.stringify(signedEdit.body));
+});
+
+test('a near miss without a signature still saves as it did (no sign screen yet), and is_anonymous is a strict boolean', async () => {
+  reset(); inserts.near_misses.length = 0;
+  const out = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: false, site: 'Pit', involved: 'x', report_json: {} } });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.notEqual(inserts.near_misses[0].awaiting_signature, true);
+  const str = await run({ type: 'nearmiss', action: 'submit', token: as(11, 'worker'), record: { reporter_name: 'x', is_anonymous: 'true', site: 'Pit', involved: 'x', report_json: {}, sign_later: true } });
+  assert.equal(str.statusCode, 200, JSON.stringify(str.body));
+  assert.equal(inserts.near_misses[1].is_anonymous, false, 'a string is not truthy anonymity');
+});
+

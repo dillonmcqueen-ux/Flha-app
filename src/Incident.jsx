@@ -107,11 +107,15 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
       signatureReceipt = receipt || null;
     } catch (e) { /* signature upload failure shouldn't block submission */ }
   }
+  // The signature never reached storage: save the report to be signed
+  // afterwards rather than as a report that looks signed and is not (the
+  // server flags such a report awaiting its signature anyway).
+  const savingUnsigned = signLater || (!!sig && !signatureReceipt);
 
   const pdfUrl = await generateAndUploadIncident({
     reporter, site, occurredAt, incidentType, injuredPerson, bodyPart, treatment, medicalAttention, witnesses, evidence, customFields,
-    report, companyName, companyLogo, signatureDataUrl: signLater ? null : sig, photoUrls: allPhotoUrls,
-    photoImages: allPhotoImages, awaitingSignature: signLater, token: tokenForRequest,
+    report, companyName, companyLogo, signatureDataUrl: savingUnsigned ? null : sig, photoUrls: allPhotoUrls,
+    photoImages: allPhotoImages, awaitingSignature: savingUnsigned, token: tokenForRequest,
   });
 
   let res;
@@ -134,7 +138,7 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
           report_json: { ...report, customFields },
           signed_by: reporter,
           pdf_url: pdfUrl || null,
-          ...(signLater ? { sign_later: true } : {}),
+          ...(savingUnsigned ? { sign_later: true } : {}),
         },
       }),
     });
@@ -543,7 +547,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     }
 
     try {
-      await resubmitIncident({ ...payload, photoImages }, clientSubmissionId, token);
+      const saved = await resubmitIncident({ ...payload, photoImages }, clientSubmissionId, token);
+      if (saved && saved.awaitingSignature) setSavedUnsigned(true);
       setSaving(false);
       clearDraft("incident", companyId);
       setStep("done");
