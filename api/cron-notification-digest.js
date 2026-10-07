@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { sendEmail } from '../server-lib/email.js';
 import { runDigest } from '../server-lib/notifyDigest.js';
 import { recordPlatformEvent } from '../server-lib/platformEvents.js';
+import { encryptionKeyProblem } from '../server-lib/fieldCrypto.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -30,6 +31,14 @@ export default async function handler(req, res) {
   }
 
   const startedAt = Date.now();
+  // The claim zeroes held counts before anything is sent, so never claim when
+  // sending cannot work: without the mail key the sends would silently no-op and
+  // the counts would be lost, and with a bad encryption key no address can be read.
+  if (!process.env.RESEND_API_KEY || encryptionKeyProblem()) {
+    console.error('notification digest skipped: email or encryption key not configured');
+    await recordPlatformEvent(supabaseAdmin, { eventType: 'cron_run', subtype: 'notification_digest', status: 'error', metrics: { skipped: 1, duration_ms: Date.now() - startedAt } });
+    return res.status(200).json({ skipped: true });
+  }
   const result = await runDigest(supabaseAdmin, { sendEmail });
   await recordPlatformEvent(supabaseAdmin, {
     eventType: 'cron_run', subtype: 'notification_digest', status: result.error || result.failed > 0 ? 'error' : 'ok',

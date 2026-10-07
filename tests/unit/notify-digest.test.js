@@ -13,15 +13,17 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runDigest } from '../../server-lib/notifyDigest.js';
+import { runDigest, isPermanentRejection, DIGEST_BATCH } from '../../server-lib/notifyDigest.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
 function fakeDb({ held = [], settings = [], roster = [], companies = [], failClaim = false, failLookup = false } = {}) {
   const refunds = [];
   const table = (rows) => ({
+    cur: rows,
     select() { return this; },
-    in(k, vs) { this.rows = rows.filter((r) => vs.map(String).includes(String(r[k]))); return this; },
-    then(resolve) { return resolve(failLookup ? { data: null, error: { code: 'X', message: 'x' } } : { data: this.rows || rows, error: null }); },
+    in(k, vs) { this.cur = this.cur.filter((r) => vs.map(String).includes(String(r[k]))); return this; },
+    limit() { return this; },
+    then(resolve) { return resolve(failLookup ? { data: null, error: { code: 'X', message: 'x' } } : { data: this.cur, error: null }); },
   });
   return {
     refunds,
@@ -122,4 +124,65 @@ test('the cron endpoint refuses a caller without the secret', async () => {
     await handler({ method: 'GET', headers }, r);
     assert.equal(r.o.code, 401, JSON.stringify(headers));
   }
+});
+
+test('permanent rejections are recognised', () => {
+  assert.equal(isPermanentRejection(new Error('Resend API error: 422 {"message":"invalid"}')), true);
+  assert.equal(isPermanentRejection(new Error('Resend API error: 403 forbidden')), true);
+  assert.equal(isPermanentRejection(new Error('Resend API error: 429 slow down')), false, 'rate limit retries');
+  assert.equal(isPermanentRejection(new Error('Resend API error: 408 timeout')), false);
+  assert.equal(isPermanentRejection(new Error('Resend API error: 500 oops')), false);
+  assert.equal(isPermanentRejection(new Error('socket hang up')), false);
+});
+
+test('a permanent rejection is dropped, a temporary one is refunded, so a bad address cannot starve the queue', async () => {
+  const dropDb = fakeDb(base());
+  const dropped = await runDigest(dropDb, { sendEmail: async () => { throw new Error('Resend API error: 422 bad address'); } });
+  assert.equal(dropped.dropped, 1);
+  assert.equal(dropped.failed, 0);
+  assert.equal(dropDb.refunds.length, 0, 'not retried');
+
+  const retryDb = fakeDb(base());
+  const retried = await runDigest(retryDb, { sendEmail: async () => { throw new Error('Resend API error: 429 slow'); } });
+  assert.equal(retried.failed, 1);
+  assert.equal(retryDb.refunds.length, 1, 'retried next run');
+});
+
+test('a stored address that cannot be decrypted is handed back, not dropped', async () => {
+  // Valid ciphertext shape under a different key cannot be decrypted with the current one.
+  const prevKey = process.env.FIELD_ENCRYPTION_KEY;
+  process.env.FIELD_ENCRYPTION_KEY = 'b'.repeat(64);
+  const foreign = encryptField('p1@x.test');
+  process.env.FIELD_ENCRYPTION_KEY = prevKey;
+  const db = fakeDb(base({ roster: [{ id: 1, company_id: 7, active: true, email: foreign }] }));
+  const { sent, sendEmail } = collect();
+  const out = await runDigest(db, { sendEmail });
+  assert.equal(sent.length, 0);
+  assert.equal(out.dropped, 0, 'a key problem is not a person who cannot be told');
+  assert.equal(out.failed, 1);
+  assert.equal(db.refunds.length, 1);
+});
+
+test('the batch is small enough that a cut-off run loses little', () => {
+  assert.ok(DIGEST_BATCH <= 50);
+});
+
+test('the cron endpoint does not claim anything when the mail key or encryption key is missing', async () => {
+  const { default: handler } = await import('../../api/cron-notification-digest.js');
+  const call = async () => {
+    const o = { code: null, body: null };
+    await handler({ method: 'GET', headers: { authorization: 'Bearer test-cron-secret' } }, { status(c) { o.code = c; return this; }, json(b) { o.body = b; return this; } });
+    return o;
+  };
+  const prev = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
+  const noMail = await call();
+  assert.deepEqual([noMail.code, noMail.body], [200, { skipped: true }]);
+  process.env.RESEND_API_KEY = 'x';
+  const prevKey = process.env.FIELD_ENCRYPTION_KEY;
+  process.env.FIELD_ENCRYPTION_KEY = 'too-short';
+  const badKey = await call();
+  assert.deepEqual([badKey.code, badKey.body], [200, { skipped: true }]);
+  process.env.FIELD_ENCRYPTION_KEY = prevKey;
+  if (prev === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = prev;
 });

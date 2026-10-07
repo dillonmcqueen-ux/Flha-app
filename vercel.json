@@ -9,6 +9,9 @@
     { "path": "/api/cron-portal-reports", "schedule": "0 13 * * *" },
     { "path": "/api/cron-notification-digest", "schedule": "*/10 * * * *" }
   ],
+  "functions": {
+    "api/cron-notification-digest.js": { "maxDuration": 60 }
+  },
   "headers": [
     {
       "source": "/(.*)",
