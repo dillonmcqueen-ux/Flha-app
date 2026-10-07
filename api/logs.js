@@ -16,6 +16,7 @@ import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { resolveOnBehalf } from '../server-lib/leadAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { unsignedFields, missingSignColumns, completeSignature, cleanSignature, loadSignState, SIGN_LATER_TABLES } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -303,6 +304,153 @@ export function dailyConditionsSignal(record) {
   return signal;
 }
 
+// Everything an inspection sets in motion once it counts: the Brain signal,
+// the corrective actions its Defective items open, and, for a post-trip, the
+// actions it closes and the repair line it logs. Called at submit for a signed
+// inspection and from sign_now for one saved to sign afterwards. `record` is
+// what the worker submitted (results_json, equipment_label); `vetted` is the
+// server-checked row (equipment_id, equipment_label, trip_type).
+async function runInspectionFollowUps(session, newId, record, recordToInsert) {
+  const type = 'inspection';
+      // Equipment inspections were left out of Phase 3's original signal
+      // set. They are the richest company-specific signal the product
+      // collects — which checks actually fail, on which machines — and the
+      // Brain was blind to all of it while learning from FLHA edits and
+      // toolbox talks submitted through this very same handler.
+      //
+      // Only the exceptions are signal. A checklist of thirty "Good" items
+      // says nothing a profile should emphasize; the two that came back
+      // Defective do. Same best-effort discipline as every other writer
+      // here: the inspection is already saved, and a failure below is
+      // logged, never turned into a failed submit.
+      if (newId && type === 'inspection') {
+        const signal = inspectionFindingSignal(record);
+        if (signal) {
+          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
+            company_id: session.companyId,
+            source_type: 'equipment_inspection',
+            source_id: String(newId),
+            signal_json: signal,
+          });
+          if (signalErr) console.error('company_signals insert failed for inspection', newId, signalErr.message);
+        }
+      }
+
+      // Break #5 — a Defective item on an inspection is a finding somebody
+      // has to act on, and until now there was nowhere for it to go: it sat
+      // in results_json and showed on the inspection record, but never
+      // became an assignable, ageable item the way a failed monthly
+      // question does.
+      //
+      // Only Defective opens an action. "Monitor" is an operator saying
+      // "keep an eye on this", and turning every one of those into a tracked
+      // row would bury the real defects — see the note in
+      // server-lib/correctiveActions.js. Monitor items still reach the Brain
+      // and still show on the inspection itself.
+      //
+      // Best-effort, same as the signal writer above: the inspection is
+      // already saved, and failures are logged inside the helper.
+      if (newId && type === 'inspection') {
+        // recordToInsert.equipment_id is the VETTED id — resolveEquipmentId
+        // above already rejected another company's machine and nulled a
+        // non-existent one. Reading record.equipment_id here instead would
+        // put a client-supplied id straight into the column that decides
+        // which machine a pattern belongs to.
+        const host = { equipmentId: recordToInsert.equipment_id ?? null, equipmentLabel: recordToInsert.equipment_label ?? null };
+        const findings = correctiveActionsFromInspection(record.results_json, record.equipment_label);
+        const fixed = recordToInsert.trip_type === 'posttrip' ? resolvedItemsFromPosttrip(record.results_json) : [];
+
+        // Break #17: an attachment's defect belongs to the attachment. Its
+        // id comes from results_json, which is client jsonb, so it is vetted
+        // against this company's fleet the same way daily reports vet theirs.
+        // A foreign or unknown id is dropped to null (label only), never
+        // stored; a failed lookup does the same rather than failing a submit.
+        const attachmentIds = [...findings, ...fixed].map(f => f.attachment?.id).filter(id => id != null);
+        const vetted = attachmentIds.length > 0 ? await resolveEquipmentIds(supabaseAdmin, session.companyId, attachmentIds) : null;
+        const vettedIds = new Set(Array.isArray(vetted) ? vetted.map(String) : []);
+
+        for (const group of groupFindingsByMachine(findings, host, vettedIds)) {
+          await openCorrectiveActions(supabaseAdmin, {
+            companyId: session.companyId,
+            sourceType: 'equipment_inspection',
+            sourceId: newId,
+            descriptions: group.findings,
+            equipmentId: group.equipmentId,
+            equipmentLabel: group.equipmentLabel,
+          });
+        }
+
+        // ── The other half of the loop: a post-trip that clears a defect ──
+        //
+        // Dillon, 2026-09-17: "if the person marks the post trip as the issue
+        // no longer exists, it can be marked in corrective actions as
+        // resolved and logged as a repair."
+        //
+        // Two writes, in this order and not the other way round. The
+        // corrective action is the supervisor-facing record and the one that
+        // must be right; the repair line is the machine's history. If the
+        // repair log fails we would rather have a closed action with no
+        // service line than an open action the worker was told they had
+        // closed.
+        // Resolved per machine, for the same reason actions are opened per
+        // machine: the forks' fixed tine closes the forks' action and logs
+        // the repair on the forks, not on the loader that carried them.
+        for (const { equipmentId: machineId, equipmentLabel: machineLabel, findings: fixedHere } of groupFindingsByMachine(fixed, host, vettedIds)) {
+          if (fixedHere.length > 0) {
+            // session.name / session.userName, never a name from the body.
+            // Who repaired a machine is attribution, and attribution a
+            // caller can choose is a suggestion — the same rule break #3
+            // settled for document authorship.
+            const who = (session.name || session.userName || '').trim() || 'Worker';
+            const noteText = fixedHere
+              .map((f) => (f.note ? `${f.item} — ${f.note}` : f.item))
+              .join('; ');
+
+            const closed = await resolveCorrectiveActionsForItems(supabaseAdmin, {
+              companyId: session.companyId,
+              equipmentId: machineId,
+              equipmentLabel: machineLabel,
+              itemKeys: fixedHere.map((f) => f.itemKey),
+              resolvedBy: who,
+              note: noteText,
+              resolutionSource: 'posttrip',
+            });
+
+            // The repair line only exists for a fleet-registered machine:
+            // equipment_maintenance_log.equipment_id is a real FK and a
+            // free-text machine has no row to point at. That machine's
+            // history still lives on its corrective actions, which is the
+            // same graceful degradation equipment_id has everywhere else.
+            //
+            // entry_type is 'field_service', NEVER 'pm_service'. A worker
+            // saying "the tire's fixed" must not reset the machine's
+            // preventative-maintenance clock — see
+            // docs/scope-equipment-service-log.md for why that would be
+            // strictly worse than not logging it at all.
+            if (closed.length > 0 && machineId != null) {
+              const { error: repairErr } = await supabaseAdmin.from('equipment_maintenance_log').insert({
+                company_id: session.companyId,
+                equipment_id: machineId,
+                entry_type: 'field_service',
+                service_date: new Date().toISOString().slice(0, 10),
+                // Deliberately no reading. The post-trip's end_reading is a
+                // meter reading for the trip, not for the repair, and
+                // service_reading is what a PM baseline would be measured
+                // from if one ever read these rows by mistake.
+                service_reading: null,
+                reading_unit: null,
+                performed_by: who,
+                logged_by_roster_id: session.userId || null,
+                notes: `Repaired on post-trip: ${noteText}`.slice(0, 1000),
+              });
+              if (repairErr) console.error('post-trip repair log insert failed for inspection', newId, repairErr.message);
+            }
+          }
+        }
+      }
+
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -467,6 +615,16 @@ export default async function handler(req, res) {
         recordToInsert[table.jsonColumn] = { ...(recordToInsert[table.jsonColumn] || {}), client_submission_id: clientSubmissionId };
       }
 
+      // "I'll sign afterwards" (inspections only so far): saved now, signed
+      // later by the person it is stamped to. Needs a real sign-in, because
+      // somebody has to be the one who signs. Until it is signed, its
+      // readings count toward nothing (maintenance, fuel).
+      const signLater = type === 'inspection' && record.sign_later === true;
+      if (signLater) {
+        if (!session.userId) return res.status(400).json({ error: 'Signing afterwards needs your own sign-in.' });
+        Object.assign(recordToInsert, unsignedFields(new Date().toISOString()));
+      }
+
       const { data, error } = await supabaseAdmin
         .from(table.name)
         // Break #3 — the author comes from the session, never the request.
@@ -475,6 +633,9 @@ export default async function handler(req, res) {
         .insert({ ...recordToInsert, company_id: session.companyId, submitted_by_roster_id: authorRosterId(session), ...(session.enteredBy ? { entered_by_roster_id: session.enteredBy } : {}) })
         .select('id')
         .limit(1);
+      if (error && signLater && missingSignColumns(error)) {
+        return res.status(503).json({ error: "Signing afterwards isn't switched on yet. Sign now, or ask your Owner." });
+      }
       if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
       const newId = data?.[0]?.id || null;
 
@@ -492,30 +653,6 @@ export default async function handler(req, res) {
             signal_json: { topic },
           });
           if (signalErr) console.error('company_signals insert failed for toolbox talk', newId, signalErr.message);
-        }
-      }
-
-      // Equipment inspections were left out of Phase 3's original signal
-      // set. They are the richest company-specific signal the product
-      // collects — which checks actually fail, on which machines — and the
-      // Brain was blind to all of it while learning from FLHA edits and
-      // toolbox talks submitted through this very same handler.
-      //
-      // Only the exceptions are signal. A checklist of thirty "Good" items
-      // says nothing a profile should emphasize; the two that came back
-      // Defective do. Same best-effort discipline as every other writer
-      // here: the inspection is already saved, and a failure below is
-      // logged, never turned into a failed submit.
-      if (newId && type === 'inspection') {
-        const signal = inspectionFindingSignal(record);
-        if (signal) {
-          const { error: signalErr } = await supabaseAdmin.from('company_signals').insert({
-            company_id: session.companyId,
-            source_type: 'equipment_inspection',
-            source_id: String(newId),
-            signal_json: signal,
-          });
-          if (signalErr) console.error('company_signals insert failed for inspection', newId, signalErr.message);
         }
       }
 
@@ -537,120 +674,75 @@ export default async function handler(req, res) {
         }
       }
 
-      // Break #5 — a Defective item on an inspection is a finding somebody
-      // has to act on, and until now there was nowhere for it to go: it sat
-      // in results_json and showed on the inspection record, but never
-      // became an assignable, ageable item the way a failed monthly
-      // question does.
-      //
-      // Only Defective opens an action. "Monitor" is an operator saying
-      // "keep an eye on this", and turning every one of those into a tracked
-      // row would bury the real defects — see the note in
-      // server-lib/correctiveActions.js. Monitor items still reach the Brain
-      // and still show on the inspection itself.
-      //
-      // Best-effort, same as the signal writer above: the inspection is
-      // already saved, and failures are logged inside the helper.
-      if (newId && type === 'inspection') {
-        // recordToInsert.equipment_id is the VETTED id — resolveEquipmentId
-        // above already rejected another company's machine and nulled a
-        // non-existent one. Reading record.equipment_id here instead would
-        // put a client-supplied id straight into the column that decides
-        // which machine a pattern belongs to.
-        const host = { equipmentId: recordToInsert.equipment_id ?? null, equipmentLabel: recordToInsert.equipment_label ?? null };
-        const findings = correctiveActionsFromInspection(record.results_json, record.equipment_label);
-        const fixed = recordToInsert.trip_type === 'posttrip' ? resolvedItemsFromPosttrip(record.results_json) : [];
-
-        // Break #17: an attachment's defect belongs to the attachment. Its
-        // id comes from results_json, which is client jsonb, so it is vetted
-        // against this company's fleet the same way daily reports vet theirs.
-        // A foreign or unknown id is dropped to null (label only), never
-        // stored; a failed lookup does the same rather than failing a submit.
-        const attachmentIds = [...findings, ...fixed].map(f => f.attachment?.id).filter(id => id != null);
-        const vetted = attachmentIds.length > 0 ? await resolveEquipmentIds(supabaseAdmin, session.companyId, attachmentIds) : null;
-        const vettedIds = new Set(Array.isArray(vetted) ? vetted.map(String) : []);
-
-        for (const group of groupFindingsByMachine(findings, host, vettedIds)) {
-          await openCorrectiveActions(supabaseAdmin, {
-            companyId: session.companyId,
-            sourceType: 'equipment_inspection',
-            sourceId: newId,
-            descriptions: group.findings,
-            equipmentId: group.equipmentId,
-            equipmentLabel: group.equipmentLabel,
-          });
-        }
-
-        // ── The other half of the loop: a post-trip that clears a defect ──
-        //
-        // Dillon, 2026-09-17: "if the person marks the post trip as the issue
-        // no longer exists, it can be marked in corrective actions as
-        // resolved and logged as a repair."
-        //
-        // Two writes, in this order and not the other way round. The
-        // corrective action is the supervisor-facing record and the one that
-        // must be right; the repair line is the machine's history. If the
-        // repair log fails we would rather have a closed action with no
-        // service line than an open action the worker was told they had
-        // closed.
-        // Resolved per machine, for the same reason actions are opened per
-        // machine: the forks' fixed tine closes the forks' action and logs
-        // the repair on the forks, not on the loader that carried them.
-        for (const { equipmentId: machineId, equipmentLabel: machineLabel, findings: fixedHere } of groupFindingsByMachine(fixed, host, vettedIds)) {
-          if (fixedHere.length > 0) {
-            // session.name / session.userName, never a name from the body.
-            // Who repaired a machine is attribution, and attribution a
-            // caller can choose is a suggestion — the same rule break #3
-            // settled for document authorship.
-            const who = (session.name || session.userName || '').trim() || 'Worker';
-            const noteText = fixedHere
-              .map((f) => (f.note ? `${f.item} — ${f.note}` : f.item))
-              .join('; ');
-
-            const closed = await resolveCorrectiveActionsForItems(supabaseAdmin, {
-              companyId: session.companyId,
-              equipmentId: machineId,
-              equipmentLabel: machineLabel,
-              itemKeys: fixedHere.map((f) => f.itemKey),
-              resolvedBy: who,
-              note: noteText,
-              resolutionSource: 'posttrip',
-            });
-
-            // The repair line only exists for a fleet-registered machine:
-            // equipment_maintenance_log.equipment_id is a real FK and a
-            // free-text machine has no row to point at. That machine's
-            // history still lives on its corrective actions, which is the
-            // same graceful degradation equipment_id has everywhere else.
-            //
-            // entry_type is 'field_service', NEVER 'pm_service'. A worker
-            // saying "the tire's fixed" must not reset the machine's
-            // preventative-maintenance clock — see
-            // docs/scope-equipment-service-log.md for why that would be
-            // strictly worse than not logging it at all.
-            if (closed.length > 0 && machineId != null) {
-              const { error: repairErr } = await supabaseAdmin.from('equipment_maintenance_log').insert({
-                company_id: session.companyId,
-                equipment_id: machineId,
-                entry_type: 'field_service',
-                service_date: new Date().toISOString().slice(0, 10),
-                // Deliberately no reading. The post-trip's end_reading is a
-                // meter reading for the trip, not for the repair, and
-                // service_reading is what a PM baseline would be measured
-                // from if one ever read these rows by mistake.
-                service_reading: null,
-                reading_unit: null,
-                performed_by: who,
-                logged_by_roster_id: session.userId || null,
-                notes: `Repaired on post-trip: ${noteText}`.slice(0, 1000),
-              });
-              if (repairErr) console.error('post-trip repair log insert failed for inspection', newId, repairErr.message);
-            }
-          }
-        }
+      // An inspection's signal, corrective actions and post-trip repairs all
+      // follow its author's signature: an unsigned one counts for nothing, so
+      // a sign-later inspection runs them from sign_now instead.
+      if (newId && type === 'inspection' && !signLater) {
+        await runInspectionFollowUps(session, newId, record, recordToInsert);
       }
 
-      return res.status(200).json({ id: newId, pdfLinked });
+      return res.status(200).json({ id: newId, pdfLinked, awaitingSignature: signLater });
+    }
+
+    // ── Worker: my inspections saved to sign afterwards ─────────────
+    // The caller's OWN unsigned inspections only (roster id from the session).
+    // The record and, for a post-trip, the pre-trip it links to come back
+    // because signing regenerates the PDF with the signature on it.
+    if (action === 'my_unsigned') {
+      if (type !== 'inspection') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      if ((session.role !== 'worker' && session.role !== 'supervisor') || !session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { data, error } = await supabaseAdmin
+        .from('inspections')
+        .select(table.listColumns + ', signature_requested_at, equipment_id')
+        .eq('company_id', session.companyId)
+        .eq('submitted_by_roster_id', Number(session.userId))
+        .eq('awaiting_signature', true)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) {
+        if (missingSignColumns(error)) return res.status(200).json({ records: [] });
+        return res.status(500).json({ error: 'Could not load your unsigned inspections.' });
+      }
+      const linkedIds = [...new Set((data || []).map(r => r.linked_inspection_id).filter(v => v != null))];
+      let linked = [];
+      if (linkedIds.length) {
+        const { data: pre } = await supabaseAdmin.from('inspections')
+          .select('id, worker_name, start_reading, reading_unit, results_json, created_at')
+          .eq('company_id', session.companyId).in('id', linkedIds);
+        linked = pre || [];
+      }
+      const records = await signRows(supabaseAdmin, data || [], [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      return res.status(200).json({ records: records.map(r => ({ ...r, linked_pretrip: linked.find(l => l.id === r.linked_inspection_id) || null })) });
+    }
+
+    // ── Worker: sign an inspection I saved to sign afterwards ────────
+    // Only the roster member it is stamped to, checked against the row. An
+    // inspection stores no signature image of its own (the drawn signature
+    // lives on the PDF), so what this needs is the signature to have been
+    // drawn and the signed PDF to have uploaded.
+    if (action === 'sign_now') {
+      if (type !== 'inspection') return res.status(400).json({ error: 'Not applicable for this record type.' });
+      if ((session.role !== 'worker' && session.role !== 'supervisor') || !session.userId) return res.status(403).json({ error: 'Not allowed.' });
+      const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const { id, signature, pdfUrl } = req.body;
+      if (!id || !cleanSignature(signature)) return res.status(400).json({ error: 'Draw your signature first.' });
+      const resolvedPdfUrl = storedUrlFromClientReceipt(pdfUrl, session.companyId);
+      if (!resolvedPdfUrl) return res.status(400).json({ error: "Your signed copy didn't upload. Check your connection and sign again." });
+      const done = await completeSignature(supabaseAdmin, { table: 'inspections', id, session, update: { pdf_url: resolvedPdfUrl }, nowIso: new Date().toISOString() });
+      if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
+      const { data: after } = await supabaseAdmin.from('inspections')
+        .select('pdf_url, equipment_id, equipment_label, trip_type, results_json')
+        .eq('id', id).eq('company_id', session.companyId).limit(1);
+      const row = after && after[0];
+      // Now that it counts: its signal, corrective actions and any repairs it
+      // reports. Best-effort, as at submit: the signature is already saved.
+      if (row) await runInspectionFollowUps(session, id, { results_json: row.results_json, equipment_label: row.equipment_label }, { equipment_id: row.equipment_id, equipment_label: row.equipment_label, trip_type: row.trip_type });
+      const stored = row && row.pdf_url;
+      const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
+      return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
     }
 
     // ── Supervisor / Admin: load records for the dashboard ──────────
@@ -658,9 +750,17 @@ export default async function handler(req, res) {
       if (session.role !== 'admin' && session.role !== 'supervisor') return res.status(403).json({ error: 'Not allowed.' });
       const denied = await requireDocKey(supabaseAdmin, session, table.docKey);
       if (denied) return res.status(denied.status).json({ error: denied.error });
-      let query = supabaseAdmin.from(table.name).select(table.listColumns).order('created_at', { ascending: false });
-      if (session.role === 'supervisor') query = query.eq('company_id', session.companyId);
-      const { data: allRows, error } = await query;
+      const runList = (columns) => {
+        let q = supabaseAdmin.from(table.name).select(columns).order('created_at', { ascending: false });
+        if (session.role === 'supervisor') q = q.eq('company_id', session.companyId);
+        return q;
+      };
+      // Inspections carry the sign-later flag; a database without the columns
+      // has no unsigned ones, so the read is retried without.
+      let { data: allRows, error } = type === 'inspection'
+        ? await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`)
+        : await runList(table.listColumns);
+      if (error && type === 'inspection' && missingSignColumns(error)) ({ data: allRows, error } = await runList(table.listColumns));
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, table.docKey, allRows || []);
       if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
@@ -713,6 +813,19 @@ export default async function handler(req, res) {
       // same "fix a mistake" edit every other document type has.
       if (type === 'toolbox' && session.role === 'supervisor') {
         return res.status(403).json({ error: 'Supervisors can add a note to a toolbox talk but can\'t edit the generated document. Use "Add Note" instead.' });
+      }
+
+      // An inspection waiting for its author's signature is not edited under
+      // them: they would sign content they never saw.
+      if (SIGN_LATER_TABLES.includes(table.name)) {
+        const { data: owner } = await supabaseAdmin.from(table.name).select('company_id').eq('id', id).limit(1);
+        const editCompany = owner && owner[0] && owner[0].company_id;
+        if (!editCompany && session.role === 'admin') return res.status(404).json({ error: 'Record not found.' });
+        if (editCompany && (session.role === 'admin' || editCompany === session.companyId)) {
+          const signState = await loadSignState(supabaseAdmin, table.name, id, editCompany);
+          if (signState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
+          if (signState.found && signState.awaiting) return res.status(409).json({ error: "The author hasn't signed this yet. Edit it once they have." });
+        }
       }
 
       if (session.role === 'supervisor') {

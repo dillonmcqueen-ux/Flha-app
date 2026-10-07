@@ -25,6 +25,7 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     endReading, hasChanges, changeCondition, changeNotes,
     linkedPretripId, linkedPretripStartReading, linkedPretripReadingUnit,
     linkedPretripResultsJson, linkedPretripWorker, linkedPretripCreatedAt,
+    signLater = false,
   } = payload;
 
   const pdfUrl = await generateAndUploadInspection({
@@ -34,7 +35,8 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     // "change reported" box; it now prints its own end-of-shift checklist
     // and what got fixed during the shift.
     results: resultsJson,
-    signatureDataUrl: sig,
+    signatureDataUrl: signLater ? null : sig,
+    awaitingSignature: signLater,
     tripType,
     startReading: isTrailer ? null : (tripType === "pretrip" ? startReading : linkedPretripStartReading),
     endReading: tripType === "posttrip" ? (isTrailer ? null : endReading) : undefined,
@@ -63,12 +65,14 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     token: tokenForRequest,
   });
 
+  const signLaterFlag = signLater ? { sign_later: true } : {};
   const record = tripType === "pretrip" ? {
     worker_name: workerName, equipment_label: label, equipment_id: equipmentId,
     results_json: resultsJson, signed_by: workerName, pdf_url: pdfUrl || null,
     trip_type: "pretrip", linked_inspection_id: null,
     start_reading: isTrailer ? null : startReading, end_reading: null,
     reading_unit: isTrailer ? null : readingUnit, has_changes: null,
+    ...signLaterFlag,
   } : {
     worker_name: workerName, equipment_label: label, equipment_id: equipmentId,
     results_json: resultsJson, signed_by: workerName, pdf_url: pdfUrl || null,
@@ -77,6 +81,7 @@ export async function resubmitInspection(payload, clientSubmissionId, tokenForRe
     end_reading: isTrailer ? null : endReading,
     reading_unit: isTrailer ? null : (linkedPretripReadingUnit || readingUnit),
     has_changes: !!hasChanges,
+    ...signLaterFlag,
   };
 
   let res;
@@ -131,6 +136,8 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const cf = useCustomFields(companyId, "inspection", token);
   const [signed, setSigned] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
+  // Saved to be signed afterwards: the done screen says so.
+  const [savedUnsigned, setSavedUnsigned] = useState(false);
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
 
@@ -510,11 +517,12 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   const resolvedCount = carriedIndexes.filter(i => items[i].resolution === "fixed").length;
 
   // ── Submit: Pre-Trip (full checklist) ───────────────────────
-  const submitPretrip = async () => {
+  const submitPretrip = async (signLater = false) => {
     setSigned(true);
     setSaveError(false);
     setSavingInspection(true);
-    const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+    setSavedUnsigned(signLater);
+    const sig = !signLater && hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
     const resultsJson = {
       machineSummary: inspectionMeta.machineSummary, items, defectiveCount, monitorCount, customFields: cf.entries(),
@@ -551,7 +559,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
     const payload = {
       tripType: "pretrip", label, workerName, companyName, companyLogo, sig, isTrailer, readingUnit,
       equipmentId: eqMode === "list" ? (selectedEqId || null) : null,
-      resultsJson, startReading,
+      resultsJson, startReading, signLater,
     };
 
     // docs/scope-offline-capability.md Phase 1: a network-level failure gets
@@ -588,11 +596,12 @@ export default function Inspection({ companyId, companyName, userName: loginUser
   };
 
   // ── Submit: Post-Trip (full checklist) ──────────────────────
-  const submitPosttrip = async () => {
+  const submitPosttrip = async (signLater = false) => {
     setSigned(true);
+    setSavedUnsigned(signLater);
     setSaveError(false);
     setSavingInspection(true);
-    const sig = hasSignature ? canvasRef.current.toDataURL("image/png") : null;
+    const sig = !signLater && hasSignature ? canvasRef.current.toDataURL("image/png") : null;
     const label = equipmentLabel();
 
     // A pre-trip with no stored checklist can't produce a carried-forward
@@ -655,6 +664,7 @@ export default function Inspection({ companyId, companyName, userName: loginUser
       linkedPretripResultsJson: openPretrip.results_json || null,
       linkedPretripWorker: openPretrip.worker_name || null,
       linkedPretripCreatedAt: openPretrip.created_at || null,
+      signLater,
     };
 
     // docs/scope-offline-capability.md Phase 1: a network-level failure gets
@@ -977,9 +987,17 @@ export default function Inspection({ companyId, companyName, userName: loginUser
                 <span>Couldn't save this inspection. Check your connection and try again.</span>
               </div>
             )}
-            <button style={s.btn(signed && !saveError ? C.status.success.solid : hasSignature ? accent : disabledBg(C))} disabled={!hasSignature || (signed && !saveError)} onClick={submitPretrip}>
+            <button style={s.btn(signed && !saveError ? C.status.success.solid : hasSignature ? accent : disabledBg(C))} disabled={!hasSignature || (signed && !saveError)} onClick={() => submitPretrip(false)}>
               {savingInspection ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : signed && !saveError ? <><CheckCircle2 size={16} strokeWidth={2.25} /> Submitted</> : "Sign & Submit Pre-Trip Inspection"}
             </button>
+            {token && !(signed && !saveError) && (
+              <>
+                <button style={{ ...s.ghost, marginTop: 8 }} onClick={() => submitPretrip(true)}>I'll sign afterwards</button>
+                <div style={{ fontSize: 11.5, color: C.text.faint, textAlign: "center", margin: "6px 0 0", lineHeight: 1.4 }}>
+                  Can't sign right now? Save it and sign from your menu later. Its reading won't count toward maintenance or fuel until you do.
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
@@ -1189,15 +1207,26 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               </div>
             )}
             {(() => {
-              const ready = hasSignature && workerName && (isTrailer || endReading) && (
+              const readyUnsigned = workerName && (isTrailer || endReading) && (
                 legacyPosttrip
                   ? (hasChanges !== null && (!hasChanges || changeNotes.trim()))
                   : (carriedAnswered && fixedNotesComplete)
               );
+              const ready = hasSignature && readyUnsigned;
               return (
-                <button style={s.btn(signed && !saveError ? C.status.success.solid : ready ? accent : disabledBg(C))} disabled={!ready || (signed && !saveError)} onClick={submitPosttrip}>
-                  {savingInspection ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : signed && !saveError ? <><CheckCircle2 size={16} strokeWidth={2.25} /> Submitted</> : "Sign & Submit Post-Trip"}
-                </button>
+                <>
+                  <button style={s.btn(signed && !saveError ? C.status.success.solid : ready ? accent : disabledBg(C))} disabled={!ready || (signed && !saveError)} onClick={() => submitPosttrip(false)}>
+                    {savingInspection ? <><Loader2 size={16} className="fora-spin" /> Saving…</> : signed && !saveError ? <><CheckCircle2 size={16} strokeWidth={2.25} /> Submitted</> : "Sign & Submit Post-Trip"}
+                  </button>
+                  {token && readyUnsigned && !(signed && !saveError) && (
+                    <>
+                      <button style={{ ...s.ghost, marginTop: 8 }} onClick={() => submitPosttrip(true)}>I'll sign afterwards</button>
+                      <div style={{ fontSize: 11.5, color: C.text.faint, textAlign: "center", margin: "6px 0 0", lineHeight: 1.4 }}>
+                        Can't sign right now? Save it and sign from your menu later. Its reading won't count toward maintenance or fuel until you do.
+                      </div>
+                    </>
+                  )}
+                </>
               );
             })()}
           </div>
@@ -1225,9 +1254,14 @@ export default function Inspection({ companyId, companyName, userName: loginUser
               ? <AlertTriangle size={48} strokeWidth={1.75} color={C.status.warning.text} style={{ marginBottom: 12 }} />
               : <CheckCircle2 size={48} strokeWidth={1.75} color={C.status.success.text} style={{ marginBottom: 12 }} />}
             <div style={{ fontWeight: 800, fontSize: 22, color: C.text.primary, marginBottom: 6 }}>
-              {mode === "posttrip" ? "Post-Trip Complete" : "Pre-Trip Complete"}
+              {savedUnsigned ? "Saved. Sign It Next" : mode === "posttrip" ? "Post-Trip Complete" : "Pre-Trip Complete"}
             </div>
             <div style={{ fontSize: 14, color: C.text.muted, marginBottom: 20 }}>{equipmentLabel()} · {new Date().toLocaleString("en-CA")}</div>
+            {savedUnsigned && (
+              <div style={{ background: C.status.warning.bg, border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 18, textAlign: "left", fontSize: 13, color: C.text.body, lineHeight: 1.5 }}>
+                Saved but not signed yet. Open <strong>Needs your signature</strong> on your menu and sign it. Its reading won't count toward maintenance or fuel until you have.
+              </div>
+            )}
             {mode === "pretrip" && defectiveCount > 0 && (
               <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.md, padding: 14, marginBottom: 18, textAlign: "left" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.status.danger.text }}>{defectiveCount} defective item{defectiveCount > 1 ? "s" : ""} flagged</div>

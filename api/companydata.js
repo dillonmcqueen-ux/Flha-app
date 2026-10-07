@@ -32,6 +32,7 @@ import { listVisibleRecords, listVisibleRecordsMulti, readHideUnassigned, readRo
 import { requireLead, loadCrew } from '../server-lib/leadAccess.js';
 import { auditorAccessLive, auditorAccessEmail, validateAuditorScope, listAuditableDocuments, AUDITOR_ACCESS_MS } from '../server-lib/auditorAccess.js';
 import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, BUILTIN_DOCUMENT_LABELS, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
+import { readSignedOnly } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -1813,7 +1814,7 @@ export default async function handler(req, res) {
       const [fleetRes, dailyRes, inspRes, logRes] = await Promise.all([
         supabaseAdmin.from('equipment').select(EQUIPMENT_COLUMNS).eq('company_id', companyId),
         supabaseAdmin.from('daily_reports').select('equipment_ids, site, report_date, created_at').eq('company_id', companyId).not('equipment_ids', 'is', null),
-        supabaseAdmin.from('inspections').select('equipment_id, equipment_label, trip_type, results_json, created_at').eq('company_id', companyId),
+        readSignedOnly(() => supabaseAdmin.from('inspections').select('equipment_id, equipment_label, trip_type, results_json, created_at').eq('company_id', companyId)),
         supabaseAdmin.from('equipment_maintenance_log').select('equipment_id, entry_type').eq('company_id', companyId),
       ]);
       if (fleetRes.error || dailyRes.error || inspRes.error || logRes.error) {

@@ -16,6 +16,7 @@ import { inspectionAttachments, attachmentForItem } from '../server-lib/inspecti
 import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, complianceDocLabel } from '../server-lib/compliance.js';
 import { isDocKeyActive, requireDocKey } from '../server-lib/docKeyGate.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { readSignedOnly } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -425,13 +426,15 @@ export function foldComplianceSnapshot(rows, fleetById, asOf) {
 // pre-trip/post-trip inspection pair whose post-trip falls in the range.
 async function buildReportForCompanyWeek(companyId, weekStartISO, weekEndISO) {
   // weekEndISO is exclusive upper bound (Monday after the week)
-  const { data: records, error } = await supabaseAdmin
+  // An inspection still waiting for its author's signature is not in a stored
+  // weekly report: its readings and defects count once it is signed.
+  const { data: records, error } = await readSignedOnly(() => supabaseAdmin
     .from('inspections')
     .select('id, equipment_id, equipment_label, worker_name, created_at, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, has_changes, results_json')
     .eq('company_id', companyId)
     .gte('created_at', weekStartISO)
     .lt('created_at', weekEndISO)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true }));
   if (error) throw new Error('Could not load inspections: ' + error.message);
 
   // Break #1's second half. api/maintenance.js has read both tables since
@@ -780,12 +783,12 @@ export default async function handler(req, res) {
       const firstMonday = mondayOf(new Date());
       firstMonday.setDate(firstMonday.getDate() - 7 * (weeks - 1));
 
-      const { data: records, error } = await supabaseAdmin
+      const { data: records, error } = await readSignedOnly(() => supabaseAdmin
         .from('inspections')
         .select('id, equipment_id, equipment_label, created_at, trip_type, linked_inspection_id, start_reading, end_reading, reading_unit, results_json')
         .eq('company_id', companyId)
         .gte('created_at', firstMonday.toISOString())
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true }));
       if (error) return res.status(500).json({ error: 'Could not load inspection history.' });
 
       // Same vetting as the stored report: an id from outside this company's

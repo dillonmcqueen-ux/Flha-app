@@ -12,6 +12,7 @@ import { ChevronLeft, PenLine, CheckCircle2 } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { generateAndUploadFLHA } from "./generatePDF";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
+import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 
 async function post(url, body) {
@@ -207,23 +208,99 @@ function UnsignedIncident({ record, token, companyId, companyName, companyLogo, 
   );
 }
 
+function UnsignedInspection({ record, token, companyName, companyLogo, userName, onSigned }) {
+  const [signature, setSignature] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const results = record.results_json || {};
+  const items = Array.isArray(results.items) ? results.items : [];
+  const flagged = items.filter(it => it && (it.condition === "Defective" || it.condition === "Monitor"));
+  const isPost = record.trip_type === "posttrip";
+
+  const sign = async () => {
+    if (!signature) return;
+    setBusy(true); setError("");
+    try {
+      const pre = record.linked_pretrip || null;
+      const pdfUrl = await generateAndUploadInspection({
+        equipmentLabel: record.equipment_label, workerName: record.worker_name, companyName, companyLogo,
+        results, signatureDataUrl: signature, tripType: record.trip_type || "pretrip",
+        startReading: record.start_reading, endReading: isPost ? record.end_reading : undefined,
+        readingUnit: record.reading_unit,
+        hasChanges: isPost ? !!record.has_changes : undefined,
+        changeCondition: isPost ? results.changeCondition : undefined,
+        changeNotes: isPost ? results.changeNotes : undefined,
+        linkedPretrip: isPost ? {
+          id: record.linked_inspection_id,
+          start_reading: pre ? pre.start_reading : record.start_reading,
+          reading_unit: pre ? pre.reading_unit : record.reading_unit,
+          results_json: pre ? pre.results_json : null,
+          worker_name: pre ? pre.worker_name : null,
+          created_at: pre ? pre.created_at : null,
+        } : undefined,
+        token,
+      });
+      const out = await post("/api/logs", { type: "inspection", action: "sign_now", token, id: record.id, signature, pdfUrl: pdfUrl || null });
+      if (out.error) { setError(out.error); setBusy(false); return; }
+      onSigned(record.id, out, "inspection");
+    } catch (e) {
+      setError("Couldn't save your signature. Check your connection and try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={card}>
+      <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.text.primary }}>{isPost ? "Post-trip" : "Pre-trip"} inspection: {record.equipment_label || "Equipment"}</div>
+      <div style={{ fontSize: 12.5, color: C.text.muted, margin: "2px 0 10px" }}>
+        Saved {new Date(record.created_at).toLocaleString("en-CA")} by <strong style={{ color: C.text.body }}>{record.worker_name || userName}</strong>
+      </div>
+      {flagged.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: C.text.primary, marginBottom: 6 }}>Flagged items, as they are now</div>
+          {flagged.map((it, i) => (
+            <div key={i} style={{ borderTop: `1px solid ${C.line}`, padding: "6px 0", fontSize: 13, color: C.text.body }}>
+              <strong>{it.item}</strong> · {it.condition}{it.note ? ` · ${it.note}` : ""}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 13, color: C.text.muted, margin: "8px 0 10px" }}>
+        By signing, I confirm this inspection, as it is now, is accurate and complete. Its reading counts toward maintenance and fuel once you sign.
+      </div>
+      <SignaturePad onChange={setSignature} />
+      {error && <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "8px 0", fontSize: 13.5, color: C.status.danger.text }}>{error}</div>}
+      <button
+        onClick={sign}
+        disabled={!signature || busy}
+        style={{ width: "100%", minHeight: 48, marginTop: 8, borderRadius: RAD.md, border: "none", fontWeight: 700, fontSize: 15, cursor: signature && !busy ? "pointer" : "default", background: signature ? C.orange : C.panelInset, color: signature ? C.text.onOrange : C.text.faint }}
+      >
+        {busy ? "Saving…" : "Sign this inspection"}
+      </button>
+    </div>
+  );
+}
+
 export default function SignAfterwards({ token, companyId, companyName, userName, onBack, onCount }) {
   const [flhas, setFlhas] = useState(null);
   const [incidents, setIncidents] = useState([]);
+  const [inspections, setInspections] = useState([]);
   const [error, setError] = useState("");
   const [logo, setLogo] = useState("");
   const [justSigned, setJustSigned] = useState([]);
 
   const load = useCallback(async () => {
-    const [out, inc] = await Promise.all([
+    const [out, inc, insp] = await Promise.all([
       post("/api/flhas", { action: "my_unsigned", token }),
       post("/api/reports", { type: "incident", action: "my_unsigned", token }),
+      post("/api/logs", { type: "inspection", action: "my_unsigned", token }),
     ]);
     // A document type the company has switched off answers with an error; that
     // is just "nothing to sign" for it, not a failure of the screen.
     setFlhas(out.flhas || []);
     setIncidents(inc.records || []);
-    if (out.error && inc.error) setError(out.error);
+    setInspections(insp.records || []);
+    if (out.error && inc.error && insp.error) setError(out.error);
   }, [token]);
 
   useEffect(() => {
@@ -233,6 +310,7 @@ export default function SignAfterwards({ token, companyId, companyName, userName
 
   const signed = (id, out, kind = "flha") => {
     if (kind === "incident") setIncidents(prev => prev.filter(r => r.id !== id));
+    else if (kind === "inspection") setInspections(prev => prev.filter(r => r.id !== id));
     else setFlhas(prev => (prev || []).filter(f => f.id !== id));
     setJustSigned(prev => [...prev, { id, pdfUrl: out && out.pdfUrl }]);
     if (onCount) onCount();
@@ -257,7 +335,7 @@ export default function SignAfterwards({ token, companyId, companyName, userName
         </div>
       )}
 
-      {flhas && flhas.length === 0 && incidents.length === 0 && justSigned.length === 0 && !error && (
+      {flhas && flhas.length === 0 && incidents.length === 0 && inspections.length === 0 && justSigned.length === 0 && !error && (
         <div style={{ color: C.text.muted, fontSize: 14 }}>Nothing is waiting for your signature.</div>
       )}
 
@@ -266,6 +344,9 @@ export default function SignAfterwards({ token, companyId, companyName, userName
       ))}
       {incidents.map(r => (
         <UnsignedIncident key={`incident-${r.id}`} record={r} token={token} companyId={companyId} companyName={companyName} companyLogo={logo} userName={userName} onSigned={signed} />
+      ))}
+      {inspections.map(r => (
+        <UnsignedInspection key={`inspection-${r.id}`} record={r} token={token} companyName={companyName} companyLogo={logo} userName={userName} onSigned={signed} />
       ))}
     </div>
   );

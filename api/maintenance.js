@@ -12,6 +12,7 @@ import { inspectionReadingPoint, fuelReadingPoint, latestReadingsByEquipment } f
 import { requireDocKey } from '../server-lib/docKeyGate.js';
 import { pmAllowedFor, isTowedUnit, towedDistanceSince } from '../server-lib/fleetActivity.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { readSignedOnly } from '../server-lib/signLater.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -167,11 +168,13 @@ export default async function handler(req, res) {
       if (eqErr) return res.status(500).json({ error: 'Could not load equipment.' });
       if (!fleet || fleet.length === 0) return res.status(200).json({ equipment: [] });
 
-      const { data: inspections, error: inspErr } = await supabaseAdmin
+      // An inspection still waiting for its author's signature does not move
+      // the maintenance clock.
+      const { data: inspections, error: inspErr } = await readSignedOnly(() => supabaseAdmin
         .from('inspections')
         .select('id, equipment_id, trip_type, start_reading, end_reading, reading_unit, created_at, linked_inspection_id, results_json')
         .eq('company_id', companyId)
-        .not('equipment_id', 'is', null);
+        .not('equipment_id', 'is', null));
       if (inspErr) return res.status(500).json({ error: 'Could not load inspection history.' });
 
       const { data: logs, error: logErr } = await supabaseAdmin
@@ -385,13 +388,13 @@ export default async function handler(req, res) {
         if (!isToday) {
           return res.status(400).json({ error: 'Enter the reading — it can’t be auto-filled for a backdated service.' });
         }
-        const { data: recent } = await supabaseAdmin
+        const { data: recent } = await readSignedOnly(() => supabaseAdmin
           .from('inspections')
           .select('trip_type, start_reading, end_reading, reading_unit, created_at')
           .eq('company_id', equipment.company_id)
           .eq('equipment_id', equipmentId)
           .order('created_at', { ascending: false })
-          .limit(1);
+          .limit(1));
         const row = recent && recent[0];
         const raw = row ? (row.trip_type === 'posttrip' ? row.end_reading : row.start_reading) : null;
         reading = raw != null && raw !== '' ? parseFloat(raw) : null;

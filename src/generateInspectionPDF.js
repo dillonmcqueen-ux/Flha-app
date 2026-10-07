@@ -194,7 +194,7 @@ function drawInfoBox(doc, { margin, contentW, y, W, rows }) {
 
 export async function generateAndUploadInspection({
   equipmentLabel, workerName, companyName, companyLogo, results, signatureDataUrl,
-  tripType = "pretrip", startReading, endReading, readingUnit, hasChanges, changeCondition, changeNotes, linkedPretrip, token,
+  tripType = "pretrip", startReading, endReading, readingUnit, hasChanges, changeCondition, changeNotes, linkedPretrip, awaitingSignature = false, token,
 }) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -379,7 +379,12 @@ export async function generateAndUploadInspection({
   y += 4; doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3); doc.line(margin, y, W - margin, y); y += 8;
   doc.setTextColor(30, 41, 59); doc.setFontSize(9); doc.setFont("helvetica", "bold");
   doc.text(isPost ? "Post-Trip Technician Signature" : "Inspector Signature", margin, y); y += 4;
-  if (signatureDataUrl) { try { doc.addImage(signatureDataUrl, "PNG", margin, y, 70, 21); } catch (e) {} }
+  if (awaitingSignature) {
+    // Saved to be signed afterwards: say so where the signature will go.
+    doc.setTextColor(180, 83, 9); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text("AWAITING INSPECTOR SIGNATURE", margin, y + 12);
+    doc.setFont("helvetica", "normal");
+  } else if (signatureDataUrl) { try { doc.addImage(signatureDataUrl, "PNG", margin, y, 70, 21); } catch (e) {} }
   doc.setDrawColor(150, 150, 150); doc.line(margin, y + 23, margin + 70, y + 23);
   doc.setTextColor(100, 116, 139); doc.setFontSize(8); doc.setFont("helvetica", "normal");
   doc.text(`Printed name: ${workerName}`, margin, y + 29);
