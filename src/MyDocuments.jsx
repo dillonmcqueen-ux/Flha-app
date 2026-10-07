@@ -210,7 +210,8 @@ export default function MyDocuments({ companyId, userName, userId, token, onBack
                   <div style={{ fontSize: 12, color: C.text.muted, marginTop: 1 }}>
                     {doc.subtitle ? `${doc.subtitle} · ` : ""}{new Date(doc.createdAt).toLocaleString("en-CA")}
                   </div>
-                  {doc.awaitingSignature === true && <div style={{ fontSize: 12, fontWeight: 700, color: C.status.warning.text, marginTop: 2 }}>Not signed yet. Sign it from "Needs your signature" on your menu.</div>}
+                  {doc.awaitingSignature === true && doc.unsignedClosed === true && <div style={{ fontSize: 12, fontWeight: 700, color: C.status.warning.text, marginTop: 2 }}>Closed unsigned. It was not signed within 10 days and can no longer be signed.</div>}
+                  {doc.awaitingSignature === true && doc.unsignedClosed !== true && <div style={{ fontSize: 12, fontWeight: 700, color: C.status.warning.text, marginTop: 2 }}>Not signed yet. Sign it from "Needs your signature" on your menu.</div>}
                 </div>
                 {doc.pdf_url
                   ? <a href={doc.pdf_url} target="_blank" rel="noreferrer" style={{ ...s.btn(C.orange), textDecoration: "none" }}><ExternalLink size={13} /> PDF</a>

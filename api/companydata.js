@@ -927,17 +927,17 @@ export default async function handler(req, res) {
 
       const FETCH_LIMIT = 200;
       const [flhaRows, inspectionRows, toolboxRows, dailyRows, incidentRows, nearMissRows] = await Promise.all([
-        flhaOn ? supabaseAdmin.from('flhas').select('id, job_site, site_id, created_at, pdf_url, awaiting_signature')
+        flhaOn ? supabaseAdmin.from('flhas').select('id, job_site, site_id, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        inspectionOn ? supabaseAdmin.from('inspections').select('id, equipment_label, trip_type, created_at, pdf_url, awaiting_signature')
+        inspectionOn ? supabaseAdmin.from('inspections').select('id, equipment_label, trip_type, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
         toolboxOn ? supabaseAdmin.from('toolbox_talks').select('id, topic, site_id, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
         dailyOn ? supabaseAdmin.from('daily_reports').select('id, site, site_id, report_date, created_at, pdf_url')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        incidentOn ? supabaseAdmin.from('incidents').select('id, site, site_id, incident_type, created_at, pdf_url, awaiting_signature')
+        incidentOn ? supabaseAdmin.from('incidents').select('id, site, site_id, incident_type, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
-        nearmissOn ? supabaseAdmin.from('near_misses').select('id, site, site_id, created_at, pdf_url, awaiting_signature')
+        nearmissOn ? supabaseAdmin.from('near_misses').select('id, site, site_id, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', companyId).eq('submitted_by_roster_id', id).order('created_at', { ascending: false }).limit(FETCH_LIMIT) : { data: [] },
       ]);
 
@@ -988,12 +988,12 @@ export default async function handler(req, res) {
       const customVis = customOut.denied ? [] : customOut.records;
 
       const documents = [
-        ...flhaVis.map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
-        ...inspectionVis.map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
+        ...flhaVis.map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
+        ...inspectionVis.map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
         ...toolboxVis.map(r => ({ id: r.id, type: 'toolbox', title: 'Toolbox Talk', subtitle: r.topic || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...dailyVis.map(r => ({ id: r.id, type: 'daily', title: 'Daily Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...incidentVis.map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
-        ...nearMissVis.map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
+        ...incidentVis.map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
+        ...nearMissVis.map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
         ...monthlyVis.map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...customVis.map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
       ];

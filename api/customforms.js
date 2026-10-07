@@ -451,7 +451,10 @@ export default async function handler(req, res) {
         // migrations have run, so the read steps down to what the database has.
         const withEntered = src.enteredBy ? `${src.cols}, entered_by_roster_id` : src.cols;
         const attempts = [];
-        if (src.signable) attempts.push(`${withEntered}, awaiting_signature, signature_requested_at`);
+        if (src.signable) {
+          attempts.push(`${withEntered}, awaiting_signature, signature_requested_at, unsigned_closed_at`);
+          attempts.push(`${withEntered}, awaiting_signature, signature_requested_at`);
+        }
         attempts.push(withEntered);
         if (src.enteredBy) attempts.push(src.cols);
         let res1;
@@ -510,6 +513,7 @@ export default async function handler(req, res) {
           createdAt: r.created_at, status: r.status || null,
           // Saved to sign afterwards and not yet signed: labelled, not hidden.
           awaitingSignature: r.awaiting_signature === true,
+          unsignedClosed: !!r.unsigned_closed_at,
           signatureRequestedAt: r.signature_requested_at || null,
           author: r.submitted_by_roster_id != null ? (nameOf.get(r.submitted_by_roster_id) || '') : 'Anonymous',
           enteredBy: r.entered_by_roster_id != null ? (nameOf.get(r.entered_by_roster_id) || '') : '',
@@ -529,17 +533,17 @@ export default async function handler(req, res) {
       const FETCH_LIMIT = 300;
 
       const [flhaRows, inspectionRows, toolboxRows, dailyRows, incidentRows, nearMissRows] = await Promise.all([
-        supabaseAdmin.from('flhas').select('id, worker_name, job_site, created_at, pdf_url, awaiting_signature')
+        supabaseAdmin.from('flhas').select('id, worker_name, job_site, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
-        supabaseAdmin.from('inspections').select('id, worker_name, equipment_label, created_at, pdf_url, awaiting_signature')
+        supabaseAdmin.from('inspections').select('id, worker_name, equipment_label, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
         supabaseAdmin.from('toolbox_talks').select('id, presenter_name, topic, created_at, pdf_url')
           .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
         supabaseAdmin.from('daily_reports').select('id, reporter_name, site, created_at, pdf_url')
           .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
-        supabaseAdmin.from('incidents').select('id, reporter_name, site, created_at, pdf_url, awaiting_signature')
+        supabaseAdmin.from('incidents').select('id, reporter_name, site, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', session.companyId).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
-        supabaseAdmin.from('near_misses').select('id, reporter_name, is_anonymous, site, created_at, pdf_url, awaiting_signature')
+        supabaseAdmin.from('near_misses').select('id, reporter_name, is_anonymous, site, created_at, pdf_url, awaiting_signature, unsigned_closed_at')
           .eq('company_id', session.companyId).eq('is_anonymous', false).order('created_at', { ascending: false }).limit(FETCH_LIMIT),
       ]);
 
@@ -576,12 +580,12 @@ export default async function handler(req, res) {
         : { data: [] };
 
       const documents = [
-        ...(flhaRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
-        ...(inspectionRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
+        ...(flhaRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'flha', title: 'FLHA', subtitle: r.job_site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
+        ...(inspectionRows.data || []).filter(r => nameMatches(r.worker_name)).map(r => ({ id: r.id, type: 'inspection', title: 'Equipment Inspection', subtitle: r.equipment_label || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
         ...(toolboxRows.data || []).filter(r => nameMatches(r.presenter_name)).map(r => ({ id: r.id, type: 'toolbox', title: 'Toolbox Talk', subtitle: r.topic || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...(dailyRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'daily', title: 'Daily Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url })),
-        ...(incidentRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
-        ...(nearMissRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true })),
+        ...(incidentRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'incident', title: 'Incident Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
+        ...(nearMissRows.data || []).filter(r => nameMatches(r.reporter_name)).map(r => ({ id: r.id, type: 'nearmiss', title: 'Near Miss Report', subtitle: r.site || '', createdAt: r.created_at, pdf_url: r.pdf_url, awaitingSignature: r.awaiting_signature === true, unsignedClosed: !!r.unsigned_closed_at })),
         ...(monthlyRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'monthly', title: monthlyFormMap[r.form_id] || 'Monthly Inspection', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...(customRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
         ...(portalRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'portalform', title: portalDocMap[r.document_id] || 'Portal Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),

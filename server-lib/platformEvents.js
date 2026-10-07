@@ -23,7 +23,7 @@ export const EVENT_STATUSES = ['ok', 'error', 'skipped', 'refused', 'rate_limite
 export const ALLOWED_METRIC_KEYS = [
   'model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens',
   'stop_reason', 'latency_ms', 'http_status', 'has_attachment', 'duration_ms',
-  'companies', 'summarized', 'failed', 'skipped', 'ran', 'claimed', 'sent', 'dropped',
+  'companies', 'summarized', 'failed', 'skipped', 'ran', 'claimed', 'sent', 'dropped', 'alerted', 'closed',
   'equipment_ok', 'equipment_failed', 'equipment_skipped',
   'timeclock_ok', 'timeclock_failed', 'timeclock_skipped',
 ];

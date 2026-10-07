@@ -412,6 +412,7 @@ export default async function handler(req, res) {
         .eq('company_id', session.companyId)
         .eq('submitted_by_roster_id', Number(session.userId))
         .eq('awaiting_signature', true)
+        .is('unsigned_closed_at', null)
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) {
@@ -472,7 +473,9 @@ export default async function handler(req, res) {
       };
       // The sign-later columns ride along; a database without them has no
       // unsigned reports, so the read is retried without.
-      let { data: allRows, error } = await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`);
+      let { data: allRows, error } = await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at, unsigned_closed_at`);
+      // Without the newer unsigned_closed_at column, still say which are unsigned.
+      if (error && missingSignColumns(error)) ({ data: allRows, error } = await runList(`${table.listColumns}, awaiting_signature, signature_requested_at, worker_signed_at`));
       if (error && missingSignColumns(error)) ({ data: allRows, error } = await runList(table.listColumns));
       if (error) return res.status(500).json({ error: 'Could not load records.' });
       const visible = await listVisibleRecords(supabaseAdmin, session, table.docKey, allRows || []);

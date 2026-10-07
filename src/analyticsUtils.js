@@ -29,14 +29,17 @@ export function nearMissIncidentRatio(nearMisses, incidents) {
 }
 
 export function reviewBacklog(nearMisses, incidents) {
-  const all = [...nearMisses, ...incidents];
+  // A record closed unsigned (not signed within 10 days) can never be reviewed, so
+  // it is left out of the backlog rather than keeping it from ever reaching caught up.
+  const closedUnsigned = [...nearMisses, ...incidents].filter(r => r.unsigned_closed_at).length;
+  const all = [...nearMisses, ...incidents].filter(r => !r.unsigned_closed_at);
   const reviewed = all.filter(r => r.reviewed).length;
   const total = all.length;
   // Counted the same as the review tabs count them, so the numbers reconcile;
   // `awaitingSignature` says how many of the outstanding ones cannot be
   // reviewed yet because their author has not signed.
   const awaitingSignature = all.filter(r => !r.reviewed && r.awaiting_signature === true).length;
-  return { reviewed, outstanding: total - reviewed, awaitingSignature, total, pct: pct(reviewed, total), caughtUp: total > 0 && reviewed === total };
+  return { reviewed, outstanding: total - reviewed, awaitingSignature, closedUnsigned, total, pct: pct(reviewed, total), caughtUp: total > 0 && reviewed === total };
 }
 
 // Matches the FLHA tab's own `highRiskCount` definition exactly (High only,

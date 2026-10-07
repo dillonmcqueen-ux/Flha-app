@@ -552,9 +552,9 @@ export function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSu
 
         {awaitingSig && (
           <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {flha.worker_name || "the worker"}'s signature</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>{flha.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${flha.worker_name || "the worker"}'s signature`}</div>
             <div style={{ fontSize: 13, color: "#A1A1AA" }}>
-              {flha.worker_name || "The worker"} saved this FLHA to sign afterwards{flha.signature_requested_at ? ` on ${new Date(flha.signature_requested_at).toLocaleString("en-CA")}` : ""}. {isPending ? "It can be signed off once they have signed it." : ""}
+              {flha.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(flha.unsigned_closed_at).toLocaleDateString("en-CA")}. It can no longer be signed and it is not counted. ` : ""}{flha.worker_name || "The worker"} saved this FLHA to sign afterwards{flha.signature_requested_at ? ` on ${new Date(flha.signature_requested_at).toLocaleString("en-CA")}` : ""}. {isPending ? "It can be signed off once they have signed it." : ""}
             </div>
           </div>
         )}
@@ -651,8 +651,8 @@ function InspectionCard({ insp, onClose, onDelete, onSave }) {
       <div style={{ background: "#161616", borderRadius: 16, padding: 24, width: "100%", border: "1px solid #242424", boxShadow: "0 24px 60px -20px rgba(0,0,0,0.7)", maxWidth: 640, marginTop: 8 }} onClick={e => e.stopPropagation()}>
         {insp.awaiting_signature === true && (
           <div style={{ background: "rgba(245,158,11,0.14)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 13, color: "#FBBF24" }}>Awaiting {insp.worker_name || "the inspector"}'s signature</div>
-            <div style={{ fontSize: 12.5, color: "#D4D4D8", marginTop: 2 }}>Saved to sign afterwards. Its reading doesn't count toward maintenance or fuel until they sign, and it can be edited once they have.</div>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#FBBF24" }}>{insp.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${insp.worker_name || "the inspector"}'s signature`}</div>
+            <div style={{ fontSize: 12.5, color: "#D4D4D8", marginTop: 2 }}>{insp.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(insp.unsigned_closed_at).toLocaleDateString("en-CA")} and can no longer be signed. ` : ""}Saved to sign afterwards. Its reading doesn't count toward maintenance or fuel until they sign, and it can be edited once they have.</div>
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -980,7 +980,7 @@ function ReportRow({ rec, last, onClick, kind }) {
             <span style={{ fontSize: 11, fontWeight: 800, color: sc.text, background: sc.bg, padding: "2px 9px", borderRadius: RAD.pill, border: sev === "Critical" ? "none" : `1px solid ${sc.border}` }}>{sev.toUpperCase()}</span>
             {kind === "incident" && <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "2px 8px", borderRadius: RAD.pill }}>{rec.incident_type}</span>}
             <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{rec.site}</div>
-            {rec.awaiting_signature === true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "2px 9px", borderRadius: RAD.pill }}>AWAITING SIGNATURE</span>}
+            {rec.awaiting_signature === true && <span title={rec.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "2px 9px", borderRadius: RAD.pill }}>{rec.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
           </div>
           <div style={{ fontSize: 13, color: C.text.body }}>{preview.length > 90 ? preview.slice(0, 90) + "…" : preview}</div>
           <div style={{ fontSize: 12, color: C.text.muted, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><CircleUserRound size={11} />{who}{rec.occurred_at ? ` · ${formatOccurredAt(rec.occurred_at)}` : ""}</div>
@@ -1139,8 +1139,8 @@ function NearMissCard({ nm, onClose, onDelete, onReview, onSave, defaultReviewer
           </div>
         ) : nm.awaiting_signature === true ? (
           <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {nm.reporter_name || "the reporter"}'s signature</div>
-            <div style={{ fontSize: 13, color: "#A1A1AA" }}>Saved to sign afterwards{nm.signature_requested_at ? ` on ${new Date(nm.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>{nm.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${nm.reporter_name || "the reporter"}'s signature`}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{nm.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(nm.unsigned_closed_at).toLocaleDateString("en-CA")} and can no longer be signed. ` : ""}Saved to sign afterwards{nm.signature_requested_at ? ` on ${new Date(nm.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
           </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #B45309", marginTop: 8, paddingTop: 14 }}>
@@ -1339,8 +1339,8 @@ function IncidentCard({ inc, onClose, onDelete, onReview, onSave, defaultReviewe
           </div>
         ) : inc.awaiting_signature === true ? (
           <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {inc.reporter_name || "the reporter"}'s signature</div>
-            <div style={{ fontSize: 13, color: "#A1A1AA" }}>Saved to sign afterwards{inc.signature_requested_at ? ` on ${new Date(inc.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>{inc.unsigned_closed_at ? "Closed unsigned" : `Awaiting ${inc.reporter_name || "the reporter"}'s signature`}</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>{inc.unsigned_closed_at ? `Nobody signed this within 10 days, so it was closed on ${new Date(inc.unsigned_closed_at).toLocaleDateString("en-CA")} and can no longer be signed. ` : ""}Saved to sign afterwards{inc.signature_requested_at ? ` on ${new Date(inc.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
           </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #F87171", marginTop: 8, paddingTop: 14 }}>
@@ -4864,7 +4864,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       groupedNearMisses[key].push(n);
     });
   }
-  const nmAwaiting = processedNearMisses.filter(n => !n.reviewed);
+  const nmAwaiting = processedNearMisses.filter(n => !n.reviewed && !n.unsigned_closed_at);
   const nmReviewed = processedNearMisses.filter(n => n.reviewed);
 
   // ── Incidents: search/sort/group processing ──
@@ -4899,7 +4899,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       groupedIncidents[key].push(n);
     });
   }
-  const incAwaiting = processedIncidents.filter(n => !n.reviewed);
+  const incAwaiting = processedIncidents.filter(n => !n.reviewed && !n.unsigned_closed_at);
   const incReviewed = processedIncidents.filter(n => n.reviewed);
 
   // ── Daily: search/sort/group processing ──
@@ -5380,8 +5380,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               : certAlerts.expiringSoonCount > 0 ? C.status.warning.solid : undefined,
           }}
           tabCounts={{
-            nearmiss: companyNearMisses.filter(n => !n.reviewed).length,
-            incident: companyIncidents.filter(n => !n.reviewed).length,
+            nearmiss: companyNearMisses.filter(n => !n.reviewed && !n.unsigned_closed_at).length,
+            incident: companyIncidents.filter(n => !n.reviewed && !n.unsigned_closed_at).length,
             // The Monthly badge used to carry the open-corrective-action
             // count, which is how a pre-trip defect ended up advertising
             // itself as a monthly-inspection problem in the nav. Each count
@@ -5745,10 +5745,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     const tone = feedTone(type, doc);
                     let statusLabel = "Logged", statusColor = C.text.muted;
                     if (type === "flha") {
-                      statusLabel = doc.awaiting_signature === true ? "Awaiting worker signature" : doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
+                      statusLabel = doc.unsigned_closed_at ? "Closed unsigned" : doc.awaiting_signature === true ? "Awaiting worker signature" : doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
                       statusColor = doc.awaiting_signature === true || doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
                     } else if (type === "nearmiss" || type === "incident") {
-                      statusLabel = doc.awaiting_signature === true ? "Awaiting signature" : doc.reviewed ? "Reviewed" : "Pending review";
+                      statusLabel = doc.unsigned_closed_at ? "Closed unsigned" : doc.awaiting_signature === true ? "Awaiting signature" : doc.reviewed ? "Reviewed" : "Pending review";
                       statusColor = doc.reviewed && doc.awaiting_signature !== true ? C.text.muted : C.status.warning.text;
                     } else if (type === "certification") {
                       statusLabel = doc.status === "expired" ? "Expired" : doc.status === "expiring_soon" ? "Expiring soon" : doc.unverified ? "Unverified" : "Uploaded";
@@ -5890,7 +5890,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             </div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
-                            {f.awaiting_signature === true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>AWAITING SIGNATURE</span>}
+                            {f.awaiting_signature === true && <span title={f.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>{rec.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
                             {f.status === "pending_approval" && f.awaiting_signature !== true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.danger.solid, padding: "3px 9px", borderRadius: RAD.pill }}>NEEDS SIGN-OFF</span>}
                             {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                             {highRisk > 0 && <RiskBadge risk="High" />}
@@ -6031,7 +6031,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                           </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
-                          {insp.awaiting_signature === true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>AWAITING SIGNATURE</span>}
+                          {insp.awaiting_signature === true && <span title={insp.unsigned_closed_at ? "Not signed within 10 days" : undefined} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>{rec.unsigned_closed_at ? "CLOSED UNSIGNED" : "AWAITING SIGNATURE"}</span>}
                           {def > 0
                             ? <span style={{ fontSize: 11, fontWeight: 700, color: C.status.danger.text, background: C.status.danger.bg, padding: "3px 9px", borderRadius: RAD.pill }}>{def} defective</span>
                             : mon > 0
