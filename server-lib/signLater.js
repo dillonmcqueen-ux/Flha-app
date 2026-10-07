@@ -30,8 +30,10 @@ export function cleanSignature(value) {
 
 export function missingSignColumns(error) {
   if (!error) return false;
+  // Only a real missing-column error counts. A message that merely names one of
+  // the columns must not unlock a retry without the unsigned filter.
   const code = String(error.code || '');
-  return code === '42703' || code === 'PGRST204' || /awaiting_signature|signature_requested_at|worker_signed_at/.test(String(error.message || ''));
+  return code === '42703' || code === 'PGRST204';
 }
 
 /** Fields stamped on a record saved to be signed later. */

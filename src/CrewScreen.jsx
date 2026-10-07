@@ -197,7 +197,7 @@ export default function CrewScreen({ token, userId, userName, companyName, crew,
                 <div style={{ fontWeight: 700, fontSize: 14.5 }}>{d.title}{d.subtitle ? ` · ${d.subtitle}` : ""}</div>
                 <div style={{ fontSize: 12.5, color: C.text.muted }}>
                   {d.author || "Unknown"}{d.enteredBy ? ` (entered by ${d.enteredBy})` : ""} · {new Date(d.createdAt).toLocaleDateString("en-CA")}
-                  {d.status === "pending_approval" ? " · waiting for sign-off" : ""}
+                  {d.awaitingSignature ? " · not signed by the worker yet" : d.status === "pending_approval" ? " · waiting for sign-off" : ""}
                 </div>
               </div>
               {d.pdf_url && (
