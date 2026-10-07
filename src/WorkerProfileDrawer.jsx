@@ -261,6 +261,7 @@ export default function WorkerProfileDrawer({
                         <div style={{ fontSize: 11.5, color: C.text.faint }}>
                           {d.subtitle ? `${d.subtitle} · ` : ""}{new Date(d.createdAt).toLocaleDateString("en-CA")}
                         </div>
+                        {d.awaitingSignature === true && <div style={{ fontSize: 11.5, fontWeight: 700, color: C.status.warning.text }}>Awaiting signature</div>}
                       </div>
                       {d.pdf_url && <a href={d.pdf_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: C.orange, fontWeight: 700, textDecoration: "none", flexShrink: 0 }}>View</a>}
                     </div>

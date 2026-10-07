@@ -183,7 +183,7 @@ export function SafetyAnalyticsPanel({
         ) : (
           <>
             <div style={{ fontSize: 13, color: C.text.body, marginBottom: 6 }}>
-              <strong>{backlog.reviewed}</strong> reviewed · <strong style={{ color: C.status.warning.text }}>{backlog.outstanding}</strong> outstanding ({backlog.pct}% caught up)
+              <strong>{backlog.reviewed}</strong> reviewed · <strong style={{ color: C.status.warning.text }}>{backlog.outstanding}</strong> outstanding ({backlog.pct}% caught up){backlog.awaitingSignature > 0 ? `, ${backlog.awaitingSignature} of them not signed yet` : ""}
             </div>
             <div style={{ background: C.panelInset, borderRadius: 6, height: 8 }}>
               <div style={{ width: `${backlog.pct}%`, background: C.status.success.solid, height: 8, borderRadius: 6 }} />

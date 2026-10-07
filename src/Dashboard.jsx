@@ -1940,6 +1940,11 @@ function CorrectiveActionRow({ ca, onUpdate }) {
           {ca.source_label}
         </div>
       )}
+      {ca.awaiting_signature === true && (
+        <div style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: "#fff", background: C.status.warning.solid, borderRadius: 999, padding: "2px 8px", marginBottom: 6, marginLeft: 6 }}>
+          Report awaiting signature
+        </div>
+      )}
       {ca.recurrence && ca.recurrence.count >= 2 && (
         <div style={{ marginBottom: 6, marginLeft: 6, display: "inline-block" }}><RecurrenceBadge recurrence={ca.recurrence} /></div>
       )}

@@ -773,14 +773,14 @@ export default async function handler(req, res) {
       const incidentIds = idsFor('incident');
       if (incidentIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('incidents').select('id, site, site_id, occurred_at, reporter_name, incident_type')
+          .from('incidents').select('id, site, site_id, occurred_at, reporter_name, incident_type, awaiting_signature')
           .in('id', incidentIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { incidentMap[r.id] = r; });
       }
       const nearMissIds = idsFor('near_miss');
       if (nearMissIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('near_misses').select('id, site, site_id, occurred_at, reporter_name')
+          .from('near_misses').select('id, site, site_id, occurred_at, reporter_name, awaiting_signature')
           .in('id', nearMissIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { nearMissMap[r.id] = r; });
       }
@@ -790,7 +790,7 @@ export default async function handler(req, res) {
       const inspectionIds = idsFor('equipment_inspection');
       if (inspectionIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('inspections').select('id, equipment_label, worker_name, trip_type, created_at')
+          .from('inspections').select('id, equipment_label, worker_name, trip_type, created_at, awaiting_signature')
           .in('id', inspectionIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { inspectionMap[r.id] = r; });
       }
@@ -829,6 +829,7 @@ export default async function handler(req, res) {
             site_id: r?.site_id ?? null,
             period_month: r?.occurred_at || null,
             submitted_by: r?.reporter_name || null,
+            awaiting_signature: r?.awaiting_signature === true,
           };
         }
         if (ca.source_type === 'equipment_inspection') {
@@ -855,6 +856,7 @@ export default async function handler(req, res) {
             site_id: null,
             period_month: r?.created_at || ca.created_at || null,
             submitted_by: r?.worker_name || null,
+            awaiting_signature: r?.awaiting_signature === true,
           };
         }
         return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', site_id: null, period_month: null, submitted_by: null };
