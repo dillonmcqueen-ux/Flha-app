@@ -76,6 +76,7 @@ export default function CrewScreen({ token, userId, userName, companyName, crew,
   const approve = async (record, supName, supSignature) => {
     const now = new Date();
     let pdfUrl = null;
+    if (record.awaiting_signature === true) { setError("The worker hasn't signed this FLHA yet."); return; }
     try {
       pdfUrl = await generateAndUploadFLHA({
         flha: record.hazards_json, workerName: record.worker_name, jobSite: record.job_site, signName: record.worker_name,

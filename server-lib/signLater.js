@@ -88,14 +88,17 @@ export async function completeSignature(supabase, { table, id, session, update, 
     return { denied: { status: 403, error: 'That is not yours to sign.' } };
   }
   if (!state.awaiting) return { denied: { status: 409, error: 'That record is already signed.' } };
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(table)
     .update({ ...update, awaiting_signature: false, worker_signed_at: nowIso })
     .eq('id', id)
     .eq('company_id', session.companyId)
     .eq('submitted_by_roster_id', Number(session.userId))
-    .eq('awaiting_signature', true);
+    .eq('awaiting_signature', true)
+    .select('id');
   if (error) return { denied: { status: 500, error: 'Could not save your signature. Try again.' } };
+  // A second, simultaneous signature matches nothing: report it, don't claim a write.
+  if (!data || data.length === 0) return { denied: { status: 409, error: 'That record is already signed.' } };
   return { ok: true };
 }
 

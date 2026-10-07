@@ -2521,6 +2521,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // overwrite the DB's real stored path with a URL that expires and can't
     // be re-signed later. null means "leave pdf_url alone" server-side.
     let pdfUrl = null;
+    // An unsigned record is not approvable (the server refuses); don't upload a
+    // PDF with a supervisor block over a blank worker signature.
+    if (record.awaiting_signature === true) { window.alert("The worker hasn't signed this FLHA yet."); return; }
     try {
       pdfUrl = await generateAndUploadFLHA({
         flha: record.hazards_json,
@@ -2578,6 +2581,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         signName: record.signed_by,
         companyName: co?.name || "",
         signatureDataUrl: record.worker_signature || null,
+        awaitingSignature: record.awaiting_signature === true,
         companyLogo: co?.logo_url || "",
         amendedNote: null,
         pendingApproval: record.status === "pending_approval",

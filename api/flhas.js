@@ -335,6 +335,16 @@ export default async function handler(req, res) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
         const amendUpdate = pickAllowed(record, SUBMITTABLE_FIELDS);
+        // A record saved to be signed afterwards is amended only by the person
+        // it is stamped to (not a same-name colleague), and an amendment never
+        // writes the signature: sign_now is the one way an awaiting record
+        // gets signed.
+        const amendSignState = await loadSignState(supabaseAdmin, 'flhas', amendingId, session.companyId);
+        if (amendSignState.error) return res.status(503).json({ error: "Couldn't check that record. Please try again." });
+        if (amendSignState.found && amendSignState.awaiting) {
+          if (amendSignState.authorId !== Number(session.userId)) return res.status(403).json({ error: 'Not allowed to amend this record.' });
+          delete amendUpdate.worker_signature;
+        }
         // An amendment must not be able to rename the author either.
         stampAuthorName(session, amendUpdate, ['worker_name', 'signed_by'].filter(k => Object.prototype.hasOwnProperty.call(amendUpdate, k)));
 

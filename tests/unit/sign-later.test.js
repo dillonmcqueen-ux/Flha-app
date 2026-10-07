@@ -206,3 +206,17 @@ test('once signed, the supervisor can approve it', async () => {
   const out = await run({ action: 'approve', token: as(2, 'supervisor'), id: 201, supName: 'Sup Sam', supSignature: 'data:image/png;base64,AAAA' });
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
 });
+
+test('an amendment cannot put a signature on an awaiting record, nor can a same-name colleague amend it', async () => {
+  reset();
+  FLHAS.push({ id: 203, company_id: 7, worker_name: 'Crew Cam', job_site: 'Pit', site_id: null, status: 'complete', submitted_by_roster_id: 11, created_at: new Date().toISOString(), hazards_json: { hazards: [{ risk: 'Low' }] }, pdf_url: null, worker_signature: null, awaiting_signature: true, signature_requested_at: new Date().toISOString() });
+  const row = () => FLHAS.find(f => f.id === 203);
+  const mine = await run({ action: 'submit', token: as(11, 'worker'), amendingId: 203, record: { job_site: 'Pit 2', worker_signature: PNG } });
+  assert.equal(mine.statusCode, 200, JSON.stringify(mine.body));
+  assert.equal(row().worker_signature, null, 'the amendment did not write a signature');
+  assert.equal(row().awaiting_signature, true);
+  ROSTER.push(P({ id: 99, name: 'Crew Cam', role: 'worker' }));
+  const twin = await run({ action: 'submit', token: as(99, 'worker'), amendingId: 203, record: { job_site: 'Hijack' } });
+  assert.equal(twin.statusCode, 403);
+  ROSTER.pop();
+});
