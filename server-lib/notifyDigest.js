@@ -52,14 +52,16 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
     const companyIds = [...new Set(rows.map((r) => Number(r.company_id)))];
     const rosterIds = [...new Set(rows.map((r) => Number(r.roster_id)))];
 
-    const [settings, people, companies] = await Promise.all([
+    const [settings, people, companies, docSettings, forms] = await Promise.all([
       supabase.from('document_notifications').select('company_id, document_key, enabled')
         .in('company_id', companyIds).in('document_key', [...new Set(rows.map((r) => r.document_key))]).limit(5000),
       supabase.from('roster').select('id, company_id, active, email').in('id', rosterIds),
       supabase.from('companies').select('id, suspended').in('id', companyIds),
+      supabase.from('company_document_settings').select('company_id, document_key, is_active').in('company_id', companyIds).limit(5000),
+      supabase.from('custom_forms').select('id, company_id, title, is_active').in('company_id', companyIds).limit(5000),
     ]);
     // If we cannot judge who may still be told, hand every row back rather than lose the counts.
-    if (settings.error || people.error || companies.error) {
+    if (settings.error || people.error || companies.error || docSettings.error || forms.error) {
       console.error('notification digest lookups failed');
       for (const r of rows) await refundSlot(supabase, Number(r.company_id), r.document_key, Number(r.roster_id), { held: Number(r.held) });
       return { ...out, error: true };
@@ -72,15 +74,21 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
     const hadEmail = new Map((people.data || []).map((p) => [`${p.company_id}:${p.id}`, !!p.email]));
     const person = new Map(withDecryptedEmail(people.data || []).map((p) => [`${p.company_id}:${p.id}`, p]));
 
-    // A company's own document is named after its form. Looked up here because
-    // the state row stores only the key; a failed lookup falls back to a generic
-    // name rather than holding the digest back.
-    const customIds = [...new Set(rows.map((r) => /^custom_([0-9]+)$/.exec(r.document_key)).filter(Boolean).map((m) => Number(m[1])))];
+    // A document the company has since switched off is not announced: same rule as
+    // the Owner's list (a built-in needs an explicit active row; a custom form must
+    // exist, be active and not be switched off under its own key). A company's own
+    // document is named after its form; a form that cannot be found falls back to a
+    // generic name.
+    const settingActive = new Map((docSettings.data || []).map((d) => [`${d.company_id}:${d.document_key}`, d.is_active === true]));
     const formTitle = new Map();
-    if (customIds.length > 0) {
-      const { data: forms } = await supabase.from('custom_forms').select('id, company_id, title').in('id', customIds).in('company_id', companyIds);
-      for (const f of forms || []) formTitle.set(`${f.company_id}:custom_${f.id}`, cleanLabel(f.title));
-    }
+    const stillOffered = (company, key) => {
+      const m = /^custom_([0-9]+)$/.exec(key);
+      if (!m) return settingActive.get(`${company}:${key}`) === true;
+      const form = (forms.data || []).find((f) => Number(f.company_id) === company && Number(f.id) === Number(m[1]));
+      if (!form || form.is_active !== true || settingActive.get(`${company}:${key}`) === false) return false;
+      formTitle.set(`${company}:${key}`, cleanLabel(form.title));
+      return true;
+    };
 
     const tell = async (row) => {
       const company = Number(row.company_id);
@@ -95,7 +103,7 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
         await refundSlot(supabase, company, row.document_key, roster, { held });
         return;
       }
-      if (held <= 0 || !on.has(`${company}:${row.document_key}`) || suspended.has(company) || !who || who.active !== true || !SINGLE_ADDRESS.test(email)) {
+      if (held <= 0 || !on.has(`${company}:${row.document_key}`) || !stillOffered(company, row.document_key) || suspended.has(company) || !who || who.active !== true || !SINGLE_ADDRESS.test(email)) {
         out.dropped += 1;
         return;
       }

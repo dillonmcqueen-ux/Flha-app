@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { runDigest, isPermanentRejection, DIGEST_BATCH } from '../../server-lib/notifyDigest.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
-function fakeDb({ held = [], settings = [], roster = [], companies = [], forms = [], failClaim = false, failLookup = false } = {}) {
+function fakeDb({ held = [], settings = [], roster = [], companies = [], forms = [], docSettings = [{ company_id: 7, document_key: 'incident', is_active: true }], failClaim = false, failLookup = false } = {}) {
   const refunds = [];
   const table = (rows) => ({
     cur: rows,
@@ -37,6 +37,7 @@ function fakeDb({ held = [], settings = [], roster = [], companies = [], forms =
       if (name === 'roster') return table(roster);
       if (name === 'companies') return table(companies);
       if (name === 'custom_forms') return table(forms);
+      if (name === 'company_document_settings') return table(docSettings);
       throw new Error('unexpected table ' + name);
     },
   };
@@ -63,13 +64,39 @@ test('a company\'s own document is named after its form, never another company\'
   const out = await runDigest(fakeDb(base({
     held: [row(1, { document_key: 'custom_5' })],
     settings: [{ company_id: 7, document_key: 'custom_5', enabled: true }],
-    forms: [{ id: 5, company_id: 7, title: 'Hot Work Permit' }, { id: 5, company_id: 8, title: 'Other Co Form' }],
+    forms: [{ id: 5, company_id: 7, title: 'Hot Work Permit', is_active: true }, { id: 5, company_id: 8, title: 'Other Co Form', is_active: true }],
   })), { sendEmail });
   assert.equal(out.sent, 1);
   assert.equal(sent[0].subject, 'Hot Work Permit: 3 new');
-  const none = collect();
-  await runDigest(fakeDb(base({ held: [row(1, { document_key: 'custom_6' })], settings: [{ company_id: 7, document_key: 'custom_6', enabled: true }], forms: [] })), { sendEmail: none.sendEmail });
-  assert.equal(none.sent[0].subject, 'Custom document: 3 new', 'a form that cannot be found falls back to a generic name');
+});
+
+test('a document the company has since switched off is not announced, and its count is dropped', async () => {
+  const run = async (over) => {
+    const { sent, sendEmail } = collect();
+    const out = await runDigest(fakeDb(base(over)), { sendEmail });
+    return { sent, out };
+  };
+  const off = await run({ docSettings: [{ company_id: 7, document_key: 'incident', is_active: false }] });
+  assert.equal(off.sent.length, 0, 'built-in switched off');
+  assert.equal(off.out.dropped, 1);
+  const never = await run({ docSettings: [] });
+  assert.equal(never.sent.length, 0, 'a built-in with no active row was never offered');
+  const customRow = { held: [row(1, { document_key: 'custom_5' })], settings: [{ company_id: 7, document_key: 'custom_5', enabled: true }] };
+  const inactiveForm = await run({ ...customRow, forms: [{ id: 5, company_id: 7, title: 'Hot Work Permit', is_active: false }] });
+  assert.equal(inactiveForm.sent.length, 0, 'custom form made inactive');
+  const switchedOff = await run({ ...customRow, forms: [{ id: 5, company_id: 7, title: 'Hot Work Permit', is_active: true }], docSettings: [{ company_id: 7, document_key: 'custom_5', is_active: false }] });
+  assert.equal(switchedOff.sent.length, 0, 'custom form switched off in settings');
+  const gone = await run({ ...customRow, forms: [] });
+  assert.equal(gone.sent.length, 0, 'custom form deleted');
+});
+
+test('if the document lookups fail, nothing is lost and nothing is sent', async () => {
+  const db = fakeDb(base({ failLookup: true }));
+  const { sent, sendEmail } = collect();
+  const out = await runDigest(db, { sendEmail });
+  assert.equal(out.error, true);
+  assert.equal(sent.length, 0);
+  assert.ok(db.refunds.length > 0);
 });
 
 test('singular wording and the 999 cap', async () => {

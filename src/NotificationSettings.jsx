@@ -74,7 +74,7 @@ export default function NotificationSettings({ token, companyId, roster = [] }) 
                 </label>
                 {d.enabled && (
                   <div style={{ paddingLeft: 28 }}>
-                    <div style={{ fontSize: 11.5, color: C.text.muted, margin: "2px 0 6px" }}>Always tell (they must be able to see this document):</div>
+                    <div style={{ fontSize: 11.5, color: C.text.muted, margin: "2px 0 6px" }}>Always tell (they are only emailed if they are allowed to see this document):</div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                       {d.extraRosterIds.length === 0 && <span style={{ fontSize: 12, color: C.text.faint }}>Nobody extra</span>}
                       {d.extraRosterIds.map(id => (
