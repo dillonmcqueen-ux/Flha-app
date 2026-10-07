@@ -16,6 +16,7 @@ import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { unsignedFields, missingSignColumns, completeSignature, cleanSignature, loadSignState } from '../server-lib/signLater.js';
+import { notifyAudience } from '../server-lib/notifyAudience.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -508,6 +509,15 @@ export default async function handler(req, res) {
           if (signalErr) console.error('company_signals insert failed for FLHA', newId, signalErr.message);
         }
 
+        // Tell the FLHA's audience once it counts. A sign-later FLHA is told
+        // about when it is signed (sign_now), not when it is saved.
+        if (newId && !signLater) {
+          await notifyAudience(supabaseAdmin, session, 'flha', {
+            siteId: recordToInsert.site_id ?? null,
+            authorId: authorRosterId(session),
+          });
+        }
+
         return res.status(200).json({ id: newId, status: data?.[0]?.status || null, pdfLinked });
       }
     }
@@ -555,7 +565,12 @@ export default async function handler(req, res) {
       const update = { worker_signature: png, pdf_url: resolvedPdfUrl };
       const done = await completeSignature(supabaseAdmin, { table: 'flhas', id, session, update, nowIso: new Date().toISOString() });
       if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
-      const { data: after } = await supabaseAdmin.from('flhas').select('pdf_url, status').eq('id', id).limit(1);
+      const { data: after } = await supabaseAdmin.from('flhas').select('pdf_url, status, site_id, submitted_by_roster_id').eq('id', id).eq('company_id', session.companyId).limit(1);
+      // Now that it counts, tell its audience (completeSignature has already
+      // proved this is the signer's own record in this company).
+      if (after && after[0]) {
+        await notifyAudience(supabaseAdmin, session, 'flha', { siteId: after[0].site_id ?? null, authorId: after[0].submitted_by_roster_id ?? null });
+      }
       const stored = after && after[0] && after[0].pdf_url;
       const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
       return res.status(200).json({ ok: true, status: (after && after[0] && after[0].status) || null, pdfUrl: signedPdfUrl, pdfLinked: !receiptWasDropped(pdfUrl, resolvedPdfUrl) });

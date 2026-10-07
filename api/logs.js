@@ -17,6 +17,7 @@ import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, qu
 import { resolveOnBehalf } from '../server-lib/leadAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { unsignedFields, missingSignColumns, completeSignature, cleanSignature, loadSignState, SIGN_LATER_TABLES } from '../server-lib/signLater.js';
+import { notifyAudience } from '../server-lib/notifyAudience.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -681,6 +682,16 @@ export default async function handler(req, res) {
         await runInspectionFollowUps(session, newId, record, recordToInsert);
       }
 
+      // Tell the document's audience once it counts. A sign-later inspection is
+      // told about when it is signed (sign_now). Inspections carry no site (the
+      // machine is what they are about), so they are placed by the author alone.
+      if (newId && !signLater) {
+        await notifyAudience(supabaseAdmin, session, table.docKey, {
+          siteId: recordToInsert.site_id ?? null,
+          authorId: authorRosterId(session),
+        });
+      }
+
       return res.status(200).json({ id: newId, pdfLinked, awaitingSignature: signLater });
     }
 
@@ -734,12 +745,14 @@ export default async function handler(req, res) {
       const done = await completeSignature(supabaseAdmin, { table: 'inspections', id, session, update: { pdf_url: resolvedPdfUrl }, nowIso: new Date().toISOString() });
       if (done.denied) return res.status(done.denied.status).json({ error: done.denied.error });
       const { data: after } = await supabaseAdmin.from('inspections')
-        .select('pdf_url, equipment_id, equipment_label, trip_type, results_json')
+        .select('pdf_url, equipment_id, equipment_label, trip_type, results_json, submitted_by_roster_id')
         .eq('id', id).eq('company_id', session.companyId).limit(1);
       const row = after && after[0];
       // Now that it counts: its signal, corrective actions and any repairs it
       // reports. Best-effort, as at submit: the signature is already saved.
       if (row) await runInspectionFollowUps(session, id, { results_json: row.results_json, equipment_label: row.equipment_label }, { equipment_id: row.equipment_id, equipment_label: row.equipment_label, trip_type: row.trip_type });
+      // ...and tell its audience, which could not be told while it was unsigned.
+      if (row) await notifyAudience(supabaseAdmin, session, 'inspection', { siteId: null, authorId: row.submitted_by_roster_id ?? null });
       const stored = row && row.pdf_url;
       const signedPdfUrl = stored ? await signStoredUrl(stored, 'flha-reports') : null;
       return res.status(200).json({ ok: true, pdfUrl: signedPdfUrl });
