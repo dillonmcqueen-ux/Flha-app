@@ -14,6 +14,24 @@
 //   - the Account Owner, ONLY when nobody else would be told, so a record that
 //     matches nobody's tags still reaches a person
 //
+// "Could open" includes the Owner's per-document VIEW assignments: someone a
+// document's view rows leave out is not told it exists, even when their tags
+// place the record. The same check runs on the Owner's "always notify" extras,
+// so naming a person cannot widen who learns about a document past who may read
+// it.
+//
+// CALLER CONTRACT (PR 2 onwards):
+//   - companyId comes from the verified session, never from the request
+//   - submitted_by_roster_id is null for an anonymous record, explicitly
+//   - siteName is a label looked up server-side from the validated site; it is
+//     still stripped of control characters and links here as a second guard
+//   - the result of routeNotification holds decrypted addresses. It is for the
+//     server only: a response to a browser (the Owner's preview) must carry
+//     names or masked addresses, never `email`
+//   - a site is placed by an anonymous record's site alone, so an alert at a
+//     one-person site can still point at its author. That is inherent to
+//     notifying by site and is the Owner's choice to switch on
+//
 // The author is never told about their own submission. An anonymous near miss
 // has no author, so it is placed by its site alone and no email mentions a
 // person.
@@ -27,7 +45,7 @@
 // person, so recipients never see each other's addresses. A failed send is
 // logged and never thrown: the record is already saved.
 
-import { recordInScope } from './documentAccess.js';
+import { recordInScope, evaluateAccess, VIEW } from './documentAccess.js';
 import { inCrew } from './leadAccess.js';
 import { withDecryptedEmail } from './fieldCrypto.js';
 
@@ -48,6 +66,20 @@ export const DOCUMENT_LABELS = {
   monthly: 'Monthly Inspection',
   fuellog: 'Fuel Log',
 };
+
+const SINGLE_ADDRESS = /^[^\s@,;<>"']+@[^\s@,;<>"']+\.[^\s@,;<>"']+$/;
+
+// A label that is safe to put in a subject line and the first line of an email
+// from FORA's own sender: one line, no control characters, no links.
+export function cleanLabel(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ')
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
 
 const toIdList = (values) => (Array.isArray(values) ? values : []).map(Number).filter((n) => Number.isFinite(n));
 
@@ -77,17 +109,26 @@ function actorFor(person, divisionSites) {
  *                  be active.
  *   divisionSites  Map(divisionId -> [siteId]) for the company
  *   extraRosterIds the Owner's "always notify" ids for this document
+ *   viewRows       the document's active 'view' assignment rows (may be empty)
+ *   nowMs          the instant the view rows are judged at
  *
  * Returns { recipients: [{ id, email }], missingEmail: [id], reason }.
  * `reason` is 'ok', or 'none' when nobody could be told.
  */
-export function pickRecipients({ record, roster, author = null, divisionSites = new Map(), extraRosterIds = [] }) {
+export function pickRecipients({ record, roster, author = null, divisionSites = new Map(), extraRosterIds = [], viewRows = [], nowMs = Date.now() }) {
   const authorId = record.submitted_by_roster_id != null ? Number(record.submitted_by_roster_id) : null;
   const authorTags = new Map();
   if (author && authorId != null) authorTags.set(authorId, { departments: author.departments || [], divisions: author.divisions || [] });
 
+  // Extras first, so the cap below drops the broad audience before it drops
+  // someone the Owner asked for by name.
   const chosen = new Map();
-  const add = (person) => { if (person && Number(person.id) !== authorId) chosen.set(Number(person.id), person); };
+  const mayView = (person) => evaluateAccess(viewRows, actorFor(person, divisionSites), VIEW, nowMs).allowed;
+  const add = (person) => {
+    if (person && Number(person.id) !== authorId && mayView(person)) chosen.set(Number(person.id), person);
+  };
+  const byId = new Map(roster.map((p) => [Number(p.id), p]));
+  for (const id of toIdList(extraRosterIds)) add(byId.get(id));
 
   for (const person of roster) {
     if (person.is_owner === true && person.role === 'supervisor') continue; // fallback only
@@ -99,19 +140,23 @@ export function pickRecipients({ record, roster, author = null, divisionSites = 
     }
   }
 
-  const byId = new Map(roster.map((p) => [Number(p.id), p]));
-  for (const id of toIdList(extraRosterIds)) add(byId.get(id));
-
   if (chosen.size === 0) {
-    roster.filter((p) => p.is_owner === true && p.role === 'supervisor').forEach(add);
+    // The Owner sees everything, so no view row can leave them out.
+    roster.filter((p) => p.is_owner === true && p.role === 'supervisor' && Number(p.id) !== authorId)
+      .forEach((p) => chosen.set(Number(p.id), p));
   }
 
   const missingEmail = [];
   const recipients = [];
   for (const person of chosen.values()) {
     const email = typeof person.email === 'string' ? person.email.trim() : '';
-    if (!email) { missingEmail.push(Number(person.id)); continue; }
+    // One plain address only: a stored value like "a@x.com, b@y.com" must not
+    // reach Resend as a list.
+    if (!SINGLE_ADDRESS.test(email)) { missingEmail.push(Number(person.id)); continue; }
     recipients.push({ id: Number(person.id), email });
+  }
+  if (recipients.length > MAX_RECIPIENTS) {
+    console.error(`notification audience capped: ${recipients.length - MAX_RECIPIENTS} of ${recipients.length} not told`);
   }
   return { recipients: recipients.slice(0, MAX_RECIPIENTS), missingEmail, reason: recipients.length > 0 ? 'ok' : 'none' };
 }
@@ -145,6 +190,26 @@ async function loadRoster(supabase, companyId) {
   }
   if (error) return { roster: [], error: true };
   return { roster: withDecryptedEmail(rows || []), error: false };
+}
+
+async function loadViewRows(supabase, companyId, documentKey) {
+  const { data, error } = await supabase
+    .from('document_assignments')
+    .select('audience_type, audience_value, action, restricts, created_at, ended_at')
+    .eq('company_id', companyId)
+    .eq('document_key', documentKey)
+    .eq('action', VIEW);
+  if (error) return isMissingSchema(error) ? { rows: [], error: false } : { rows: [], error: true };
+  return { rows: data || [], error: false };
+}
+
+// A site id that is not this company's is treated as no site at all. The
+// submit handler validates it too; this keeps a forged id from steering routing.
+async function ownSiteId(supabase, companyId, siteId) {
+  if (siteId == null) return { siteId: null, error: false };
+  const { data, error } = await supabase.from('sites').select('id').eq('company_id', companyId).eq('id', siteId).limit(1);
+  if (error) return isMissingSchema(error) ? { siteId: null, error: false } : { siteId: null, error: true };
+  return { siteId: data && data[0] ? Number(data[0].id) : null, error: false };
 }
 
 async function loadDivisionSites(supabase, companyId, divisionIds) {
@@ -187,7 +252,12 @@ export async function routeNotification(supabase, { companyId, documentKey, reco
   const { map: divisionSites, error: sitesErr } = await loadDivisionSites(supabase, companyId, divisionIds);
   if (sitesErr) return { enabled: true, recipients: [], missingEmail: [], reason: 'error' };
 
-  const picked = pickRecipients({ record, roster, author, divisionSites, extraRosterIds: setting.extraRosterIds });
+  const view = await loadViewRows(supabase, companyId, documentKey);
+  if (view.error) return { enabled: true, recipients: [], missingEmail: [], reason: 'error' };
+  const site = await ownSiteId(supabase, companyId, record.site_id);
+  if (site.error) return { enabled: true, recipients: [], missingEmail: [], reason: 'error' };
+
+  const picked = pickRecipients({ record: { ...record, site_id: site.siteId }, roster, author, divisionSites, extraRosterIds: setting.extraRosterIds, viewRows: view.rows });
   return { enabled: true, ...picked };
 }
 
@@ -198,12 +268,14 @@ export async function routeNotification(supabase, { companyId, documentKey, reco
  * `siteName` is the label shown in the email; it falls back to "your company"
  * rather than printing nothing.
  */
-export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentKey, record, siteName }) {
+export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentKey, record, siteName, documentLabel }) {
   try {
     const routed = await routeNotification(supabase, { companyId, documentKey, record });
     if (!routed.enabled || routed.recipients.length === 0) return { sent: 0, failed: 0, reason: routed.reason };
-    const label = DOCUMENT_LABELS[documentKey] || 'Custom document';
-    const where = typeof siteName === 'string' && siteName.trim() ? ` at ${siteName.trim().slice(0, 80)}` : '';
+    // A custom form passes its own title; a built-in uses its fixed label.
+    const label = DOCUMENT_LABELS[documentKey] || cleanLabel(documentLabel) || 'Custom document';
+    const cleanSite = cleanLabel(siteName);
+    const where = cleanSite ? ` at ${cleanSite}` : '';
     let sent = 0;
     let failed = 0;
     for (const r of routed.recipients) {

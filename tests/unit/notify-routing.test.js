@@ -13,7 +13,7 @@ process.env.FIELD_ENCRYPTION_KEY ||= 'a'.repeat(64);
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickRecipients, routeNotification, notifyOnSubmit, MAX_RECIPIENTS } from '../../server-lib/notifyRouting.js';
+import { pickRecipients, routeNotification, notifyOnSubmit, cleanLabel, MAX_RECIPIENTS } from '../../server-lib/notifyRouting.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
 const P = (over) => ({ active: true, is_owner: false, is_lead: false, departments: [], divisions: [], default_site_id: null, email: null, ...over });
@@ -111,8 +111,9 @@ const company7 = enc(ROSTER.map((p) => ({ ...p, company_id: 7 })));
 const company8 = enc([P({ id: 90, role: 'supervisor', departments: ['safety'], email: 'other@y.test', company_id: 8 })]);
 const baseTables = (setting) => ({
   document_notifications: setting ? [{ company_id: 7, document_key: 'incident', ...setting }] : [],
+  document_assignments: [],
   roster: [...company7, ...company8],
-  sites: [{ id: 60, company_id: 7, division_id: 9 }],
+  sites: [{ id: 60, company_id: 7, division_id: 9 }, { id: 50, company_id: 7, division_id: null }, { id: 51, company_id: 8, division_id: null }],
 });
 const rec = { site_id: null, submitted_by_roster_id: 11 };
 
@@ -155,4 +156,81 @@ test('notifyOnSubmit: one email per person, no report content, never throws', as
 
   const broken = await notifyOnSubmit({ from() { throw new Error('db down'); } }, { sendEmail: async () => {}, companyId: 7, documentKey: 'incident', record: rec });
   assert.equal(broken.reason, 'error');
+});
+
+// ── review fixes ────────────────────────────────────────────────────────
+const NOW = Date.parse('2026-10-07T12:00:00Z');
+const viewRow = (type, value) => ({ audience_type: type, audience_value: value, action: 'view', restricts: true, created_at: '2026-10-01T00:00:00Z', ended_at: null });
+
+test('a document restricted by view rows is not announced to people it leaves out', () => {
+  // Only the safety department may read this document.
+  const rows = [viewRow('department', 'safety')];
+  const out = pickRecipients({ record: { site_id: 50, submitted_by_roster_id: 12 }, roster: ROSTER, author: author(12), divisionSites: DIVISION_SITES, viewRows: rows, nowMs: NOW });
+  assert.ok(!ids(out).includes(3), 'site supervisor 3 has no safety tag, so a site match is not enough');
+  assert.deepEqual(ids(out), [1], 'nobody left: the Owner is the fallback and is never restricted');
+
+  const safetyRecord = pickRecipients({ record: { site_id: null, submitted_by_roster_id: 11 }, roster: ROSTER, author: author(11), divisionSites: DIVISION_SITES, viewRows: rows, nowMs: NOW });
+  assert.deepEqual(ids(safetyRecord), [2, 10], 'safety people still hear');
+});
+
+test('naming someone as an extra cannot widen who may learn about a document', () => {
+  const rows = [viewRow('department', 'safety')];
+  const out = pickRecipients({ record: { site_id: null, submitted_by_roster_id: 11 }, roster: ROSTER, author: author(11), divisionSites: DIVISION_SITES, extraRosterIds: [12], viewRows: rows, nowMs: NOW });
+  assert.ok(!ids(out).includes(12), 'yard worker 12 holds no view right, so the extra is ignored');
+});
+
+test('an ended or future view row does not restrict', () => {
+  const ended = { ...viewRow('department', 'safety'), ended_at: '2026-10-02T00:00:00Z' };
+  const out = pickRecipients({ record: { site_id: 50, submitted_by_roster_id: 12 }, roster: ROSTER, author: author(12), divisionSites: DIVISION_SITES, viewRows: [ended], nowMs: NOW });
+  assert.deepEqual(ids(out), [3]);
+});
+
+test('extras survive the cap before the broad audience does', () => {
+  const crowd = Array.from({ length: 40 }, (_, i) => P({ id: 100 + i, role: 'supervisor', departments: ['safety'], email: `s${i}@x.test` }));
+  const named = P({ id: 500, role: 'worker', email: 'named@x.test' });
+  const out = pickRecipients({ record: { site_id: null, submitted_by_roster_id: 11 }, roster: [P({ id: 1, role: 'supervisor', is_owner: true, email: 'o@x.test' }), named, ...crowd], author: { id: 11, departments: ['safety'], divisions: [], default_site_id: null }, divisionSites: new Map(), extraRosterIds: [500] });
+  assert.equal(out.recipients.length, MAX_RECIPIENTS);
+  assert.ok(ids(out).includes(500), 'the person the Owner named is kept');
+});
+
+test('only a single plain address is ever used', () => {
+  const messy = [
+    P({ id: 1, role: 'supervisor', is_owner: true, email: 'o@x.test' }),
+    P({ id: 2, role: 'supervisor', departments: ['safety'], email: 'a@x.test, b@y.test' }),
+    P({ id: 3, role: 'supervisor', departments: ['safety'], email: 'not an address' }),
+    P({ id: 4, role: 'supervisor', departments: ['safety'], email: '  ok@x.test  ' }),
+  ];
+  const out = pickRecipients({ record: { site_id: null, submitted_by_roster_id: 11 }, roster: messy, author: { id: 11, departments: ['safety'], divisions: [], default_site_id: null }, divisionSites: new Map() });
+  assert.deepEqual(out.recipients.map((r) => r.email), ['ok@x.test']);
+  assert.deepEqual(out.missingEmail.sort(), [2, 3]);
+});
+
+test('labels cannot carry line breaks or links into an email from FORA', () => {
+  assert.equal(cleanLabel('Pit\nYour session expired, log in at https://evil.example/x now'), 'Pit Your session expired, log in at now');
+  assert.equal(cleanLabel('www.evil.example Yard'), 'Yard');
+  assert.equal(cleanLabel(null), '');
+  assert.equal(cleanLabel('x'.repeat(200)).length, 80);
+});
+
+test('a forged site id from another company does not steer routing', async () => {
+  const db = fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }));
+  // Site 51 belongs to company 8. Treated as no site, so only the author's tags route.
+  const forged = await routeNotification(db, { companyId: 7, documentKey: 'incident', record: { site_id: 51, submitted_by_roster_id: 12 } });
+  assert.ok(!forged.recipients.some((r) => r.email === 'pit@x.test'));
+  const own = await routeNotification(db, { companyId: 7, documentKey: 'incident', record: { site_id: 50, submitted_by_roster_id: 12 } });
+  assert.deepEqual(own.recipients.map((r) => r.email), ['pit@x.test']);
+});
+
+test('the loader applies the document\'s view rows', async () => {
+  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
+  tables.document_assignments = [{ company_id: 7, document_key: 'incident', audience_type: 'department', audience_value: 'safety', action: 'view', restricts: true, created_at: '2026-10-01T00:00:00Z', ended_at: null }];
+  const out = await routeNotification(fakeDb(tables), { companyId: 7, documentKey: 'incident', record: { site_id: 50, submitted_by_roster_id: 12 } });
+  assert.deepEqual(out.recipients.map((r) => r.email), ['owner@x.test'], 'the site supervisor is left out of this document, so the Owner is told');
+});
+
+test('a custom form uses its own title, cleaned', async () => {
+  const sent = [];
+  const db = fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }));
+  await notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec });
+  assert.match(sent[0].subject, /^New Incident Report/);
 });
