@@ -40,6 +40,7 @@ const reset = () => {
 };
 reset();
 const inserts = [];
+const sideWrites = [];
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -82,6 +83,7 @@ const server = http.createServer(async (req, res) => {
   if (table === 'fuel_logs') return send(200, []);
   if (table === 'document_assignments') return send(200, []);
   if (table === 'audit_log') return send(201, []);
+  if (req.method !== 'GET') sideWrites.push({ table, method: req.method, payload });
   return send(req.method === 'POST' ? 201 : 200, []);
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -174,4 +176,26 @@ test('an unsigned inspection\'s reading does not count: the last-reading lookup 
   ROWS.inspections.find(r => r.id === 201).awaiting_signature = false;
   const signed = await run(fuellogs, { action: 'check_equipment', token: as(11, 'worker'), equipmentLabel: 'Cat 320' });
   assert.ok(JSON.stringify(signed.body).includes('150'), 'once signed it counts');
+});
+
+test('an unsigned inspection sets nothing in motion (no signal, no corrective actions) until it is signed', async () => {
+  reset(); inserts.length = 0; sideWrites.length = 0;
+  const results = { items: [{ item: 'Brakes', category: 'Safety', condition: 'Defective', note: 'soft pedal' }], defectiveCount: 1, monitorCount: 0 };
+  const out = await run(logs, { type: 'inspection', action: 'submit', token: as(11, 'worker'), record: record({ sign_later: true, results_json: results }) });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  const watched = (w) => ['company_signals', 'corrective_actions', 'equipment_maintenance_log'].includes(w.table);
+  assert.equal(sideWrites.filter(watched).length, 0, 'nothing written for an unsigned inspection: ' + JSON.stringify(sideWrites.filter(watched).map(w => w.table)));
+
+  const newId = inserts[0].id;
+  const signed = await run(logs, { type: 'inspection', action: 'sign_now', token: as(11, 'worker'), id: newId, signature: PNG, pdfUrl: pdfReceipt() });
+  assert.equal(signed.statusCode, 200, JSON.stringify(signed.body));
+  assert.ok(sideWrites.filter(watched).length > 0, 'its signal and corrective actions follow the signature');
+});
+
+test('a signed inspection still sets them in motion at submit, as before', async () => {
+  reset(); inserts.length = 0; sideWrites.length = 0;
+  const results = { items: [{ item: 'Brakes', category: 'Safety', condition: 'Defective', note: 'soft pedal' }], defectiveCount: 1, monitorCount: 0 };
+  const out = await run(logs, { type: 'inspection', action: 'submit', token: as(11, 'worker'), record: record({ results_json: results }) });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.ok(sideWrites.some(w => ['company_signals', 'corrective_actions'].includes(w.table)));
 });
