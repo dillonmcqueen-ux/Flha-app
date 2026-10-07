@@ -307,7 +307,7 @@ export default async function handler(req, res) {
         if (record.sign_later === true) return res.status(400).json({ error: 'An amendment is confirmed with your signature.' });
         // Confirm this record actually belongs to the worker's own company first.
         const { data: existing, error: findErr } = await supabaseAdmin
-          .from('flhas').select('id, company_id, worker_name, hazards_json, created_at').eq('id', amendingId).limit(1);
+          .from('flhas').select('id, company_id, worker_name, hazards_json, created_at, status, site_id').eq('id', amendingId).limit(1);
         if (findErr || !existing || existing.length === 0 || existing[0].company_id !== session.companyId) {
           return res.status(403).json({ error: 'Not allowed to amend this record.' });
         }
@@ -404,6 +404,15 @@ export default async function handler(req, res) {
         const { error } = await supabaseAdmin
           .from('flhas').update(amendUpdate).eq('id', amendingId).eq('company_id', session.companyId);
         if (error) return res.status(500).json({ error: 'Save failed. Try again.' });
+        // An amendment that newly sends the record back for sign-off is the
+        // notice that matters most, so the audience is told once, on that
+        // transition only. Ordinary edits stay quiet.
+        if (amendUpdate.status === 'pending_approval' && existing[0].status !== 'pending_approval') {
+          await notifyAudience(supabaseAdmin, session, 'flha', {
+            siteId: Object.prototype.hasOwnProperty.call(amendUpdate, 'site_id') ? amendUpdate.site_id : (existing[0].site_id ?? null),
+            authorId: authorRosterId(session),
+          });
+        }
         return res.status(200).json({ id: amendingId, status: amendUpdate.status, pdfLinked: amendPdfLinked });
       } else {
         // Idempotency (docs/scope-offline-capability.md Phase 1) — a queued

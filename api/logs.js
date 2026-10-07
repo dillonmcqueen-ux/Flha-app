@@ -689,6 +689,7 @@ export default async function handler(req, res) {
         await notifyAudience(supabaseAdmin, session, table.docKey, {
           siteId: recordToInsert.site_id ?? null,
           authorId: authorRosterId(session),
+          skipId: session.enteredBy ?? null,
         });
       }
 

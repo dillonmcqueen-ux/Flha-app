@@ -59,6 +59,11 @@ test('the author is never told about their own submission', () => {
   assert.ok(!ids(out).includes(2));
 });
 
+test('someone who typed the record in for the author is not told either', () => {
+  const out = pickRecipients({ record: { site_id: null, submitted_by_roster_id: 13, skip_roster_id: 10 }, roster: ROSTER, author: author(13), divisionSites: DIVISION_SITES });
+  assert.ok(!ids(out).includes(10), 'the lead who entered it already knows');
+});
+
 test('the Owner is the fallback only, and only when nobody else would be told', () => {
   const nobody = pickRecipients({ record: { site_id: 999, submitted_by_roster_id: 12 }, roster: ROSTER, author: author(12), divisionSites: DIVISION_SITES });
   assert.deepEqual(ids(nobody), [1], 'yard worker, unknown site: only the Owner');

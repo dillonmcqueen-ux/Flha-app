@@ -23,7 +23,7 @@ import { sendEmail } from './email.js';
 
 export const WIRED_DOCUMENT_KEYS = new Set(['incident', 'nearmiss', 'flha', 'inspection', 'toolbox', 'daily']);
 
-export async function notifyAudience(supabase, session, documentKey, { siteId, authorId } = {}) {
+export async function notifyAudience(supabase, session, documentKey, { siteId, authorId, skipId } = {}) {
   try {
     if (!WIRED_DOCUMENT_KEYS.has(documentKey)) return;
     if (!session || !session.companyId) return;
@@ -39,7 +39,7 @@ export async function notifyAudience(supabase, session, documentKey, { siteId, a
       sendEmail,
       companyId: session.companyId,
       documentKey,
-      record: { site_id: siteId ?? null, submitted_by_roster_id: authorId ?? null },
+      record: { site_id: siteId ?? null, submitted_by_roster_id: authorId ?? null, skip_roster_id: skipId ?? null },
       siteName,
     });
   } catch (e) {
