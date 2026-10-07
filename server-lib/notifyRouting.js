@@ -40,6 +40,12 @@
 // enabled = false, notifies nobody. A database without the table behaves the
 // same way, so shipping this ahead of the SQL changes nothing.
 //
+// COOLDOWN: document_notification_state remembers when each person was last
+// told about each document. Inside the window a notice is held back and
+// counted, and the next email says how many came in since. A state table that
+// cannot be read or written means NOTHING is sent: the cooldown is what keeps
+// a flood off the shared sender, so it is never skipped.
+//
 // The email names the document and the site and nothing else: no report
 // content, no author, so incident detail never sits in an inbox. One email per
 // person, so recipients never see each other's addresses. A failed send is
@@ -55,6 +61,11 @@ const isMissingSchema = (error) => !!error && MISSING_SCHEMA.has(String(error.co
 // A runaway audience (a mis-tagged company) must not turn one submit into a
 // burst of emails.
 export const MAX_RECIPIENTS = 25;
+
+// One email per person per document per window. A worker looping submits, or a
+// busy site, then costs each recipient one email and a count, not one per
+// submit, and the shared sender's quota is protected for every company.
+export const COOLDOWN_MS = 10 * 60 * 1000;
 
 export const DOCUMENT_LABELS = {
   flha: 'FLHA',
@@ -262,8 +273,42 @@ export async function routeNotification(supabase, { companyId, documentKey, reco
 }
 
 /**
+ * Splits the audience into who is emailed now and who is inside their cooldown.
+ * Pure. `state` maps roster id -> { last_sent_at, suppressed_count }.
+ */
+export function applyCooldown(recipients, state, nowMs) {
+  const send = [];
+  const hold = [];
+  for (const r of recipients) {
+    const s = state.get(Number(r.id));
+    const last = s ? Date.parse(s.last_sent_at) : NaN;
+    if (Number.isFinite(last) && nowMs - last < COOLDOWN_MS) hold.push({ ...r, suppressed: Number(s.suppressed_count) || 0 });
+    else send.push({ ...r, suppressed: s ? Number(s.suppressed_count) || 0 : 0 });
+  }
+  return { send, hold };
+}
+
+async function loadState(supabase, companyId, documentKey, rosterIds) {
+  const { data, error } = await supabase
+    .from('document_notification_state')
+    .select('roster_id, last_sent_at, suppressed_count')
+    .eq('company_id', companyId)
+    .eq('document_key', documentKey)
+    .in('roster_id', rosterIds);
+  if (error) return { state: new Map(), error: true };
+  return { state: new Map((data || []).map((r) => [Number(r.roster_id), r])), error: false };
+}
+
+async function saveState(supabase, companyId, documentKey, rosterId, lastSentAt, suppressedCount) {
+  const { error } = await supabase
+    .from('document_notification_state')
+    .upsert({ company_id: companyId, document_key: documentKey, roster_id: rosterId, last_sent_at: lastSentAt, suppressed_count: suppressedCount }, { onConflict: 'company_id,document_key,roster_id' });
+  if (error) console.error('notification state write failed:', error.message);
+}
+
+/**
  * Tells the audience about a new record. Never throws. Returns
- * { sent, failed, reason } so a caller or a test can see what happened.
+ * { sent, failed, held, reason } so a caller or a test can see what happened.
  *
  * `siteName` is the label shown in the email; it falls back to "your company"
  * rather than printing nothing.
@@ -271,29 +316,39 @@ export async function routeNotification(supabase, { companyId, documentKey, reco
 export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentKey, record, siteName, documentLabel }) {
   try {
     const routed = await routeNotification(supabase, { companyId, documentKey, record });
-    if (!routed.enabled || routed.recipients.length === 0) return { sent: 0, failed: 0, reason: routed.reason };
+    if (!routed.enabled || routed.recipients.length === 0) return { sent: 0, failed: 0, held: 0, reason: routed.reason };
+    const now = Date.now();
+    const st = await loadState(supabase, companyId, documentKey, routed.recipients.map((r) => r.id));
+    if (st.error) return { sent: 0, failed: 0, held: 0, reason: 'error' };
+    const { send, hold } = applyCooldown(routed.recipients, st.state, now);
+    for (const h of hold) {
+      const prev = st.state.get(h.id);
+      await saveState(supabase, companyId, documentKey, h.id, prev.last_sent_at, h.suppressed + 1);
+    }
     // A custom form passes its own title; a built-in uses its fixed label.
     const label = DOCUMENT_LABELS[documentKey] || cleanLabel(documentLabel) || 'Custom document';
     const cleanSite = cleanLabel(siteName);
     const where = cleanSite ? ` at ${cleanSite}` : '';
     let sent = 0;
     let failed = 0;
-    for (const r of routed.recipients) {
+    for (const r of send) {
       try {
+        const more = r.suppressed > 0 ? `\n\n${r.suppressed} more ${label}${r.suppressed === 1 ? ' was' : 's were'} submitted since your last notice.` : '';
         await sendEmail({
           to: r.email,
           subject: `New ${label}${where}`,
-          text: `A new ${label} was submitted${where}.\n\nLog in to FORA to view it.`,
+          text: `A new ${label} was submitted${where}.${more}\n\nLog in to FORA to view it.`,
         });
+        await saveState(supabase, companyId, documentKey, r.id, new Date(now).toISOString(), 0);
         sent += 1;
       } catch (e) {
         failed += 1;
         console.error('routed notification email failed:', e && e.message);
       }
     }
-    return { sent, failed, reason: 'ok' };
+    return { sent, failed, held: hold.length, reason: 'ok' };
   } catch (e) {
     console.error('notifyOnSubmit failed:', e && e.message);
-    return { sent: 0, failed: 0, reason: 'error' };
+    return { sent: 0, failed: 0, held: 0, reason: 'error' };
   }
 }

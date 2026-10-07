@@ -13,7 +13,7 @@ process.env.FIELD_ENCRYPTION_KEY ||= 'a'.repeat(64);
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickRecipients, routeNotification, notifyOnSubmit, cleanLabel, MAX_RECIPIENTS } from '../../server-lib/notifyRouting.js';
+import { pickRecipients, routeNotification, notifyOnSubmit, applyCooldown, cleanLabel, MAX_RECIPIENTS, COOLDOWN_MS } from '../../server-lib/notifyRouting.js';
 import { encryptField } from '../../server-lib/fieldCrypto.js';
 
 const P = (over) => ({ active: true, is_owner: false, is_lead: false, departments: [], divisions: [], default_site_id: null, email: null, ...over });
@@ -95,6 +95,14 @@ function fakeDb(tables, { failTable = null, failCode = '42P01' } = {}) {
         eq(k, v) { filters.push((r) => String(r[k]) === String(v)); return builder; },
         in(k, vs) { filters.push((r) => vs.map(String).includes(String(r[k]))); return builder; },
         limit(n) { limitN = n; return builder; },
+        upsert(row, opts) {
+          const keys = String((opts && opts.onConflict) || 'id').split(',');
+          const list = (tables[name] = tables[name] || []);
+          const hit = list.find((r) => keys.every((k) => String(r[k]) === String(row[k])));
+          if (failTable === name) return { then: (resolve) => resolve({ error: { code: failCode, message: 'x' } }) };
+          if (hit) Object.assign(hit, row); else list.push({ ...row });
+          return { then: (resolve) => resolve({ error: null }) };
+        },
         then(resolve) {
           if (failTable === name) return resolve({ data: null, error: { code: failCode, message: 'x' } });
           let rows = (tables[name] || []).filter((r) => filters.every((f) => f(r)));
@@ -112,6 +120,7 @@ const company8 = enc([P({ id: 90, role: 'supervisor', departments: ['safety'], e
 const baseTables = (setting) => ({
   document_notifications: setting ? [{ company_id: 7, document_key: 'incident', ...setting }] : [],
   document_assignments: [],
+  document_notification_state: [],
   roster: [...company7, ...company8],
   sites: [{ id: 60, company_id: 7, division_id: 9 }, { id: 50, company_id: 7, division_id: null }, { id: 51, company_id: 8, division_id: null }],
 });
@@ -150,7 +159,7 @@ test('notifyOnSubmit: one email per person, no report content, never throws', as
     assert.ok(!/\u2014/.test(m.text));
   }
 
-  const failing = await notifyOnSubmit(db, { sendEmail: async () => { throw new Error('boom'); }, companyId: 7, documentKey: 'incident', record: rec });
+  const failing = await notifyOnSubmit(fakeDb(baseTables({ enabled: true, extra_roster_ids: [] })), { sendEmail: async () => { throw new Error('boom'); }, companyId: 7, documentKey: 'incident', record: rec });
   assert.equal(failing.failed, 2);
   assert.equal(failing.sent, 0);
 
@@ -233,4 +242,60 @@ test('a custom form uses its own title, cleaned', async () => {
   const db = fakeDb(baseTables({ enabled: true, extra_roster_ids: [] }));
   await notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec });
   assert.match(sent[0].subject, /^New Incident Report/);
+});
+
+// ── cooldown ────────────────────────────────────────────────────────────
+test('applyCooldown: inside the window is held and counted, outside is sent', () => {
+  const now = Date.parse('2026-10-07T12:00:00Z');
+  const state = new Map([
+    [1, { last_sent_at: new Date(now - 60 * 1000).toISOString(), suppressed_count: 2 }],
+    [2, { last_sent_at: new Date(now - COOLDOWN_MS - 1000).toISOString(), suppressed_count: 3 }],
+  ]);
+  const out = applyCooldown([{ id: 1, email: 'a@x.test' }, { id: 2, email: 'b@x.test' }, { id: 3, email: 'c@x.test' }], state, now);
+  assert.deepEqual(out.hold.map((r) => r.id), [1]);
+  assert.deepEqual(out.send.map((r) => [r.id, r.suppressed]), [[2, 3], [3, 0]]);
+});
+
+test('a burst of submits costs each person one email and a count', async () => {
+  const sent = [];
+  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
+  const db = fakeDb(tables);
+  const run = () => notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec, siteName: 'Pit' });
+
+  const first = await run();
+  assert.equal(first.sent, 2);
+  assert.equal(sent.length, 2);
+  const second = await run();
+  const third = await run();
+  assert.equal(second.sent + third.sent, 0, 'inside the window nothing more is sent');
+  assert.equal(second.held, 2);
+  assert.equal(sent.length, 2, 'two people, one email each');
+  assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 2), 'two held notices counted per person');
+
+  // Window passes: back-date the state and the next email reports the count.
+  tables.document_notification_state.forEach((r) => { r.last_sent_at = new Date(Date.now() - COOLDOWN_MS - 1000).toISOString(); });
+  const after = await run();
+  assert.equal(after.sent, 2);
+  assert.match(sent[sent.length - 1].text, /2 more Incident Reports were submitted since your last notice/);
+  assert.ok(tables.document_notification_state.every((r) => r.suppressed_count === 0), 'count resets once reported');
+});
+
+test('cooldown is per document and per person, not shared', async () => {
+  const sent = [];
+  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
+  tables.document_notifications.push({ company_id: 7, document_key: 'nearmiss', enabled: true, extra_roster_ids: [] });
+  const db = fakeDb(tables);
+  const go = (documentKey) => notifyOnSubmit(db, { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey, record: rec });
+  await go('incident');
+  const other = await go('nearmiss');
+  assert.equal(other.sent, 2, 'a different document has its own window');
+});
+
+test('a state table that cannot be read or written sends nothing', async () => {
+  const sent = [];
+  const tables = baseTables({ enabled: true, extra_roster_ids: [] });
+  const noState = await notifyOnSubmit(fakeDb(tables, { failTable: 'document_notification_state' }), { sendEmail: async (m) => { sent.push(m); }, companyId: 7, documentKey: 'incident', record: rec });
+  assert.equal(noState.sent, 0);
+  assert.equal(noState.reason, 'error');
+  assert.equal(sent.length, 0, 'no state, no email: the cooldown is never skipped');
 });

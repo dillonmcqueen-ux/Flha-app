@@ -38,10 +38,30 @@ create table if not exists public.document_notifications (
 -- Deny-by-default backstop, same as every other table (README access model).
 alter table public.document_notifications enable row level security;
 
+-- Cooldown state. One row per (company, document, person): when that person was
+-- last emailed about that document, and how many notices were held back since.
+-- A person is emailed about a document at most once per cooldown window (10
+-- minutes, server-lib/notifyRouting.js); the notices held back are counted and
+-- reported in their next email ("N more since your last notice"). This is what
+-- stops one worker looping submits from flooding inboxes or burning the
+-- shared sender's Resend quota. It holds no report content and no address.
+create table if not exists public.document_notification_state (
+  company_id bigint not null references public.companies(id) on delete cascade,
+  document_key text not null,
+  roster_id bigint not null references public.roster(id) on delete cascade,
+  last_sent_at timestamptz not null default now(),
+  suppressed_count integer not null default 0 check (suppressed_count >= 0),
+  primary key (company_id, document_key, roster_id)
+);
+
+alter table public.document_notification_state enable row level security;
+
 -- ── Verification ─────────────────────────────────────────────────────────
 -- select column_name from information_schema.columns
 --   where table_schema = 'public' and table_name = 'document_notifications';
 -- select relrowsecurity from pg_class where oid = 'public.document_notifications'::regclass;
+-- select relrowsecurity from pg_class where oid = 'public.document_notification_state'::regclass;
 --
 -- ── Rollback ─────────────────────────────────────────────────────────────
+-- drop table if exists public.document_notification_state;
 -- drop table if exists public.document_notifications;
