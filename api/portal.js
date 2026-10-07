@@ -1345,8 +1345,6 @@ Rules:
       const doc = docRows && docRows[0];
       if (!doc) return denied();
       if (session.role === 'supervisor' && doc.company_id !== session.companyId) return denied();
-      // The department must be one of the DOCUMENT's company's departments.
-      if (!(await validDepartmentKeys(supabaseAdmin, doc.company_id)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
       const mine = await myDepartmentList();
       if (mine && !(doc.departments || []).some(dep => mine.includes(dep))) return denied();
       // Only a record the supervisor could have listed (site and author, rule A).
@@ -1356,6 +1354,10 @@ Rules:
       // actually routed to, so this can't be used to push a document at a
       // department that isn't meant to see it. Admin is unrestricted.
       if (session.role !== 'admin' && !(doc.departments || []).includes(department)) return denied();
+      // The department must be one of the DOCUMENT's company's departments. Checked
+      // after every access check, so a 400 here never confirms that a record the
+      // caller cannot see exists.
+      if (!(await validDepartmentKeys(supabaseAdmin, doc.company_id)).has(department)) return res.status(400).json({ error: 'Pick a department.' });
 
       try {
         const result = await emailRecordToDepartment(supabaseAdmin, { companyId: doc.company_id, record, documentTitle: doc.title, department });

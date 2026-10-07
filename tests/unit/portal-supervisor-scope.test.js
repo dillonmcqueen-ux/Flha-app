@@ -120,3 +120,10 @@ test('another company\'s supervisor never reaches these records', async () => {
   const detail = await call({ action: 'get_portal_record_detail', token: as(90, 8), recordId: 100 });
   assert.equal(detail.statusCode, 403);
 });
+
+test('email: an invalid department never confirms that an out-of-scope record exists', async () => {
+  const hidden = await call({ action: 'email_portal_record', token: as(2), recordId: 101, department: 'not-a-department' });
+  const missing = await call({ action: 'email_portal_record', token: as(2), recordId: 999, department: 'not-a-department' });
+  assert.equal(hidden.statusCode, 403);
+  assert.equal(missing.statusCode, 403);
+});
