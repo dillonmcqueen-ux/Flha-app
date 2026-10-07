@@ -16,6 +16,7 @@ import WorkerMenu from "./WorkerMenu";
 import WorkerProfileDrawer from "./WorkerProfileDrawer";
 import CompanyStructureManager from "./CompanyStructureManager.jsx";
 import DocumentAssignmentsManager from "./DocumentAssignmentsManager.jsx";
+import NotificationSettings from "./NotificationSettings.jsx";
 import AuditorsManager from "./AuditorsManager.jsx";
 import useCompanyStructure from "./useCompanyStructure.js";
 import { generateSafetyAnalyticsPDF } from "./generateSafetyAnalyticsPDF";
@@ -7950,6 +7951,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                   sites={companyStructure.sites}
                   roster={rosterList}
                 />
+              )}
+
+              {canManageCompany && (
+                <NotificationSettings token={token} companyId={selectedCompany} roster={rosterList} />
               )}
 
               {loadingRosterList ? (
