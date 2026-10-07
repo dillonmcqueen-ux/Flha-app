@@ -13,13 +13,14 @@ import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import FieldService, { resubmitFieldService } from "./FieldService.jsx";
 import MyDocuments from "./MyDocuments.jsx";
 import CrewScreen from "./CrewScreen.jsx";
+import SignAfterwards from "./SignAfterwards.jsx";
 import AccountSecurity from "./AccountSecurity.jsx";
 import WorkerCertifications from "./WorkerCertifications.jsx";
 import { drainQueue } from "./offlineQueue.js";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import {
   ClipboardList, ClipboardCheck, Hammer, AlertTriangle, Siren, CalendarClock,
-  Clock, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
+  Clock, PenLine, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
   HardHat, Wrench, Layers, ShieldCheck, Users,
 } from "lucide-react";
 
@@ -98,6 +99,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // decides whether to show the "My crew" card.
   const [crewInfo, setCrewInfo] = useState({ isLead: false, crew: [] });
   const [showCrew, setShowCrew] = useState(false);
+  // Documents this person saved to sign afterwards. The server returns only
+  // their own; this is the count on the menu card.
+  const [unsignedCount, setUnsignedCount] = useState(0);
+  const [showSign, setShowSign] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
@@ -156,6 +161,19 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       } catch (e) { /* not a lead, or offline: no crew card */ }
     }
     loadCrew();
+
+    async function loadUnsigned() {
+      if (!userId) return;
+      try {
+        const res = await fetch("/api/flhas", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "my_unsigned", token }),
+        });
+        const data = await res.json();
+        if (res.ok) setUnsignedCount((data.flhas || []).length);
+      } catch (e) { /* offline: no card */ }
+    }
+    loadUnsigned();
   }, [token]);
 
   // Certification expiry notification (onboarding wallet, Phase 3) — only
@@ -234,6 +252,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
 
   if (showSecurity) {
     return <AccountSecurity token={token} onBack={() => setShowSecurity(false)} />;
+  }
+
+  if (showSign) {
+    return <SignAfterwards token={token} companyId={companyId} companyName={companyName} userName={userName} onBack={() => setShowSign(false)} onCount={() => setUnsignedCount(n => Math.max(0, n - 1))} />;
   }
 
   if (showCrew) {
@@ -611,6 +633,27 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
               {openShiftWhileOff ? "You're still clocked in. Tap to clock out." : "Clock in and out"}
             </div>
           </button>
+        )}
+
+        {unsignedCount > 0 && (
+          <div
+            onClick={() => setShowSign(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+              background: C.status.warning.bg,
+              border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.lg, padding: "14px 16px",
+              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
+            }}
+          >
+            <div style={s.iconTile(C.orange)}>
+              <PenLine size={22} color={C.orange} strokeWidth={2.25} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: C.status.warning.text }}>Needs your signature</div>
+              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{unsignedCount} saved {unsignedCount === 1 ? "document is" : "documents are"} waiting for you to sign</div>
+            </div>
+            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+          </div>
         )}
 
         {crewInfo.isLead && (

@@ -337,6 +337,9 @@ function EditToggleButton({ onClick }) {
 export function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSupName = "" }) {
   const h = flha.hazards_json || {};
   const isPending = flha.status === "pending_approval";
+  // Saved by the worker to sign afterwards. Nobody can sign it off until the
+  // worker has (the server refuses too).
+  const awaitingSig = flha.awaiting_signature === true;
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -546,7 +549,16 @@ export function FLHACard({ flha, onClose, onDelete, onApprove, onSave, defaultSu
           </div>
         )}
 
-        {isPending && onApprove && (
+        {awaitingSig && (
+          <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {flha.worker_name || "the worker"}'s signature</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>
+              {flha.worker_name || "The worker"} saved this FLHA to sign afterwards{flha.signature_requested_at ? ` on ${new Date(flha.signature_requested_at).toLocaleString("en-CA")}` : ""}. {isPending ? "It can be signed off once they have signed it." : ""}
+            </div>
+          </div>
+        )}
+
+        {isPending && onApprove && !awaitingSig && (
           <div style={{ borderTop: "2px solid #DC2626", marginTop: 8, paddingTop: 16 }}>
             <div style={{ fontWeight: 800, fontSize: 15, color: "#DC2626", marginBottom: 4 }}>Supervisor Sign-Off Required</div>
             <div style={{ fontSize: 13, color: "#A1A1AA", marginBottom: 12 }}>By signing, I approve this extreme-risk work to proceed with the controls listed above.</div>
@@ -2534,6 +2546,12 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
       });
       const data = await res.json();
       if (res.ok) signedPdfUrl = data.pdfUrl || signedPdfUrl;
+      else {
+        // The server refused (for example the worker has not signed it yet).
+        // Showing it as approved here would be wrong.
+        window.alert(data.error || "Approval failed.");
+        return;
+      }
     } catch (e) { /* keep local state updated even if the request fails */ }
 
     setFlhas(prev => prev.map(f => f.id === record.id
@@ -4239,7 +4257,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     } catch (e) { /* ignore */ }
   };
 
-  const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval").length;
+  const awaitingSignOff = companyFlhas.filter(f => f.status === "pending_approval" && f.awaiting_signature !== true).length;
   const incidentCount = companyIncidents.length;
   const startOfWeek = (() => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() - day); d.setHours(0, 0, 0, 0); return d; })();
   const docsThisWeekList = [
@@ -5693,8 +5711,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                     const tone = feedTone(type, doc);
                     let statusLabel = "Logged", statusColor = C.text.muted;
                     if (type === "flha") {
-                      statusLabel = doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
-                      statusColor = doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
+                      statusLabel = doc.awaiting_signature === true ? "Awaiting worker signature" : doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
+                      statusColor = doc.awaiting_signature === true || doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
                     } else if (type === "nearmiss" || type === "incident") {
                       statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
                       statusColor = doc.reviewed ? C.text.muted : C.status.warning.text;
@@ -5838,7 +5856,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             </div>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 }}>
-                            {f.status === "pending_approval" && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.danger.solid, padding: "3px 9px", borderRadius: RAD.pill }}>NEEDS SIGN-OFF</span>}
+                            {f.awaiting_signature === true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.warning.solid, padding: "3px 9px", borderRadius: RAD.pill }}>AWAITING SIGNATURE</span>}
+                            {f.status === "pending_approval" && f.awaiting_signature !== true && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: C.status.danger.solid, padding: "3px 9px", borderRadius: RAD.pill }}>NEEDS SIGN-OFF</span>}
                             {extremeRisk > 0 && <RiskBadge risk="Extreme" />}
                             {highRisk > 0 && <RiskBadge risk="High" />}
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
