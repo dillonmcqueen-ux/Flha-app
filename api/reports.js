@@ -100,6 +100,14 @@ async function verifySession(token) {
 // twice for one report: the signal is checked first and
 // openCorrectiveActions skips descriptions it already holds.
 async function runReportFollowUps(session, type, id, record) {
+  try {
+    await runReportFollowUpsUnguarded(session, type, id, record);
+  } catch (e) {
+    console.error('report follow-ups failed for', type, id, e && e.message);
+  }
+}
+
+async function runReportFollowUpsUnguarded(session, type, id, record) {
   if (type !== 'incident' && type !== 'nearmiss') return;
   const sourceType = type === 'incident' ? 'incident' : 'near_miss';
   const shortStr = (v) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 200) : null;
