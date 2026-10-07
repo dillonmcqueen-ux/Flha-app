@@ -1324,6 +1324,11 @@ function IncidentCard({ inc, onClose, onDelete, onReview, onSave, defaultReviewe
             <div style={{ fontSize: 12, color: "#D4D4D8", marginTop: 2 }}>{inc.reviewed_at ? new Date(inc.reviewed_at).toLocaleString("en-CA") : ""}</div>
             {inc.review_notes && <div style={{ fontSize: 13, color: "#D4D4D8", marginTop: 6 }}><strong>Action taken:</strong> {inc.review_notes}</div>}
           </div>
+        ) : inc.awaiting_signature === true ? (
+          <div style={{ borderTop: "2px solid #D97706", marginTop: 8, paddingTop: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: "#D97706", marginBottom: 4 }}>Awaiting {inc.reporter_name || "the reporter"}'s signature</div>
+            <div style={{ fontSize: 13, color: "#A1A1AA" }}>Saved to sign afterwards{inc.signature_requested_at ? ` on ${new Date(inc.signature_requested_at).toLocaleString("en-CA")}` : ""}. It can be reviewed once they have signed it.</div>
+          </div>
         ) : onReview && (
           <div style={{ borderTop: "2px solid #F87171", marginTop: 8, paddingTop: 14 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#F87171", marginBottom: 8 }}>Mark as Reviewed</div>
@@ -4420,6 +4425,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   const reviewIncident = async (id, notes, reviewerName) => {
     const record = incidents.find(n => n.id === id);
+    if (record && record.awaiting_signature === true) { window.alert("The reporter hasn't signed this report yet."); return; }
     const reviewedBy = (reviewerName || "").trim() || userName || (isAdmin ? "Admin" : "Supervisor");
     const reviewedAt = new Date().toLocaleString("en-CA");
     // record.pdf_url is already a signed URL (the list load signed it) —
@@ -4493,6 +4499,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         evidence: edited.evidence, report: edited.report_json,
         companyName: co?.name || "", companyLogo: co?.logo_url || "",
         signatureDataUrl: record.signature_url || null,
+        awaitingSignature: record.awaiting_signature === true,
         customFields: record.report_json?.customFields || [],
         photoUrls: record.photo_urls || [],
         reviewed: record.reviewed ? { by: record.reviewed_by, at: record.reviewed_at, notes: record.review_notes } : undefined,
@@ -5718,8 +5725,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                       statusLabel = doc.awaiting_signature === true ? "Awaiting worker signature" : doc.status === "pending_approval" ? "Needs sign-off" : "Signed off";
                       statusColor = doc.awaiting_signature === true || doc.status === "pending_approval" ? C.status.warning.text : C.status.success.text;
                     } else if (type === "nearmiss" || type === "incident") {
-                      statusLabel = doc.reviewed ? "Reviewed" : "Pending review";
-                      statusColor = doc.reviewed ? C.text.muted : C.status.warning.text;
+                      statusLabel = doc.awaiting_signature === true ? "Awaiting signature" : doc.reviewed ? "Reviewed" : "Pending review";
+                      statusColor = doc.reviewed && doc.awaiting_signature !== true ? C.text.muted : C.status.warning.text;
                     } else if (type === "certification") {
                       statusLabel = doc.status === "expired" ? "Expired" : doc.status === "expiring_soon" ? "Expiring soon" : doc.unverified ? "Unverified" : "Uploaded";
                       statusColor = doc.status === "expired" ? C.status.danger.text : doc.status === "expiring_soon" || doc.unverified ? C.status.warning.text : C.status.success.text;

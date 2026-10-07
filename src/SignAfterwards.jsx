@@ -11,6 +11,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, PenLine, CheckCircle2 } from "lucide-react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "./theme";
 import { generateAndUploadFLHA } from "./generatePDF";
+import { generateAndUploadIncident } from "./generateIncidentPDF";
+import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 
 async function post(url, body) {
   try {
@@ -148,16 +150,80 @@ function UnsignedFlha({ flha, token, companyName, companyLogo, userName, onSigne
   );
 }
 
+function UnsignedIncident({ record, token, companyId, companyName, companyLogo, userName, onSigned }) {
+  const [signature, setSignature] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const report = record.report_json || {};
+
+  const sign = async () => {
+    if (!signature) return;
+    setBusy(true); setError("");
+    try {
+      const blob = await (await fetch(signature)).blob();
+      const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
+      const { receipt: signatureReceipt } = await uploadViaSignedUrl({
+        endpoint: "/api/reports", action: "create_upload_url", token,
+        bucket: "signatures", filename, file: blob, contentType: "image/png",
+      });
+      const pdfUrl = await generateAndUploadIncident({
+        reporter: record.reporter_name, site: record.site, occurredAt: record.occurred_at, incidentType: record.incident_type,
+        injuredPerson: record.injured_person, bodyPart: record.body_part, treatment: record.treatment,
+        medicalAttention: record.medical_attention, witnesses: record.witnesses, evidence: record.evidence,
+        report, companyName, companyLogo, signatureDataUrl: signature,
+        customFields: report.customFields || [], photoUrls: record.photo_urls || [], token,
+      });
+      const out = await post("/api/reports", { type: "incident", action: "sign_now", token, id: record.id, signatureReceipt, pdfUrl: pdfUrl || null });
+      if (out.error) { setError(out.error); setBusy(false); return; }
+      onSigned(record.id, out, "incident");
+    } catch (e) {
+      setError("Couldn't save your signature. Check your connection and try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={card}>
+      <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 16, color: C.text.primary }}>Incident report: {record.incident_type || "Incident"}</div>
+      <div style={{ fontSize: 12.5, color: C.text.muted, margin: "2px 0 10px" }}>
+        {record.site || "No site"} · saved {new Date(record.created_at).toLocaleString("en-CA")} by <strong style={{ color: C.text.body }}>{record.reporter_name || userName}</strong>
+      </div>
+      {report.summary && <div style={{ fontSize: 13, color: C.text.body, marginBottom: 10, lineHeight: 1.45 }}>{report.summary}</div>}
+      {record.injured_person && <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 4 }}>Injured person: {record.injured_person}{record.body_part ? ` · ${record.body_part}` : ""}</div>}
+      {record.treatment && <div style={{ fontSize: 13, color: C.text.muted, marginBottom: 4 }}>Treatment: {record.treatment}</div>}
+      <div style={{ fontSize: 13, color: C.text.muted, margin: "8px 0 10px" }}>
+        By signing, I confirm this incident report, as it is now, is accurate and complete to the best of my knowledge.
+      </div>
+      <SignaturePad onChange={setSignature} />
+      {error && <div style={{ background: C.status.danger.bg, border: `1px solid ${C.status.danger.border}`, borderRadius: RAD.sm, padding: "10px 12px", margin: "8px 0", fontSize: 13.5, color: C.status.danger.text }}>{error}</div>}
+      <button
+        onClick={sign}
+        disabled={!signature || busy}
+        style={{ width: "100%", minHeight: 48, marginTop: 8, borderRadius: RAD.md, border: "none", fontWeight: 700, fontSize: 15, cursor: signature && !busy ? "pointer" : "default", background: signature ? C.orange : C.panelInset, color: signature ? C.text.onOrange : C.text.faint }}
+      >
+        {busy ? "Saving…" : "Sign this report"}
+      </button>
+    </div>
+  );
+}
+
 export default function SignAfterwards({ token, companyId, companyName, userName, onBack, onCount }) {
   const [flhas, setFlhas] = useState(null);
+  const [incidents, setIncidents] = useState([]);
   const [error, setError] = useState("");
   const [logo, setLogo] = useState("");
   const [justSigned, setJustSigned] = useState([]);
 
   const load = useCallback(async () => {
-    const out = await post("/api/flhas", { action: "my_unsigned", token });
-    if (out.error) { setError(out.error); setFlhas([]); return; }
+    const [out, inc] = await Promise.all([
+      post("/api/flhas", { action: "my_unsigned", token }),
+      post("/api/reports", { type: "incident", action: "my_unsigned", token }),
+    ]);
+    // A document type the company has switched off answers with an error; that
+    // is just "nothing to sign" for it, not a failure of the screen.
     setFlhas(out.flhas || []);
+    setIncidents(inc.records || []);
+    if (out.error && inc.error) setError(out.error);
   }, [token]);
 
   useEffect(() => {
@@ -165,8 +231,9 @@ export default function SignAfterwards({ token, companyId, companyName, userName
     post("/api/companydata", { action: "get_company_logo", token, companyId }).then(d => { if (d && d.logo_url) setLogo(d.logo_url); });
   }, [load, token]);
 
-  const signed = (id, out) => {
-    setFlhas(prev => (prev || []).filter(f => f.id !== id));
+  const signed = (id, out, kind = "flha") => {
+    if (kind === "incident") setIncidents(prev => prev.filter(r => r.id !== id));
+    else setFlhas(prev => (prev || []).filter(f => f.id !== id));
     setJustSigned(prev => [...prev, { id, pdfUrl: out && out.pdfUrl }]);
     if (onCount) onCount();
   };
@@ -190,12 +257,15 @@ export default function SignAfterwards({ token, companyId, companyName, userName
         </div>
       )}
 
-      {flhas && flhas.length === 0 && justSigned.length === 0 && !error && (
+      {flhas && flhas.length === 0 && incidents.length === 0 && justSigned.length === 0 && !error && (
         <div style={{ color: C.text.muted, fontSize: 14 }}>Nothing is waiting for your signature.</div>
       )}
 
       {(flhas || []).map(f => (
-        <UnsignedFlha key={f.id} flha={f} token={token} companyName={companyName} companyLogo={logo} userName={userName} onSigned={signed} />
+        <UnsignedFlha key={`flha-${f.id}`} flha={f} token={token} companyName={companyName} companyLogo={logo} userName={userName} onSigned={signed} />
+      ))}
+      {incidents.map(r => (
+        <UnsignedIncident key={`incident-${r.id}`} record={r} token={token} companyId={companyId} companyName={companyName} companyLogo={logo} userName={userName} onSigned={signed} />
       ))}
     </div>
   );
