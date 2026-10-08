@@ -12,7 +12,8 @@ import crypto from 'crypto';
 import { createUploadUrl, storedUrlFromClientReceipt, receiptWasDropped } from '../server-lib/uploadUrls.js';
 import { signRows } from '../server-lib/signedUrls.js';
 import { requireDocKey } from '../server-lib/docKeyGate.js';
-import { requireAssignment, requireRecordsAccess, listVisibleRecords, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { requireAssignment, requireRecordsAccess, listVisibleRecords, listVisibleRecordsMulti, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
+import { docKeyForSource, requireActionAccess } from '../server-lib/correctiveActionScope.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
 const supabaseAdmin = createClient(
@@ -755,7 +756,7 @@ export default async function handler(req, res) {
         // renders as Unknown rather than leaking. Fail closed.
         const recordIds = [...new Set((answers || []).map(a => a.record_id).filter(Boolean))];
         const { data: records } = await supabaseAdmin
-          .from('inspection_records').select('id, form_id, site_id, period_month, submitted_by')
+          .from('inspection_records').select('id, form_id, site_id, period_month, submitted_by, submitted_by_roster_id')
           .in('id', recordIds.length ? recordIds : [0])
           .in('form_id', scopedFormIds);
         (records || []).forEach(r => { recordMap[r.id] = r; });
@@ -780,14 +781,14 @@ export default async function handler(req, res) {
       const incidentIds = idsFor('incident');
       if (incidentIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('incidents').select('id, site, site_id, occurred_at, reporter_name, incident_type, awaiting_signature')
+          .from('incidents').select('id, site, site_id, occurred_at, reporter_name, incident_type, awaiting_signature, submitted_by_roster_id')
           .in('id', incidentIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { incidentMap[r.id] = r; });
       }
       const nearMissIds = idsFor('near_miss');
       if (nearMissIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('near_misses').select('id, site, site_id, occurred_at, reporter_name, awaiting_signature')
+          .from('near_misses').select('id, site, site_id, occurred_at, reporter_name, awaiting_signature, submitted_by_roster_id')
           .in('id', nearMissIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { nearMissMap[r.id] = r; });
       }
@@ -797,7 +798,7 @@ export default async function handler(req, res) {
       const inspectionIds = idsFor('equipment_inspection');
       if (inspectionIds.length > 0) {
         const { data: rows } = await supabaseAdmin
-          .from('inspections').select('id, equipment_label, worker_name, trip_type, created_at, awaiting_signature')
+          .from('inspections').select('id, equipment_label, worker_name, trip_type, created_at, awaiting_signature, submitted_by_roster_id')
           .in('id', inspectionIds).in('company_id', scopedIds);
         (rows || []).forEach(r => { inspectionMap[r.id] = r; });
       }
@@ -824,6 +825,7 @@ export default async function handler(req, res) {
             site_id: rec?.site_id ?? null,
             period_month: rec?.period_month || null,
             submitted_by: rec?.submitted_by || null,
+            source_author_id: rec?.submitted_by_roster_id ?? null,
           };
         }
         if (ca.source_type === 'incident' || ca.source_type === 'near_miss') {
@@ -837,6 +839,7 @@ export default async function handler(req, res) {
             period_month: r?.occurred_at || null,
             submitted_by: r?.reporter_name || null,
             awaiting_signature: r?.awaiting_signature === true,
+            source_author_id: r?.submitted_by_roster_id ?? null,
           };
         }
         if (ca.source_type === 'equipment_inspection') {
@@ -864,9 +867,10 @@ export default async function handler(req, res) {
             period_month: r?.created_at || ca.created_at || null,
             submitted_by: r?.worker_name || null,
             awaiting_signature: r?.awaiting_signature === true,
+            source_author_id: r?.submitted_by_roster_id ?? null,
           };
         }
-        return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', site_id: null, period_month: null, submitted_by: null };
+        return { ...base, source_label: 'Unknown source', question_text: null, site_name: 'Unknown', site_id: null, period_month: null, submitted_by: null, source_author_id: null };
       });
 
       // ── Recurrence ────────────────────────────────────────────────────
@@ -888,9 +892,22 @@ export default async function handler(req, res) {
       // tenant-safely, and duplicating that resolution in a second endpoint
       // is precisely how the cross-tenant hazard documented above gets
       // reintroduced. It also costs no new Vercel function.
+      //
+      // Who sees which action (break #48): an action carries finding text from the
+      // record it was raised on, so it follows that record's rules (the document's
+      // view rows, then site and author). Recurrence above is still counted over
+      // the whole set. The Owner and founder see everything.
+      const visible = await listVisibleRecordsMulti(
+        supabaseAdmin, session, withRecurrence, (a) => docKeyForSource(a.source_type),
+        { siteKey: 'site_id', authorKey: 'source_author_id' },
+      );
+      if (visible.denied) return res.status(visible.denied.status).json({ error: visible.denied.error });
+      const shownActions = visible.records.map(({ source_author_id: _a, ...rest }) => rest);
       return res.status(200).json({
-        actions: withRecurrence,
-        equipmentPatterns: patternsByEquipment(enriched),
+        actions: shownActions,
+        // Built from what this caller may see: a pattern group carries a sample of the
+        // finding text, which must not outlive the scope above. The Owner sees all.
+        equipmentPatterns: patternsByEquipment(visible.records),
         recurrenceRule: { threshold: RECURRENCE_THRESHOLD, windowDays: RECURRENCE_WINDOW_DAYS },
       });
     }
@@ -906,10 +923,13 @@ export default async function handler(req, res) {
       // incident- and inspection-sourced action permanently unresolvable
       // for a supervisor, while still listing it on their dashboard.
       if (session.role === 'supervisor') {
-        const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id, company_id').eq('id', actionId).limit(1);
+        const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id, company_id, source_type, source_id').eq('id', actionId).limit(1);
         const ca = caRows && caRows[0];
-        if (!ca) return res.status(404).json({ error: 'Not found.' });
-        if (ca.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+        // Missing, another company's and out-of-scope all read alike.
+        if (!ca || ca.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+        // And only an action raised on a record this supervisor could open (break #48).
+        const noAccess = await requireActionAccess(supabaseAdmin, session, caRows[0]);
+        if (noAccess) return res.status(noAccess.status).json({ error: noAccess.error });
       }
 
       // Two values that used to go straight from the request body into the
