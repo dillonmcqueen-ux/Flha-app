@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+import { dataUrlToBlob } from "./dataUrlToBlob.js";
 import { loadDraft, clearDraft, useDraftAutosave } from "./useDraftAutosave.js";
 import { enqueueSubmission, queuedAtFor } from "./offlineQueue.js";
 import { fetchCompanyProfile, buildCompanyContextBlock } from "./companyProfile.js";
@@ -10,15 +11,6 @@ import { ArrowLeft, FileText, Loader2, CheckCircle2, AlertTriangle, WifiOff, Pen
 
 function newClientSubmissionId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-function dataUrlToBlob(dataUrl) {
-  const [header, b64] = dataUrl.split(",");
-  const mime = /data:(.*?);base64/.exec(header)?.[1] || "application/octet-stream";
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
 }
 
 // signature/file_upload answers are captured as dataURLs client-side (same
