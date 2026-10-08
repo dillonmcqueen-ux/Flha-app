@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+import { dataUrlToBlob } from "./dataUrlToBlob.js";
 import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { useCustomFields, CustomFieldInputs } from "./customFields.jsx";
 import { siteIdForName } from "./siteLookup.js";
@@ -98,7 +99,7 @@ export async function resubmitIncident(payload, clientSubmissionId, tokenForRequ
   let signatureReceipt = null;
   if (sig && !signLater) {
     try {
-      const blob = await (await fetch(sig)).blob();
+      const blob = dataUrlToBlob(sig);
       const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
       const { receipt } = await uploadViaSignedUrl({
         endpoint: "/api/reports", action: "create_upload_url", token: tokenForRequest,
