@@ -905,7 +905,9 @@ export default async function handler(req, res) {
       const shownActions = visible.records.map(({ source_author_id: _a, ...rest }) => rest);
       return res.status(200).json({
         actions: shownActions,
-        equipmentPatterns: patternsByEquipment(enriched),
+        // Built from what this caller may see: a pattern group carries a sample of the
+        // finding text, which must not outlive the scope above. The Owner sees all.
+        equipmentPatterns: patternsByEquipment(visible.records),
         recurrenceRule: { threshold: RECURRENCE_THRESHOLD, windowDays: RECURRENCE_WINDOW_DAYS },
       });
     }
@@ -923,8 +925,8 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') {
         const { data: caRows } = await supabaseAdmin.from('corrective_actions').select('id, company_id, source_type, source_id').eq('id', actionId).limit(1);
         const ca = caRows && caRows[0];
-        if (!ca) return res.status(404).json({ error: 'Not found.' });
-        if (ca.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
+        // Missing, another company's and out-of-scope all read alike.
+        if (!ca || ca.company_id !== session.companyId) return res.status(403).json({ error: 'Not allowed.' });
         // And only an action raised on a record this supervisor could open (break #48).
         const noAccess = await requireActionAccess(supabaseAdmin, session, caRows[0]);
         if (noAccess) return res.status(noAccess.status).json({ error: noAccess.error });

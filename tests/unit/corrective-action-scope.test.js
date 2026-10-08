@@ -120,3 +120,15 @@ test('a supervisor can update an action raised on a record they can open; the Ow
   assert.equal(owner.statusCode, 200);
   assert.equal(updated.length, 2);
 });
+
+test('a missing action reads like a foreign or out-of-scope one', async () => {
+  const missing = await call({ action: 'update_corrective_action', token: as(2), actionId: 12345, status: 'resolved' });
+  assert.equal(missing.statusCode, 403);
+  assert.equal(missing.body.error, 'Not allowed.');
+});
+
+test('equipment patterns carry no finding text from actions the caller cannot see', async () => {
+  const sue = await call({ action: 'list_corrective_actions', token: as(2) });
+  const patterns = JSON.stringify(sue.body.equipmentPatterns || {});
+  assert.ok(!patterns.includes('Cat 320') || (sue.body.actions || []).some((a) => a.equipment_label === 'Cat 320'), 'a machine appears only if one of its actions is visible');
+});
