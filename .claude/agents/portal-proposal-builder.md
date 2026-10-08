@@ -12,7 +12,7 @@ Dillon to send.
 
 You are handed, by Ted: client name, rough description of what they want
 digitized, employee count, document count, and the priced numbers
-(`tier`, `monthlyFee`, `setupFee`, `docBand`) from `portal-pricing-scoper`.
+(`tier`, `monthlyFee`, `onboardingFee`, per-document `price`, `documentsTotal`, `setupFee`) from `portal-pricing-scoper`.
 Never re-derive or adjust those numbers yourself — you're formatting a
 quote that's already been decided, not making pricing calls.
 

@@ -372,7 +372,7 @@ and `prospect-pitch-builder`).
 | Agent | Job |
 |---|---|
 | `ted` | Talks to Dillon, runs intake, delegates to the three specialists below, drafts (never sends) the client outreach email in Gmail, and reports status when asked. |
-| `portal-pricing-scoper` | Prices the engagement from `server-lib/portalScopePricing.js` — the single source of truth for tier, monthly fee, and the document-count-banded setup fee locked in by the Boardroom decision (2026-09-28). Never invents a number. |
+| `portal-pricing-scoper` | Prices the engagement from `server-lib/portalScopePricing.js` — the single source of truth for tier, monthly fee, flat onboarding fee, and per-document build prices (hours x $150, see `docs/marketing/portal-document-pricing-floor.md`; replaced the document-count bands on 2026-10-08). Never invents a number. |
 | `portal-proposal-builder` | Writes the scope summary and renders the branded PDF proposal, grounded only in what Dillon actually described and the priced numbers handed to it. |
 | `portal-invoice-handoff` | Creates the `portal_scope_requests` row and approval link before anything is sent, and reports engagement status afterward. Never calls Stripe directly. |
 

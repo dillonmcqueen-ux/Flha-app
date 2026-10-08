@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 
 import {
   tierFor, setupFeeFor, quotePortalScope, PORTAL_MONTHLY_FEE, SETUP_FEE_BANDS,
+  documentPriceFor, quotePortalBuild, ONBOARDING_FEE,
 } from '../../server-lib/portalScopePricing.js';
 
 test('tierFor: 10 or fewer employees is basic, 11+ is advanced', () => {
@@ -87,4 +88,54 @@ test('SETUP_FEE_BANDS is ordered and non-overlapping', () => {
   for (let i = 1; i < SETUP_FEE_BANDS.length; i++) {
     assert.ok(SETUP_FEE_BANDS[i].max > SETUP_FEE_BANDS[i - 1].max, 'bands must be strictly increasing');
   }
+});
+
+test('documentPriceFor: hours x $150 rounded to nearest $50, floor $150', () => {
+  assert.equal(documentPriceFor(0.75), 150);
+  assert.equal(documentPriceFor(1), 150);
+  assert.equal(documentPriceFor(2), 300);
+  assert.equal(documentPriceFor(2.25), 350);
+  assert.equal(documentPriceFor(3.25), 500);
+  assert.equal(documentPriceFor(3.75), 550);
+  assert.equal(documentPriceFor(6.75), 1000);
+  assert.equal(documentPriceFor(10), 1500);
+  assert.equal(documentPriceFor(10.75), 1600);
+});
+
+test('documentPriceFor: unusable hours return null, never a guess', () => {
+  assert.equal(documentPriceFor(0), null);
+  assert.equal(documentPriceFor(undefined), null);
+  assert.equal(documentPriceFor('x'), null);
+});
+
+test('quotePortalBuild: typical 10 documents (4 A, 4 B, 2 C) plus onboarding', () => {
+  const documents = [
+    ...Array(4).fill({ hours: 1 }),
+    { hours: 2 }, { hours: 2 }, { hours: 2 }, { hours: 2.25 },
+    { hours: 3.75 }, { hours: 3.75 },
+  ];
+  const q = quotePortalBuild({ employeeCount: 25, documents });
+  assert.equal(q.documentsTotal, 2950);
+  assert.equal(q.onboardingFee, ONBOARDING_FEE);
+  assert.equal(q.setupFee, 3250);
+  assert.equal(q.monthlyFee, 100);
+  assert.equal(q.needsRealScopingCall, false);
+});
+
+test('quotePortalBuild: a workflow document forces a scoping call and no setup fee', () => {
+  const q = quotePortalBuild({ employeeCount: 25, documents: [{ hours: 1 }, { name: 'CAR', workflow: true }] });
+  assert.equal(q.needsRealScopingCall, true);
+  assert.equal(q.setupFee, null);
+});
+
+test('quotePortalBuild: rush adds 25% to documents only, add-ons are flat dollars', () => {
+  const q = quotePortalBuild({ employeeCount: 5, documents: [{ hours: 2, addOn: 100 }], rush: true });
+  assert.equal(q.documents[0].price, 400);
+  assert.equal(q.documentsTotal, 500);
+  assert.equal(q.setupFee, 800);
+});
+
+test('quotePortalBuild: no documents or no employee count needs a scoping call', () => {
+  assert.equal(quotePortalBuild({ employeeCount: 5, documents: [] }).needsRealScopingCall, true);
+  assert.equal(quotePortalBuild({ documents: [{ hours: 1 }] }).needsRealScopingCall, true);
 });

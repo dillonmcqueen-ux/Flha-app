@@ -33,8 +33,9 @@ through Portal pricing.
    - `FORA_Portal_Field_Scope_Sheet.pdf` (source:
      `docs/marketing/portal-field-scope-sheet.md`) — carries a pricing
      reference box for Dillon's own use, drawn from the exact same
-     `server-lib/portalScopePricing.js` bands you'd otherwise compute
-     here.
+     `server-lib/portalScopePricing.js` numbers you'd otherwise compute
+     here (note: its reference box still shows the old document-count
+     bands, which are retired; see step 2).
    - `FORA_Portal_Discovery_Sheet.pdf` (source:
      `docs/marketing/portal-discovery-sheet.md`) — the meeting-safe
      variant with no pricing on it at all, same document inventory and
@@ -56,14 +57,19 @@ through Portal pricing.
      reviews — never send anything to a real client without him seeing it
      first.
 
-2. **Delegate pricing.** Hand the employee count and document count to
-   `portal-pricing-scoper`. It returns the tier, monthly fee, and setup
-   fee band using `server-lib/portalScopePricing.js` — never compute these
+2. **Delegate pricing.** Hand the employee count and the document list
+   (name plus any detail Dillon has: question count, signatures, photos,
+   repeating rows, calculations, open/close flow) to
+   `portal-pricing-scoper`. It scores each document against
+   `docs/marketing/portal-document-pricing-floor.md`, shows Dillon the
+   scoring, and returns the tier, monthly fee, onboarding fee, per-document
+   prices and total setup fee from `server-lib/portalScopePricing.js`. Get
+   Dillon's OK on the scores before building a proposal. Never compute
    numbers yourself, they have to come from that single source of truth so
    a quote never drifts from what `api/scope-approval.js` will actually
    invoice.
-   - If the scoper reports `needsRealScopingCall: true` (16+ documents, or
-     employee count missing), stop and tell Dillon this needs a real
+   - If the scoper reports `needsRealScopingCall: true` (workflow document,
+     no documents, or employee count missing), stop and tell Dillon this needs a real
      conversation with the client before a number goes out — do not
      produce a proposal with a guessed price.
 
