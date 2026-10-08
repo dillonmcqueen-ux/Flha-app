@@ -35,6 +35,6 @@ Folders: `images/` holds full size WebP files, `thumbs/` holds the previews, `ma
 - The ABC logo is the placeholder DEMO hexagon already on the test company.
 - No Admin Panel screens. That panel is founder only, so the form builders, Brain tab and platform views are not here.
 
-## One thing found while shooting
+## Signing bug found while shooting, now fixed
 
-Signing a near miss, an incident, or anything saved to sign afterwards fails in Chromium based browsers. `src/NearMiss.jsx:31`, `src/Incident.jsx:101` and `src/SignAfterwards.jsx:165` and `:295` read the signature with `fetch(dataUrl)`, and the Content Security Policy in `vercel.json` has `connect-src 'self' https://wzyvbtzxxdcxgvbkcqmt.supabase.co` with no `data:`. The browser blocks the fetch and the worker sees "Couldn't save your signature". The signing screens in this gallery were captured with CSP bypassed for that reason. This has not been fixed.
+Signing a near miss, an incident, or anything saved to sign afterwards failed in Chromium based browsers. The screens read the signature with `fetch(dataUrl)`, and the Content Security Policy in `vercel.json` has no `data:` in `connect-src`, so the browser refused it and the worker saw "Couldn't save your signature". Fixed in PR #203 by decoding the data URL in place (`src/dataUrlToBlob.js`). The signing screens in this gallery were captured with CSP bypassed, before the fix.
