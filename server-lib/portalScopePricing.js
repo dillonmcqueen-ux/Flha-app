@@ -31,6 +31,11 @@ export function tierFor(employeeCount) {
 // and routing/assignment runs continuously.
 export const PORTAL_MONTHLY_FEE = { basic: 45, advanced: 100 };
 
+// DEPRECATED for new quotes (2026-10-08): superseded by quotePortalBuild()
+// below, which prices each document by build hours and charges onboarding
+// separately. Kept so existing tests and the printed field scope sheet's
+// reference box keep matching until those are regenerated.
+//
 // Banded by document count, not per-document — replaces (does not stack
 // with) pricing.js's SETUP fee when Portal is a customer's first module.
 // The 16+ band has no number: that's scoped as a real conversation, same
@@ -65,5 +70,64 @@ export function quotePortalScope({ employeeCount, documentCount }) {
     setupFee,
     monthlyFee,
     needsRealScopingCall: band === '16+' || !tier,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Per-document build pricing (Dillon, 2026-10-08). Replaces the document-count
+// bands above for new quotes. Reference table and the 20 worked examples:
+// docs/marketing/portal-document-pricing-floor.md
+//
+// Setup fee = onboarding (roster, equipment, sites, linking) + the sum of
+// each document's build price. Monthly fee is unchanged.
+
+export const HOURLY_RATE = 150;
+export const DOCUMENT_MIN_PRICE = 150; // Tier 0 Custom Form floor
+export const ONBOARDING_FEE = 300; // ~2 hours at HOURLY_RATE, per Dillon
+export const RUSH_MULTIPLIER = 1.25; // under 48 hours
+
+// Estimated build hours x HOURLY_RATE, rounded to the nearest $50, never
+// below DOCUMENT_MIN_PRICE. Returns null for unusable hours.
+export function documentPriceFor(hours) {
+  const h = Number(hours);
+  if (!Number.isFinite(h) || h <= 0) return null;
+  return Math.max(DOCUMENT_MIN_PRICE, Math.round((h * HOURLY_RATE) / 50) * 50);
+}
+
+// documents: [{ name, hours, addOn?, workflow? }]
+//   hours    estimated build hours, scored against the reference table
+//   addOn    flat dollars for modifiers (exact paper layout match, extra
+//            escalation routes, retyping from a scan)
+//   workflow true for assign/due-date/close-out builds. Never priced here:
+//            those are Custom Builds Tier 2+ and need a real scoping call.
+// Returns null prices (never a guess) for anything it can't price, and sets
+// needsRealScopingCall.
+export function quotePortalBuild({ employeeCount, documents, rush = false }) {
+  const tier = tierFor(employeeCount);
+  const docs = Array.isArray(documents) ? documents : [];
+  const priced = docs.map(d => {
+    const addOn = Number(d.addOn) > 0 ? Number(d.addOn) : 0;
+    const base = d.workflow ? null : documentPriceFor(d.hours);
+    return {
+      name: d.name ?? null,
+      hours: d.hours ?? null,
+      price: base === null ? null : base + addOn,
+      needsScopingCall: base === null,
+    };
+  });
+  const unpriceable = priced.some(d => d.needsScopingCall);
+  const rawTotal = priced.reduce((sum, d) => sum + (d.price ?? 0), 0);
+  const documentsTotal = unpriceable || docs.length === 0
+    ? null
+    : Math.round(rush ? rawTotal * RUSH_MULTIPLIER : rawTotal);
+  return {
+    tier,
+    monthlyFee: tier ? PORTAL_MONTHLY_FEE[tier] : null,
+    onboardingFee: ONBOARDING_FEE,
+    documents: priced,
+    documentsTotal,
+    setupFee: documentsTotal === null ? null : ONBOARDING_FEE + documentsTotal,
+    rush,
+    needsRealScopingCall: !tier || docs.length === 0 || unpriceable,
   };
 }
