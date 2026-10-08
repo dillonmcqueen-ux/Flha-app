@@ -15,6 +15,7 @@ import { generateAndUploadIncident } from "./generateIncidentPDF";
 import { generateAndUploadInspection } from "./generateInspectionPDF";
 import { generateAndUploadNearMiss } from "./generateNearMissPDF";
 import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
+import { dataUrlToBlob } from "./dataUrlToBlob.js";
 
 async function post(url, body) {
   try {
@@ -162,7 +163,7 @@ function UnsignedIncident({ record, token, companyId, companyName, companyLogo, 
     if (!signature) return;
     setBusy(true); setError("");
     try {
-      const blob = await (await fetch(signature)).blob();
+      const blob = dataUrlToBlob(signature);
       const filename = `incident_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
       const { receipt: signatureReceipt } = await uploadViaSignedUrl({
         endpoint: "/api/reports", action: "create_upload_url", token,
@@ -292,7 +293,7 @@ function UnsignedNearMiss({ record, token, companyId, companyName, companyLogo, 
     if (!signature) return;
     setBusy(true); setError("");
     try {
-      const blob = await (await fetch(signature)).blob();
+      const blob = dataUrlToBlob(signature);
       const filename = `nearmiss_${companyId}_${Date.now()}.png`.replace(/[^a-zA-Z0-9_.\-]/g, "");
       const { receipt: signatureReceipt } = await uploadViaSignedUrl({
         endpoint: "/api/reports", action: "create_upload_url", token,
