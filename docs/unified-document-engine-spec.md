@@ -44,6 +44,7 @@ The founder builds each company's exact documents from the Admin Panel, with att
 | Attachments in PDF | Images embedded. PDF, Word and Excel stored and linked or listed by name. About 10 MB per file (2026-10-09) |
 | Reference files | Per document and per field (2026-10-09) |
 | Signatures | Reviewer blocks appear in the PDF. Every signature is also stored as data. External link signers and typed-name fallback are out of phase 1 (2026-10-09) |
+| Paper match | Box for box visual match: box sizes, lines and logos as on their form. The uploaded form is kept as a background reference in the editor (2026-10-09) |
 | Brain default | On by default for new documents, with an opt-out toggle (2026-10-09) |
 | Analytics for custom documents | Counts and trends only (submissions per period, site, author, flagged answers). No builder-picked charts yet (2026-10-09) |
 | Billing | Not decided. Stays out of the engine for now (2026-10-09) |
@@ -146,6 +147,7 @@ Built entirely behind the existing admin session. No customer-facing builder.
 - Layout supports header block, sections, columns, tables, repeating rows, images (photos and signatures embedded, not just "Attached"), per-document accent color, optional uploaded form as background.
 - AI step: upload the company's paper form, AI proposes fields and layout, founder adjusts in the builder. Extends `ai_draft_document` (today it returns a flat question list and no layout).
 - Editor: a full drag and drop layout editor (decided 2026-10-09). The founder places and resizes header blocks, sections, columns, tables, repeating rows, signature blocks and attachment slots on a page canvas, with the AI proposal as the starting point. The editor reads and writes the same `document_layouts` JSON the renderer consumes, so preview and PDF can never disagree. The worker form is a separate responsive rendering of the same fields.
+- Box for box fidelity (decided 2026-10-09): the editor shows the uploaded paper form as a background reference layer and the founder aligns blocks to it, so box sizes, lines and logos match. AI proposes initial positions from the scan.
 - Editor scope for the FLHA proof: it must at least place the specialised FLHA blocks (hazard table, PPE list, crew signature grid, approval stamps) and the standard blocks. Features beyond that (background image overlay, snap guides, undo history) are staged after FLHA works.
 - Stay separate: Safety Analytics PDF, Equipment Analytics PDF, Roster PIN sheet, Brain snapshot, server-rendered weekly equipment report (`server-lib/reportPdfs.js`).
 - FLHA and equipment inspection need specialised block types (hazard table, approval stamps, carried-forward lists). FLHA is the first document (decided 2026-10-09), so its blocks are built in phase 1. Equipment inspection blocks come later.
@@ -222,9 +224,9 @@ Hardcoded document lists that become data driven: `server-lib/pricing.js` MODULE
 
 Status as of 2026-10-09. Answered questions are recorded in section 2. Questions below are kept for reference.
 
-Answered: 1, 2, 3, 4, 5, 7, 8, 9, 10 (out of phase 1), 11, 12, 13, 14, 15, 16, 20, 21, 22, 23, and the certifications question.
+Answered: 1, 2, 3, 6, 4, 5, 7, 8, 9, 10 (out of phase 1), 11, 12, 13, 14, 15, 16, 20, 21, 22, 23, and the certifications question.
 Deferred on purpose: 17 and 18 (billing), 19 (Portal pricing, revisit after FLHA).
-Still open: 6 (how exact the paper form match must be).
+Still open: nothing blocking FLHA. Question 6 is answered (box for box).
 
 Scope
 1. Time clock: stays a standalone module?
