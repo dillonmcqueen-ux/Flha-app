@@ -718,13 +718,40 @@ async function leadMayReadForReview(db, session, record) {
   return reviewerMayAct({ actor, record, step, crew }).ok;
 }
 
+/**
+ * A reviewer who gave an approval on this record in its current round may still
+ * read it while it is open or approved, so the file can carry the approval. The
+ * reach they had when they approved still applies: a supervisor must still pass
+ * the document's view assignment and their scope, and a crew lead must still
+ * have the author on their crew.
+ */
+async function approverMayRead(db, session, record) {
+  const me = authorRosterId(session);
+  if (me == null) return false;
+  if (record.status !== 'pending_approval' && record.status !== 'approved') return false;
+  const round = Number(record.review_round) || 0;
+  const mine = await many(db.from('document_signatures').select('signer_roster_id, meta').eq('record_id', record.id).eq('kind', 'approval'), 'read the approvals');
+  if (!mine.some((g) => same(g.signer_roster_id, me) && (Number(g.meta?.round) || 0) === round)) return false;
+  const cid = record.company_id;
+  if (session.role !== 'worker') {
+    const viewDenied = await requireAssignment(db, { ...session, companyId: cid }, engineKey(record.definition_id), VIEW);
+    if (viewDenied) return false;
+    const out = await scopeRecords(db, { ...session, companyId: cid }, [record]);
+    return !out.denied && out.records.length > 0;
+  }
+  const { actor, error } = await loadActor(db, { ...session, companyId: cid });
+  if (error || !actor || !actor.isLead) return false;
+  const crew = await crewIdSet(db, { ...session, companyId: cid }, actor);
+  return !crew.error && crew.ids.has(Number(record.submitted_by_roster_id));
+}
+
 export async function getRecord(db, { session, companyId, recordId }) {
   const cid = asId(companyId);
   const record = await loadRecord(db, recordId, cid);
   try {
     await requireRecordView(db, session, record);
   } catch (e) {
-    if (!(e instanceof EngineError) || e.status !== 403 || !(await leadMayReadForReview(db, session, record))) throw e;
+    if (!(e instanceof EngineError) || e.status !== 403 || !((await leadMayReadForReview(db, session, record)) || (await approverMayRead(db, session, record)))) throw e;
   }
   const answers = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the answers');
   const signatures = await many(db.from('document_signatures').select('*').eq('record_id', record.id), 'read the signatures');
