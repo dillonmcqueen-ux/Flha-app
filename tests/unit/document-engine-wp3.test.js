@@ -6,10 +6,11 @@ import assert from 'node:assert/strict';
 import { makeDb } from './_fakeDb.js';
 import {
   EngineError, createDefinition, saveDraft, publishDraft, setCompanyDocument, submitRecord, resubmitRecord, signNow,
-  reviewRecord, myInbox, listEscalations, actionEscalation, setOwnerMute,
+  reviewRecord, myInbox, listEscalations, actionEscalation, setOwnerMute, getRecord,
 } from '../../server-lib/documentEngine/service.js';
 import { closeStaleUnsignedEngine, alertOverdueUnsignedEngine, escalateStalePending } from '../../server-lib/documentEngine/sweeps.js';
 import { runDigest } from '../../server-lib/notifyDigest.js';
+import { routeNotification } from '../../server-lib/notifyRouting.js';
 
 const mail = () => {
   const sent = [];
@@ -539,4 +540,92 @@ test('the digest reports held engine notices under the document title, and drops
   assert.equal(out.sent, 1);
   assert.equal(out.dropped, 1);
   assert.match(m.sent[0].subject, /^Pre Shift: 2 new$/);
+});
+
+// ── Review hardening ───────────────────────────────────────────────────────
+
+test('the same reviewer approving the same step twice at once is recorded once, the other request is a 409', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW(), REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  const results = await Promise.allSettled([
+    reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }),
+    reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }),
+  ]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(db.tables.document_records[0].review_step, 1, 'advanced once, not twice');
+  assert.equal(db.tables.document_signatures.filter((s) => s.kind === 'approval').length, 1);
+  await rejects(reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }), 403, /different person/);
+});
+
+test('a lost race takes its approval signature back', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  // Someone returns it between this reviewer's checks and their approval.
+  db.tables.document_records[0].status = 'returned';
+  await rejects(reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }), 409);
+  assert.equal((db.tables.document_signatures || []).length, 0);
+});
+
+test('an approval from an earlier round does not block a reviewer once the record is fixed and sent back', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW(), REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' });
+  await reviewRecord(db, { session: supB, companyId: 1, recordId: rec.id, decision: 'return', reason: 'fix' });
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'fixed' }, deps: mkDeps() });
+  assert.equal(db.tables.document_records[0].review_round, 1);
+  const again = await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' });
+  assert.deepEqual(again, { status: 'pending_approval', step: 1 }, 'the first reviewer is free to take step one again');
+  assert.deepEqual(db.tables.document_signatures.filter((s) => s.kind === 'approval').map((s) => s.meta.round), [0, 1]);
+  await reviewRecord(db, { session: supB, companyId: 1, recordId: rec.id, decision: 'approve' });
+  assert.equal(db.tables.document_records[0].status, 'approved');
+});
+
+// ── Escalation visibility, suspended companies, override guard, lead reading ──
+
+test('a department supervisor sees only their own department, and one with no departments sees none', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE, { ruleType: 'route_by_answer', config: { fieldKey: 'risk', equals: 'High', department: 'hr' } }] });
+  await file(db, id, worker, { answers: { task: 'x', injury: 'yes', risk: 'High' } });
+  assert.equal(db.tables.document_escalations.length, 2);
+  const safety = { role: 'supervisor', userId: 25, companyId: 1, name: 'Sal Safety' };
+  assert.deepEqual((await listEscalations(db, { session: safety, companyId: 1 })).escalations.map((e) => e.target_department), ['safety']);
+  assert.equal((await listEscalations(db, { session: supA, companyId: 1 })).escalations.length, 0);
+});
+
+test('a suspended company gets no sent-back or routed notices either', async () => {
+  const db = seed({ companies: [{ id: 1, suspended: true }] });
+  const id = await doc(db, { rules: [REVIEW(), ROUTE] });
+  const m = mail();
+  const rec = (await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } }, m)).record;
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'return', reason: 'fix', deps: mkDeps(m) });
+  assert.equal(m.sent.length, 0);
+});
+
+test('a setting override can never switch a built-in or custom document', async () => {
+  const db = seed();
+  for (const key of ['flha', 'incident', 'custom_3', 'engine_', 'engine_x', 'portal_1']) {
+    const out = await routeNotification(db, { companyId: 1, documentKey: key, record: { site_id: 5, submitted_by_roster_id: 11 }, settingOverride: { enabled: true, extraRosterIds: [21] } });
+    assert.deepEqual([out.enabled, out.recipients.length, out.reason], [false, 0, 'off'], key);
+  }
+  const ok = await routeNotification(db, { companyId: 1, documentKey: 'engine_7', record: { site_id: 5, submitted_by_roster_id: 11 }, settingOverride: { enabled: true, extraRosterIds: [] } });
+  assert.equal(ok.enabled, true);
+});
+
+test('a crew lead can open a record they are asked to review, and nothing else', async () => {
+  const db = seed();
+  const open = await doc(db, { rules: [REVIEW({ allowLeads: true })], title: 'Open' });
+  const closed = await doc(db, { rules: [REVIEW({})], title: 'Closed' });
+  const crewRec = (await file(db, open, worker)).record;
+  const noLeadsRec = (await file(db, closed, worker)).record;
+  const outsider = (await file(db, open, { ...worker, userId: 15, name: 'Out Crew' }, { siteId: undefined })).record;
+  const leadsRec = (await file(db, open, { ...worker, userId: 13, name: 'Lou Lead' })).record;
+  assert.equal((await getRecord(db, { session: lead, companyId: 1, recordId: crewRec.id })).record.id, crewRec.id);
+  await rejects(getRecord(db, { session: lead, companyId: 1, recordId: noLeadsRec.id }), 403);
+  await rejects(getRecord(db, { session: lead, companyId: 1, recordId: outsider.id }), 403);
+  await rejects(getRecord(db, { session: lead, companyId: 1, recordId: leadsRec.id }), 403);
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: crewRec.id, decision: 'approve' });
+  await rejects(getRecord(db, { session: lead, companyId: 1, recordId: crewRec.id }), 403, undefined);
 });

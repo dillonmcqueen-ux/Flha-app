@@ -5,7 +5,7 @@
 
 const DEFAULTS = {
   company_documents: { is_enabled: false, brain_enabled: true, owner_muted: false },
-  document_records: { status: 'submitted', review_step: 0, unsigned_alerted_at: null, review_alerted_at: null, unsigned_closed_at: null, submitted_at: null, awaiting_signature: false, signature_requested_at: null, worker_signed_at: null, returned_reason: null, pdf_path: null, site_id: null, submitted_by_roster_id: null, client_submission_id: null },
+  document_records: { status: 'submitted', review_step: 0, review_round: 0, unsigned_alerted_at: null, review_alerted_at: null, unsigned_closed_at: null, submitted_at: null, awaiting_signature: false, signature_requested_at: null, worker_signed_at: null, returned_reason: null, pdf_path: null, site_id: null, submitted_by_roster_id: null, client_submission_id: null },
   document_fields: { required: false, config: {}, attachment_rules: {}, section: null, help_text: null },
   document_definitions: { company_id: null, template_id: null, current_version_id: null, archived_at: null, icon: null, category: null },
   document_versions: { published_at: null },
@@ -58,6 +58,14 @@ export function makeDb(seed = {}) {
         return { data: out, error: null };
       }
       if (this.mode === 'insert') {
+        // document_signatures_review_once_uidx: one approval per step per round.
+        if (this.name === 'document_signatures') {
+          for (const p of this.payload) {
+            if (p.kind === 'approval' && rows.some((r) => r.kind === 'approval' && String(r.record_id) === String(p.record_id) && r.step_key === p.step_key && String(r.meta?.round) === String(p.meta?.round))) {
+              return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+            }
+          }
+        }
         const made = this.payload.map((p) => {
           const row = { ...(DEFAULTS[this.name] || {}), ...p };
           if (row.id == null) { row.id = nextId[this.name]; nextId[this.name] += 1; }

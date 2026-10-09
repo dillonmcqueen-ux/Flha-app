@@ -90,6 +90,7 @@ export async function notifyPeople(db, deps, { companyId, documentKey, rosterIds
   let sent = 0;
   try {
     if (!deps || !deps.sendEmail) return 0;
+    if (await companySuspended(db, companyId)) return 0;
     const ids = [...new Set((rosterIds || []).map(Number).filter(Number.isInteger))].slice(0, MAX_PEOPLE);
     if (ids.length === 0) return 0;
     const { data, error } = await db.from('roster').select('id, email, active').eq('company_id', companyId).in('id', ids);

@@ -20,7 +20,7 @@ function mintToken(payload) {
 // supervisor of company 1, 99 an auditor of company 1.
 function rosterRow(id) {
   const role = id === 99 ? 'auditor' : id >= 20 ? 'supervisor' : 'worker';
-  return { id, active: true, role, company_id: 1, name: `Person ${id}`, is_owner: false, departments: [], divisions: [] };
+  return { id, active: true, role, company_id: 1, name: `Person ${id}`, is_owner: id === 24, departments: [], divisions: [] };
 }
 
 const calls = [];
@@ -139,8 +139,10 @@ test('a missing company is never read as "template": the founder must say so', a
 });
 
 test('only the Owner or the founder can mute a document, a plain supervisor cannot', async () => {
-  const owner = mintToken({ role: 'supervisor', companyId: 1, userId: 21, isOwner: true });
-  for (const token of [worker, supervisor]) {
+  const owner = mintToken({ role: 'supervisor', companyId: 1, userId: 24 });
+  // A token that CLAIMS to be the Owner is not enough: ownership is read from the roster row.
+  const claimsOwner = mintToken({ role: 'supervisor', companyId: 1, userId: 21, isOwner: true });
+  for (const token of [worker, supervisor, claimsOwner]) {
     assert.equal((await call({ action: 'set_owner_mute', token, definitionId: 1, muted: true })).statusCode, 403);
   }
   // The Owner gets past the gate and reaches the service (which finds no such document here).

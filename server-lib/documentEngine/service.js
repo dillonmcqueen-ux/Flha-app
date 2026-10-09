@@ -614,10 +614,29 @@ async function requireRecordView(db, session, record) {
   if (out.records.length === 0) throw new EngineError(403, 'Not allowed.');
 }
 
+// A crew lead may read a record they are being asked to review: it is waiting
+// on a step that allows leads, and its author is on their crew (the same
+// check reviewRecord applies). Nothing else widens a lead's reading.
+async function leadMayReadForReview(db, session, record) {
+  if (record.status !== 'pending_approval' || record.awaiting_signature) return false;
+  const { actor, error } = await loadActor(db, session);
+  if (error || !actor || !actor.isLead) return false;
+  const rules = await many(db.from('document_rules').select('*').eq('version_id', record.version_id), 'read the rules');
+  const step = reviewSteps(rules)[Number(record.review_step) || 0];
+  if (!step || !step.allowLeads) return false;
+  const crew = await crewIdSet(db, session, actor);
+  if (crew.error) return false;
+  return reviewerMayAct({ actor, record, step, crew }).ok;
+}
+
 export async function getRecord(db, { session, companyId, recordId }) {
   const cid = asId(companyId);
   const record = await loadRecord(db, recordId, cid);
-  await requireRecordView(db, session, record);
+  try {
+    await requireRecordView(db, session, record);
+  } catch (e) {
+    if (!(e instanceof EngineError) || e.status !== 403 || !(await leadMayReadForReview(db, session, record))) throw e;
+  }
   const answers = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the answers');
   const signatures = await many(db.from('document_signatures').select('*').eq('record_id', record.id), 'read the signatures');
   return { record, answers, signatures };
@@ -682,7 +701,11 @@ export async function reviewRecord(db, { session, companyId, recordId, decision,
     if (c.error) throw new EngineError(503, "Couldn't check your crew. Please try again.");
     crew = c;
   }
-  const earlier = await many(db.from('document_signatures').select('signer_roster_id').eq('record_id', record.id).eq('kind', 'approval'), 'read the earlier reviews');
+  // Only approvals given in THIS round count against "a different person
+  // each step": a record that was returned and fixed starts its chain again.
+  const round = Number(record.review_round) || 0;
+  const earlier = (await many(db.from('document_signatures').select('signer_roster_id, meta').eq('record_id', record.id).eq('kind', 'approval'), 'read the earlier reviews'))
+    .filter((e) => (Number(e.meta?.round) || 0) === round);
   const verdict = reviewerMayAct({ actor, record, step, crew, priorReviewerIds: earlier.map((e) => e.signer_roster_id).filter((v) => v != null) });
   if (!verdict.ok) throw new EngineError(verdict.status, verdict.error);
   // A supervisor reviews only what their scope places with them. A lead is
@@ -710,14 +733,12 @@ export async function reviewRecord(db, { session, companyId, recordId, decision,
   }
 
   const isLast = step.index === steps.length - 1;
-  const hit = await updated(
-    stillWaiting(db.from('document_records').update(isLast
-      ? { status: 'approved', returned_reason: null, updated_at: nowIso }
-      : { review_step: step.index + 1, updated_at: nowIso })),
-    'approve the document',
-  );
-  if (hit.length === 0) throw new EngineError(409, 'This document is not waiting for review.');
-  const { error: sigErr } = await db.from('document_signatures').insert({
+  // The approval signature goes in FIRST. The database allows one approval
+  // per step per round, so two requests approving the same step at once
+  // cannot both be recorded, and a reviewer who just approved is already on
+  // the record when their second request looks for earlier reviews. The
+  // guarded advance follows, and the signature is taken back if it loses.
+  const { data: sigRows, error: sigErr } = await db.from('document_signatures').insert({
     record_id: record.id,
     kind: 'approval',
     step_key: `review_${step.index}`,
@@ -725,10 +746,24 @@ export async function reviewRecord(db, { session, companyId, recordId, decision,
     signer_name: sessionName(session),
     signer_role: actor.isLead ? 'lead' : session.role,
     signed_at: nowIso,
-  });
+    meta: { round },
+  }).select('id');
   if (sigErr) {
-    await db.from('document_records').update({ status: 'pending_approval', review_step: step.index }).eq('id', record.id).eq('company_id', cid);
+    if (String(sigErr.code) === '23505') throw new EngineError(409, 'This step was already approved.');
     throw dbFail(sigErr, 'save the approval');
+  }
+  const hit = await updated(
+    stillWaiting(db.from('document_records').update(isLast
+      ? { status: 'approved', returned_reason: null, updated_at: nowIso }
+      : { review_step: step.index + 1, updated_at: nowIso })),
+    'approve the document',
+  ).catch(async (e) => {
+    await db.from('document_signatures').delete().eq('id', sigRows[0].id);
+    throw e;
+  });
+  if (hit.length === 0) {
+    await db.from('document_signatures').delete().eq('id', sigRows[0].id);
+    throw new EngineError(409, 'This document is not waiting for review.');
   }
   if (isLast) return { status: 'approved' };
   // The next step's reviewers hear they are up. The reviewer who just acted is skipped.
@@ -757,7 +792,7 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
   // Claim the record first (only one resubmit can move it out of
   // 'returned'), then replace the answers, and put it back if that fails.
   const claimed = await updated(
-    db.from('document_records').update({ status: 'pending_approval', review_step: 0, returned_reason: null, review_alerted_at: null, submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid).eq('status', 'returned'),
+    db.from('document_records').update({ status: 'pending_approval', review_step: 0, review_round: (Number(record.review_round) || 0) + 1, returned_reason: null, review_alerted_at: null, submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid).eq('status', 'returned'),
     'resubmit',
   );
   if (claimed.length === 0) throw new EngineError(409, 'This document was not sent back.');
@@ -897,8 +932,15 @@ export async function listEscalations(db, { session, companyId, status }) {
   const actor = await escalationAccess(db, session, cid);
   let q = db.from('document_escalations').select('*').eq('company_id', cid);
   if (status === 'open' || status === 'actioned') q = q.eq('status', status);
-  let rows = await many(q.order('created_at', { ascending: false }).limit(200), 'read the escalations');
-  if (!actor.bypass) rows = rows.filter((e) => e.target_department && (actor.departments || []).includes(e.target_department));
+  // A department supervisor sees their own departments' escalations only. The
+  // department filter is part of the query, so other departments' rows cannot
+  // use up the page.
+  if (!actor.bypass) {
+    const mine = (actor.departments || []).filter(Boolean);
+    if (mine.length === 0) return { escalations: [] };
+    q = q.in('target_department', mine);
+  }
+  const rows = await many(q.order('created_at', { ascending: false }).limit(200), 'read the escalations');
   return { escalations: rows };
 }
 

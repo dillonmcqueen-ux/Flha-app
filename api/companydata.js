@@ -1785,6 +1785,12 @@ export default async function handler(req, res) {
       const { count: portalCount } = await supabaseAdmin
         .from('portal_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
       if (portalCount) blockers.push(`${portalCount} Company Portal submission${portalCount === 1 ? '' : 's'}`);
+      // Unified document engine records keep no free-text site name, so
+      // detaching the site would lose where they happened (and drop them from a
+      // site-scoped supervisor's view). A database without the table is fine.
+      const { count: engineCount } = await supabaseAdmin
+        .from('document_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (engineCount) blockers.push(`${engineCount} document${engineCount === 1 ? '' : 's'} filed in the document engine`);
       if (blockers.length > 0) {
         return res.status(400).json({
           error: `This site can't be removed — it has ${blockers.join(' and ')} filed against it. Those records would lose the site they belong to.`,

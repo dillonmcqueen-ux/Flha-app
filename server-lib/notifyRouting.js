@@ -274,6 +274,11 @@ export async function routeNotification(supabase, { companyId, documentKey, reco
   // Owner (company_documents), not by the Owner's document_notifications
   // row, so its caller hands the setting in. Every built-in and custom
   // document passes none and reads its own row as before.
+  // The override is for engine documents only: it can never switch a
+  // built-in or custom document's Owner setting on or off.
+  if (settingOverride && !/^engine_[0-9]+$/.test(String(documentKey))) {
+    return { enabled: false, recipients: [], missingEmail: [], reason: 'off' };
+  }
   const setting = settingOverride
     ? { enabled: settingOverride.enabled === true, extraRosterIds: toIdList(settingOverride.extraRosterIds), error: false }
     : await loadNotifySetting(supabase, companyId, documentKey);

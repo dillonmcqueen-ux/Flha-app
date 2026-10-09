@@ -81,7 +81,7 @@ async function verifySession(token) {
   if (!payload.userId) return payload.founder === true ? payload : null;
   const { data: rows, error } = await supabaseAdmin
     .from('roster')
-    .select('active, role, company_id, name')
+    .select('active, role, company_id, name, is_owner')
     .eq('id', payload.userId)
     .limit(1);
   if (error || !rows || rows.length === 0 || !rows[0].active) return null;
@@ -89,7 +89,9 @@ async function verifySession(token) {
   // An auditor reads through api/audit.js only. Every other endpoint treats
   // an auditor session as no session at all.
   if (rows[0].role === 'auditor') return null;
-  return { ...payload, role: rows[0].role, name: rows[0].name };
+  // isOwner comes from the roster row, never the token, so a demoted Owner
+  // loses it on their next request.
+  return { ...payload, role: rows[0].role, name: rows[0].name, isOwner: rows[0].is_owner === true };
 }
 
 // The company a call is about. A founder names it in the body; everyone else

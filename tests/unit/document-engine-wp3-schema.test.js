@@ -28,6 +28,21 @@ test('never stores the answer value', () => {
   assert.doesNotMatch(block, /value_text|value_json|answer_value/);
 });
 
+test('the notification state key check now allows engine documents, and still only those', () => {
+  const m = /alter table public\.document_notification_state\s+add constraint document_notification_state_document_key_check\s+check \(document_key ~ '([^']+)'\)/.exec(sql);
+  assert.ok(m, 'the widened check is in the migration');
+  const re = new RegExp(m[1]);
+  for (const ok of ['flha', 'incident', 'custom_3', 'engine_12']) assert.ok(re.test(ok), ok);
+  for (const bad of ['engine_', 'engine_x', 'portal_1', 'engine_12; drop', 'xengine_1']) assert.equal(re.test(bad), false, bad);
+  // The built-in list must not have lost anything.
+  for (const k of ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly']) assert.ok(re.test(k), k);
+});
+
+test('one approval per step per round is a database rule', () => {
+  assert.match(sql, /create unique index if not exists document_signatures_review_once_uidx[\s\S]*where kind = 'approval'/);
+  assert.match(sql, /add column if not exists review_round /);
+});
+
 test('contains no em dash', () => {
   assert.equal(sql.includes('—'), false);
 });
