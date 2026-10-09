@@ -45,6 +45,7 @@ export function makeDb(seed = {}) {
     in(col, vals) { this.filters.push((r) => (vals || []).some((v) => same(r[col], v))); return this; }
     is(col, val) { this.filters.push((r) => (val === null ? r[col] == null : r[col] === val)); return this; }
     not(col, op, val) { this.filters.push((r) => (op === 'is' && val === null ? r[col] != null : true)); return this; }
+    gte(col, val) { this.filters.push((r) => r[col] != null && r[col] >= val); return this; }
     lt(col, val) { this.filters.push((r) => r[col] != null && r[col] < val); return this; }
     order(col, { ascending = true } = {}) { this._order = { col, ascending }; return this; }
     limit(n) { this._limit = n; return this; }

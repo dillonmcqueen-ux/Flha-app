@@ -21,6 +21,8 @@ import { isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { loadAuditor } from '../server-lib/auditorAccess.js';
 import { DIRECT_SOURCES } from '../server-lib/documentSources.js';
 import { missingSignColumns } from '../server-lib/signLater.js';
+import { listEngineDocuments, engineDocKey, ENGINE_KEY_RE } from '../server-lib/documentEngine/companyDocs.js';
+import { linkTargets, signTargets } from '../server-lib/documentEngine/links.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -78,14 +80,18 @@ export default async function handler(req, res) {
     const customTitle = new Map((customForms || []).map((f) => [`custom_${f.id}`, f.title]));
     const builtinTitle = new Map([...DIRECT_SOURCES.map((s) => [s.key, s.title]), ['monthly', 'Monthly Inspection']]);
     const labelFor = (key) => builtinTitle.get(key) || customTitle.get(key) || key;
-    const allowedKeys = [...auditor.documentKeys].filter((k) => builtinTitle.has(k) || customTitle.has(k));
+    // Unified-engine documents: only those the company still has switched on.
+    const engineDocs = await listEngineDocuments(supabaseAdmin, companyId);
+    const engineTitle = new Map(engineDocs.map((d) => [engineDocKey(d.id), d.title]));
+    const labelOf = (key) => engineTitle.get(key) || labelFor(key);
+    const allowedKeys = [...auditor.documentKeys].filter((k) => builtinTitle.has(k) || customTitle.has(k) || engineTitle.has(k));
 
     if (action === 'get_audit_scope') {
       return res.status(200).json({
         name: auditor.name,
         expiresAt: auditor.expiresAt,
         sites: [...siteName.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
-        documents: allowedKeys.map((key) => ({ key, label: labelFor(key) })),
+        documents: allowedKeys.map((key) => ({ key, label: labelOf(key) })),
       });
     }
 
@@ -137,10 +143,28 @@ export default async function handler(req, res) {
         (data || []).forEach((r) => collected.push({ r, type: 'customform', title: customTitle.get(`custom_${r.form_id}`) || 'Custom Document', subtitle: '' }));
       }
 
+      // Unified-engine records. An auditor sees only what is filed: submitted or
+      // approved, never one still awaiting its author's signature, waiting on a
+      // reviewer, sent back or closed unsigned.
+      const engineIds = keys.map((k) => ENGINE_KEY_RE.exec(k)).filter(Boolean).map((m) => Number(m[1])).filter((id) => engineDocs.some((d) => d.id === id));
+      const enginePdf = new Map();
+      if (engineIds.length) {
+        const { data, error } = await supabaseAdmin.from('document_records')
+          .select('id, definition_id, site_id, created_at, pdf_path, status, awaiting_signature')
+          .eq('company_id', companyId).in('definition_id', engineIds).in('site_id', sites)
+          .in('status', ['submitted', 'approved']).eq('awaiting_signature', false)
+          .order('created_at', { ascending: false }).limit(LIMIT_PER_SOURCE);
+        if (error) return res.status(500).json({ error: 'Could not load documents.' });
+        (data || []).forEach((r) => collected.push({ r, type: 'engine', title: engineTitle.get(engineDocKey(r.definition_id)) || 'Document', subtitle: '' }));
+        const targets = (data || []).flatMap((r) => linkTargets({ companyId, record: { pdf_path: r.pdf_path }, answers: [], signatures: [] }).map((t) => ({ ...t, id: `engine:${r.id}` })));
+        (await signTargets(supabaseAdmin, targets, 300)).forEach((url, id) => enginePdf.set(id, url));
+      }
+
       collected.sort((a, b) => new Date(b.r.created_at) - new Date(a.r.created_at));
       const top = collected.slice(0, MAX_RESULTS);
       const signed = await signRows(supabaseAdmin, top.map((c) => ({ id: `${c.type}:${c.r.id}`, pdf_url: c.r.pdf_url })), [{ key: 'pdf_url', bucket: 'flha-reports' }], 300);
       const pdfById = new Map(signed.map((s) => [s.id, s.pdf_url]));
+      enginePdf.forEach((url, id) => pdfById.set(id, url));
       return res.status(200).json({
         documents: top.map((c) => ({
           id: c.r.id, type: c.type, title: c.title, subtitle: c.subtitle,

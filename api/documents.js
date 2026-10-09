@@ -48,6 +48,7 @@ import {
 } from '../server-lib/documentEngine/service.js';
 import { ENGINE_FIELD_TYPES, ENGINE_RULE_TYPES } from '../server-lib/documentEngine/fieldTypes.js';
 import { signTargets } from '../server-lib/documentEngine/links.js';
+import { listPickerOptions } from '../server-lib/documentEngine/idAnswers.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -191,7 +192,7 @@ export default async function handler(req, res) {
     if (companyId == null) return res.status(400).json({ error: 'Missing company id.' });
 
     if (action === 'list_worker_documents') {
-      return res.status(200).json(await listWorkerDocuments(db, { companyId }));
+      return res.status(200).json(await listWorkerDocuments(db, { companyId, session }));
     }
     if (action === 'get_document') {
       return res.status(200).json(await getDocumentForWorker(db, { companyId, definitionId: body.definitionId }));
@@ -206,7 +207,7 @@ export default async function handler(req, res) {
     if (action === 'submit') {
       const out = await submitRecord(db, {
         session, companyId, definitionId: body.definitionId, answers: body.answers, notes: body.notes, siteId: body.siteId,
-        clientSubmissionId: body.clientSubmissionId, signLater: body.signLater, signature: body.signature, pdfReceipt: body.pdfReceipt, crew: body.crew, deps,
+        clientSubmissionId: body.clientSubmissionId, queuedAt: body.queuedAt, signLater: body.signLater, signature: body.signature, pdfReceipt: body.pdfReceipt, crew: body.crew, deps,
       });
       return res.status(200).json({ ok: true, id: out.record.id, status: out.record.status, duplicate: out.duplicate });
     }
@@ -217,6 +218,11 @@ export default async function handler(req, res) {
     if (action === 'sign_now') {
       const out = await signNow(db, { session, companyId, recordId: body.recordId, signature: body.signature, pdfReceipt: body.pdfReceipt, deps });
       return res.status(200).json({ ok: true, ...out });
+    }
+    if (action === 'get_picker_options') {
+      const out = await listPickerOptions(db, { companyId, session, kind: body.kind });
+      if (out.error) return res.status(out.status || 400).json({ error: out.error });
+      return res.status(200).json({ options: out.options });
     }
     if (action === 'get_record_links') {
       const out = await getRecordLinks(db, { session, companyId, recordId: body.recordId, sign: (targets) => signTargets(supabaseAdmin, targets) });

@@ -61,8 +61,9 @@ function addImageSafe(doc, url, x, y, w, h) {
 
 function answerText(value) {
   if (value == null) return '';
-  if (Array.isArray(value)) return value.filter((v) => typeof v !== 'object').map((v) => String(v)).join(', ');
-  if (typeof value === 'object') return '';
+  if (Array.isArray(value)) return value.map((v) => (v && typeof v === 'object' ? (v.label || '') : String(v))).filter(Boolean).join(', ');
+  // An equipment, site, person or document answer carries the label the server stored.
+  if (typeof value === 'object') return Array.isArray(value.labels) ? value.labels.join(', ') : String(value.label || '');
   const s = String(value);
   return s === 'yes' ? 'Yes' : s === 'no' ? 'No' : s;
 }

@@ -19,6 +19,7 @@
 // their name, a PIN and an authenticator, exactly like everyone else.
 
 import { AUDITABLE_BUILTIN_KEYS } from './documentSources.js';
+import { listEngineDocuments, engineDocKey } from './documentEngine/companyDocs.js';
 import { sanitizeDivisionIds } from './companyStructure.js';
 
 export const AUDITOR_ACCESS_DAYS = 14;
@@ -121,14 +122,17 @@ export function recordInAuditScope(record, auditor) {
 
 /**
  * The document keys an Owner may pick for an auditor in one company: the
- * built-ins placed by site, and the company's own custom forms.
+ * built-ins placed by site, the company's own custom forms and its
+ * unified-engine documents.
  * Returns [{ key, label }].
  */
 export async function listAuditableDocuments(supabase, companyId, labels) {
   const { data: forms } = await supabase.from('custom_forms').select('id, title').eq('company_id', companyId).order('created_at', { ascending: true });
+  const engine = await listEngineDocuments(supabase, companyId);
   return [
     ...AUDITABLE_BUILTIN_KEYS.map((key) => ({ key, label: labels[key] || key })),
     ...(forms || []).map((f) => ({ key: `custom_${f.id}`, label: f.title })),
+    ...engine.map((d) => ({ key: engineDocKey(d.id), label: d.title })),
   ];
 }
 

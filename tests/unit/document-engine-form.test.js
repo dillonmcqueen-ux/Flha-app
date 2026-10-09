@@ -27,17 +27,19 @@ test('initial answers and filled checks', () => {
 
 test('client problems: required, flagged note, unanswerable types skipped', () => {
   let p = clientProblems(fields, initialAnswers(fields));
-  assert.deepEqual(p, ['"Site safe?" is required.']);
-  p = clientProblems(fields, { ...initialAnswers(fields), site_ok: 'yes', cond: 'Defective' });
+  assert.deepEqual(p, ['"Site safe?" is required.', '"Machine" is required.']);
+  p = clientProblems(fields, { ...initialAnswers(fields), eq: { text: '  ' } });
+  assert.ok(p.includes('"Machine" is required.'), 'a typed-in machine with no name is not an answer');
+  p = clientProblems(fields, { ...initialAnswers(fields), site_ok: 'yes', cond: 'Defective', eq: { equipmentId: 1 } });
   assert.deepEqual(p, ['"Brakes" needs a note.']);
-  p = clientProblems(fields, { ...initialAnswers(fields), site_ok: 'yes', cond: 'Defective' }, { cond: 'Leaking' });
+  p = clientProblems(fields, { ...initialAnswers(fields), site_ok: 'yes', cond: 'Defective', eq: { equipmentId: 1 } }, { cond: 'Leaking' });
   assert.deepEqual(p, []);
-  assert.ok(UNANSWERABLE_TYPES.includes('equipment_picker'));
+  assert.deepEqual(UNANSWERABLE_TYPES, ['crew_signatures']);
 });
 
-test('splitAnswers separates files and drops empties and unanswerable types', () => {
-  const { values, uploads } = splitAnswers(fields, { site_ok: 'yes', cond: '', ppe: ['Hard hat'], hz: [{ hazard: 'Fall', risk: 'Bogus' }, { hazard: '' }], pic: DATA, eq: [1] });
-  assert.deepEqual(Object.keys(values).sort(), ['hz', 'ppe', 'site_ok']);
+test('splitAnswers separates files and drops empties', () => {
+  const { values, uploads } = splitAnswers(fields, { site_ok: 'yes', cond: '', ppe: ['Hard hat'], hz: [{ hazard: 'Fall', risk: 'Bogus' }, { hazard: '' }], pic: DATA, eq: { equipmentId: 1 }, crew: 'x' });
+  assert.deepEqual(Object.keys(values).sort(), ['eq', 'hz', 'ppe', 'site_ok']);
   assert.equal(values.hz.length, 1);
   assert.equal(values.hz[0].risk, 'Low');
   assert.deepEqual(uploads.map((u) => [u.key, u.kind]), [['pic', 'attachment']]);

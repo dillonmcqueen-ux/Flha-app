@@ -184,7 +184,7 @@ function jsonSize(v) {
  * receipt into the stored path, or null if the receipt is not one this server
  * issued for this company. The browser can never name a storage path itself.
  */
-export function validateAnswerValue(field, raw, { resolveFile } = {}) {
+export function validateAnswerValue(field, raw, { resolveFile, resolved } = {}) {
   const info = fieldTypeInfo(field.field_type);
   if (!info) return { error: `"${field.label}" has an unknown type.` };
   const config = field.config || {};
@@ -200,6 +200,10 @@ export function validateAnswerValue(field, raw, { resolveFile } = {}) {
   if (isEmptyValue(raw)) return {};
 
   if (fieldTypeIsIdBearing(field.field_type)) {
+    // The ids were checked against the caller's company before this point
+    // (idAnswers.js) and the value to store is the checked one, with its
+    // label read from the database. Anything not checked is refused.
+    if (resolved && resolved.has(field.field_key)) return { value_json: resolved.get(field.field_key) };
     return { error: `"${field.label}" can't be answered yet.` };
   }
 
@@ -263,7 +267,7 @@ export function validateAnswerValue(field, raw, { resolveFile } = {}) {
  * Unknown keys are rejected so a client cannot smuggle extra data in.
  * `notes` is { [fieldKey]: text } for the optional per-answer note.
  */
-export function validateAnswers(fields, answers, { notes, resolveFile } = {}) {
+export function validateAnswers(fields, answers, { notes, resolveFile, resolved } = {}) {
   const input = answers && typeof answers === 'object' && !Array.isArray(answers) ? answers : {};
   const noteMap = notes && typeof notes === 'object' && !Array.isArray(notes) ? notes : {};
   const known = new Set(fields.map((f) => f.field_key));
@@ -272,7 +276,7 @@ export function validateAnswers(fields, answers, { notes, resolveFile } = {}) {
   }
   const rows = [];
   for (const field of fields) {
-    const out = validateAnswerValue(field, input[field.field_key], { resolveFile });
+    const out = validateAnswerValue(field, input[field.field_key], { resolveFile, resolved });
     if (out.error) return { error: out.error };
     const present = out.value_text != null || out.value_json != null || out.file_path != null;
     if (field.required && !present) return { error: `"${field.label}" is required.` };

@@ -18,8 +18,9 @@ export function formatAnswer(row) {
     if (row.field_type === 'hazard_table' && Array.isArray(v)) {
       return v.map((r) => `${r.hazard || ''}${r.risk ? ` (${r.risk})` : ''}${r.control ? `: ${r.control}` : ''}`).join('\n');
     }
-    if (Array.isArray(v)) return v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ');
-    return typeof v === 'object' ? '' : String(v);
+    if (Array.isArray(v)) return v.map((x) => (typeof x === 'object' ? (x.label || '') : String(x))).filter(Boolean).join(', ');
+    if (typeof v === 'object') return Array.isArray(v.labels) ? v.labels.join(', ') : String(v.label || '');
+    return String(v);
   }
   if (row.value_text != null) return row.field_type === 'yesno' ? cap(row.value_text) : String(row.value_text);
   return '';

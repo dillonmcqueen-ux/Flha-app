@@ -78,5 +78,7 @@ test('routingSummary describes each stage in plain words', () => {
   assert.match(text, /Any injuries\?" is Yes, Safety/);
   assert.match(text, /48 hours/);
   assert.match(routingSummary(rulesToView([]), []).map((l) => l.detail).join(' '), /Nobody is notified/);
-  assert.ok(BUILDER_FIELD_TYPES.some((t) => t.notYet));
+  assert.ok(BUILDER_FIELD_TYPES.some((t) => t.key === 'equipment_picker'));
+  assert.ok(BUILDER_FIELD_TYPES.every((t) => !t.notYet), 'every offered type can be answered');
+  assert.ok(!BUILDER_FIELD_TYPES.some((t) => t.key === 'crew_signatures'));
 });

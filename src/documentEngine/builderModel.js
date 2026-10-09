@@ -5,6 +5,7 @@
 
 import { ENGINE_FIELD_TYPES, fieldTypeNeedsOptions, fieldTypeIsIdBearing } from '../../server-lib/documentEngine/fieldTypes.js';
 import { slugKey } from '../../server-lib/documentEngine/validate.js';
+import { RESOLVABLE_ID_TYPES } from '../../server-lib/documentEngine/idAnswers.js';
 
 export const MAX_FIELDS = 200;
 export const DEPARTMENTS = [
@@ -15,10 +16,10 @@ export const ROUTABLE_TYPES = ['yesno', 'dropdown', 'multiselect', 'condition3']
 export const ATTACHMENT_KINDS = [['image', 'Photos'], ['pdf', 'PDF'], ['word', 'Word'], ['excel', 'Excel']];
 export const ATTACHMENT_FIELD_TYPES = ['file_upload', 'photo'];
 
-/** Types a builder may add today. Id-bearing pickers are listed but flagged: workers cannot answer them until WP7. */
+/** Types a builder may add. A type workers cannot answer yet is flagged (none today besides crew signatures, which are not offered). */
 export const BUILDER_FIELD_TYPES = ENGINE_FIELD_TYPES
   .filter((t) => t.key !== 'crew_signatures')
-  .map((t) => ({ key: t.key, label: t.label, needsOptions: !!t.needsOptions, notYet: fieldTypeIsIdBearing(t.key) }));
+  .map((t) => ({ key: t.key, label: t.label, needsOptions: !!t.needsOptions, notYet: fieldTypeIsIdBearing(t.key) && !RESOLVABLE_ID_TYPES.includes(t.key) }));
 
 const uniqueKey = (fields, base) => {
   const used = new Set(fields.map((f) => f.field_key));
