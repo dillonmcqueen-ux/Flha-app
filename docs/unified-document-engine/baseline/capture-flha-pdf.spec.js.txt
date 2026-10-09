@@ -1,0 +1,40 @@
+import { test, expect } from '@playwright/test';
+import fs from 'fs';
+import { mockWorkerApis, mockExternalServices, loginAsWorker, signCanvas, openForm } from './helpers.js';
+
+test('WP0: capture today FLHA PDF', async ({ page }) => {
+  await mockWorkerApis(page);
+  await mockExternalServices(page);
+  const pdfs = [];
+  await page.route('**/storage/v1/object/**', async route => {
+    const buf = route.request().postDataBuffer();
+    if (buf) {
+      const s = buf.toString('latin1');
+      const a = s.indexOf('%PDF');
+      const b = s.lastIndexOf('%%EOF');
+      if (a >= 0 && b > a) pdfs.push(Buffer.from(s.slice(a, b + 5), 'latin1'));
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ Key: 'mock/path.png' }) });
+  });
+  await page.route('**/api/flhas', async route => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    const out = body.action === 'create_upload_url'
+      ? { path: 'mock/flha.pdf', uploadToken: 'tok', receipt: 'rcpt' }
+      : { id: 'test-flha-id' };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
+  });
+  await loginAsWorker(page);
+  await openForm(page, 'FLHA');
+  await page.getByPlaceholder('e.g. John Smith').fill('Jamie Worker');
+  await page.locator('select').selectOption('Test Site');
+  await page.getByRole('button', { name: /^Continue to Voice Input/ }).click();
+  await page.locator('textarea').fill('Operating an excavator near an active roadway, digging a trench for a water line.');
+  await page.getByRole('button', { name: /Generate FLHA/ }).click();
+  await expect(page.getByText('Job Hazard Analysis')).toBeVisible();
+  await page.getByRole('button', { name: /^Continue to Sign-Off/ }).click();
+  await signCanvas(page);
+  await page.getByRole('button', { name: /Sign & Submit FLHA/ }).click();
+  await expect(page.getByText('FLHA Complete')).toBeVisible({ timeout: 15000 });
+  console.log('PDFS CAPTURED', pdfs.length);
+  if (pdfs.length) fs.writeFileSync('docs/unified-document-engine/baseline/flha-today.pdf', pdfs[0]);
+});

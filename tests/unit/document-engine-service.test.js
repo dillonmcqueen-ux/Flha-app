@@ -146,7 +146,7 @@ test('cloning copies the published template into an editable draft, once per com
   const db = seedDb();
   const { definition: t } = await createDefinition(db, { companyId: null, title: 'FLHA' });
   await rejects(cloneTemplate(db, { companyId: 1, templateId: t.id }), 409, /no published/);
-  await saveDraft(db, { companyId: null, definitionId: t.id, fields: FIELDS, rules: [WORKER_SIG_RULE], layout: { blocks: [1] } });
+  await saveDraft(db, { companyId: null, definitionId: t.id, fields: FIELDS, rules: [WORKER_SIG_RULE], layout: { version: 1, blocks: [{ id: 'sp', type: 'spacer', height: 6 }] } });
   await publishDraft(db, { companyId: null, definitionId: t.id });
 
   const out = await cloneTemplate(db, { companyId: 1, templateId: t.id });
@@ -155,7 +155,7 @@ test('cloning copies the published template into an editable draft, once per com
   const copied = db.tables.document_fields.filter((f) => f.version_id === out.draftVersionId);
   assert.equal(copied.length, 2);
   assert.equal(db.tables.document_rules.filter((r) => r.version_id === out.draftVersionId).length, 1);
-  assert.deepEqual(db.tables.document_layouts.find((l) => l.version_id === out.draftVersionId).layout_json, { blocks: [1] });
+  assert.equal(db.tables.document_layouts.find((l) => l.version_id === out.draftVersionId).layout_json.blocks[0].type, 'spacer');
   await rejects(cloneTemplate(db, { companyId: 1, templateId: t.id }), 409, /already has/);
   await rejects(cloneTemplate(db, { companyId: 1, templateId: out.definition.id }), 404, undefined);
 });
