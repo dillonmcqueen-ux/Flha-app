@@ -4,11 +4,13 @@ import { buildFormStyles, disabledBg, bannerStyle } from "../FormKit";
 import { loadDraft, clearDraft, useDraftAutosave } from "../useDraftAutosave.js";
 import { enqueueSubmission } from "../offlineQueue.js";
 import { callDocuments } from "./builderApi.js";
-import { initialAnswers, clientProblems, newClientSubmissionId, UNANSWERABLE_TYPES, RISKS, emptyHazard } from "./formModel.js";
+import { initialAnswers, clientProblems, newClientSubmissionId, isHidden, RISKS, emptyHazard } from "./formModel.js";
 import { submitEngineDocument, resubmitEngineDocument, loadRecordForWorker } from "./engineSubmit.js";
 import { rowsToForm, hasFiles } from "./recordView.js";
 import SignaturePad from "./SignaturePad.jsx";
 import PickerControl from "./PickerControl.jsx";
+import HazardAssist from "./HazardAssist.jsx";
+import CrewSignOff from "./CrewSignOff.jsx";
 import { shrinkImage, readAsDataUrl } from "./shrinkImage.js";
 import { ArrowLeft, Loader2, CheckCircle2, AlertTriangle, WifiOff, PenLine } from "lucide-react";
 
@@ -31,6 +33,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const [answers, setAnswers] = useState({});
   const [notes, setNotes] = useState({});
   const [signature, setSignature] = useState(null);
+  const [crew, setCrew] = useState([]); // [{ rosterId, name, signature }], not kept in drafts (signature images are large)
   const [step, setStep] = useState("form"); // form | queued | done
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -88,6 +91,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const needsSignature = (doc?.signatureSteps || []).some((x) => x.signer === "worker");
   const problems = doc ? clientProblems(fields, answers, notes, keptFileKeys) : [];
   const set = (k, v) => setAnswers((p) => ({ ...p, [k]: v }));
+  const setMany = (patch) => setAnswers((p) => ({ ...p, ...patch }));
   const setNote = (k, v) => setNotes((p) => ({ ...p, [k]: v }));
   const siteName = sites.find((x) => String(x.id) === String(siteId))?.name || "";
 
@@ -109,7 +113,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
     const now = new Date();
     const payload = {
       definitionId, title: doc.definition.title, layout: doc.layout, fields, answers, notes, siteId, siteName, companyName, companyLogo,
-      submittedBy: userName, signature: signLater ? null : signature, signLater, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"),
+      submittedBy: userName, signature: signLater ? null : signature, signLater, crew, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"),
     };
     const id = newClientSubmissionId();
     const queue = async () => { await enqueueSubmission("engineform", id, payload); clearDraft("engineform", scope); setStep("queued"); };
@@ -155,7 +159,9 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
       case "date": return <input style={{ ...s.input, marginBottom: 0 }} type="date" value={v || ""} onChange={(e) => set(k, e.target.value)} />;
       case "dropdown": return (<select style={{ ...s.input, marginBottom: 0 }} value={v || ""} onChange={(e) => set(k, e.target.value)}><option value="">Select...</option>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>);
       case "multiselect": case "ppe_list": {
-        const list = f.field_type === "ppe_list" && opts.length === 0 ? ["Hard hat", "Safety vest", "Safety glasses", "Gloves", "Steel toe boots", "Hearing protection", "Fall arrest harness", "Respirator"] : opts;
+        const base = f.field_type === "ppe_list" && opts.length === 0 ? ["Hard hat", "Safety vest", "Safety glasses", "Gloves", "Steel toe boots", "Hearing protection", "Fall arrest harness", "Respirator"] : opts;
+        // Items the AI added that are not in the usual list still show, ticked.
+        const list = f.field_type === "ppe_list" ? [...new Set([...base, ...(Array.isArray(v) ? v : [])])] : base;
         return (<div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{list.map((o) => {
           const on = Array.isArray(v) && v.includes(o);
           return <button key={o} type="button" aria-pressed={on} onClick={() => set(k, on ? v.filter((x) => x !== o) : [...(v || []), o])} style={{ minHeight: 44, padding: "8px 14px", borderRadius: RAD.pill, fontSize: 14, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? C.orange : C.line}`, background: on ? `${C.orange}22` : C.panelInset, color: on ? C.orange : C.text.faint }}>{on ? "✓ " : ""}{o}</button>;
@@ -168,10 +174,26 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
           {typeof v === "string" && v.startsWith("data:image") && <img src={v} alt="" style={{ display: "block", maxWidth: "100%", maxHeight: 160, marginTop: 8, borderRadius: RAD.sm }} />}
           {typeof v === "string" && v.startsWith("data:") && !v.startsWith("data:image") && <div style={{ fontSize: 13, color: C.text.muted, marginTop: 6 }}>File attached</div>}
         </div>);
+      case "text_list": {
+        const items = Array.isArray(v) ? v : [];
+        return (
+          <div>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input aria-label={`${f.label} ${i + 1}`} style={{ ...s.input, marginBottom: 0 }} value={it} onChange={(e) => set(k, items.map((x, j) => (j === i ? e.target.value : x)))} />
+                <button type="button" onClick={() => set(k, items.filter((_, j) => j !== i))} style={{ ...s.ghost, width: "auto", marginTop: 0, padding: "0 14px" }}>Remove</button>
+              </div>
+            ))}
+            <button type="button" style={{ ...s.ghost, marginTop: 0 }} onClick={() => set(k, [...items, ""])}>Add item</button>
+          </div>
+        );
+      }
       case "hazard_table": {
         const rows = Array.isArray(v) ? v : [];
         const upd = (i, p) => set(k, rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
-        return (<div>{rows.map((r, i) => (
+        return (<div>
+          {f.config?.aiAssist && <HazardAssist field={f} answers={answers} setMany={setMany} token={token} companyId={companyId} companyName={companyName} workerName={userName} siteName={siteName} />}
+          {rows.map((r, i) => (
           <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: 10, marginBottom: 8 }}>
             <input aria-label={`Hazard ${i + 1}`} style={s.input} placeholder="Hazard" value={r.hazard || ""} onChange={(e) => upd(i, { hazard: e.target.value })} />
             <textarea aria-label={`Control ${i + 1}`} style={{ ...s.input, minHeight: 56 }} placeholder="Control measure" value={r.control || ""} onChange={(e) => upd(i, { control: e.target.value })} />
@@ -182,6 +204,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
           </div>))}
           <button type="button" style={{ ...s.ghost, marginTop: 0 }} onClick={() => set(k, [...rows, emptyHazard()])}>Add hazard</button></div>);
       }
+      case "crew_signatures": return <CrewSignOff crew={crew} onChange={setCrew} token={token} companyId={companyId} authorId={userId} />;
       case "equipment_picker": case "attachment_picker": case "site_picker": case "person_picker": case "linked_document":
         return <PickerControl field={f} value={v} onChange={(x) => set(k, x)} token={token} companyId={companyId} />;
       default: return <div style={{ fontSize: 13, color: C.text.muted }}>This question type is not available on this form yet.</div>;
@@ -227,7 +250,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
         {userName && <div style={{ fontSize: 13, color: C.text.muted, marginTop: 10 }}>Filling in as <strong>{userName}</strong></div>}
       </div>}
 
-      {fields.filter((f) => !UNANSWERABLE_TYPES.includes(f.field_type)).map((f) => {
+      {fields.filter((f) => !isHidden(f)).map((f) => {
         const head = f.section && f.section !== section ? <div style={{ fontWeight: 800, fontSize: 13, color: accent, textTransform: "uppercase", margin: "6px 2px 8px" }}>{f.section}</div> : null;
         section = f.section || section;
         return (

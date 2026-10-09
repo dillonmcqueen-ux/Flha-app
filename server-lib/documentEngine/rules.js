@@ -7,12 +7,16 @@
 // Rule types and their config (stored in document_rules.config):
 //
 //   signature_step    { signer: 'worker' }  a worker signature is required
-//   reviewer_step     { label?, allowLeads?, role? }  one step of the reviewer
+//   reviewer_step     { label?, allowLeads?, role?, onlyIf? }  one step of the reviewer
 //                     chain. Steps run in sort order. role 'owner' limits the
 //                     step to the Account Owner and the founder. allowLeads
 //                     lets a crew lead act on records written by their crew.
 //                     distinct (default true): the same person cannot review
-//                     two steps of one record.
+//                     two steps of one record. onlyIf makes the chain conditional:
+//                     { field, riskIn: ['Extreme'] } applies when that hazard table
+//                     has a row at one of those risks; { field, equalsAny: ['yes'] }
+//                     when that answer is one of those. The chain is skipped only
+//                     when every step has an onlyIf and none matches.
 //   notify            { extraRosterIds?: number[], departments?: string[] }
 //                     who is told on submit, on top of whoever the scope rules
 //                     already place the record with.
@@ -39,6 +43,34 @@ export function reviewSteps(rules) {
     allowLeads: r.config?.allowLeads === true,
     distinct: r.config?.distinct !== false,
   }));
+}
+
+// The stored answer rows, by field key.
+function conditionMet(onlyIf, answerRows) {
+  if (!onlyIf || typeof onlyIf !== 'object') return true;
+  const row = (answerRows || []).find((r) => r.field_key === onlyIf.field);
+  if (!row) return false;
+  if (Array.isArray(onlyIf.riskIn)) {
+    const rows = Array.isArray(row.value_json) ? row.value_json : [];
+    return rows.some((r) => r && onlyIf.riskIn.includes(r.risk));
+  }
+  if (Array.isArray(onlyIf.equalsAny)) {
+    const have = Array.isArray(row.value_json) ? row.value_json.map((v) => String(v).toLowerCase()) : (row.value_text != null ? [String(row.value_text).toLowerCase()] : []);
+    return onlyIf.equalsAny.some((e) => have.includes(String(e).toLowerCase()));
+  }
+  return true;
+}
+
+/**
+ * Does a record with these answers go through the reviewer chain? A chain with
+ * no steps never does. A step with no onlyIf always applies. The chain is
+ * skipped only when every step is conditional and none of the conditions hold
+ * (the FLHA: only an Extreme risk hazard needs a supervisor).
+ */
+export function reviewApplies(rules, answerRows) {
+  const steps = (rules || []).filter((r) => r.rule_type === 'reviewer_step');
+  if (steps.length === 0) return false;
+  return steps.some((r) => conditionMet(r.config && r.config.onlyIf, answerRows));
 }
 
 export function needsWorkerSignature(rules) {

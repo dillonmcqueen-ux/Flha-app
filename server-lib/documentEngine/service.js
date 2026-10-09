@@ -30,7 +30,7 @@ import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
 import { fieldTypeInfo } from './fieldTypes.js';
 import { linkTargets } from './links.js';
 import { resolveIdAnswers } from './idAnswers.js';
-import { reviewSteps, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
+import { reviewSteps, reviewApplies, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
 import { notifyRecord, notifyReturned, notifyEscalations, engineKey } from './notify.js';
 
 export class EngineError extends Error {
@@ -417,7 +417,6 @@ export async function listWorkerDocuments(db, { companyId, session }) {
 
 function ruleFlags(rules) {
   return {
-    needsReview: reviewSteps(rules).length > 0,
     needsWorkerSignature: needsWorkerSignature(rules),
   };
 }
@@ -616,7 +615,7 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
     company_id: cid,
     definition_id: def.id,
     version_id: version.id,
-    status: flags.needsReview ? 'pending_approval' : 'submitted',
+    status: reviewApplies(content.rules, checked.rows) ? 'pending_approval' : 'submitted',
     site_id: resolvedSite || null,
     submitted_by_roster_id: authorId,
     client_submission_id: csid,

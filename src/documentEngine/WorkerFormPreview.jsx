@@ -20,6 +20,8 @@ function Control({ f }) {
     case "file_upload": case "photo": return <div style={{ ...box, textAlign: "center" }}>{f.field_type === "photo" ? "Take or choose a photo" : "Attach a file"}</div>;
     case "hazard_table": return <div style={box}>Hazard, control and risk rows</div>;
     case "ppe_list": return <div style={box}>PPE checklist</div>;
+    case "text_list": return <div style={box}>Add items one by one</div>;
+    case "crew_signatures": return <div style={box}>Crew members pick their name and sign</div>;
     case "section_table": return <div style={box}>Repeating rows</div>;
     default: return <div style={box}>{f.field_type.replace(/_/g, " ")}</div>;
   }
@@ -30,7 +32,7 @@ export default function WorkerFormPreview({ title, fields, signatureRequired }) 
   return (
     <div data-testid="worker-preview" style={{ width: 390, maxWidth: "100%", border: `1px solid ${C.line}`, borderRadius: 24, padding: 14, background: "#f8fafc" }}>
       <div style={{ fontWeight: 800, fontSize: 18, color: "#0f172a", marginBottom: 10 }}>{title || "Untitled document"}</div>
-      {fields.map((f) => {
+      {fields.filter((f) => !(f.config && f.config.hidden)).map((f) => {
         const head = f.section && f.section !== section ? <div style={{ fontWeight: 800, fontSize: 13, color: "#1e3a5f", margin: "12px 0 6px", textTransform: "uppercase" }}>{f.section}</div> : null;
         section = f.section || section;
         return (

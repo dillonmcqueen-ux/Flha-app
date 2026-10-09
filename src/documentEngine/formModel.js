@@ -3,13 +3,16 @@
 // plain values and files that must be uploaded first. No React, no network.
 
 export const FILE_TYPES = ['file_upload', 'photo', 'signature'];
-export const ARRAY_TYPES = ['multiselect', 'ppe_list', 'hazard_table', 'section_table'];
+export const ARRAY_TYPES = ['multiselect', 'ppe_list', 'text_list', 'hazard_table', 'section_table'];
 // Only crew signatures: they sign through the crew parameter of submit, not a field.
 // The pickers (equipment, attachments, site, person, linked document) are answerable.
 export const UNANSWERABLE_TYPES = ['crew_signatures'];
 export const UPLOAD_KIND = { signature: 'signature', file_upload: 'attachment', photo: 'attachment' };
 export const BUCKET_FOR_KIND = { pdf: 'flha-reports', signature: 'signatures', attachment: 'portal-attachments' };
 export const RISKS = ['Low', 'Medium', 'High', 'Extreme'];
+
+/** A field the worker is not shown: the AI assist or the form fills it in. */
+export const isHidden = (f) => !!(f && f.config && f.config.hidden === true);
 
 export function initialAnswers(fields) {
   const out = {};
@@ -37,7 +40,7 @@ export function isFilled(field, value) {
 export function clientProblems(fields, answers, notes = {}, keptFileKeys = []) {
   const out = [];
   for (const f of fields || []) {
-    if (UNANSWERABLE_TYPES.includes(f.field_type)) continue;
+    if (UNANSWERABLE_TYPES.includes(f.field_type) || isHidden(f)) continue;
     if (keptFileKeys.includes(f.field_key) && !isFilled(f, answers[f.field_key])) continue; // an earlier file stays
     const v = answers[f.field_key];
     if (f.required && !isFilled(f, v)) out.push(`"${f.label}" is required.`);

@@ -53,6 +53,15 @@ export async function submitEngineDocument(payload, clientSubmissionId, token, d
     } catch (e) { /* answer stays empty */ }
   }
 
+  // Crew sign-off: each crew member's signature is uploaded and sent with their
+  // roster id. The server takes the name from the roster, never from here.
+  const crew = [];
+  for (const c of payload.crew || []) {
+    const receipt = await upload({ token, kind: 'signature', filename: `crew-${c.rosterId}.png`, blob: dataUrlToBlob(c.signature) }).catch(() => null);
+    if (!receipt) throw Object.assign(new Error(`${c.name || 'A crew member'}'s signature did not upload. Try again.`), { isServerError: true });
+    crew.push({ rosterId: c.rosterId, signature: receipt });
+  }
+
   let signature = null;
   if (payload.signature) {
     try { signature = await upload({ token, kind: 'signature', filename: 'signature.png', blob: dataUrlToBlob(payload.signature) }); } catch (e) { /* server will ask again */ }
@@ -67,7 +76,10 @@ export async function submitEngineDocument(payload, clientSubmissionId, token, d
         status: 'submitted', awaitingSignature: payload.signLater === true,
       },
       fields: payload.fields, answers: payload.answers,
-      signatures: payload.signature ? [{ kind: 'worker', signer_name: payload.submittedBy, signature: payload.signature, signedAtText: payload.dateTimeText }] : [],
+      signatures: [
+        ...(payload.signature ? [{ kind: 'worker', signer_name: payload.submittedBy, signature: payload.signature, signedAtText: payload.dateTimeText }] : []),
+        ...(payload.crew || []).map((c) => ({ kind: 'crew', signer_name: c.name, signature: c.signature, signedAtText: payload.dateTimeText })),
+      ],
       assets: { foraLogoDataUrl: deps.logo !== undefined ? deps.logo : await foraLogoDataUrl() },
     });
     pdfReceipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: pdfBlob });
@@ -80,7 +92,7 @@ export async function submitEngineDocument(payload, clientSubmissionId, token, d
       body: JSON.stringify({
         action: 'submit', token, definitionId: payload.definitionId, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         answers, notes: payload.notes || {}, siteId: payload.siteId || undefined,
-        signature, signLater: payload.signLater === true || undefined, pdfReceipt: pdfReceipt || undefined, crew: payload.crew || undefined,
+        signature, signLater: payload.signLater === true || undefined, pdfReceipt: pdfReceipt || undefined, crew: crew.length ? crew : undefined,
       }),
     });
   } catch (networkErr) {

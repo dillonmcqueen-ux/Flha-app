@@ -153,3 +153,23 @@ test('signing skips the PDF when the form changed since the document was filed',
   });
   assert.deepEqual(uploads, ['signature']);
 });
+
+test('crew signatures upload with their roster ids, and one that cannot upload stops the submit', async () => {
+  let body; const kinds = [];
+  const deps = {
+    upload: async (u) => { kinds.push(u.filename); return `rcpt-${u.filename}`; }, render: async () => new Blob(['x']), logo: null,
+    fetchFn: async (u, init) => { body = JSON.parse(init.body); return { ok: true, json: async () => ({}) }; },
+  };
+  await submitEngineDocument({ ...payload(), crew: [{ rosterId: 12, name: 'Cora Crew', signature: DATA }, { rosterId: 13, name: 'Lou', signature: DATA }] }, 'c9', 't', deps);
+  assert.deepEqual(body.crew, [{ rosterId: 12, signature: 'rcpt-crew-12.png' }, { rosterId: 13, signature: 'rcpt-crew-13.png' }]);
+  assert.ok(!JSON.stringify(body.crew).includes('Cora'), 'names are never sent');
+  await assert.rejects(
+    submitEngineDocument({ ...payload(), crew: [{ rosterId: 12, name: 'Cora Crew', signature: DATA }] }, 'c10', 't', { ...deps, upload: async (u) => (u.filename.startsWith('crew') ? null : 'r') }),
+    (e) => e.isServerError === true && /Cora Crew's signature did not upload/.test(e.message),
+  );
+});
+
+test('hidden fields are not asked for', () => {
+  const f = [{ field_key: 'flag', label: 'AI', field_type: 'yesno', required: true, config: { hidden: true } }];
+  assert.deepEqual(clientProblems(f, { flag: '' }), []);
+});

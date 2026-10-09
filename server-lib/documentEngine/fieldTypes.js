@@ -34,6 +34,7 @@ export const ENGINE_FIELD_TYPES = [
   // FLHA blocks.
   { key: 'hazard_table', label: 'Hazard table', value: 'json' },
   { key: 'ppe_list', label: 'PPE list', value: 'json' },
+  { key: 'text_list', label: 'List of short items', value: 'json' },
   { key: 'crew_signatures', label: 'Crew signatures', value: 'json', idBearing: true },
 ];
 

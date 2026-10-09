@@ -106,7 +106,7 @@ export function rulesToView(rows) {
   for (const r of list) {
     const c = r.config || {};
     if (r.rule_type === 'signature_step') { if (c.signer === 'worker') v.signatureRequired = true; else v.other.push(r); }
-    else if (r.rule_type === 'reviewer_step') v.reviewers.push({ label: c.label || '', role: c.role === 'owner' ? 'owner' : 'supervisor', allowLeads: c.allowLeads === true, distinct: c.distinct !== false });
+    else if (r.rule_type === 'reviewer_step') v.reviewers.push({ label: c.label || '', role: c.role === 'owner' ? 'owner' : 'supervisor', allowLeads: c.allowLeads === true, distinct: c.distinct !== false, onlyIf: c.onlyIf && typeof c.onlyIf === 'object' ? c.onlyIf : undefined });
     else if (r.rule_type === 'notify') { v.notifyDepartments.push(...(c.departments || [])); if (Array.isArray(c.extraRosterIds) && c.extraRosterIds.length) v.other.push({ rule_type: 'notify', config: { extraRosterIds: c.extraRosterIds } }); }
     else if (r.rule_type === 'route_by_scope') v.scopeDepartments.push(...(c.departments || []));
     else if (r.rule_type === 'route_by_answer') v.routes.push({ fieldKey: c.fieldKey || '', equals: Array.isArray(c.equals) ? c.equals.map(String) : (c.equals != null ? [String(c.equals)] : []), department: c.department || '' });
@@ -126,6 +126,7 @@ export function viewToRules(v) {
     if (s.label && s.label.trim()) config.label = s.label.trim().slice(0, 80);
     if (s.allowLeads) config.allowLeads = true;
     if (s.distinct === false) config.distinct = false;
+    if (s.onlyIf) config.onlyIf = s.onlyIf; // set by a template, kept as it was
     rules.push({ rule_type: 'reviewer_step', config });
   }
   if (v.notifyDepartments.length) rules.push({ rule_type: 'notify', config: { departments: v.notifyDepartments } });
