@@ -656,7 +656,7 @@ export default async function handler(req, res) {
       const { companyId } = req.body;
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
 
-      const tables = ['flhas', 'incidents', 'near_misses', 'inspections', 'toolbox_talks', 'daily_reports', 'time_clock_entries', 'timeclock_reports'];
+      const tables = ['flhas', 'incidents', 'near_misses', 'inspections', 'toolbox_talks', 'daily_reports', 'time_clock_entries', 'timeclock_reports', 'document_records'];
       const counts = {};
       for (const t of tables) {
         const { data, error } = await supabaseAdmin.from(t).select('id').eq('company_id', companyId);

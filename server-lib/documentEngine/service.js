@@ -29,6 +29,7 @@ import { validDepartmentKeys } from '../companyStructure.js';
 import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
 import { fieldTypeInfo } from './fieldTypes.js';
 import { linkTargets } from './links.js';
+import { sanitizeAiEditSignal } from '../aiEditSignal.js';
 import { resolveIdAnswers } from './idAnswers.js';
 import { reviewSteps, reviewApplies, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
 import { notifyRecord, notifyReturned, notifyEscalations, engineKey } from './notify.js';
@@ -501,6 +502,12 @@ async function afterRecordCounts(db, deps, { definition, setting, rules, record,
     if (list.length > 0) await notifyEscalations(db, deps, { companyId, definition, matches: list, ownerMuted: muted });
   });
   await step('notify', async () => { await notifyRecord(db, deps, { companyId, definition, record, plan: notifyPlan(rules), ownerMuted: muted }); });
+  await step('edit_signal', async () => {
+    const sig = record.meta && record.meta.ai_edit_signal;
+    if (!sig || setting.brain_enabled === false) return;
+    const { error } = await db.from('company_signals').insert({ company_id: companyId, source_type: 'flha_edit', source_id: String(record.id), signal_json: sig });
+    if (error) throw dbFail(error, 'save the edit signal');
+  });
   await step('brain', async () => { if (setting.brain_enabled !== false) await writeBrainSignal(db, { companyId, definition, record, answerRows, matches }); });
   // Remember what is done, and whether the sweep still has work to do. This
   // write is itself best effort: if it fails the record is simply not retried.
@@ -578,7 +585,7 @@ async function resolveCrew(db, { companyId, authorId, crew, resolveFile }) {
  * receipt into the stored path (null if it is not one this server issued for
  * this company). `deps.resolveSiteId(raw)` vets a site id.
  */
-export async function submitRecord(db, { session, companyId, definitionId, answers, notes, siteId, clientSubmissionId, queuedAt, signLater, signature, pdfReceipt, crew, deps }) {
+export async function submitRecord(db, { session, companyId, definitionId, answers, notes, siteId, clientSubmissionId, queuedAt, signLater, signature, pdfReceipt, crew, aiEditSignal, deps }) {
   const cid = asId(companyId);
   if (!cid) throw new EngineError(400, 'Missing company id.');
   const def = await loadDefinition(db, definitionId, { companyId: cid });
@@ -641,6 +648,9 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
     awaiting_signature: wantsSignLater,
     signature_requested_at: wantsSignLater ? nowIso : null,
     submitted_at: nowIso,
+    // How the worker changed the AI's hazards. Kept with the record until it
+    // counts (a sign-later record only counts once signed), then sent to the Brain.
+    meta: (() => { const sig = (content.fields || []).some((f) => f.field_type === 'hazard_table' && f.config && f.config.aiAssist) ? sanitizeAiEditSignal(aiEditSignal) : null; return sig ? { ai_edit_signal: sig } : {}; })(),
   }).select('*');
   if (error || !data || !data[0]) throw dbFail(error, 'save the document');
   const record = data[0];
@@ -754,6 +764,47 @@ export async function listRecords(db, { session, companyId, definitionId, status
   const out = await listVisibleRecordsMulti(db, { ...session, companyId: cid }, rows, (r) => engineKey(r.definition_id));
   if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
   return { records: out.records };
+}
+
+/**
+ * A supervisor's or the founder's view of this company's engine FLHAs, shaped
+ * like the rows the Dashboard already holds for FLHAs (so its counters,
+ * Analytics and the FLHA tab can read them). Held to the document's view
+ * assignments and the caller's scope. `sign` turns link targets into a Map of
+ * id to signed URL.
+ */
+export async function listEngineFlhaRows(db, { session, companyId, sign }) {
+  const cid = asId(companyId);
+  if (!cid) throw new EngineError(400, 'Missing company id.');
+  if (!isSupervisorTier(session)) throw new EngineError(403, 'Not allowed.');
+  const defs = await many(db.from('document_definitions').select('id, key').eq('company_id', cid).eq('key', 'flha'), 'read the FLHA documents');
+  if (defs.length === 0) return { flhas: [] };
+  const recs = await many(db.from('document_records').select('*').eq('company_id', cid).in('definition_id', defs.map((d) => d.id)).order('created_at', { ascending: false }).limit(300), 'read the FLHAs');
+  const out = await listVisibleRecordsMulti(db, { ...session, companyId: cid }, recs, (r) => engineKey(r.definition_id));
+  if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
+  const rows = out.records;
+  if (rows.length === 0) return { flhas: [] };
+  const ids = rows.map((r) => r.id);
+  const [answers, people, sites] = await Promise.all([
+    many(db.from('document_answers').select('record_id, field_key, value_json').in('record_id', ids).eq('field_key', 'hazards'), 'read the hazards'),
+    many(db.from('roster').select('id, name').eq('company_id', cid).in('id', [...new Set(rows.map((r) => r.submitted_by_roster_id).filter((v) => v != null))]), 'read the names'),
+    many(db.from('sites').select('id, name').eq('company_id', cid).in('id', [...new Set(rows.map((r) => r.site_id).filter((v) => v != null))]), 'read the sites'),
+  ]);
+  const hazardsOf = new Map(answers.map((a) => [a.record_id, Array.isArray(a.value_json) ? a.value_json : []]));
+  const nameOf = new Map(people.map((p) => [p.id, p.name]));
+  const siteOf = new Map(sites.map((x) => [x.id, x.name]));
+  const urls = await sign(rows.flatMap((r) => linkTargets({ companyId: cid, record: { pdf_path: r.pdf_path }, answers: [], signatures: [] }).map((t) => ({ ...t, id: `pdf:${r.id}` }))));
+  return {
+    flhas: rows.map((r) => ({
+      id: `engine:${r.id}`, source: 'engine', engine_record_id: r.id, definition_id: r.definition_id, company_id: cid,
+      worker_name: nameOf.get(r.submitted_by_roster_id) || '', job_site: siteOf.get(r.site_id) || '', site_id: r.site_id ?? null,
+      created_at: r.created_at, status: r.status, awaiting_signature: r.awaiting_signature === true,
+      unsigned_closed_at: r.unsigned_closed_at || null, signature_requested_at: r.signature_requested_at || null,
+      submitted_by_roster_id: r.submitted_by_roster_id ?? null,
+      hazards_json: { hazards: hazardsOf.get(r.id) || [] },
+      pdf_url: urls.get(`pdf:${r.id}`) || null,
+    })),
+  };
 }
 
 /**
@@ -933,6 +984,131 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
   return { status: 'pending_approval' };
 }
 
+const AMENDABLE_STATUSES = ['submitted', 'pending_approval', 'approved'];
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** True when this version's rules let the author amend on the day they filed. */
+function amendAllowed(rules) {
+  return (rules || []).some((r) => r.rule_type === 'amend_same_day');
+}
+
+/** Why a record cannot be amended by its author right now, or null when it can. */
+function amendBlock(record, rules) {
+  if (!amendAllowed(rules)) return 'This document cannot be amended.';
+  if (record.unsigned_closed_at) return 'This document closed unsigned and can no longer be changed.';
+  if (record.awaiting_signature === true) return 'Sign this document first, then you can amend it.';
+  if (!AMENDABLE_STATUSES.includes(record.status)) return 'This document is not open for amendment.';
+  if (!record.created_at || new Date(record.created_at) < startOfToday()) return 'This document is no longer open for amendment.';
+  return null;
+}
+
+/**
+ * The author changes a document they filed, on the day they filed it, when the
+ * document allows it (the amend_same_day rule). The status is worked out again
+ * from the new answers, and the review starts over: earlier approvals stay on
+ * the record as history but no longer count (the review round moves on).
+ * Reviewers are told only when the record newly goes to review. Signatures
+ * already on the record are untouched; an amendment never signs.
+ */
+export async function amendRecord(db, { session, companyId, recordId, answers, notes, pdfReceipt, deps }) {
+  const cid = asId(companyId);
+  const record = await loadRecord(db, recordId, cid);
+  const own = authorRosterId(session);
+  if (own == null || !same(record.submitted_by_roster_id, own)) throw new EngineError(403, 'Only the person who filed this can amend it.');
+
+  const version = await one(db.from('document_versions').select('*').eq('id', record.version_id), 'read the version');
+  if (!version) throw new EngineError(404, 'Document not found.');
+  const content = await readVersionContent(db, version);
+  const block = amendBlock(record, content.rules);
+  if (block) throw new EngineError(409, block);
+  const denied = await requireAssignment(db, { ...session, companyId: cid }, engineKey(record.definition_id), SUBMIT);
+  if (denied) throw new EngineError(denied.status, denied.error);
+
+  const oldAnswers = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the earlier answers');
+  const keepPath = new Map(oldAnswers.filter((o) => o.file_path).map((o) => [o.field_key, o.file_path]));
+  const KEEP = '__keep_existing_file__';
+  const sent = answers && typeof answers === 'object' && !Array.isArray(answers) ? { ...answers } : {};
+  for (const f of content.fields) {
+    if (fieldTypeInfo(f.field_type)?.value === 'file' && keepPath.has(f.field_key) && (sent[f.field_key] == null || sent[f.field_key] === '')) sent[f.field_key] = KEEP;
+  }
+  const resolveFile = (raw, field) => (raw === KEEP ? (keepPath.get(field.field_key) || null) : deps.resolveFile(raw, field));
+  const ids = await resolveIdAnswers(db, { companyId: cid, session, fields: content.fields, answers: sent, deps });
+  if (ids.error) throw new EngineError(ids.status || 400, ids.error);
+  const checked = validateAnswers(content.fields, sent, { notes, resolveFile, resolved: ids.resolved });
+  if (checked.error) throw new EngineError(400, checked.error);
+
+  const pdfPath = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
+  const nextStatus = reviewApplies(content.rules, checked.rows) ? 'pending_approval' : 'submitted';
+  const nowIso = new Date().toISOString();
+  const claimed = await updated(
+    db.from('document_records').update({
+      status: nextStatus, review_step: 0, review_round: (Number(record.review_round) || 0) + 1, returned_reason: null, review_alerted_at: null,
+      updated_at: nowIso, ...(nextStatus === 'pending_approval' ? { submitted_at: nowIso } : {}), ...(pdfPath ? { pdf_path: pdfPath } : {}),
+    }).eq('id', record.id).eq('company_id', cid).eq('status', record.status),
+    'amend',
+  );
+  if (claimed.length === 0) throw new EngineError(409, 'This document changed. Open it again.');
+  try {
+    await must(db.from('document_answers').delete().eq('record_id', record.id), 'replace the answers');
+    if (checked.rows.length > 0) {
+      await must(db.from('document_answers').insert(checked.rows.map((x) => ({ ...x, record_id: record.id }))), 'save the answers');
+    }
+  } catch (e) {
+    await db.from('document_records').update({ status: record.status, review_round: record.review_round, review_step: record.review_step, pdf_path: record.pdf_path, updated_at: record.updated_at }).eq('id', record.id).eq('company_id', cid);
+    throw e;
+  }
+  // Escalations are re-checked against the new answers. People are told only
+  // when the record newly goes to review; ordinary edits stay quiet.
+  try {
+    const ctx = await loadFollowUpContext(db, { ...record, company_id: cid });
+    const matches = matchRoutes(answerRoutes(ctx.rules), ctx.answerRows);
+    const created = await createEscalations(db, { companyId: cid, record, matches });
+    const muted = ctx.setting.owner_muted === true;
+    if (nextStatus === 'pending_approval' && record.status !== 'pending_approval') {
+      await notifyRecord(db, deps, { companyId: cid, definition: ctx.definition, record, plan: notifyPlan(ctx.rules), ownerMuted: muted });
+    }
+    if (created.length > 0) await notifyEscalations(db, deps, { companyId: cid, definition: ctx.definition, matches: created, ownerMuted: muted });
+  } catch (e) {
+    console.error('documents: amend follow-ups failed:', e && e.message);
+  }
+  return { status: nextStatus };
+}
+
+/**
+ * Replaces a record's PDF with one redrawn after an approval, so the file
+ * carries the approval. Only the person who gave an approval on this record in
+ * its current round may do it, and the receipt is resolved like every other
+ * (a PDF this server issued for this company). Anyone else, or a forged
+ * receipt, changes nothing.
+ */
+export async function setRecordPdf(db, { session, companyId, recordId, pdfReceipt, deps }) {
+  const cid = asId(companyId);
+  const record = await loadRecord(db, recordId, cid);
+  const me = authorRosterId(session);
+  if (me == null) throw new EngineError(403, 'Not allowed.');
+  const round = Number(record.review_round) || 0;
+  const mine = (await many(db.from('document_signatures').select('signer_roster_id, meta').eq('record_id', record.id).eq('kind', 'approval'), 'read the approvals'))
+    .filter((g) => same(g.signer_roster_id, me) && (Number(g.meta?.round) || 0) === round);
+  if (mine.length === 0) throw new EngineError(403, 'Only a reviewer who approved this can update its PDF.');
+  if (record.status !== 'pending_approval' && record.status !== 'approved') throw new EngineError(409, 'This document is not open for a PDF update.');
+  // Same reach as reviewing: losing the view assignment or scope ends it.
+  if (session.role !== 'worker') {
+    const viewDenied = await requireAssignment(db, { ...session, companyId: cid }, engineKey(record.definition_id), VIEW);
+    if (viewDenied) throw new EngineError(viewDenied.status, viewDenied.error);
+    const out = await scopeRecords(db, session, [record]);
+    if (out.denied || out.records.length === 0) throw new EngineError(403, 'Not allowed.');
+  }
+  const path = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
+  if (!path) throw new EngineError(400, 'That PDF is not valid.');
+  await must(db.from('document_records').update({ pdf_path: path, updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid), 'save the PDF');
+  return { ok: true };
+}
+
 /** The author signs a record they saved unsigned. Anyone else is refused. */
 export async function signNow(db, { session, companyId, recordId, signature, pdfReceipt, deps }) {
   const cid = asId(companyId);
@@ -985,11 +1161,21 @@ export async function myInbox(db, { session, companyId }) {
   if (!cid) throw new EngineError(400, 'Missing company id.');
   const own = authorRosterId(session);
   const mine = [];
+  const amendable = [];
   if (own != null) {
     const returned = await many(db.from('document_records').select('*').eq('company_id', cid).eq('submitted_by_roster_id', own).eq('status', 'returned').order('updated_at', { ascending: false }).limit(100), 'read your returned documents');
     returned.forEach((r) => mine.push({ kind: 'returned', recordId: r.id, definitionId: r.definition_id, reason: r.returned_reason || null, at: r.updated_at }));
     const unsigned = await many(db.from('document_records').select('*').eq('company_id', cid).eq('submitted_by_roster_id', own).eq('awaiting_signature', true).is('unsigned_closed_at', null).limit(100), 'read your unsigned documents');
     unsigned.forEach((r) => mine.push({ kind: 'sign', recordId: r.id, definitionId: r.definition_id, at: r.signature_requested_at }));
+    // Filed today and allowed to be changed (not counted: nothing is waiting on them).
+    const todays = await many(db.from('document_records').select('*').eq('company_id', cid).eq('submitted_by_roster_id', own).gte('created_at', startOfToday().toISOString()).order('created_at', { ascending: false }).limit(50), 'read your documents from today');
+    const open = todays.filter((r) => AMENDABLE_STATUSES.includes(r.status) && !r.unsigned_closed_at && r.awaiting_signature !== true);
+    if (open.length > 0) {
+      const rules = await many(db.from('document_rules').select('*').in('version_id', [...new Set(open.map((r) => r.version_id))]), 'read the rules');
+      for (const r of open) {
+        if (amendAllowed(rules.filter((x) => same(x.version_id, r.version_id)))) amendable.push({ kind: 'amend', recordId: r.id, definitionId: r.definition_id, at: r.created_at });
+      }
+    }
   }
 
   const review = [];
@@ -1024,7 +1210,7 @@ export async function myInbox(db, { session, companyId }) {
       }
     }
   }
-  return { mine, review, counts: { mine: mine.length, review: review.length, total: mine.length + review.length } };
+  return { mine, amendable, review, counts: { mine: mine.length, review: review.length, total: mine.length + review.length } };
 }
 
 // ── Escalations ────────────────────────────────────────────────────────────

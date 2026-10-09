@@ -12,9 +12,10 @@ import { ArrowLeft, AlertTriangle, CheckCircle2, Loader2, PenLine, RotateCcw } f
 // documents they saved to sign afterwards. Needs a connection; nothing here
 // is queued offline.
 
-export default function EngineWorkerInbox({ token, companyId, companyName, userName, userId, titles = {}, onBack, onCount }) {
+export default function EngineWorkerInbox({ token, companyId, companyName, userName, userId, titles = {}, onBack, onCount, onAmendCount }) {
   const s = buildFormStyles(C, FONT, RAD, SHAD, C.orange);
   const [items, setItems] = useState(null);
+  const [amendable, setAmendable] = useState([]);
   const [err, setErr] = useState("");
   const [fixing, setFixing] = useState(null); // { recordId, definitionId }
   const [signing, setSigning] = useState(null); // { recordId, definitionId }
@@ -23,13 +24,15 @@ export default function EngineWorkerInbox({ token, companyId, companyName, userN
     try {
       const out = await callDocuments(token, "my_inbox", { companyId });
       setItems(out.mine || []);
+      setAmendable(out.amendable || []);
+      onAmendCount && onAmendCount((out.amendable || []).length);
       onCount && onCount(out.counts?.mine || 0);
     } catch (e) { setErr(e.message || "Couldn't load your inbox."); setItems([]); }
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
 
   if (fixing) {
-    return <EngineDocumentForm companyId={companyId} companyName={companyName} userName={userName} userId={userId} definitionId={fixing.definitionId} resubmitRecordId={fixing.recordId} token={token} onBack={() => { setFixing(null); load(); }} />;
+    return <EngineDocumentForm companyId={companyId} companyName={companyName} userName={userName} userId={userId} definitionId={fixing.definitionId} resubmitRecordId={fixing.recordId} amend={fixing.amend === true} token={token} onBack={() => { setFixing(null); load(); }} />;
   }
   if (signing) {
     return <SignPanel s={s} token={token} companyId={companyId} companyName={companyName} userName={userName} item={signing} title={titles[signing.definitionId]} onBack={() => { setSigning(null); load(); }} />;
@@ -60,6 +63,18 @@ export default function EngineWorkerInbox({ token, companyId, companyName, userN
           )}
         </div>
       ))}
+      {amendable.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: C.text.primary, margin: "0 0 6px" }}>You can still change today</div>
+          {amendable.map((it) => (
+            <div key={`amend_${it.recordId}`} style={s.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: C.text.primary }}>{titles[it.definitionId] || "Document"}</div>
+              <div style={{ fontSize: 13, color: C.text.muted, margin: "6px 0 10px" }}>Filed {it.at ? new Date(it.at).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" }) : "today"}.</div>
+              <button style={s.btn(C.orange)} onClick={() => setFixing({ recordId: it.recordId, definitionId: it.definitionId, amend: true })}><RotateCcw size={16} /> Amend</button>
+            </div>
+          ))}
+        </div>
+      )}
       <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
     </div>
   );

@@ -12,6 +12,9 @@ import { signRows } from '../server-lib/signedUrls.js';
 import { requireCustomDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { requireLead, crewIdSet } from '../server-lib/leadAccess.js';
 import { DIRECT_SOURCES, INSPECTION_SOURCE } from '../server-lib/documentSources.js';
+import { listEngineDocuments, engineDocKey } from '../server-lib/documentEngine/companyDocs.js';
+import { listAuthoredEngineDocuments } from '../server-lib/documentEngine/authoredRecords.js';
+import { linkTargets, signTargets } from '../server-lib/documentEngine/links.js';
 import { requireAssignment, requireRecordsAccess, listVisibleRecords, listVisibleRecordsMulti, menuAccessFor, withCompletion, SUBMIT, queuedAsOf } from '../server-lib/documentAccess.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 
@@ -491,6 +494,19 @@ export default async function handler(req, res) {
         }
       }
 
+      // Unified-engine documents the company has switched on. Held to the same
+      // view assignments and scope rule as the others, then to the crew below.
+      const engineDocs = await listEngineDocuments(supabaseAdmin, companyId);
+      if (engineDocs.length) {
+        const { data: recs, error: engErr } = await supabaseAdmin.from('document_records')
+          .select('id, definition_id, site_id, created_at, pdf_path, status, awaiting_signature, signature_requested_at, unsigned_closed_at, submitted_by_roster_id')
+          .eq('company_id', companyId).in('definition_id', engineDocs.map((d) => d.id)).order('created_at', { ascending: false }).limit(LIMIT);
+        if (!engErr) {
+          const visible = await listVisibleRecordsMulti(supabaseAdmin, session, recs || [], (r) => engineDocKey(r.definition_id));
+          if (!visible.denied) visible.records.forEach(r => collected.push({ ...r, _src: { type: 'engine', title: (engineDocs.find((d) => d.id === r.definition_id) || {}).title || 'Document', sub: () => '' } }));
+        }
+      }
+
       // Only what the crew itself wrote. Rule A also places a record by its
       // site, which would let a lead see a supervisor's or an Owner's record
       // at their site, or an anonymous or unstamped one.
@@ -507,6 +523,9 @@ export default async function handler(req, res) {
       }
       const signed = await signRows(supabaseAdmin, top.map(r => ({ id: `${r._src.type}:${r.id}`, pdf_url: r.pdf_url })), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
       const pdfById = new Map(signed.map(r => [r.id, r.pdf_url]));
+      // Engine records keep a plain storage path, signed here only inside the company's own folder.
+      const engineTargets = top.filter(r => r._src.type === 'engine').flatMap(r => linkTargets({ companyId, record: { pdf_path: r.pdf_path }, answers: [], signatures: [] }).map(t => ({ ...t, id: `engine:${r.id}` })));
+      (await signTargets(supabaseAdmin, engineTargets, 300)).forEach((url, id) => pdfById.set(id, url));
       return res.status(200).json({
         documents: top.map(r => ({
           id: r.id, type: r._src.type, title: r._src.title, subtitle: r._src.sub(r) || '',
@@ -591,8 +610,14 @@ export default async function handler(req, res) {
         ...(portalRows || []).filter(r => nameMatches(r.submitted_by)).map(r => ({ id: r.id, type: 'portalform', title: portalDocMap[r.document_id] || 'Portal Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
       ];
 
+      // Unified-engine documents this person filed (matched by roster id, not
+      // by typed name). They arrive with a signed link already, so they join
+      // after the legacy rows are signed.
+      const engineMine = session.userId ? await listAuthoredEngineDocuments(supabaseAdmin, session, { companyId: session.companyId, authorId: session.userId, limit: FETCH_LIMIT }) : [];
+
       documents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      const signed = await signRows(supabaseAdmin, documents.slice(0, 100), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const signedLegacy = await signRows(supabaseAdmin, documents.slice(0, 100), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const signed = [...signedLegacy, ...engineMine].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 100);
 
       return res.status(200).json({ documents: signed });
     }

@@ -15,6 +15,7 @@ import { retiredEquipmentIds, withoutRetiredEquipment } from '../server-lib/equi
 import { sendEmail } from '../server-lib/email.js';
 import { requireDocKey, isDocKeyActive } from '../server-lib/docKeyGate.js';
 import { signRows } from '../server-lib/signedUrls.js';
+import { listAuthoredEngineDocuments } from '../server-lib/documentEngine/authoredRecords.js';
 import { lastOnSiteByEquipment, mountedOnByAttachment, attachmentStats, pmAllowedFor, isTowedUnit } from '../server-lib/fleetActivity.js';
 import { isFounder, canManageCompany } from '../server-lib/ownerAccess.js';
 import {
@@ -998,7 +999,10 @@ export default async function handler(req, res) {
         ...customVis.map(r => ({ id: r.id, type: 'customform', title: customFormMap[r.form_id] || 'Custom Document', subtitle: '', createdAt: r.created_at, pdf_url: r.pdf_url })),
       ];
       documents.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      const signedDocuments = await signRows(supabaseAdmin, documents.slice(0, 150), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      const signedLegacy = await signRows(supabaseAdmin, documents.slice(0, 150), [{ key: 'pdf_url', bucket: 'flha-reports' }]);
+      // Unified-engine documents this person filed, under the same view rows and scope.
+      const engineDocs = await listAuthoredEngineDocuments(supabaseAdmin, session, { companyId, authorId: id, limit: FETCH_LIMIT });
+      const signedDocuments = [...signedLegacy, ...engineDocs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 150);
 
       // Punch locations: last 60 days, not just the currently-viewed week on
       // the Time Clock tab, so a profile opened from the Roster tab (which

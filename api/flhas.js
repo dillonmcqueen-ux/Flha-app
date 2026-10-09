@@ -4,6 +4,7 @@
 // issued at login) and we double-check the caller is allowed to do what
 // they're asking before touching the database.
 
+import { sanitizeAiEditSignal } from '../server-lib/aiEditSignal.js';
 import { createClient } from '@supabase/supabase-js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
 import { sanitizeSignerRosterIds } from '../server-lib/rosterSignerScope.js';
@@ -208,26 +209,6 @@ export function deriveFlhaStatus(hazardsJson) {
     (h) => h && typeof h.risk === 'string' && h.risk.trim().toLowerCase() === 'extreme'
   );
   return hasExtreme ? 'pending_approval' : 'complete';
-}
-
-function sanitizeAiEditSignal(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const strList = (arr) => (Array.isArray(arr) ? arr : [])
-    .filter((v) => typeof v === 'string' && v.trim())
-    .slice(0, 20)
-    .map((v) => v.trim().slice(0, 200));
-  const riskChanged = (Array.isArray(raw.riskChanged) ? raw.riskChanged : [])
-    .filter((r) => r && typeof r === 'object' && typeof r.hazard === 'string')
-    .slice(0, 20)
-    .map((r) => ({
-      hazard: r.hazard.trim().slice(0, 200),
-      from: typeof r.from === 'string' ? r.from.slice(0, 20) : null,
-      to: typeof r.to === 'string' ? r.to.slice(0, 20) : null,
-    }));
-  const added = strList(raw.added);
-  const removed = strList(raw.removed);
-  if (added.length === 0 && removed.length === 0 && riskChanged.length === 0) return null;
-  return { added, removed, riskChanged };
 }
 
 // Which company an FLHA belongs to, for the founder/admin path that has no

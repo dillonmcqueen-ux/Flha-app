@@ -48,7 +48,7 @@ export default function HazardAssist({ field, answers, setMany, token, companyId
       const result = parseHazardResponse((data.content || []).map((b) => b.text || "").join(""), task, task);
       const { patch, baseline } = applyAiResult({ result, cfg, hazardKey: field.field_key, answers, taskLabel: task, addingTask: hasHazards });
       setMany(patch);
-      onBaseline && onBaseline(baseline);
+      onBaseline && onBaseline(baseline, hasHazards);
       setDesc("");
     } catch (e) { setFailed(true); }
     setBusy(false);

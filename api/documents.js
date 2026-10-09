@@ -36,9 +36,12 @@ import {
   listWorkerDocuments,
   submitRecord,
   resubmitRecord,
+  amendRecord,
+  listEngineFlhaRows,
   signNow,
   getRecord,
   getRecordLinks,
+  setRecordPdf,
   listRecords,
   reviewRecord,
   myInbox,
@@ -207,9 +210,13 @@ export default async function handler(req, res) {
     if (action === 'submit') {
       const out = await submitRecord(db, {
         session, companyId, definitionId: body.definitionId, answers: body.answers, notes: body.notes, siteId: body.siteId,
-        clientSubmissionId: body.clientSubmissionId, queuedAt: body.queuedAt, signLater: body.signLater, signature: body.signature, pdfReceipt: body.pdfReceipt, crew: body.crew, deps,
+        clientSubmissionId: body.clientSubmissionId, queuedAt: body.queuedAt, signLater: body.signLater, signature: body.signature, pdfReceipt: body.pdfReceipt, crew: body.crew, aiEditSignal: body.aiEditSignal, deps,
       });
       return res.status(200).json({ ok: true, id: out.record.id, status: out.record.status, duplicate: out.duplicate });
+    }
+    if (action === 'amend') {
+      const out = await amendRecord(db, { session, companyId, recordId: body.recordId, answers: body.answers, notes: body.notes, pdfReceipt: body.pdfReceipt, deps });
+      return res.status(200).json(out);
     }
     if (action === 'resubmit') {
       const out = await resubmitRecord(db, { session, companyId, recordId: body.recordId, answers: body.answers, notes: body.notes, pdfReceipt: body.pdfReceipt, deps });
@@ -218,6 +225,10 @@ export default async function handler(req, res) {
     if (action === 'sign_now') {
       const out = await signNow(db, { session, companyId, recordId: body.recordId, signature: body.signature, pdfReceipt: body.pdfReceipt, deps });
       return res.status(200).json({ ok: true, ...out });
+    }
+    if (action === 'set_record_pdf') {
+      const out = await setRecordPdf(db, { session, companyId, recordId: body.recordId, pdfReceipt: body.pdfReceipt, deps });
+      return res.status(200).json(out);
     }
     if (action === 'get_picker_options') {
       const out = await listPickerOptions(db, { companyId, session, kind: body.kind });
@@ -230,6 +241,9 @@ export default async function handler(req, res) {
     }
     if (action === 'list_records') {
       return res.status(200).json(await listRecords(db, { session, companyId, definitionId: body.definitionId, status: body.status, limit: body.limit }));
+    }
+    if (action === 'list_flha_rows') {
+      return res.status(200).json(await listEngineFlhaRows(db, { session, companyId, sign: (targets) => signTargets(supabaseAdmin, targets) }));
     }
     if (action === 'get_record') {
       return res.status(200).json(await getRecord(db, { session, companyId, recordId: body.recordId }));

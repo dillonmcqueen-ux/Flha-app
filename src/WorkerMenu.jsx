@@ -99,6 +99,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [engineDocuments, setEngineDocuments] = useState([]);
   const [assignedEngine, setAssignedEngine] = useState([]);
   const [engineInboxCount, setEngineInboxCount] = useState(0);
+  const [engineAmendCount, setEngineAmendCount] = useState(0);
   const [showEngineInbox, setShowEngineInbox] = useState(false);
   // Documents the Owner assigned to this person, with due dates and whether
   // they have already filled them in. Shown first on the menu.
@@ -179,7 +180,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           body: JSON.stringify({ action: "my_inbox", token, companyId }),
         });
         const data = await res.json();
-        if (res.ok) setEngineInboxCount(data.counts?.mine || 0);
+        if (res.ok) { setEngineInboxCount(data.counts?.mine || 0); setEngineAmendCount((data.amendable || []).length); }
       } catch (e) { /* no badge on a transient error */ }
     }
     loadEngineInbox();
@@ -296,7 +297,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
 
   if (showEngineInbox) {
     const titles = Object.fromEntries(engineDocuments.map(d => [d.id, d.title]));
-    return <EngineWorkerInbox token={token} companyId={companyId} companyName={companyName} userName={userName} userId={userId} titles={titles} onBack={() => setShowEngineInbox(false)} onCount={setEngineInboxCount} />;
+    return <EngineWorkerInbox token={token} companyId={companyId} companyName={companyName} userName={userName} userId={userId} titles={titles} onBack={() => setShowEngineInbox(false)} onCount={setEngineInboxCount} onAmendCount={setEngineAmendCount} />;
   }
 
   if (showSign) {
@@ -720,6 +721,26 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: C.status.warning.text }}>Company documents need you</div>
               <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{engineInboxCount} sent back or waiting for your signature</div>
+            </div>
+            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+          </div>
+        )}
+
+        {engineInboxCount === 0 && engineAmendCount > 0 && (
+          <div
+            onClick={() => setShowEngineInbox(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+              background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px",
+              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
+            }}
+          >
+            <div style={s.iconTile(C.orange)}>
+              <Inbox size={22} color={C.orange} strokeWidth={2.25} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>Change a document from today</div>
+              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{engineAmendCount} you can still amend</div>
             </div>
             <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
           </div>

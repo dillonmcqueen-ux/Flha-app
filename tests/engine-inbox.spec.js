@@ -82,4 +82,36 @@ test.describe('Engine document inbox', () => {
     expect(re.answers.safe).toBe('yes');
     expect(re.answers.pic).toBeUndefined();
   });
+
+  test('a worker amends a document filed earlier today and the change is saved', async ({ page }) => {
+    await mockWorkerApis(page, { userId: 12 });
+    await mockExternalServices(page);
+    const calls = await mockEngineApi(page, (b) => {
+      if (b.action === 'list_worker_documents') return { documents: DOCS };
+      if (b.action === 'my_inbox') return { mine: [], amendable: [{ kind: 'amend', recordId: 9, definitionId: 5, at: new Date().toISOString() }], review: [], counts: { mine: 0, review: 0, total: 0 } };
+      if (b.action === 'get_record') return {
+        record: { id: 9, definition_id: 5, version_id: 11, status: 'submitted', review_round: 0, site_id: null },
+        answers: [{ field_key: 'safe', value_text: 'no', field_type: 'yesno', question_text: 'Is the yard safe?' }],
+        signatures: [],
+      };
+      if (b.action === 'get_document') return {
+        definition: { id: 5, title: 'Yard Check' }, versionId: 11, layout: {}, signatureSteps: [],
+        fields: [{ field_key: 'safe', label: 'Is the yard safe?', field_type: 'yesno', required: true, config: {} }],
+      };
+      if (b.action === 'get_record_links') return { signatures: {} };
+      if (b.action === 'create_upload_url') return { ok: true, path: 'x', uploadToken: 't', receipt: `rcpt-${b.kind}` };
+      if (b.action === 'amend') return { status: 'submitted' };
+      return {};
+    });
+    await loginAsWorker(page);
+    await page.getByText('Change a document from today').click();
+    await page.getByRole('button', { name: /Amend/ }).click();
+    await expect(page.getByRole('note')).toContainText('Amending');
+    await page.getByRole('button', { name: 'Yes', exact: true }).click();
+    await page.getByRole('button', { name: /Save changes/ }).click();
+    await expect(page.getByText('Submitted')).toBeVisible({ timeout: 15000 });
+    const am = calls.find((c) => c.action === 'amend');
+    expect(am).toMatchObject({ recordId: 9 });
+    expect(am.answers.safe).toBe('yes');
+  });
 });

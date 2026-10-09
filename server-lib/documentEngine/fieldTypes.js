@@ -74,6 +74,8 @@ export const ENGINE_RULE_TYPES = [
   'notify',
   'corrective_action',
   'signature_step',
+  // The author may change what they filed until the end of the day it was filed.
+  'amend_same_day',
 ];
 
 export const MAX_SHORT_TEXT = 2000;

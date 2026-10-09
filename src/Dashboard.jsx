@@ -2644,7 +2644,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   const deleteSelected = async () => {
-    const ids = [...selectedIds];
+    const all = [...selectedIds];
+    // FLHAs filed as company documents are not deleted from here.
+    const ids = all.filter(id => !String(id).startsWith("engine:"));
+    if (ids.length < all.length) window.alert("FLHAs filed as company documents can't be deleted from this list. They were left out.");
     if (ids.length === 0) return;
     if (!window.confirm(`Delete ${ids.length} selected FLHA${ids.length > 1 ? "s" : ""}? This cannot be undone.`)) return;
     try {
@@ -2654,7 +2657,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         body: JSON.stringify({ action: "delete", token, ids }),
       });
     } catch (e) { /* leave list as-is if the request fails */ }
-    setFlhas(prev => prev.filter(f => !selectedIds.has(f.id)));
+    setFlhas(prev => prev.filter(f => !ids.includes(f.id)));
     setSelectedIds(new Set());
   };
 
@@ -2718,8 +2721,23 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         ss = sopResults.flat();
       } catch (e) { /* leave ss empty if the request fails */ }
 
+      // FLHAs filed through the unified engine, read into the same list so the
+      // counters, Analytics and the FLHA tab count them. A company without one
+      // (or a call that fails) simply adds nothing.
+      let engineFlhas = [];
+      try {
+        const lists = await Promise.all(visibleCompaniesRaw.map(async (c) => {
+          try {
+            const res = await fetch("/api/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_flha_rows", token, companyId: c.id }) });
+            const data = res.ok ? await res.json() : {};
+            return data.flhas || [];
+          } catch (e) { return []; }
+        }));
+        engineFlhas = lists.flat();
+      } catch (e) { /* leave empty */ }
+
       setCompanies(visibleCompaniesRaw);
-      setFlhas(fs);
+      setFlhas([...fs, ...engineFlhas]);
       setInspections(insp);
       setToolboxTalks(tbt);
       setNearMisses(nm);
@@ -3147,7 +3165,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
   const engineInbox = useEngineInbox(token, selectedCompany, !!selectedCompany);
   const TAB_VISIBLE = {
-    flhas: isDocActive("flha"),
+    flhas: isDocActive("flha") || flhas.some(f => f.source === "engine" && f.company_id === selectedCompany),
     inspections: isDocActive("inspection"),
     toolbox: isDocActive("toolbox"),
     nearmiss: isDocActive("nearmiss"),
@@ -5896,7 +5914,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                         onClick={e => e.stopPropagation()}
                       />
                       <RowIconTile icon={ClipboardList} color={f.status === "pending_approval" || f.awaiting_signature === true ? C.status.warning.text : C.status.success.text} />
-                      <div style={{ flex: 1, minWidth: 0 }} onClick={() => setSelectedFlha(f)}>
+                      <div style={{ flex: 1, minWidth: 0 }} onClick={() => (f.source === "engine" ? (f.pdf_url ? window.open(f.pdf_url, "_blank", "noopener") : setActiveTab("enginedocs")) : setSelectedFlha(f))}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 700, fontSize: 14, color: C.text.primary }}>{f.worker_name || "Unknown Worker"}</div>
@@ -5913,7 +5931,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
                             {medRisk > 0 && <RiskBadge risk="Medium" />}
                             {extremeRisk === 0 && highRisk === 0 && medRisk === 0 && <RiskBadge risk="Low" />}
                             <div style={{ fontSize: 11, color: f.pdf_url ? C.text.muted : C.text.faint, display: "flex", alignItems: "center", gap: 3 }}>
-                              {f.pdf_url && <FileText size={11} />}{f.pdf_url ? "PDF ready" : "No PDF"} · {hazards.length} hazards →
+                              {f.pdf_url && <FileText size={11} />}{f.pdf_url ? "PDF ready" : "No PDF"} · {hazards.length} hazards{f.source === "engine" ? " · company document" : ""} →
                             </div>
                           </div>
                         </div>
@@ -6579,7 +6597,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
 
         {activeTab === "enginedocs" && TAB_VISIBLE.enginedocs && (
-          <EngineInbox token={token} companyId={selectedCompany} docs={engineInbox.docs} inbox={engineInbox.inbox} escalations={engineInbox.escalations} onChanged={engineInbox.reload} />
+          <EngineInbox token={token} companyId={selectedCompany} companyName={company?.name || ""} docs={engineInbox.docs} inbox={engineInbox.inbox} escalations={engineInbox.escalations} onChanged={engineInbox.reload} />
         )}
 
         {activeTab === "portal" && TAB_VISIBLE.portal && (

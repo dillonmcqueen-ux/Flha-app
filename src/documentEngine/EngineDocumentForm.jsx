@@ -1,12 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "../theme";
 import { buildFormStyles, disabledBg, bannerStyle } from "../FormKit";
 import { loadDraft, clearDraft, useDraftAutosave } from "../useDraftAutosave.js";
 import { enqueueSubmission } from "../offlineQueue.js";
 import { callDocuments } from "./builderApi.js";
 import { initialAnswers, clientProblems, newClientSubmissionId, isHidden, RISKS, emptyHazard } from "./formModel.js";
-import { submitEngineDocument, resubmitEngineDocument, loadRecordForWorker } from "./engineSubmit.js";
+import { submitEngineDocument, resubmitEngineDocument, amendEngineDocument, loadRecordForWorker } from "./engineSubmit.js";
 import { rowsToForm, hasFiles } from "./recordView.js";
+import { computeFlhaEditSignal } from "../flhaHazardAi.js";
 import SignaturePad from "./SignaturePad.jsx";
 import PickerControl from "./PickerControl.jsx";
 import HazardAssist from "./HazardAssist.jsx";
@@ -24,7 +25,10 @@ async function postJson(action, token, extra) {
   return res.ok ? await res.json() : {};
 }
 
-export default function EngineDocumentForm({ companyId, companyName, userName = "", userId = null, definitionId, resubmitRecordId = null, onBack, token }) {
+export default function EngineDocumentForm({ companyId, companyName, userName = "", userId = null, definitionId, resubmitRecordId: fixRecordId = null, amend = false, onBack, token }) {
+  // One saved record opened for changes: either sent back (resubmit) or amended the day it was filed.
+  const resubmitRecordId = fixRecordId;
+  const [loadedRec, setLoadedRec] = useState(null);
   const [doc, setDoc] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [sites, setSites] = useState([]);
@@ -33,7 +37,8 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const [answers, setAnswers] = useState({});
   const [notes, setNotes] = useState({});
   const [signature, setSignature] = useState(null);
-  const [crew, setCrew] = useState([]); // [{ rosterId, name, signature }], not kept in drafts (signature images are large)
+  const baselineRef = useRef([]); // the AI's hazards as generated, to see what the worker changed
+  const [crew, setCrew] = useState([]); // [{ rosterId, name, signature }], kept in the draft like the built-in FLHA keeps it
   const [step, setStep] = useState("form"); // form | queued | done
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -54,6 +59,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
         if (resubmitRecordId) {
           const rec = await loadRecordForWorker(token, companyId, resubmitRecordId, callDocuments);
           if (!live) return;
+          setLoadedRec(rec);
           if (!rec.sameVersion) throw new Error("This document was updated after you filed it. Ask your supervisor to cancel it and file it again.");
           setDoc(rec.doc);
           const prefill = rowsToForm(rec.answers);
@@ -61,7 +67,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
           setNotes(prefill.notes);
           setSiteId(rec.record.site_id ? String(rec.record.site_id) : "");
           setKeptFileKeys(rec.answers.filter((r) => r.file_path).map((r) => r.field_key));
-          setReturnedNote({ reason: rec.record.returned_reason || "", hadFiles: hasFiles(rec.answers) });
+          setReturnedNote(amend ? { reason: "", hadFiles: hasFiles(rec.answers), amending: true } : { reason: rec.record.returned_reason || "", hadFiles: hasFiles(rec.answers) });
         } else {
           const got = await callDocuments(token, "get_document", { companyId, definitionId });
           if (!live) return;
@@ -70,6 +76,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
           setAnswers({ ...initialAnswers(got.fields), ...(draft?.answers || {}) });
           if (draft?.notes) setNotes(draft.notes);
           if (draft?.siteId) setSiteId(draft.siteId);
+          if (Array.isArray(draft?.crew)) setCrew(draft.crew);
         }
       } catch (e) { if (live) setLoadError(e.message || "This document is not available."); }
       setRestored(true);
@@ -85,7 +92,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
     return () => { live = false; };
   }, [companyId, definitionId, resubmitRecordId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useDraftAutosave("engineform", scope, { answers, notes, siteId }, restored && !!doc && step === "form");
+  useDraftAutosave("engineform", scope, { answers, notes, siteId, crew }, restored && !!doc && step === "form");
 
   const fields = doc?.fields || [];
   const needsSignature = (doc?.signatureSteps || []).some((x) => x.signer === "worker");
@@ -95,6 +102,13 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const setNote = (k, v) => setNotes((p) => ({ ...p, [k]: v }));
   const siteName = sites.find((x) => String(x.id) === String(siteId))?.name || "";
 
+  // What the worker changed in the AI's hazards, for the Brain. Null when no AI was used.
+  const aiEditSignalFor = () => {
+    const hz = fields.find((f) => f.field_type === "hazard_table" && f.config?.aiAssist);
+    if (!hz || answers[hz.config.aiAssist.flagField] !== "yes") return null;
+    return computeFlhaEditSignal(baselineRef.current, Array.isArray(answers[hz.field_key]) ? answers[hz.field_key] : []);
+  };
+
   const submit = async (signLater) => {
     setShowProblems(true);
     if (problems.length) return;
@@ -102,7 +116,9 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
       setSaving(true); setSaveError("");
       const now = new Date();
       try {
-        await resubmitEngineDocument({ title: doc.definition.title, layout: doc.layout, fields, answers, notes, siteName, companyName, companyLogo, submittedBy: userName, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"), status: "pending_approval" }, resubmitRecordId, token);
+        const base = { title: doc.definition.title, layout: doc.layout, fields, answers, notes, siteName, companyName, companyLogo, submittedBy: userName, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA") };
+        if (amend) await amendEngineDocument({ ...base, companyId }, resubmitRecordId, loadedRec?.record, loadedRec?.signatures || [], token);
+        else await resubmitEngineDocument({ ...base, status: "pending_approval" }, resubmitRecordId, token);
         setStep("done");
       } catch (e) { setSaveError(e.isNetworkFailure ? "No connection. Try again when you are back online." : e.message); }
       setSaving(false);
@@ -113,7 +129,8 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
     const now = new Date();
     const payload = {
       definitionId, title: doc.definition.title, layout: doc.layout, fields, answers, notes, siteId, siteName, companyName, companyLogo,
-      submittedBy: userName, signature: signLater ? null : signature, signLater, crew, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"),
+      submittedBy: userName, signature: signLater ? null : signature, signLater, crew,
+      aiEditSignal: aiEditSignalFor(), dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"),
     };
     const id = newClientSubmissionId();
     const queue = async () => { await enqueueSubmission("engineform", id, payload); clearDraft("engineform", scope); setStep("queued"); };
@@ -192,7 +209,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
         const rows = Array.isArray(v) ? v : [];
         const upd = (i, p) => set(k, rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
         return (<div>
-          {f.config?.aiAssist && <HazardAssist field={f} answers={answers} setMany={setMany} token={token} companyId={companyId} companyName={companyName} workerName={userName} siteName={siteName} />}
+          {f.config?.aiAssist && <HazardAssist field={f} answers={answers} setMany={setMany} token={token} companyId={companyId} companyName={companyName} workerName={userName} siteName={siteName} onBaseline={(b, adding) => { baselineRef.current = adding ? [...baselineRef.current, ...b] : b; }} />}
           {rows.map((r, i) => (
           <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: 10, marginBottom: 8 }}>
             <input aria-label={`Hazard ${i + 1}`} style={s.input} placeholder="Hazard" value={r.hazard || ""} onChange={(e) => upd(i, { hazard: e.target.value })} />
@@ -239,7 +256,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
     <>
       {returnedNote && (
         <div role="note" style={bannerStyle(C, RAD, "warning")}><AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <span><strong>Sent back:</strong> {returnedNote.reason || "No reason given."}{returnedNote.hadFiles ? " Photos and files you already added stay unless you add new ones." : ""}</span></div>
+          <span>{returnedNote.amending ? <><strong>Amending today's document.</strong> If it now needs review it goes back to your supervisor.</> : <><strong>Sent back:</strong> {returnedNote.reason || "No reason given."}</>}{returnedNote.hadFiles ? " Photos and files you already added stay unless you add new ones." : ""}</span></div>
       )}
       {!resubmitRecordId && <div style={s.card}>
         <label style={s.label} htmlFor="eng-site">Job site</label>
@@ -277,7 +294,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
       {showProblems && problems.length > 0 && <div role="alert" style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} style={{ flexShrink: 0 }} /><span>{problems[0]}{problems.length > 1 ? ` (and ${problems.length - 1} more)` : ""}</span></div>}
       {saveError && <div role="alert" style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} style={{ flexShrink: 0 }} /><span>{saveError}</span></div>}
       <button style={s.btn(saving ? disabledBg(C) : C.status.success.solid)} disabled={saving} onClick={() => submit(false)}>
-        {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting...</> : <><CheckCircle2 size={16} /> {resubmitRecordId ? "Send back for review" : needsSignature ? "Sign and submit" : "Submit"}</>}
+        {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting...</> : <><CheckCircle2 size={16} /> {resubmitRecordId ? (amend ? "Save changes" : "Send back for review") : needsSignature ? "Sign and submit" : "Submit"}</>}
       </button>
       {needsSignature && userId && !resubmitRecordId && <button style={s.ghost} disabled={saving} onClick={() => submit(true)}>Submit now, sign later</button>}
       <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
