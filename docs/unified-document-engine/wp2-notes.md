@@ -31,12 +31,12 @@ Rules that are enforced and tested:
 | Rules are stored, not executed | Only `reviewer_step` (record starts pending approval) and `signature_step` with signer `worker` (signature required) are read. Routing, notifications, corrective actions, Brain signals do nothing yet | WP3 |
 | Crew lead approval rule | A worker who is a crew lead cannot review engine records. The general reviewer rule (not own, crew only, no lead on lead, still pending) is not built | WP3 |
 | Id-bearing answers refused | `equipment_picker`, `attachment_picker`, `site_picker`, `person_picker`, `linked_document` and `crew_signatures` cannot be answered. Storing them unchecked would let a later reader follow another company's id | WP7 (validators per picker) |
-| Crew signature authenticity | The server proves the crew member exists and is active, and uses their real name. It cannot prove that person signed. A client can attach any signature image to a coworker | Decision needed, see below |
+| Crew signature authenticity | The server proves the crew member exists and is active, and uses their real name. It cannot prove that person signed. A client can attach any signature image to a coworker | Accepted for now, see below |
 | Assignments | Submit checks only that the document is switched on. `document_assignments` does not know engine documents, so narrowing and `hide_unassigned` do not apply | WP7 |
 | Word and Excel attachments | Attachment uploads reuse the `portal-attachments` bucket (png, jpg, jpeg, webp, pdf). Word and Excel need a new private bucket | WP7 |
 | Raw storage paths in responses | `get_record` and `get_document` return stored paths, not signed links. Signing must be added from these scoped rows only | WP7 |
 | Auditor view and crew list | Engine records are not in `DIRECT_SOURCES`, so auditors and crew leads cannot see them yet | WP7 |
 
-## Decision needed
+## Decision made
 
-Crew signatures: to make them unforgeable, each crew member has to sign themselves (a co-sign step on their own device, like a reviewer step), instead of the author attaching their image. That is a bigger flow than FLHA has today. Options: keep parity with FLHA for now (roster validated, name from roster), or build co-signing in WP3.
+Crew signatures: keep parity with FLHA for now (Dillon, 2026-10-09). The server checks the crew member is on this company's active roster and uses the roster name, but the author attaches the signature image. A co-sign step where each crew member signs on their own device is not built. Revisit if a customer or auditor needs signatures that cannot be attached by someone else.
