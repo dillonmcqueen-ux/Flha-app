@@ -44,5 +44,5 @@ test('a replayed submit cannot create a second record', () => {
 });
 
 test('contains no em dash', () => {
-  assert.equal(sql.includes('—'), false);
+  assert.equal(sql.includes('\u2014'), false);
 });
