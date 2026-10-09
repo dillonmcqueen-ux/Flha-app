@@ -48,6 +48,15 @@ const FLHAS = [
   { id: 103, company_id: 7, worker_name: 'Lead Lee', job_site: 'Pit', site_id: null, status: 'pending_approval', submitted_by_roster_id: 10, created_at: '2026-10-03T10:00:00Z', hazards_json: {}, pdf_url: null },
 ];
 
+const ENGINE_SETTINGS = [{ company_id: 7, definition_id: 55, is_enabled: true }];
+const ENGINE_DEFS = [{ id: 55, title: 'Yard Check', company_id: 7, current_version_id: 1, archived_at: null }];
+const ENGINE_RECORDS = [
+  { id: 1, company_id: 7, definition_id: 55, site_id: null, status: 'submitted', awaiting_signature: false, created_at: '2026-10-06T10:00:00Z', pdf_path: '7/abc-doc.pdf', submitted_by_roster_id: 11 },
+  { id: 2, company_id: 7, definition_id: 55, site_id: null, status: 'submitted', awaiting_signature: false, created_at: '2026-10-06T11:00:00Z', pdf_path: null, submitted_by_roster_id: 12 },
+  { id: 3, company_id: 7, definition_id: 55, site_id: null, status: 'pending_approval', awaiting_signature: false, created_at: '2026-10-06T12:00:00Z', pdf_path: null, submitted_by_roster_id: 2 },
+  { id: 4, company_id: 8, definition_id: 55, site_id: null, status: 'submitted', awaiting_signature: false, created_at: '2026-10-06T13:00:00Z', pdf_path: null, submitted_by_roster_id: 11 },
+];
+
 let assignments = [];
 let nextId = 500;
 const inserted = { daily_reports: [], fuel_logs: [] };
@@ -69,8 +78,13 @@ const server = http.createServer(async (req, res) => {
     (eq('active') === null || String(r.active) === eq('active')) &&
     (eq('role') === null || r.role === eq('role')) &&
     (eq('awaiting_signature') === null || String(r.awaiting_signature === true) === eq('awaiting_signature')) &&
+    (eq('is_enabled') === null || String(r.is_enabled) === eq('is_enabled')) &&
+    (inList('definition_id') === null || inList('definition_id').includes(String(r.definition_id))) &&
     (inList('id') === null || inList('id').includes(String(r.id))));
 
+  if (table === 'company_documents') return send(200, filt(ENGINE_SETTINGS));
+  if (table === 'document_definitions') return send(200, filt(ENGINE_DEFS));
+  if (table === 'document_records') return send(200, filt(ENGINE_RECORDS));
   if (table === 'roster') return wantsObject ? send(200, filt(ROSTER)[0] || {}) : send(200, filt(ROSTER));
   if (table === 'company_document_settings') return send(200, filt(SETTINGS).filter(s => !eq('document_key') || s.document_key === eq('document_key')));
   if (table === 'flhas') {
@@ -282,4 +296,16 @@ test('a crew document saved to sign afterwards is labelled for the lead, not hid
   } finally {
     delete row.awaiting_signature; delete row.signature_requested_at;
   }
+});
+
+
+test('the crew list includes engine documents the crew wrote, and only those', async () => {
+  const out = await run(customforms, { action: 'get_crew_documents', token: LEAD() });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  const engine = out.body.documents.filter(d => d.type === 'engine');
+  // Crew Cam (11) is on the crew. Other Oz (12), the supervisor (2) and another company's record are not.
+  assert.deepEqual(engine.map(d => d.id), [1]);
+  assert.equal(engine[0].title, 'Yard Check');
+  assert.equal(engine[0].author, 'Crew Cam');
+  assert.equal(engine[0].status, 'submitted');
 });

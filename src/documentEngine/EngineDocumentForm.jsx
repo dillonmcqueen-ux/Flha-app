@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD } from "../theme";
 import { buildFormStyles, disabledBg, bannerStyle } from "../FormKit";
 import { loadDraft, clearDraft, useDraftAutosave } from "../useDraftAutosave.js";
@@ -7,6 +7,7 @@ import { callDocuments } from "./builderApi.js";
 import { initialAnswers, clientProblems, newClientSubmissionId, isHidden, RISKS, emptyHazard } from "./formModel.js";
 import { submitEngineDocument, resubmitEngineDocument, loadRecordForWorker } from "./engineSubmit.js";
 import { rowsToForm, hasFiles } from "./recordView.js";
+import { computeFlhaEditSignal } from "../flhaHazardAi.js";
 import SignaturePad from "./SignaturePad.jsx";
 import PickerControl from "./PickerControl.jsx";
 import HazardAssist from "./HazardAssist.jsx";
@@ -33,6 +34,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const [answers, setAnswers] = useState({});
   const [notes, setNotes] = useState({});
   const [signature, setSignature] = useState(null);
+  const baselineRef = useRef([]); // the AI's hazards as generated, to see what the worker changed
   const [crew, setCrew] = useState([]); // [{ rosterId, name, signature }], not kept in drafts (signature images are large)
   const [step, setStep] = useState("form"); // form | queued | done
   const [saving, setSaving] = useState(false);
@@ -95,6 +97,13 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const setNote = (k, v) => setNotes((p) => ({ ...p, [k]: v }));
   const siteName = sites.find((x) => String(x.id) === String(siteId))?.name || "";
 
+  // What the worker changed in the AI's hazards, for the Brain. Null when no AI was used.
+  const aiEditSignalFor = () => {
+    const hz = fields.find((f) => f.field_type === "hazard_table" && f.config?.aiAssist);
+    if (!hz || answers[hz.config.aiAssist.flagField] !== "yes") return null;
+    return computeFlhaEditSignal(baselineRef.current, Array.isArray(answers[hz.field_key]) ? answers[hz.field_key] : []);
+  };
+
   const submit = async (signLater) => {
     setShowProblems(true);
     if (problems.length) return;
@@ -113,7 +122,8 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
     const now = new Date();
     const payload = {
       definitionId, title: doc.definition.title, layout: doc.layout, fields, answers, notes, siteId, siteName, companyName, companyLogo,
-      submittedBy: userName, signature: signLater ? null : signature, signLater, crew, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"),
+      submittedBy: userName, signature: signLater ? null : signature, signLater, crew,
+      aiEditSignal: aiEditSignalFor(), dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"),
     };
     const id = newClientSubmissionId();
     const queue = async () => { await enqueueSubmission("engineform", id, payload); clearDraft("engineform", scope); setStep("queued"); };
@@ -192,7 +202,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
         const rows = Array.isArray(v) ? v : [];
         const upd = (i, p) => set(k, rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
         return (<div>
-          {f.config?.aiAssist && <HazardAssist field={f} answers={answers} setMany={setMany} token={token} companyId={companyId} companyName={companyName} workerName={userName} siteName={siteName} />}
+          {f.config?.aiAssist && <HazardAssist field={f} answers={answers} setMany={setMany} token={token} companyId={companyId} companyName={companyName} workerName={userName} siteName={siteName} onBaseline={(b, adding) => { baselineRef.current = adding ? [...baselineRef.current, ...b] : b; }} />}
           {rows.map((r, i) => (
           <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: RAD.md, padding: 10, marginBottom: 8 }}>
             <input aria-label={`Hazard ${i + 1}`} style={s.input} placeholder="Hazard" value={r.hazard || ""} onChange={(e) => upd(i, { hazard: e.target.value })} />

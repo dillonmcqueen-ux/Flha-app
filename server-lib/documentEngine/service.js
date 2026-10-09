@@ -29,6 +29,7 @@ import { validDepartmentKeys } from '../companyStructure.js';
 import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
 import { fieldTypeInfo } from './fieldTypes.js';
 import { linkTargets } from './links.js';
+import { sanitizeAiEditSignal } from '../aiEditSignal.js';
 import { resolveIdAnswers } from './idAnswers.js';
 import { reviewSteps, reviewApplies, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
 import { notifyRecord, notifyReturned, notifyEscalations, engineKey } from './notify.js';
@@ -501,6 +502,12 @@ async function afterRecordCounts(db, deps, { definition, setting, rules, record,
     if (list.length > 0) await notifyEscalations(db, deps, { companyId, definition, matches: list, ownerMuted: muted });
   });
   await step('notify', async () => { await notifyRecord(db, deps, { companyId, definition, record, plan: notifyPlan(rules), ownerMuted: muted }); });
+  await step('edit_signal', async () => {
+    const sig = record.meta && record.meta.ai_edit_signal;
+    if (!sig || setting.brain_enabled === false) return;
+    const { error } = await db.from('company_signals').insert({ company_id: companyId, source_type: 'flha_edit', source_id: String(record.id), signal_json: sig });
+    if (error) throw dbFail(error, 'save the edit signal');
+  });
   await step('brain', async () => { if (setting.brain_enabled !== false) await writeBrainSignal(db, { companyId, definition, record, answerRows, matches }); });
   // Remember what is done, and whether the sweep still has work to do. This
   // write is itself best effort: if it fails the record is simply not retried.
@@ -578,7 +585,7 @@ async function resolveCrew(db, { companyId, authorId, crew, resolveFile }) {
  * receipt into the stored path (null if it is not one this server issued for
  * this company). `deps.resolveSiteId(raw)` vets a site id.
  */
-export async function submitRecord(db, { session, companyId, definitionId, answers, notes, siteId, clientSubmissionId, queuedAt, signLater, signature, pdfReceipt, crew, deps }) {
+export async function submitRecord(db, { session, companyId, definitionId, answers, notes, siteId, clientSubmissionId, queuedAt, signLater, signature, pdfReceipt, crew, aiEditSignal, deps }) {
   const cid = asId(companyId);
   if (!cid) throw new EngineError(400, 'Missing company id.');
   const def = await loadDefinition(db, definitionId, { companyId: cid });
@@ -641,6 +648,9 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
     awaiting_signature: wantsSignLater,
     signature_requested_at: wantsSignLater ? nowIso : null,
     submitted_at: nowIso,
+    // How the worker changed the AI's hazards. Kept with the record until it
+    // counts (a sign-later record only counts once signed), then sent to the Brain.
+    meta: (() => { const sig = sanitizeAiEditSignal(aiEditSignal); return sig ? { ai_edit_signal: sig } : {}; })(),
   }).select('*');
   if (error || !data || !data[0]) throw dbFail(error, 'save the document');
   const record = data[0];
@@ -931,6 +941,28 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
     console.error('documents: resubmit follow-ups failed:', e && e.message);
   }
   return { status: 'pending_approval' };
+}
+
+/**
+ * Replaces a record's PDF with one redrawn after an approval, so the file
+ * carries the approval. Only the person who gave an approval on this record in
+ * its current round may do it, and the receipt is resolved like every other
+ * (a PDF this server issued for this company). Anyone else, or a forged
+ * receipt, changes nothing.
+ */
+export async function setRecordPdf(db, { session, companyId, recordId, pdfReceipt, deps }) {
+  const cid = asId(companyId);
+  const record = await loadRecord(db, recordId, cid);
+  const me = authorRosterId(session);
+  if (me == null) throw new EngineError(403, 'Not allowed.');
+  const round = Number(record.review_round) || 0;
+  const mine = (await many(db.from('document_signatures').select('signer_roster_id, meta').eq('record_id', record.id).eq('kind', 'approval'), 'read the approvals'))
+    .filter((g) => same(g.signer_roster_id, me) && (Number(g.meta?.round) || 0) === round);
+  if (mine.length === 0) throw new EngineError(403, 'Only a reviewer who approved this can update its PDF.');
+  const path = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
+  if (!path) throw new EngineError(400, 'That PDF is not valid.');
+  await must(db.from('document_records').update({ pdf_path: path, updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid), 'save the PDF');
+  return { ok: true };
 }
 
 /** The author signs a record they saved unsigned. Anyone else is refused. */

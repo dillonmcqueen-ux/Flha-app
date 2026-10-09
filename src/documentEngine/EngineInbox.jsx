@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { colors as C, radius as RAD, shadow as SHAD } from "../theme";
 import { callDocuments } from "./builderApi.js";
 import { formatAnswer, statusLabel } from "./recordView.js";
+import { redrawRecordPdf } from "./engineSubmit.js";
 
 // Supervisor and Owner view of company (unified-engine) documents: what
 // waits on you to review, escalations routed to your departments, and every
@@ -12,7 +13,7 @@ const card = { background: C.panel, border: `1px solid ${C.line}`, borderRadius:
 const btn = { background: C.panelInset, color: C.text.body, border: `1px solid ${C.line}`, borderRadius: RAD.sm, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" };
 const when = (t) => (t ? new Date(t).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "");
 
-export default function EngineInbox({ token, companyId, docs = [], inbox, escalations = [], onChanged }) {
+export default function EngineInbox({ token, companyId, companyName = "", docs = [], inbox, escalations = [], onChanged }) {
   const titles = Object.fromEntries(docs.map((d) => [d.id, d.title]));
   const [tab, setTab] = useState("review");
   const [records, setRecords] = useState(null);
@@ -45,6 +46,8 @@ export default function EngineInbox({ token, companyId, docs = [], inbox, escala
     setBusy(true); setMsg("");
     try {
       await call("review", { recordId: open.record.id, decision, reason: reason.trim() || undefined });
+      // The filed PDF is redrawn so it carries this approval. Best effort: the approval stands either way.
+      if (decision === "approve") await redrawRecordPdf(token, companyId, open.record.id, callDocuments, { companyName });
       setOpen(null); setRecords(null); await onChanged();
     } catch (e) { setMsg(e.message); }
     setBusy(false);

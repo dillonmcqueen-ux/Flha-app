@@ -142,3 +142,68 @@ test('a seed that stopped half way is finished on the next run', async () => {
   assert.ok(db.tables.document_definitions[0].current_version_id);
   assert.equal(db.tables.document_definitions.length, 1);
 });
+
+test('how the worker changed the AI hazards reaches the Brain as flha_edit once the record counts, trimmed and only if the Brain is on', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  const signal = { added: ['Slip', ' '.repeat(3), 'x'.repeat(500)], removed: ['Dust'], riskChanged: [{ hazard: 'Cave-in', from: 'Medium', to: 'High', extra: 'drop' }], evil: 'drop' };
+  // Saved to sign later: nothing is sent yet.
+  const later = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signLater: true, answers: lowAnswers, aiEditSignal: signal, deps });
+  assert.equal((db.tables.company_signals || []).filter((s) => s.source_type === 'flha_edit').length, 0);
+  await signNow(db, { session: worker, companyId: 1, recordId: later.record.id, signature: 'rcpt:1/s.png', deps });
+  const sent = db.tables.company_signals.filter((s) => s.source_type === 'flha_edit');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].company_id, 1);
+  assert.equal(sent[0].source_id, String(later.record.id));
+  assert.deepEqual(sent[0].signal_json, { added: ['Slip', 'x'.repeat(200)], removed: ['Dust'], riskChanged: [{ hazard: 'Cave-in', from: 'Medium', to: 'High' }] });
+  // An empty signal is nothing to record.
+  await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s2.png', answers: lowAnswers, aiEditSignal: { added: [], removed: [], riskChanged: [] }, deps });
+  assert.equal(db.tables.company_signals.filter((s) => s.source_type === 'flha_edit').length, 1);
+  // Brain off for the document: no edit signal.
+  await setCompanyDocument(db, { companyId: 1, definitionId: id, brainEnabled: false });
+  await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s3.png', answers: lowAnswers, aiEditSignal: signal, deps });
+  assert.equal(db.tables.company_signals.filter((s) => s.source_type === 'flha_edit').length, 1);
+});
+
+import { setRecordPdf } from '../../server-lib/documentEngine/service.js';
+import { redrawRecordPdf } from '../../src/documentEngine/engineSubmit.js';
+
+test('only a reviewer who approved a record can replace its PDF, with a PDF this server issued', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', pdfReceipt: 'rcpt:1/old.pdf', answers: { ...lowAnswers, hazards: [{ hazard: 'Live', risk: 'Extreme' }] }, deps })).record;
+  const set = (session, receipt) => setRecordPdf(db, { session, companyId: 1, recordId: rec.id, pdfReceipt: receipt, deps });
+  await assert.rejects(set(supervisor, 'rcpt:1/new.pdf'), /Only a reviewer who approved/);
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'approve', deps });
+  await assert.rejects(set(worker, 'rcpt:1/new.pdf'), /Only a reviewer who approved/);
+  await assert.rejects(set(supervisor, 'forged'), /not valid/);
+  await assert.rejects(set(supervisor, undefined), /not valid/);
+  assert.equal(db.tables.document_records.find((r) => r.id === rec.id).pdf_path, '1/old.pdf');
+  await set(supervisor, 'rcpt:1/new.pdf');
+  assert.equal(db.tables.document_records.find((r) => r.id === rec.id).pdf_path, '1/new.pdf');
+  await assert.rejects(setRecordPdf(db, { session: { ...supervisor, companyId: 2 }, companyId: 2, recordId: rec.id, pdfReceipt: 'rcpt:1/x.pdf', deps }), /not found/i);
+});
+
+test('the reviewer\'s browser redraws the PDF with every signature after approving, and never throws', async () => {
+  const calls = [];
+  const call = async (t, action, body) => {
+    calls.push(action);
+    if (action === 'get_record') return { record: { id: 3, definition_id: 9, version_id: 4, site_id: 5, status: 'approved', submitted_at: '2026-10-09T10:00:00Z' }, answers: [{ field_key: 'task_summary', value_text: 'Trench' }], signatures: [{ id: 1, kind: 'worker', signer_name: 'Wes', signed_at: '2026-10-09T10:00:00Z' }, { id: 2, kind: 'approval', step_key: 'review_0', signer_name: 'Sue', signed_at: '2026-10-09T11:00:00Z' }] };
+    if (action === 'get_document') return { versionId: 4, layout: {}, definition: { title: 'FLHA' }, fields: [{ field_key: 'task_summary', label: 'Task', field_type: 'long_text' }] };
+    if (action === 'get_record_links') return { signatures: { 1: 'https://s/1.png', 2: 'https://s/2.png' } };
+    if (action === 'set_record_pdf') return { ok: true };
+    throw new Error('unexpected');
+  };
+  let drawn;
+  const deps = { upload: async () => 'rcpt-pdf', render: async (input) => { drawn = input; return new Blob(['x']); }, fetchImage: async (u) => `data:image/png;base64,${u.length}`, siteName: 'North Yard', logo: null };
+  assert.deepEqual(await redrawRecordPdf('t', 1, 3, call, deps), { redrawn: true });
+  assert.deepEqual(drawn.signatures.map((s) => [s.kind, s.signer_name, !!s.signature]), [['worker', 'Wes', true], ['approval', 'Sue', true]]);
+  assert.equal(drawn.record.author, 'Wes');
+  assert.equal(drawn.record.status, 'approved');
+  assert.ok(calls.includes('set_record_pdf'));
+  // The form changed since filing: keep the PDF as filed.
+  assert.deepEqual(await redrawRecordPdf('t', 1, 3, async (t, a) => (a === 'get_document' ? { versionId: 5, layout: {}, definition: {}, fields: [] } : call(t, a)), deps), { redrawn: false });
+  // Any failure leaves the old PDF and does not throw.
+  assert.deepEqual(await redrawRecordPdf('t', 1, 3, async () => { throw new Error('offline'); }, deps), { redrawn: false });
+  assert.deepEqual(await redrawRecordPdf('t', 1, 3, call, { ...deps, upload: async () => null }), { redrawn: false });
+});

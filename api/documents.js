@@ -39,6 +39,7 @@ import {
   signNow,
   getRecord,
   getRecordLinks,
+  setRecordPdf,
   listRecords,
   reviewRecord,
   myInbox,
@@ -207,7 +208,7 @@ export default async function handler(req, res) {
     if (action === 'submit') {
       const out = await submitRecord(db, {
         session, companyId, definitionId: body.definitionId, answers: body.answers, notes: body.notes, siteId: body.siteId,
-        clientSubmissionId: body.clientSubmissionId, queuedAt: body.queuedAt, signLater: body.signLater, signature: body.signature, pdfReceipt: body.pdfReceipt, crew: body.crew, deps,
+        clientSubmissionId: body.clientSubmissionId, queuedAt: body.queuedAt, signLater: body.signLater, signature: body.signature, pdfReceipt: body.pdfReceipt, crew: body.crew, aiEditSignal: body.aiEditSignal, deps,
       });
       return res.status(200).json({ ok: true, id: out.record.id, status: out.record.status, duplicate: out.duplicate });
     }
@@ -218,6 +219,10 @@ export default async function handler(req, res) {
     if (action === 'sign_now') {
       const out = await signNow(db, { session, companyId, recordId: body.recordId, signature: body.signature, pdfReceipt: body.pdfReceipt, deps });
       return res.status(200).json({ ok: true, ...out });
+    }
+    if (action === 'set_record_pdf') {
+      const out = await setRecordPdf(db, { session, companyId, recordId: body.recordId, pdfReceipt: body.pdfReceipt, deps });
+      return res.status(200).json(out);
     }
     if (action === 'get_picker_options') {
       const out = await listPickerOptions(db, { companyId, session, kind: body.kind });

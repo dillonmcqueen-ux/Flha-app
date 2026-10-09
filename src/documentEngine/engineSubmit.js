@@ -92,7 +92,7 @@ export async function submitEngineDocument(payload, clientSubmissionId, token, d
       body: JSON.stringify({
         action: 'submit', token, definitionId: payload.definitionId, clientSubmissionId, queuedAt: queuedAtFor(clientSubmissionId),
         answers, notes: payload.notes || {}, siteId: payload.siteId || undefined,
-        signature, signLater: payload.signLater === true || undefined, pdfReceipt: pdfReceipt || undefined, crew: crew.length ? crew : undefined,
+        signature, signLater: payload.signLater === true || undefined, pdfReceipt: pdfReceipt || undefined, crew: crew.length ? crew : undefined, aiEditSignal: payload.aiEditSignal || undefined,
       }),
     });
   } catch (networkErr) {
@@ -168,4 +168,60 @@ export async function loadRecordForWorker(token, companyId, recordId, call) {
   const { record, answers, signatures } = await call(token, 'get_record', { companyId, recordId });
   const doc = await call(token, 'get_document', { companyId, definitionId: record.definition_id });
   return { record, answers, signatures, doc, sameVersion: Number(doc.versionId) === Number(record.version_id) };
+}
+
+async function defaultFetchImage(url) {
+  try {
+    const blob = await (await fetch(url)).blob();
+    return await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => ok(null); r.readAsDataURL(blob); });
+  } catch (e) { return null; }
+}
+
+/**
+ * Redraws a filed record's PDF with every signature it has now (worker, crew,
+ * approvals) and replaces the stored one. Run by the reviewer right after they
+ * approve, so the file carries the approval. Best effort and never throws: if
+ * anything fails the earlier PDF stays. `call(token, action, body)` is the
+ * documents API. Returns { redrawn: boolean }.
+ */
+export async function redrawRecordPdf(token, companyId, recordId, call, deps = {}) {
+  try {
+    const upload = deps.upload || defaultUpload;
+    const fetchImage = deps.fetchImage || defaultFetchImage;
+    const { record, answers, signatures, doc, sameVersion } = await loadRecordForWorker(token, companyId, recordId, call);
+    // A form changed since this was filed cannot redraw it faithfully: keep the PDF as filed.
+    if (!sameVersion) return { redrawn: false };
+    const links = await call(token, 'get_record_links', { companyId, recordId }).catch(() => ({ signatures: {} }));
+    const siteName = deps.siteName !== undefined ? deps.siteName : await (async () => {
+      try {
+        const res = await fetch('/api/companydata', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'list_sites', token, companyId }) });
+        const d = res.ok ? await res.json() : {};
+        return ((d.sites || []).find((x) => String(x.id) === String(record.site_id)) || {}).name || '';
+      } catch (e) { return ''; }
+    })();
+    const when = (t) => (t ? new Date(t).toLocaleString('en-CA') : '');
+    const sigInputs = [];
+    for (const g of signatures) {
+      const url = links.signatures && links.signatures[g.id];
+      sigInputs.push({
+        kind: g.kind === 'reviewer' ? 'approval' : g.kind, step_key: g.step_key, signer_name: g.signer_name,
+        signature: url ? await fetchImage(url) : null, signedAtText: when(g.signed_at),
+      });
+    }
+    const worker = signatures.find((g) => g.kind === 'worker');
+    const { rowsToForm } = await import('./recordView.js');
+    const render = deps.render || defaultRender;
+    const pdf = await render({
+      layout: doc.layout, document: { title: doc.definition.title }, company: { name: deps.companyName || '', logoDataUrl: deps.companyLogo || undefined },
+      record: { site: siteName, author: worker ? worker.signer_name : '', dateText: when(record.submitted_at).slice(0, 10), dateTimeText: when(record.submitted_at), status: record.status, awaitingSignature: record.awaiting_signature === true },
+      fields: doc.fields, answers: rowsToForm(answers).answers, signatures: sigInputs,
+      assets: { foraLogoDataUrl: deps.logo !== undefined ? deps.logo : await foraLogoDataUrl() },
+    });
+    const receipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: pdf });
+    if (!receipt) return { redrawn: false };
+    await call(token, 'set_record_pdf', { companyId, recordId, pdfReceipt: receipt });
+    return { redrawn: true };
+  } catch (e) {
+    return { redrawn: false };
+  }
 }

@@ -6579,7 +6579,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
 
         {activeTab === "enginedocs" && TAB_VISIBLE.enginedocs && (
-          <EngineInbox token={token} companyId={selectedCompany} docs={engineInbox.docs} inbox={engineInbox.inbox} escalations={engineInbox.escalations} onChanged={engineInbox.reload} />
+          <EngineInbox token={token} companyId={selectedCompany} companyName={company?.name || ""} docs={engineInbox.docs} inbox={engineInbox.inbox} escalations={engineInbox.escalations} onChanged={engineInbox.reload} />
         )}
 
         {activeTab === "portal" && TAB_VISIBLE.portal && (
