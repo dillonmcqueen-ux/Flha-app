@@ -14,7 +14,7 @@
 // (a `rect`) are drawn inside their box on their page and clipped to it, for
 // reproducing a customer's paper form box for box. The numbers below
 // (offsets, sizes, colors) are copied from src/generatePDF.js so the FLHA
-// template prints as it always has; tests/unit/document-engine-render.test.js
+// template prints as it always has; tests/unit/document-engine-layout.test.js
 // compares the two.
 
 import { blockVisible, isPlaced, defaultLayout, validateLayout, PAGE_W, PAGE_H } from '../../server-lib/documentEngine/layoutSchema.js';
