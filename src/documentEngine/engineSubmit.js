@@ -99,3 +99,61 @@ export async function submitEngineDocument(payload, clientSubmissionId, token, d
 
 /** The queue-drain entry point for formType "engineform". */
 export const resubmitEngineForm = (payload, clientSubmissionId, tokenForRequest) => submitEngineDocument(payload, clientSubmissionId, tokenForRequest);
+
+async function postDocuments(body, fetchFn) {
+  let res;
+  try {
+    res = await fetchFn('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch (networkErr) { networkErr.isNetworkFailure = true; throw networkErr; }
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err = new Error(errBody.error || `Save failed (${res.status})`);
+    err.isServerError = true; err.status = res.status;
+    throw err;
+  }
+  return await res.json().catch(() => ({}));
+}
+
+async function drawPdf(payload, signature, deps) {
+  const render = deps.render || defaultRender;
+  return render({
+    layout: payload.layout, document: { title: payload.title }, company: { name: payload.companyName, logoDataUrl: payload.companyLogo || undefined },
+    record: { site: payload.siteName, author: payload.submittedBy, dateText: payload.dateText, dateTimeText: payload.dateTimeText, status: payload.status || 'submitted', awaitingSignature: false },
+    fields: payload.fields, answers: payload.answers,
+    signatures: signature ? [{ kind: 'worker', signer_name: payload.submittedBy, signature, signedAtText: payload.dateTimeText }] : [],
+    assets: { foraLogoDataUrl: deps.logo !== undefined ? deps.logo : await foraLogoDataUrl() },
+  });
+}
+
+/** A returned document, fixed and sent back for review. Files not sent again stay as they were (server side). */
+export async function resubmitEngineDocument(payload, recordId, token, deps = {}) {
+  const upload = deps.upload || defaultUpload;
+  const { values, uploads } = splitAnswers(payload.fields, payload.answers);
+  const answers = { ...values };
+  for (const u of uploads) {
+    try { const r = await upload({ token, kind: u.kind, filename: `${u.field_type}-${u.key}.${extForDataUrl(u.dataUrl)}`, blob: dataUrlToBlob(u.dataUrl) }); if (r) answers[u.key] = r; } catch (e) { /* keeps the earlier file */ }
+  }
+  let pdfReceipt = null;
+  try { pdfReceipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: await drawPdf(payload, payload.signature || null, deps) }); } catch (e) { /* the old PDF stays */ }
+  return postDocuments({ action: 'resubmit', token, recordId, answers, notes: payload.notes || {}, pdfReceipt: pdfReceipt || undefined }, deps.fetchFn || fetch);
+}
+
+/** The author signs a document they saved unsigned. Needs a connection; it is not queued. */
+export async function signEngineDocument(payload, recordId, signatureDataUrl, token, deps = {}) {
+  const upload = deps.upload || defaultUpload;
+  const signature = await upload({ token, kind: 'signature', filename: 'signature.png', blob: dataUrlToBlob(signatureDataUrl) });
+  if (!signature) throw Object.assign(new Error('The signature did not upload. Try again.'), { isServerError: true });
+  let pdfReceipt = null;
+  // When the form changed since this was filed the old layout cannot redraw it, so the PDF stays as filed.
+  if (!payload.skipPdf) {
+    try { pdfReceipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: await drawPdf(payload, signatureDataUrl, deps) }); } catch (e) { /* the record still signs */ }
+  }
+  return postDocuments({ action: 'sign_now', token, recordId, signature, pdfReceipt: pdfReceipt || undefined }, deps.fetchFn || fetch);
+}
+
+/** Everything the worker screens need to redraw or fix one record: the form, the record, its answers. */
+export async function loadRecordForWorker(token, companyId, recordId, call) {
+  const { record, answers, signatures } = await call(token, 'get_record', { companyId, recordId });
+  const doc = await call(token, 'get_document', { companyId, definitionId: record.definition_id });
+  return { record, answers, signatures, doc, sameVersion: Number(doc.versionId) === Number(record.version_id) };
+}

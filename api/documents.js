@@ -209,7 +209,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, id: out.record.id, status: out.record.status, duplicate: out.duplicate });
     }
     if (action === 'resubmit') {
-      const out = await resubmitRecord(db, { session, companyId, recordId: body.recordId, answers: body.answers, notes: body.notes, deps });
+      const out = await resubmitRecord(db, { session, companyId, recordId: body.recordId, answers: body.answers, notes: body.notes, pdfReceipt: body.pdfReceipt, deps });
       return res.status(200).json({ ok: true, ...out });
     }
     if (action === 'sign_now') {
