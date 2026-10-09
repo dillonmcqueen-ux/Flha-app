@@ -4,7 +4,7 @@ import { uploadViaSignedUrl } from "./uploadViaSignedUrl.js";
 import MonthlyInspectionBuilder from "./MonthlyInspectionBuilder.jsx";
 import CustomFormBuilder from "./CustomFormBuilder.jsx";
 import PortalDocumentBuilder from "./PortalDocumentBuilder.jsx";
-import DocumentLayoutScreen from "./documentEngine/DocumentLayoutScreen.jsx";
+import DocumentBuilderScreen from "./documentEngine/DocumentBuilderScreen.jsx";
 import PlatformDashboard from "./PlatformDashboard.jsx";
 import CollapsibleGroup from "./CollapsibleGroup.jsx";
 import { generateRosterPinsPDF } from "./generateRosterPinsPDF.js";
@@ -30,7 +30,7 @@ import Sidebar from "./Sidebar";
 // category rather than folded into "Admin" because it isn't a console
 // operation on a company record; it's Dillon building a document for one.
 const ADMIN_TAB_ICON = { onboarding: Inbox, codes: KeyRound, documentBuilder: FileText, documentLayouts: FileText, platform: Activity };
-const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes", documentBuilder: "Document Builder", documentLayouts: "Document Layouts", platform: "Platform" };
+const ADMIN_TAB_LABEL = { onboarding: "Onboarding Requests", codes: "All Codes", documentBuilder: "Document Builder", documentLayouts: "Documents", platform: "Platform" };
 const ADMIN_CATEGORY_ICON = { admin: Building2, portal: FileText };
 const ADMIN_CATEGORIES = [
   { key: "admin", label: "Admin", tabs: ["onboarding", "codes", "platform"] },
@@ -1361,7 +1361,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             )}
 
             {activeAdminTab === "documentLayouts" && (
-              <DocumentLayoutScreen companies={companies} token={token} />
+              <DocumentBuilderScreen companies={companies} token={token} />
             )}
 
             {activeAdminTab === "overview" && (
