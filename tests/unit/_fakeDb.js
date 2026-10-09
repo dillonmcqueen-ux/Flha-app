@@ -5,7 +5,7 @@
 
 const DEFAULTS = {
   company_documents: { is_enabled: false, brain_enabled: true, owner_muted: false },
-  document_records: { status: 'submitted', review_step: 0, review_round: 0, unsigned_alerted_at: null, review_alerted_at: null, unsigned_closed_at: null, submitted_at: null, awaiting_signature: false, signature_requested_at: null, worker_signed_at: null, returned_reason: null, pdf_path: null, site_id: null, submitted_by_roster_id: null, client_submission_id: null },
+  document_records: { meta: {}, status: 'submitted', review_step: 0, review_round: 0, unsigned_alerted_at: null, review_alerted_at: null, unsigned_closed_at: null, submitted_at: null, awaiting_signature: false, signature_requested_at: null, worker_signed_at: null, returned_reason: null, pdf_path: null, site_id: null, submitted_by_roster_id: null, client_submission_id: null },
   document_fields: { required: false, config: {}, attachment_rules: {}, section: null, help_text: null },
   document_definitions: { company_id: null, template_id: null, current_version_id: null, archived_at: null, icon: null, category: null },
   document_versions: { published_at: null },
@@ -35,7 +35,13 @@ export function makeDb(seed = {}) {
     insert(rows) { this.mode = 'insert'; this.payload = Array.isArray(rows) ? rows : [rows]; return this; }
     update(patch) { this.mode = 'update'; this.payload = patch; return this; }
     delete() { this.mode = 'delete'; return this; }
-    eq(col, val) { this.filters.push((r) => same(r[col], val)); return this; }
+    eq(col, val) {
+      // PostgREST's json path form, meta->>key.
+      const m = /^(\w+)->>(\w+)$/.exec(col);
+      if (m) this.filters.push((r) => same(r[m[1]] && r[m[1]][m[2]] != null ? String(r[m[1]][m[2]]) : null, val));
+      else this.filters.push((r) => same(r[col], val));
+      return this;
+    }
     in(col, vals) { this.filters.push((r) => (vals || []).some((v) => same(r[col], v))); return this; }
     is(col, val) { this.filters.push((r) => (val === null ? r[col] == null : r[col] === val)); return this; }
     not(col, op, val) { this.filters.push((r) => (op === 'is' && val === null ? r[col] != null : true)); return this; }

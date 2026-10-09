@@ -550,3 +550,42 @@ test('a resubmit can bring the redrawn PDF, and a bad receipt is ignored', async
   await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'z' }, pdfReceipt: 'forged', deps });
   assert.equal(db.tables.document_records[0].pdf_path, 'co1/new.pdf');
 });
+
+import { getRecordLinks } from '../../server-lib/documentEngine/service.js';
+import { pathInCompany, linkTargets, signTargets } from '../../server-lib/documentEngine/links.js';
+
+test('paths are only signed inside the company folder', () => {
+  assert.equal(pathInCompany('1/abc-file.pdf', 1), true);
+  for (const bad of ['2/abc.pdf', '/1/abc.pdf', '1/../2/abc.pdf', '1/./a.pdf', '1', '1/', '', null, '12/a.pdf', '1//a.pdf']) assert.equal(pathInCompany(bad, 1), false, String(bad));
+});
+
+test('record links: author and in-scope supervisor get them, others do not, and other companies paths are never signed', async () => {
+  const db = seedDb();
+  const fields = [{ label: 'Task', fieldType: 'short_text', required: true }, { label: 'Pic', fieldType: 'photo' }];
+  const id = await publishedDoc(db, { rules: [WORKER_SIG_RULE], fields });
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x', pic: 'rcpt:1/a-pic.png' }, siteId: 5, signature: 'rcpt:1/sig.png', pdfReceipt: 'rcpt:1/doc.pdf', deps })).record;
+  // A path that somehow points at another company is never signed.
+  db.tables.document_answers.push({ id: 99, record_id: rec.id, field_id: 1, field_key: 'x', question_text: 'x', field_type: 'file_upload', file_path: '2/other-co.pdf' });
+  const asked = [];
+  const sign = async (targets) => { asked.push(...targets); return new Map(targets.map((t) => [t.id, `https://signed/${t.bucket}/${t.path}`])); };
+
+  const out = await getRecordLinks(db, { session: worker, companyId: 1, recordId: rec.id, sign });
+  assert.equal(out.pdf, 'https://signed/flha-reports/1/doc.pdf');
+  assert.ok(Object.values(out.files).includes('https://signed/portal-attachments/1/a-pic.png'));
+  assert.ok(Object.values(out.signatures).includes('https://signed/signatures/1/sig.png'));
+  assert.equal(asked.some((t) => t.path.startsWith('2/')), false);
+  assert.equal(out.files[99], undefined);
+
+  await getRecordLinks(db, { session: supervisor, companyId: 1, recordId: rec.id, sign });
+  await rejects(getRecordLinks(db, { session: { ...worker, userId: 12, name: 'Cora Crew' }, companyId: 1, recordId: rec.id, sign }), 403);
+  await rejects(getRecordLinks(db, { session: { role: 'supervisor', userId: 32, companyId: 2, name: 'Sara' }, companyId: 2, recordId: rec.id, sign }), 404);
+});
+
+test('signTargets batches one call per bucket and leaves out links that fail', async () => {
+  const calls = [];
+  const client = { storage: { from: (b) => ({ createSignedUrls: async (paths) => { calls.push([b, paths]); return { data: paths.map((p) => (p.includes('bad') ? { path: p, error: 'x' } : { path: p, signedUrl: `u/${p}` })), error: null }; } }) } };
+  const urls = await signTargets(client, [{ id: 'a', bucket: 'signatures', path: '1/a.png' }, { id: 'b', bucket: 'signatures', path: '1/bad.png' }, { id: 'c', bucket: 'flha-reports', path: '1/c.pdf' }]);
+  assert.equal(calls.length, 2);
+  assert.deepEqual([...urls.keys()].sort(), ['a', 'c']);
+  assert.equal(linkTargets({ companyId: 1, record: { pdf_path: '1/x.pdf' }, answers: [], signatures: [] }).length, 1);
+});

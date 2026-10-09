@@ -31,7 +31,12 @@ export default function EngineInbox({ token, companyId, docs = [], inbox, escala
 
   const openRecord = async (recordId) => {
     setBusy(true); setMsg(""); setReason("");
-    try { setOpen(await call("get_record", { recordId })); } catch (e) { setMsg(e.message); }
+    try {
+      const rec = await call("get_record", { recordId });
+      // Links are short lived and best effort: the record reads fine without them.
+      const links = await call("get_record_links", { recordId }).catch(() => ({ pdf: null, files: {}, signatures: {} }));
+      setOpen({ ...rec, links });
+    } catch (e) { setMsg(e.message); }
     setBusy(false);
   };
 
@@ -70,18 +75,21 @@ export default function EngineInbox({ token, companyId, docs = [], inbox, escala
             <div style={{ fontWeight: 800, color: C.text.primary }}>{titles[open.record.definition_id] || "Document"} <span style={{ fontWeight: 500, fontSize: 12, color: C.text.muted }}>{statusLabel(open.record.status)}{open.record.awaiting_signature ? ", not signed yet" : ""}</span></div>
             <button style={btn} onClick={() => setOpen(null)}>Close</button>
           </div>
-          <div style={{ fontSize: 12, color: C.text.muted, margin: "4px 0 10px" }}>Filed {when(open.record.submitted_at)}</div>
+          <div style={{ fontSize: 12, color: C.text.muted, margin: "4px 0 10px" }}>Filed {when(open.record.submitted_at)}
+            {open.links?.pdf && <> · <a href={open.links.pdf} target="_blank" rel="noreferrer" style={{ color: C.orange, fontWeight: 700 }}>Open PDF</a></>}</div>
           {open.record.returned_reason && <div style={{ fontSize: 13, color: C.status.warning.text, marginBottom: 8 }}>Sent back: {open.record.returned_reason}</div>}
           {open.answers.map((a) => (
             <div key={a.id} style={{ padding: "8px 0", borderBottom: `1px solid ${C.line}` }}>
               <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text.muted, textTransform: "uppercase" }}>{a.question_text}</div>
-              <div style={{ fontSize: 14, color: C.text.primary, whiteSpace: "pre-wrap" }}>{formatAnswer(a) || "No answer"}</div>
+              <div style={{ fontSize: 14, color: C.text.primary, whiteSpace: "pre-wrap" }}>{formatAnswer(a) || "No answer"}
+                {open.links?.files?.[a.id] && <> <a href={open.links.files[a.id]} target="_blank" rel="noreferrer" style={{ color: C.orange, fontWeight: 700 }}>Open</a></>}</div>
               {a.notes && <div style={{ fontSize: 12.5, color: C.status.warning.text }}>Note: {a.notes}</div>}
             </div>
           ))}
           {open.signatures.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 13, color: C.text.body }}>
-              {open.signatures.map((g) => <div key={g.id}>{g.kind === "approval" ? "Approved" : "Signed"} by {g.signer_name}{g.step_key ? ` (${g.step_key})` : ""}, {when(g.signed_at)}</div>)}
+              {open.signatures.map((g) => <div key={g.id}>{g.kind === "approval" ? "Approved" : "Signed"} by {g.signer_name}{g.step_key ? ` (${g.step_key})` : ""}, {when(g.signed_at)}
+                {open.links?.signatures?.[g.id] && <> <a href={open.links.signatures[g.id]} target="_blank" rel="noreferrer" style={{ color: C.orange, fontWeight: 700 }}>View signature</a></>}</div>)}
             </div>
           )}
           {reviewIds.has(open.record.id) && (
