@@ -2,8 +2,9 @@
 --
 -- Unified document engine, work package 3: the rules that DO things. Builds on
 -- docs/schema/document-engine-wp1-migration.sql. Idempotent and safe to re-run.
--- NOT YET APPLIED to production: it is applied only after Dillon says so.
--- Until it is, the engine runs without it: an escalation that cannot be
+-- APPLIED to the production FORA project on 2026-10-09 (migration name
+-- document_engine_wp3_rules), on Dillon's yes, before the WP3 code was deployed.
+-- Before it was applied, the engine ran without it: an escalation that cannot be
 -- written is logged and skipped (it never fails a submit), and the sweeps
 -- skip the columns they need.
 --
