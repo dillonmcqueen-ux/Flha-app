@@ -108,12 +108,36 @@ test('file answers only store a path the server resolved', () => {
 });
 
 test('structured types accept objects and arrays but not strings or huge blobs', () => {
-  const f = F({ field_type: 'hazard_table' });
-  assert.deepEqual(validateAnswerValue(f, [{ hazard: 'Struck by', risk: 'High' }]).value_json, [{ hazard: 'Struck by', risk: 'High' }]);
+  const f = F({ field_type: 'section_table' });
+  assert.deepEqual(validateAnswerValue(f, [{ a: 1 }]).value_json, [{ a: 1 }]);
   assert.ok(validateAnswerValue(f, 'text').error);
   assert.ok(validateAnswerValue(f, { x: 'y'.repeat(200 * 1024) }).error);
 });
 
+test('hazard rows are checked and rebuilt from known keys, and a bad risk is refused', () => {
+  const f = F({ field_type: 'hazard_table', label: 'Hazards' });
+  const ok = validateAnswerValue(f, [{ task: ' T ', hazard: ' Struck by ', control: 'Spotter', sopRef: '  ', risk: 'High', extra: 'drop me' }, { hazard: '  ', risk: 'Low' }]);
+  assert.deepEqual(ok.value_json, [{ task: 'T', hazard: 'Struck by', control: 'Spotter', sopRef: null, risk: 'High' }]);
+  assert.deepEqual(validateAnswerValue(f, [{ hazard: '', risk: 'Low' }]), {}, 'only blank rows is no answer');
+  assert.match(validateAnswerValue(f, [{ hazard: 'x', risk: 'Severe' }]).error, /risk of Low, Medium, High or Extreme/);
+  assert.match(validateAnswerValue(f, [{ hazard: 'x' }]).error, /risk/);
+  assert.ok(validateAnswerValue(f, [1]).error);
+  assert.ok(validateAnswerValue(f, { hazard: 'x', risk: 'Low' }).error);
+  assert.ok(validateAnswerValue(f, Array.from({ length: 101 }, () => ({ hazard: 'x', risk: 'Low' }))).error);
+  assert.ok(validateAnswerValue(f, [{ hazard: 'x'.repeat(301), risk: 'Low' }]).error);
+});
+
+test('PPE and text lists are plain lists of short strings', () => {
+  for (const type of ['ppe_list', 'text_list']) {
+    const f = F({ field_type: type, label: 'List' });
+    assert.deepEqual(validateAnswerValue(f, [' Hard hat ', 'Hard hat', 'Vest']).value_json, ['Hard hat', 'Vest']);
+    assert.deepEqual(validateAnswerValue(f, ['', '  ']), {});
+    assert.ok(validateAnswerValue(f, 'Hard hat').error);
+    assert.ok(validateAnswerValue(f, [{ a: 1 }]).error);
+    assert.ok(validateAnswerValue(f, ['x'.repeat(301)]).error);
+    assert.ok(validateAnswerValue(f, Array.from({ length: 41 }, (_, i) => `i${i}`)).error);
+  }
+});
 test('types that carry ids are refused until their ids are validated', () => {
   for (const t of ['equipment_picker', 'attachment_picker', 'site_picker', 'person_picker', 'linked_document', 'crew_signatures']) {
     assert.match(validateAnswerValue(F({ field_type: t }), { id: 4 }).error, /can't be answered yet/, t);

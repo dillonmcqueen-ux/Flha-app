@@ -1,32 +1,9 @@
 // The FLHA expressed as an engine layout, plus sample data equal to the WP0
 // baseline capture. Used by the renderer tests and the golden comparison.
-export const FLHA_LAYOUT = {
-  version: 1,
-  page: { size: 'A4', margin: 16, footer: true },
-  blocks: [
-    { id: 'header', type: 'header', title: 'Job Hazard Analysis (JHA)', subtitle: 'Field Level Hazard Assessment', showDate: 'datetime', showLogo: true },
-    { id: 'info', type: 'info_box', items: [
-      { label: 'COMPANY', value: '{{company.name}}', x: 4 },
-      { label: 'WORKER', value: '{{record.author}}', x: 70 },
-      { label: 'JOB SITE', value: '{{record.site}}', x: 130 },
-    ] },
-    { id: 'pending', type: 'banner', text: 'PENDING SUPERVISOR APPROVAL: EXTREME RISK', subtext: 'Work must not begin until a supervisor has signed off below.', tone: 'danger', showIf: { status: ['pending_approval'] } },
-    { id: 'summary', type: 'text', heading: 'TASK SUMMARY', headingStyle: 'pill', field: 'task_summary' },
-    { id: 'hazards', type: 'table', title: 'Hazard / Control / SOP Reference Checklist', field: 'hazards', measureBold: true, groupBy: 'task', groupLabel: 'TASK',
-      columns: [
-        { key: 'n', header: '#', width: 8, type: 'index' },
-        { key: 'hazard', header: 'HAZARD', width: 46, style: 'bold' },
-        { key: 'control', header: 'CONTROL MEASURE', width: 56 },
-        { key: 'sopRef', header: 'SOP REF', width: 40, style: 'italic', emptyText: 'N/A' },
-        { key: 'risk', header: 'RISK', width: 28, type: 'badge' },
-      ] },
-    { id: 'ppe', type: 'chips', heading: 'Required PPE', field: 'ppe' },
-    { id: 'notes', type: 'text', heading: 'ADDITIONAL NOTES', headingStyle: 'pill', field: 'notes' },
-    { id: 'sign', type: 'signature', heading: 'Worker Signature' },
-    { id: 'crew', type: 'signature_grid', heading: 'Additional Crew Sign-Off ({{count}})' },
-    { id: 'approval', type: 'approvals', heading: 'Supervisor Approval: Extreme-Risk Sign-Off' },
-  ],
-};
+import { FLHA_LAYOUT as TEMPLATE_LAYOUT } from '../../../server-lib/documentEngine/templates/flha.js';
+
+// The layout is the template's own, so the golden test checks what ships.
+export const FLHA_LAYOUT = TEMPLATE_LAYOUT;
 
 export const FLHA_FIELDS = [
   { field_key: 'task_summary', label: 'Task summary', field_type: 'long_text' },

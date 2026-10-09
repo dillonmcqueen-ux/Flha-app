@@ -24,6 +24,7 @@ const MAX_FIELDS = 200;
 const MAX_RULES = 100;
 const MAX_LAYOUT_BYTES = 200 * 1024;
 const ATTACHMENT_KINDS = ['image', 'pdf', 'word', 'excel'];
+export const HAZARD_RISKS = ['Low', 'Medium', 'High', 'Extreme'];
 const MAX_ATTACHMENT_MB = 10;
 // File extensions each attachment kind stands for. The bucket has no type
 // check of its own, so this list, the upload extension list and this check
@@ -249,6 +250,36 @@ export function validateAnswerValue(field, raw, { resolveFile, resolved } = {}) 
       const v = String(raw).trim();
       if (!CONDITION_VALUES.includes(v)) return { error: `"${field.label}" must be Good, Monitor, Defective or N/A.` };
       return { value_text: v };
+    }
+    case 'hazard_table': {
+      // The rows decide whether a document needs a supervisor (any Extreme
+      // risk), so every row is checked and rebuilt from known keys only.
+      if (!Array.isArray(raw)) return { error: `"${field.label}" must be a list of hazards.` };
+      if (raw.length > 100) return { error: `"${field.label}" has too many hazards.` };
+      const rows = [];
+      for (const r of raw) {
+        if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: `"${field.label}" has a hazard that is not valid.` };
+        const hazard = typeof r.hazard === 'string' ? r.hazard.trim() : '';
+        if (!hazard) continue; // a blank row is not a hazard
+        if (hazard.length > 300) return { error: `"${field.label}" has a hazard name that is too long.` };
+        const control = typeof r.control === 'string' ? r.control.trim() : '';
+        const task = typeof r.task === 'string' ? r.task.trim() : '';
+        const sopRef = typeof r.sopRef === 'string' && r.sopRef.trim() ? r.sopRef.trim() : null;
+        if (control.length > 1000 || task.length > 300 || (sopRef && sopRef.length > 500)) return { error: `"${field.label}" has a hazard with text that is too long.` };
+        if (!HAZARD_RISKS.includes(r.risk)) return { error: `"${field.label}" has a hazard without a risk of Low, Medium, High or Extreme.` };
+        rows.push({ task, hazard, control, sopRef, risk: r.risk });
+      }
+      return rows.length ? { value_json: rows } : {};
+    }
+    case 'ppe_list':
+    case 'text_list': {
+      // A plain list of short strings (PPE items, SOP alerts).
+      if (!Array.isArray(raw)) return { error: `"${field.label}" must be a list.` };
+      if (raw.length > 40) return { error: `"${field.label}" has too many items.` };
+      const items = raw.map((x) => (typeof x === 'string' ? x.trim() : null));
+      if (items.some((x) => x == null || x.length > 300)) return { error: `"${field.label}" has an item that is not valid.` };
+      const kept = [...new Set(items.filter(Boolean))];
+      return kept.length ? { value_json: kept } : {};
     }
     default: {
       // Picker and block types: structured JSON, size-capped. Their shape is

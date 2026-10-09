@@ -711,3 +711,36 @@ test('a lost Brain signal is retried, and giving up after five tries is recorded
   for (let i = 0; i < 6; i += 1) await retryFailedFollowUps(db2, {});
   assert.equal(db2.tables.document_records[0].meta.followups_gave_up, true);
 });
+
+// ── Conditional review (the FLHA: only an Extreme risk hazard needs a supervisor) ──
+
+import { reviewApplies } from '../../server-lib/documentEngine/rules.js';
+
+const EXTREME_ONLY = { ruleType: 'reviewer_step', config: { onlyIf: { field: 'hazards', riskIn: ['Extreme'] } } };
+
+test('reviewApplies: no steps never, a plain step always, conditional steps only when a condition holds', () => {
+  const rows = (risk) => [{ field_key: 'hazards', value_json: [{ hazard: 'x', risk }] }];
+  assert.equal(reviewApplies([], rows('Extreme')), false);
+  assert.equal(reviewApplies([{ rule_type: 'reviewer_step', config: {} }], []), true);
+  const cond = [{ rule_type: 'reviewer_step', config: { onlyIf: { field: 'hazards', riskIn: ['Extreme'] } } }];
+  assert.equal(reviewApplies(cond, rows('Extreme')), true);
+  assert.equal(reviewApplies(cond, rows('High')), false);
+  assert.equal(reviewApplies(cond, []), true, 'no answer to judge by: review applies');
+  const answer = [{ rule_type: 'reviewer_step', config: { onlyIf: { field: 'injury', equalsAny: ['yes'] } } }];
+  assert.equal(reviewApplies(answer, [{ field_key: 'injury', value_text: 'yes' }]), true);
+  assert.equal(reviewApplies(answer, [{ field_key: 'injury', value_text: 'no' }]), false);
+  // One plain step keeps the whole chain on.
+  assert.equal(reviewApplies([...cond, { rule_type: 'reviewer_step', config: {} }], rows('Low')), true);
+});
+
+test('a document with a conditional review is filed straight away unless the condition holds', async () => {
+  const db = seed();
+  const id = await doc(db, { fields: [{ label: 'Task', fieldType: 'short_text', required: true }, { label: 'Hazards', fieldType: 'hazard_table' }], rules: [EXTREME_ONLY] });
+  const low = await file(db, id, worker, { answers: { task: 'a', hazards: [{ hazard: 'Slip', risk: 'Low' }] } });
+  assert.equal(low.record.status, 'submitted');
+  const extreme = await file(db, id, worker, { answers: { task: 'b', hazards: [{ hazard: 'Live line', risk: 'Extreme' }] } });
+  assert.equal(extreme.record.status, 'pending_approval');
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: extreme.record.id, decision: 'approve', deps: mkDeps() });
+  assert.equal(db.tables.document_records.find((r) => r.id === extreme.record.id).status, 'approved');
+  assert.equal((await myInbox(db, { session: supA, companyId: 1 })).review.length, 0);
+});

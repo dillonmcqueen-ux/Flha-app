@@ -21,7 +21,7 @@
 //     (server-lib/documentAccess.js scopeRecords), which already understands
 //     site_id and submitted_by_roster_id.
 
-import { normalizeFields, normalizeLayout, normalizeRules, validateDefinitionInput, validateAnswers } from './validate.js';
+import { normalizeFields, normalizeLayout, normalizeRules, validateDefinitionInput, validateAnswers, HAZARD_RISKS } from './validate.js';
 import { authorRosterId } from '../authorStamp.js';
 import { scopeRecords, loadActor, requireAssignment, menuAccessFor, withCompletion, listVisibleRecordsMulti, queuedAsOf, SUBMIT, VIEW } from '../documentAccess.js';
 import { crewIdSet } from '../leadAccess.js';
@@ -30,7 +30,7 @@ import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
 import { fieldTypeInfo } from './fieldTypes.js';
 import { linkTargets } from './links.js';
 import { resolveIdAnswers } from './idAnswers.js';
-import { reviewSteps, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
+import { reviewSteps, reviewApplies, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
 import { notifyRecord, notifyReturned, notifyEscalations, engineKey } from './notify.js';
 
 export class EngineError extends Error {
@@ -162,6 +162,24 @@ async function copyVersionContent(db, fromVersionId, toVersionId) {
 // the draft is saved.
 const ROUTABLE = ['yesno', 'dropdown', 'multiselect', 'condition3'];
 async function checkRuleTargets(db, { companyId, rules, fields }) {
+  // A conditional review must point at a field that can answer it. A typo here
+  // would otherwise be read as "the condition never holds" for every record.
+  const byField = new Map(fields.map((f) => [f.field_key, f]));
+  for (const r of rules) {
+    const o = r.rule_type === 'reviewer_step' && r.config ? r.config.onlyIf : undefined;
+    if (o === undefined) continue;
+    const f = o && typeof o === 'object' ? byField.get(o.field) : null;
+    if (!f) throw new EngineError(400, 'A review condition points at a field this document does not have.');
+    if (Array.isArray(o.riskIn)) {
+      if (f.field_type !== 'hazard_table') throw new EngineError(400, `"${f.label}" has no hazard risks to check.`);
+      if (o.riskIn.length === 0 || o.riskIn.some((x) => !HAZARD_RISKS.includes(x))) throw new EngineError(400, 'A review condition names a risk that does not exist.');
+    } else if (Array.isArray(o.equalsAny)) {
+      if (!ROUTABLE.includes(f.field_type)) throw new EngineError(400, `"${f.label}" cannot decide whether a review is needed.`);
+      if (o.equalsAny.length === 0) throw new EngineError(400, 'A review condition needs an answer to match.');
+    } else {
+      throw new EngineError(400, 'A review condition needs riskIn or equalsAny.');
+    }
+  }
   const needsDepartments = rules.some((r) => ['route_by_answer', 'route_by_scope', 'notify'].includes(r.rule_type));
   if (!needsDepartments) return;
   let valid;
@@ -417,7 +435,6 @@ export async function listWorkerDocuments(db, { companyId, session }) {
 
 function ruleFlags(rules) {
   return {
-    needsReview: reviewSteps(rules).length > 0,
     needsWorkerSignature: needsWorkerSignature(rules),
   };
 }
@@ -616,7 +633,7 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
     company_id: cid,
     definition_id: def.id,
     version_id: version.id,
-    status: flags.needsReview ? 'pending_approval' : 'submitted',
+    status: reviewApplies(content.rules, checked.rows) ? 'pending_approval' : 'submitted',
     site_id: resolvedSite || null,
     submitted_by_roster_id: authorId,
     client_submission_id: csid,

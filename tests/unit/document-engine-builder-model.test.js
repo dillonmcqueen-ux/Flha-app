@@ -82,3 +82,11 @@ test('routingSummary describes each stage in plain words', () => {
   assert.ok(BUILDER_FIELD_TYPES.every((t) => !t.notYet), 'every offered type can be answered');
   assert.ok(!BUILDER_FIELD_TYPES.some((t) => t.key === 'crew_signatures'));
 });
+
+test('a conditional review set by a template survives the builder round trip', () => {
+  const rows = [{ rule_type: 'reviewer_step', config: { label: 'Approval', allowLeads: true, onlyIf: { field: 'hazards', riskIn: ['Extreme'] } }, sort_order: 0 }];
+  const back = viewToRules(rulesToView(rows));
+  assert.deepEqual(back[0].config.onlyIf, { field: 'hazards', riskIn: ['Extreme'] });
+  assert.equal(back[0].config.allowLeads, true);
+  assert.equal(normalizeRules(rulesForSave(back)).error, undefined);
+});
