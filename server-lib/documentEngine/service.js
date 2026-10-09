@@ -448,7 +448,7 @@ async function writeBrainSignal(db, { companyId, definition, record, answerRows,
     source_id: String(record.id),
     signal_json: signal,
   });
-  if (error) console.error('documents: company_signals insert failed:', error.message);
+  if (error) throw dbFail(error, 'save the Brain signal');
 }
 
 async function afterRecordCounts(db, deps, { definition, setting, rules, record, answerRows }) {
@@ -478,7 +478,7 @@ async function afterRecordCounts(db, deps, { definition, setting, rules, record,
   // write is itself best effort: if it fails the record is simply not retried.
   try {
     const attempts = (Number(record.meta && record.meta.followups_attempts) || 0) + (failed ? 1 : 0);
-    const meta = { ...(record.meta || {}), followups: done, followups_failed: failed && attempts < MAX_FOLLOWUP_ATTEMPTS ? true : false, followups_attempts: attempts };
+    const meta = { ...(record.meta || {}), followups: done, followups_failed: failed && attempts < MAX_FOLLOWUP_ATTEMPTS ? true : false, followups_gave_up: failed && attempts >= MAX_FOLLOWUP_ATTEMPTS ? true : undefined, followups_attempts: attempts };
     if (failed || (record.meta && record.meta.followups_failed)) {
       await db.from('document_records').update({ meta }).eq('id', record.id).eq('company_id', companyId);
     }

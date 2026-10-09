@@ -690,3 +690,24 @@ test('a retry is dropped for a document that was switched off after it was filed
   assert.equal(db.tables.document_escalations.length, 0);
   assert.equal(db.tables.document_records[0].meta.followups_failed, false);
 });
+
+test('a lost Brain signal is retried, and giving up after five tries is recorded on the record', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  db.failOn('company_signals', 'insert');
+  await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } });
+  assert.equal(db.tables.document_records[0].meta.followups_failed, true);
+  db.clearFailures();
+  db.tables.document_records[0].created_at = new Date(Date.now() - 3600 * 1000).toISOString();
+  await retryFailedFollowUps(db, {});
+  assert.equal(db.tables.company_signals.length, 1);
+  assert.equal(db.tables.document_records[0].meta.followups_failed, false);
+
+  const db2 = seed();
+  const id2 = await doc(db2, { rules: [ROUTE] });
+  db2.failOn('company_signals', 'insert');
+  await file(db2, id2, worker, { answers: { task: 'x', injury: 'yes' } });
+  db2.tables.document_records[0].created_at = new Date(Date.now() - 3600 * 1000).toISOString();
+  for (let i = 0; i < 6; i += 1) await retryFailedFollowUps(db2, {});
+  assert.equal(db2.tables.document_records[0].meta.followups_gave_up, true);
+});
