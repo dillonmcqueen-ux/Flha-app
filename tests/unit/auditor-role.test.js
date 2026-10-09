@@ -62,6 +62,21 @@ const INCIDENTS = [{ id: 7, company_id: 7, site: 'Pit', site_id: 9, created_at: 
 const CUSTOM_FORMS = [{ id: 11, company_id: 7, title: 'Yard Walk' }, { id: 12, company_id: 8, title: 'Other Form' }];
 const CUSTOM_RECORDS = [{ id: 31, form_id: 11, site_id: 10, created_at: '2026-10-03T09:00:00Z', pdf_url: null }, { id: 32, form_id: 11, site_id: 11, created_at: '2026-10-03T08:00:00Z', pdf_url: null }];
 
+const ENGINE_SETTINGS = [{ company_id: 7, definition_id: 55, is_enabled: true }, { company_id: 7, definition_id: 56, is_enabled: false }];
+const ENGINE_DEFS = [
+  { id: 55, title: 'Yard Check', company_id: 7, current_version_id: 1, archived_at: null },
+  { id: 56, title: 'Switched Off', company_id: 7, current_version_id: 2, archived_at: null },
+];
+const ENGINE_RECORDS = [
+  { id: 1, company_id: 7, definition_id: 55, site_id: 10, status: 'submitted', awaiting_signature: false, created_at: '2026-10-07T10:00:00Z', pdf_path: '7/abc-doc.pdf' },
+  { id: 2, company_id: 7, definition_id: 55, site_id: 10, status: 'pending_approval', awaiting_signature: false, created_at: '2026-10-07T11:00:00Z', pdf_path: null },
+  { id: 3, company_id: 7, definition_id: 55, site_id: 11, status: 'submitted', awaiting_signature: false, created_at: '2026-10-07T12:00:00Z', pdf_path: null },
+  { id: 4, company_id: 7, definition_id: 55, site_id: 10, status: 'submitted', awaiting_signature: true, created_at: '2026-10-07T13:00:00Z', pdf_path: null },
+  { id: 5, company_id: 7, definition_id: 55, site_id: 10, status: 'approved', awaiting_signature: false, created_at: '2026-10-08T10:00:00Z', pdf_path: null },
+  { id: 6, company_id: 7, definition_id: 55, site_id: 10, status: 'returned', awaiting_signature: false, created_at: '2026-10-08T11:00:00Z', pdf_path: null },
+  { id: 7, company_id: 8, definition_id: 55, site_id: 10, status: 'submitted', awaiting_signature: false, created_at: '2026-10-08T12:00:00Z', pdf_path: null },
+];
+
 const writes = [];
 const sentEmails = [];
 const server = http.createServer(async (req, res) => {
@@ -83,7 +98,10 @@ const server = http.createServer(async (req, res) => {
     (inList('id') === null || inList('id').includes(String(r.id))) &&
     (inList('site_id') === null || inList('site_id').includes(String(r.site_id))) &&
     (inList('division_id') === null || inList('division_id').includes(String(r.division_id))) &&
-    (inList('form_id') === null || inList('form_id').includes(String(r.form_id))));
+    (inList('form_id') === null || inList('form_id').includes(String(r.form_id))) &&
+    (inList('definition_id') === null || inList('definition_id').includes(String(r.definition_id))) &&
+    (inList('status') === null || inList('status').includes(String(r.status))) &&
+    (eq('is_enabled') === null || String(r.is_enabled) === eq('is_enabled')));
   if (req.method !== 'GET' && table !== 'audit_log') writes.push({ method: req.method, table, payload });
 
   if (table === 'roster') {
@@ -107,6 +125,9 @@ const server = http.createServer(async (req, res) => {
   if (table === 'incidents') return send(200, filt(INCIDENTS));
   if (table === 'custom_forms') return send(200, filt(CUSTOM_FORMS));
   if (table === 'custom_form_records') return send(200, filt(CUSTOM_RECORDS));
+  if (table === 'company_documents') return send(200, filt(ENGINE_SETTINGS));
+  if (table === 'document_definitions') return send(200, filt(ENGINE_DEFS));
+  if (table === 'document_records') return send(200, filt(ENGINE_RECORDS));
   if (table === 'companies') return send(200, [{ name: 'ABC Earthworks', plan_tier: 'basic' }]);
   if (table === 'rpc/claim_pin_attempt') return send(200, [{ id: 1 }]);
   if (table.startsWith('rpc/')) return send(200, true);
@@ -274,4 +295,32 @@ test('an auditor is never handed a record still awaiting its author\'s signature
   const ids = out.body.documents.map(d => d.id);
   assert.ok(!ids.includes(6), 'the unsigned FLHA at an allowed site is hidden');
   assert.ok(ids.includes(1), 'signed ones at the same site still show');
+});
+
+
+test('an auditor sees only filed engine records, at their sites, for documents still switched on', async () => {
+  const scope = SCOPES.find(x => x.roster_id === 20);
+  const before = [...scope.document_keys];
+  scope.document_keys = [...before, 'engine_55', 'engine_56'];
+  try {
+    const sc = await run(audit, { action: 'get_audit_scope', token: AUDITOR() });
+    assert.ok(sc.body.documents.some(d => d.key === 'engine_55' && d.label === 'Yard Check'));
+    assert.equal(sc.body.documents.some(d => d.key === 'engine_56'), false, 'a document switched off is not offered');
+
+    const out = await run(audit, { action: 'list_audit_documents', token: AUDITOR(), documentKey: 'engine_55' });
+    assert.equal(out.statusCode, 200);
+    const ids = out.body.documents.map(d => d.id).sort();
+    // Filed (submitted or approved) at site 10 only: 1 and 5. Not pending, unsigned, returned, another site, or another company.
+    assert.deepEqual(ids, [1, 5]);
+    assert.ok(out.body.documents.every(d => d.type === 'engine' && d.title === 'Yard Check' && d.site === 'Yard'));
+    const off = await run(audit, { action: 'list_audit_documents', token: AUDITOR(), documentKey: 'engine_56' });
+    assert.deepEqual(off.body.documents, []);
+  } finally { scope.document_keys = before; }
+});
+
+test('only the Owner can pick an engine document for an auditor, and only one this company has on', async () => {
+  const ok = await run(companydata, { action: 'set_auditor_scope', token: OWNER(), rosterId: 20, siteIds: [10], documentKeys: ['engine_55'] });
+  assert.notEqual(ok.statusCode, 400, JSON.stringify(ok.body));
+  const bad = await run(companydata, { action: 'set_auditor_scope', token: OWNER(), rosterId: 20, siteIds: [10], documentKeys: ['engine_56'] });
+  assert.equal(bad.statusCode, 400);
 });

@@ -423,14 +423,14 @@ test('review and records ignore a record id from another company', async () => {
 
 // ── Hardening from the tenant review ───────────────────────────────────────
 
-test('picker and crew-signature fields cannot be answered until their ids are validated', async () => {
+test('a picker answer is refused unless its id belongs to the caller\'s company, and a blank picker still files', async () => {
   const db = seedDb();
   const fields = [
     { label: 'Task', fieldType: 'short_text' },
     { label: 'Machine', fieldType: 'equipment_picker' },
   ];
   const id = await publishedDoc(db, { fields });
-  await rejects(submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x', machine: { equipmentId: 777 } }, deps }), 400, /can't be answered yet/);
+  await rejects(submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x', machine: { equipmentId: 777 } }, deps }), 400, /not one of your machines/);
   const ok = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x' }, deps });
   assert.equal(ok.record.status, 'submitted', 'leaving the picker blank still works');
 });
@@ -588,4 +588,207 @@ test('signTargets batches one call per bucket and leaves out links that fail', a
   assert.equal(calls.length, 2);
   assert.deepEqual([...urls.keys()].sort(), ['a', 'c']);
   assert.equal(linkTargets({ companyId: 1, record: { pdf_path: '1/x.pdf' }, answers: [], signatures: [] }).length, 1);
+});
+
+// ── Assignments (map weak point E-4) ───────────────────────────────────────
+
+import { listWorkerDocuments as listWorkerDocs, listRecords as listRecs, myInbox as inboxOf } from '../../server-lib/documentEngine/service.js';
+
+const assignRow = (id, over = {}) => ({
+  company_id: 1, document_key: `engine_${id}`, audience_type: 'individual', audience_value: '12', action: 'submit', restricts: true,
+  by_lead: false, due_at: null, created_at: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(), ended_at: null, ...over,
+});
+
+test('a submit assignment narrows who may file an engine document and who sees it on the menu', async () => {
+  const db = seedDb();
+  const id = await publishedDoc(db);
+  db.tables.document_assignments = [assignRow(id)]; // only Cora (12) may submit
+  await rejects(submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x' }, siteId: 5, deps }), 403);
+  const cora = { ...worker, userId: 12, name: 'Cora Crew' };
+  await submitRecord(db, { session: cora, companyId: 1, definitionId: id, answers: { task: 'x' }, siteId: 5, deps });
+  assert.equal((await listWorkerDocs(db, { companyId: 1, session: worker })).documents.length, 0);
+  const mine = await listWorkerDocs(db, { companyId: 1, session: cora });
+  assert.equal(mine.documents.length, 1);
+  assert.equal(mine.assigned[0].documentKey, `engine_${id}`);
+  assert.ok(mine.assigned[0].completedAt, 'the filing counts as done');
+  // The Owner and founder are never narrowed.
+  await submitRecord(db, { session: admin, companyId: 1, definitionId: id, answers: { task: 'y' }, siteId: 5, deps });
+});
+
+test('a queued submit is judged as of when it was filled in, within 48 hours', async () => {
+  const db = seedDb();
+  const id = await publishedDoc(db);
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+  // Assigned away from Wes 2 hours ago: a submit filled in 5 hours ago still lands, a live one does not.
+  db.tables.document_assignments = [assignRow(id, { created_at: hoursAgo(2) })];
+  await rejects(submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'live' }, siteId: 5, deps }), 403);
+  const out = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'queued' }, siteId: 5, clientSubmissionId: 'q1', queuedAt: hoursAgo(5), deps });
+  assert.equal(out.record.status, 'submitted');
+  // queuedAt alone, with no client submission id, is ignored.
+  await rejects(submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'forged' }, siteId: 5, queuedAt: hoursAgo(5), deps }), 403);
+});
+
+test('a view assignment narrows which supervisors see engine records and the review inbox', async () => {
+  const db = seedDb();
+  const id = await publishedDoc(db, { rules: [REVIEW_RULE] });
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x' }, siteId: 5, deps })).record;
+  const sue = supervisor;
+  assert.equal((await listRecs(db, { session: sue, companyId: 1 })).records.length, 1);
+  db.tables.document_assignments = [assignRow(id, { audience_value: '22', action: 'view' })]; // only Sam may view
+  assert.equal((await listRecs(db, { session: sue, companyId: 1 })).records.length, 0);
+  await rejects(getRecord(db, { session: sue, companyId: 1, recordId: rec.id }), 403);
+  assert.equal((await inboxOf(db, { session: sue, companyId: 1 })).review.length, 0);
+  // The author still reads their own, and the founder is never narrowed.
+  await getRecord(db, { session: worker, companyId: 1, recordId: rec.id });
+  assert.equal((await listRecs(db, { session: admin, companyId: 1 })).records.length, 1);
+});
+
+test('another company\'s assignment rows never narrow this company', async () => {
+  const db = seedDb();
+  const id = await publishedDoc(db);
+  db.tables.document_assignments = [assignRow(id, { company_id: 2 })];
+  await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x' }, siteId: 5, deps });
+});
+
+import { listAssignableDocuments, validateAssignment } from '../../server-lib/assignmentAdmin.js';
+import { isAssignableKey, isAssignableAction } from '../../server-lib/documentAccess.js';
+
+test('the Owner can assign engine documents, only ones this company has switched on', async () => {
+  const db = seedDb();
+  const id = await publishedDoc(db, { title: 'Yard Check' });
+  const off = await publishedDoc(db, { title: 'Switched Off', enable: false });
+  const other = await publishedDoc(db, { companyId: 2, title: 'Other Co' });
+  assert.equal(isAssignableKey(`engine_${id}`), true);
+  assert.equal(isAssignableAction(`engine_${id}`, 'view'), true);
+  assert.equal(isAssignableKey('engine_x'), false);
+  const docs = await listAssignableDocuments(db, 1);
+  assert.deepEqual(docs.filter((d) => d.kind === 'engine').map((d) => [d.key, d.label]), [[`engine_${id}`, 'Yard Check']]);
+  const ok = await validateAssignment(db, 1, { documentKey: `engine_${id}`, action: 'submit', audienceType: 'role', audienceValue: 'worker' });
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.row.document_key, `engine_${id}`);
+  assert.match((await validateAssignment(db, 1, { documentKey: `engine_${off}`, action: 'submit', audienceType: 'everyone' })).error, /isn't available/);
+  assert.match((await validateAssignment(db, 1, { documentKey: `engine_${other}`, action: 'submit', audienceType: 'everyone' })).error, /isn't available/);
+});
+
+import { listAuditableDocuments, validateAuditorScope } from '../../server-lib/auditorAccess.js';
+
+test('an Owner can share engine documents with an auditor, only this company\'s switched-on ones', async () => {
+  const db = makeDb({ sites: [{ id: 5, company_id: 1, name: 'North' }], roster: [] });
+  const mine = await publishedDoc(db, { title: 'Yard Check' });
+  const off = await publishedDoc(db, { title: 'Off', enable: false });
+  const theirs = await publishedDoc(db, { companyId: 2, title: 'Their Doc' });
+  const docs = await listAuditableDocuments(db, 1, { flha: 'FLHA' });
+  assert.deepEqual(docs.filter((d) => d.key.startsWith('engine_')), [{ key: `engine_${mine}`, label: 'Yard Check' }]);
+  const ok = await validateAuditorScope(db, 1, { siteIds: [5], documentKeys: [`engine_${mine}`] }, {});
+  assert.equal(ok.error, undefined);
+  assert.deepEqual(ok.scope.document_keys, [`engine_${mine}`]);
+  for (const key of [`engine_${off}`, `engine_${theirs}`, 'engine_9999']) {
+    assert.match((await validateAuditorScope(db, 1, { siteIds: [5], documentKeys: [key] }, {})).error, /can't be shared/);
+  }
+});
+
+// ── Id-bearing answers (map weak point E-6) ────────────────────────────────
+
+const PICKER_FIELDS = [
+  { label: 'Task', fieldType: 'short_text' },
+  { label: 'Machine', fieldType: 'equipment_picker' },
+  { label: 'Attachments', fieldType: 'attachment_picker' },
+  { label: 'Where', fieldType: 'site_picker' },
+  { label: 'Buddy', fieldType: 'person_picker' },
+  { label: 'Related', fieldType: 'linked_document' },
+];
+
+function pickerDb() {
+  const db = seedDb();
+  db.tables.equipment = [
+    { id: 1, company_id: 1, year: '2019', make: 'Cat', model: '320', type: 'Excavator', unit_number: '12', is_attachment: false, retired_at: null },
+    { id: 2, company_id: 1, make: 'Bobcat', model: 'Bucket', type: 'Bucket', unit_number: '3', is_attachment: true, retired_at: null },
+    { id: 3, company_id: 1, make: 'Old', model: 'Loader', type: 'Loader', unit_number: '9', is_attachment: false, retired_at: '2026-01-01' },
+    { id: 4, company_id: 2, make: 'Other', model: 'Co', type: 'Dozer', unit_number: '1', is_attachment: false, retired_at: null },
+  ];
+  db.tables.sites = [{ id: 5, company_id: 1, name: 'North Yard' }, { id: 6, company_id: 1, name: 'South Yard' }, { id: 9, company_id: 2, name: 'Other Site' }];
+  return db;
+}
+const pickDeps = { ...deps, resolveSiteId: async (raw) => ([5, 6, 9].includes(Number(raw)) ? Number(raw) : null) };
+
+test('picker answers store checked ids with labels read from the database', async () => {
+  const db = pickerDb();
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS });
+  const prior = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'first' }, siteId: 5, deps: pickDeps })).record;
+  const out = await submitRecord(db, {
+    session: worker, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps,
+    answers: { task: 'x', machine: { equipmentId: 1, label: 'FORGED' }, attachments: { equipmentIds: [2] }, where: { siteId: 6 }, buddy: { rosterId: 12 }, related: { recordId: prior.id } },
+  });
+  const rows = db.tables.document_answers.filter((a) => a.record_id === out.record.id);
+  const by = (k) => rows.find((r) => r.field_key === k).value_json;
+  assert.deepEqual(by('machine'), { equipment_id: 1, label: 'Unit 12 - 2019 Cat 320' });
+  assert.deepEqual(by('attachments'), { equipment_ids: [2], labels: ['Unit 3 - Bobcat Bucket'] });
+  assert.deepEqual(by('where'), { site_id: 6, label: 'South Yard' });
+  assert.deepEqual(by('buddy'), { roster_id: 12, label: 'Cora Crew' });
+  assert.deepEqual(by('related'), { record_id: prior.id, definition_id: id, label: `Pre Shift #${prior.id}` });
+});
+
+test('a rental machine can be typed in, with no id', async () => {
+  const db = pickerDb();
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS });
+  const out = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'x', machine: { text: 'Rental Kubota' } } });
+  assert.deepEqual(db.tables.document_answers.find((a) => a.record_id === out.record.id && a.field_key === 'machine').value_json, { equipment_id: null, label: 'Rental Kubota' });
+});
+
+test('picker ids from another company, retired, wrong kind or not allowed are refused', async () => {
+  const db = pickerDb();
+  db.tables.document_records = db.tables.document_records || [];
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS });
+  const go = (answers, session = worker) => submitRecord(db, { session, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'x', ...answers } });
+  await rejects(go({ machine: { equipmentId: 4 } }), 400, /not one of your machines/);
+  await rejects(go({ machine: { equipmentId: 3 } }), 400, /not one of your machines/);
+  await rejects(go({ attachments: { equipmentIds: [1] } }), 400, /not one of your attachments/);
+  await rejects(go({ attachments: { equipmentIds: [2, 4] } }), 400, /not one of your attachments/);
+  await rejects(go({ where: { siteId: 9 } }), 400, /site|not/);
+  await rejects(go({ buddy: { rosterId: 31 } }), 400, /not someone on your roster/);
+  await rejects(go({ buddy: { rosterId: 13 } }), 400, /not someone on your roster/);
+  await rejects(go({ machine: 'drop table' }), 400, /not valid/);
+  await rejects(go({ related: { recordId: 99999 } }), 400, /not a document you can link/);
+});
+
+test('a worker cannot link someone else\'s document, a supervisor can, and another company\'s is never found', async () => {
+  const db = pickerDb();
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS });
+  const corasDoc = (await submitRecord(db, { session: { ...worker, userId: 12, name: 'Cora Crew' }, companyId: 1, definitionId: id, answers: { task: 'hers' }, siteId: 5, deps: pickDeps })).record;
+  const link = (session) => submitRecord(db, { session, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'x', related: { recordId: corasDoc.id } } });
+  await rejects(link(worker), 400, /not a document you can link/);
+  await link(supervisor);
+  const other = await publishedDoc(db, { companyId: 2, title: 'Other' });
+  const theirs = (await submitRecord(db, { session: { role: 'worker', userId: 31, companyId: 2, name: 'Other Co Oscar' }, companyId: 2, definitionId: other, answers: { task: 'o' }, deps: { ...pickDeps, resolveSiteId: async () => null } })).record;
+  await rejects(submitRecord(db, { session: supervisor, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'x', related: { recordId: theirs.id } } }), 400, /not a document you can link/);
+});
+
+test('fixing a returned document sends the stored picker form back and it is checked again', async () => {
+  const db = pickerDb();
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS, rules: [REVIEW_RULE] });
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'x', machine: { equipmentId: 1 } } })).record;
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Fix' });
+  // The stored form (equipment_id, label) is what a returned document hands back.
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'y', machine: { equipment_id: 1, label: 'FORGED' } }, deps: pickDeps });
+  assert.equal(db.tables.document_answers.find((a) => a.record_id === rec.id && a.field_key === 'machine').value_json.label, 'Unit 12 - 2019 Cat 320');
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Again' });
+  await rejects(resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'z', machine: { equipment_id: 4 } }, deps: pickDeps }), 400, /not one of your machines/);
+});
+
+import { listPickerOptions } from '../../server-lib/documentEngine/idAnswers.js';
+
+test('picker option lists only hold this company\'s rows, split by kind', async () => {
+  const db = pickerDb();
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS });
+  await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'mine' }, siteId: 5, deps: pickDeps });
+  await submitRecord(db, { session: { ...worker, userId: 12, name: 'Cora Crew' }, companyId: 1, definitionId: id, answers: { task: 'hers' }, siteId: 5, deps: pickDeps });
+  const opts = async (kind, session = worker) => (await listPickerOptions(db, { companyId: 1, session, kind })).options;
+  assert.deepEqual((await opts('equipment')).map((o) => o.id), [1]);
+  assert.deepEqual((await opts('attachment')).map((o) => o.id), [2]);
+  assert.deepEqual((await opts('site')).map((o) => o.id).sort(), [5, 6]);
+  const people = (await opts('person')).map((o) => o.label);
+  assert.ok(people.includes('Cora Crew') && !people.includes('Other Co Oscar') && !people.includes('Inactive Ian'));
+  assert.equal((await opts('document')).length, 1, 'a worker lists only their own documents');
+  assert.equal((await opts('document', supervisor)).length, 2);
+  assert.match((await listPickerOptions(db, { companyId: 1, session: worker, kind: 'bogus' })).error, /Unknown/);
 });

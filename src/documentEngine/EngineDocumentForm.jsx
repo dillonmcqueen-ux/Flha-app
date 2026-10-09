@@ -8,6 +8,7 @@ import { initialAnswers, clientProblems, newClientSubmissionId, UNANSWERABLE_TYP
 import { submitEngineDocument, resubmitEngineDocument, loadRecordForWorker } from "./engineSubmit.js";
 import { rowsToForm, hasFiles } from "./recordView.js";
 import SignaturePad from "./SignaturePad.jsx";
+import PickerControl from "./PickerControl.jsx";
 import { shrinkImage, readAsDataUrl } from "./shrinkImage.js";
 import { ArrowLeft, Loader2, CheckCircle2, AlertTriangle, WifiOff, PenLine } from "lucide-react";
 
@@ -181,6 +182,8 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
           </div>))}
           <button type="button" style={{ ...s.ghost, marginTop: 0 }} onClick={() => set(k, [...rows, emptyHazard()])}>Add hazard</button></div>);
       }
+      case "equipment_picker": case "attachment_picker": case "site_picker": case "person_picker": case "linked_document":
+        return <PickerControl field={f} value={v} onChange={(x) => set(k, x)} token={token} companyId={companyId} />;
       default: return <div style={{ fontSize: 13, color: C.text.muted }}>This question type is not available on this form yet.</div>;
     }
   };

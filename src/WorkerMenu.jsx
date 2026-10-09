@@ -97,6 +97,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // Unified-engine documents the company has switched on (api/documents.js).
   const [engineDocumentId, setEngineDocumentId] = useState(null);
   const [engineDocuments, setEngineDocuments] = useState([]);
+  const [assignedEngine, setAssignedEngine] = useState([]);
   const [engineInboxCount, setEngineInboxCount] = useState(0);
   const [showEngineInbox, setShowEngineInbox] = useState(false);
   // Documents the Owner assigned to this person, with due dates and whether
@@ -165,7 +166,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           body: JSON.stringify({ action: "list_worker_documents", token, companyId }),
         });
         const data = await res.json();
-        if (res.ok) setEngineDocuments(data.documents || []);
+        if (res.ok) { setEngineDocuments(data.documents || []); setAssignedEngine(data.assigned || []); }
       } catch (e) { /* leave list empty on a transient error */ }
     }
     loadEngineDocs();
@@ -443,6 +444,13 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       if (!t || (builtinActive && builtinActive[t.key] === false)) return null;
       const Icon = t.icon;
       return { key: a.documentKey, a, title: t.title, accent: t.accent, open: () => setDoc(t.key), iconNode: <Icon size={22} color={t.accent} strokeWidth={2.25} /> };
+    }),
+    ...assignedEngine.map(a => {
+      const m = /^engine_(\d+)$/.exec(a.documentKey);
+      const d = m && engineDocuments.find(x => String(x.id) === m[1]);
+      if (!d) return null;
+      return { key: a.documentKey, a, title: d.title, accent: "#F97316", open: () => { setEngineDocumentId(String(d.id)); setDoc("engine"); },
+        iconNode: d.icon ? <span style={{ fontSize: 22 }}>{d.icon}</span> : <FileText size={22} color="#F97316" strokeWidth={2.25} /> };
     }),
     ...assignedPortal.map(a => {
       const m = /^portal_(\d+)$/.exec(a.documentKey);

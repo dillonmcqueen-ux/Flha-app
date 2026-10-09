@@ -17,6 +17,7 @@
 
 import { isAssignableAction, matchesAudience, SUBMIT, VIEW } from './documentAccess.js';
 import { validDepartmentKeys, listDivisions } from './companyStructure.js';
+import { listEngineDocuments, engineDocKey } from './documentEngine/companyDocs.js';
 
 export const BUILTIN_DOCUMENT_LABELS = {
   flha: 'FLHA',
@@ -39,10 +40,11 @@ export const MAX_ACTIVE_ASSIGNMENTS = 500;
  * Returns [{ key, label, kind, actions }].
  */
 export async function listAssignableDocuments(supabase, companyId) {
-  const [{ data: settings }, { data: customForms }, { data: portalDocs }] = await Promise.all([
+  const [{ data: settings }, { data: customForms }, { data: portalDocs }, engineDocs] = await Promise.all([
     supabase.from('company_document_settings').select('document_key, is_active').eq('company_id', companyId),
     supabase.from('custom_forms').select('id, title').eq('company_id', companyId).eq('is_active', true).order('created_at', { ascending: true }),
     supabase.from('portal_documents').select('id, title').eq('company_id', companyId).eq('is_active', true).order('created_at', { ascending: true }),
+    listEngineDocuments(supabase, companyId),
   ]);
   const on = new Set((settings || []).filter((s) => s.is_active === true).map((s) => s.document_key));
   const off = new Set((settings || []).filter((s) => s.is_active === false).map((s) => s.document_key));
@@ -57,6 +59,7 @@ export async function listAssignableDocuments(supabase, companyId) {
   for (const d of portalDocs || []) {
     docs.push({ key: `portal_${d.id}`, label: d.title, kind: 'portal', actions: [SUBMIT] });
   }
+  for (const d of engineDocs) docs.push({ key: engineDocKey(d.id), label: d.title, kind: 'engine', actions: [SUBMIT, VIEW] });
   return docs;
 }
 

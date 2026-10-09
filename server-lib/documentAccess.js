@@ -52,11 +52,13 @@ export const GRACE_MS = 48 * 60 * 60 * 1000;
 // compliance, maintenance, equipment reports) would hide a menu card while
 // the handler still answered, which is the cosmetic-only gating break #21
 // was about. Custom forms (`custom_<id>`) and Portal documents
-// (`portal_<id>`) are enforced too. The assignment screen must only offer
+// (`portal_<id>`) are enforced too, and so are unified-engine documents
+// (`engine_<definitionId>`): submit in server-lib/documentEngine/service.js
+// submitRecord, view in its record reads. The assignment screen must only offer
 // keys that pass isAssignableKey.
 export const ENFORCED_BUILTIN_KEYS = ['flha', 'inspection', 'toolbox', 'nearmiss', 'incident', 'daily', 'monthly', 'fuellog'];
 export function isAssignableKey(key) {
-  return ENFORCED_BUILTIN_KEYS.includes(key) || /^custom_\d+$/.test(String(key)) || /^portal_\d+$/.test(String(key));
+  return ENFORCED_BUILTIN_KEYS.includes(key) || /^custom_\d+$/.test(String(key)) || /^portal_\d+$/.test(String(key)) || /^engine_\d+$/.test(String(key));
 }
 // Portal documents take submit assignments only. Their supervisor reads are
 // picked by department in api/portal.js and then narrowed by the site and
@@ -475,8 +477,10 @@ export async function withCompletion(supabase, session, assigned) {
       let q;
       const custom = /^custom_(\d+)$/.exec(a.documentKey);
       const portal = /^portal_(\d+)$/.exec(a.documentKey);
+      const engine = /^engine_(\d+)$/.exec(a.documentKey);
       if (custom) q = supabase.from('custom_form_records').select('created_at').eq('form_id', Number(custom[1]));
       else if (portal) q = supabase.from('portal_records').select('created_at').eq('document_id', Number(portal[1]));
+      else if (engine) q = supabase.from('document_records').select('created_at').eq('definition_id', Number(engine[1])).eq('company_id', session.companyId);
       else if (COMPLETION_SOURCES[a.documentKey]) {
         q = supabase.from(COMPLETION_SOURCES[a.documentKey].table).select('created_at');
         if (a.documentKey !== 'monthly') q = q.eq('company_id', session.companyId);

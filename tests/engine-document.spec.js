@@ -16,14 +16,15 @@ const DOC = {
   signatureSteps: [{ signer: 'worker' }],
 };
 
-async function mockEngine(page) {
+async function mockEngine(page, doc = DOC) {
   const calls = [];
   await page.route('**/api/documents', async (route) => {
     const b = route.request().postDataJSON();
     calls.push(b);
     const json = (o, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(o) });
     if (b.action === 'list_worker_documents') return json({ documents: [{ id: 5, key: 'yard_check', title: 'Yard Check', icon: null, category: 'safety' }] });
-    if (b.action === 'get_document') return json(DOC);
+    if (b.action === 'get_document') return json(doc);
+    if (b.action === 'get_picker_options') return json({ options: b.kind === 'equipment' ? [{ id: 1, label: 'Unit 12 - 2019 Cat 320' }] : [{ id: 7, label: 'North Yard' }] });
     if (b.action === 'create_upload_url') return json({ ok: true, path: `x/${b.kind}`, uploadToken: 'tok', receipt: `rcpt-${b.kind}` });
     if (b.action === 'submit') return json({ ok: true, id: 77, status: 'submitted' });
     return json({}, 400);
@@ -84,5 +85,26 @@ test.describe('Engine document form', () => {
     await page.getByRole('button', { name: /Sign and submit/ }).click();
     await expect(page.getByText('Saved, no signal')).toBeVisible({ timeout: 15000 });
     expect(calls.some((c) => c.action === 'submit')).toBe(false);
+  });
+
+  test('equipment and site pickers send ids', async ({ page }) => {
+    await mockWorkerApis(page);
+    await mockExternalServices(page);
+    const doc = { ...DOC, signatureSteps: [], fields: [
+      { field_key: 'machine', label: 'Machine used', field_type: 'equipment_picker', required: true, config: {} },
+      { field_key: 'where', label: 'Work area', field_type: 'site_picker', required: false, config: {} },
+    ] };
+    const calls = await mockEngine(page, doc);
+    await loginAsWorker(page);
+    await page.getByText('Yard Check').click();
+    await page.getByRole('button', { name: /^Submit/ }).click();
+    await expect(page.getByRole('alert')).toContainText('Machine used');
+    await page.getByLabel('Machine used').selectOption('1');
+    await page.getByLabel('Work area').selectOption('7');
+    await page.getByRole('button', { name: /^Submit/ }).click();
+    await expect(page.getByText('Submitted')).toBeVisible({ timeout: 15000 });
+    const sub = calls.find((c) => c.action === 'submit');
+    expect(sub.answers.machine).toEqual({ equipmentId: 1 });
+    expect(sub.answers.where).toEqual({ siteId: 7 });
   });
 });

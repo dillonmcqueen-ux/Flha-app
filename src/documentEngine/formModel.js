@@ -4,8 +4,9 @@
 
 export const FILE_TYPES = ['file_upload', 'photo', 'signature'];
 export const ARRAY_TYPES = ['multiselect', 'ppe_list', 'hazard_table', 'section_table'];
-// Types a worker cannot answer until the id validators ship (see fieldTypes.js).
-export const UNANSWERABLE_TYPES = ['equipment_picker', 'attachment_picker', 'site_picker', 'person_picker', 'linked_document', 'crew_signatures'];
+// Only crew signatures: they sign through the crew parameter of submit, not a field.
+// The pickers (equipment, attachments, site, person, linked document) are answerable.
+export const UNANSWERABLE_TYPES = ['crew_signatures'];
 export const UPLOAD_KIND = { signature: 'signature', file_upload: 'attachment', photo: 'attachment' };
 export const BUCKET_FOR_KIND = { pdf: 'flha-reports', signature: 'signatures', attachment: 'portal-attachments' };
 export const RISKS = ['Low', 'Medium', 'High', 'Extreme'];
@@ -24,7 +25,11 @@ export function isFilled(field, value) {
     if (field.field_type === 'hazard_table') return value.some((r) => r && String(r.hazard || '').trim());
     return true;
   }
-  if (typeof value === 'object') return Object.keys(value).length > 0;
+  if (typeof value === 'object') {
+    // A typed-in machine with no name is not an answer.
+    if ('text' in value && !String(value.text || '').trim()) return false;
+    return Object.keys(value).length > 0;
+  }
   return true;
 }
 

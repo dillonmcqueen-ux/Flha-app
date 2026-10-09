@@ -23,14 +23,15 @@
 
 import { normalizeFields, normalizeLayout, normalizeRules, validateDefinitionInput, validateAnswers } from './validate.js';
 import { authorRosterId } from '../authorStamp.js';
-import { scopeRecords, loadActor } from '../documentAccess.js';
+import { scopeRecords, loadActor, requireAssignment, menuAccessFor, withCompletion, listVisibleRecordsMulti, queuedAsOf, SUBMIT, VIEW } from '../documentAccess.js';
 import { crewIdSet } from '../leadAccess.js';
 import { validDepartmentKeys } from '../companyStructure.js';
 import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
 import { fieldTypeInfo } from './fieldTypes.js';
 import { linkTargets } from './links.js';
+import { resolveIdAnswers } from './idAnswers.js';
 import { reviewSteps, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
-import { notifyRecord, notifyReturned, notifyEscalations } from './notify.js';
+import { notifyRecord, notifyReturned, notifyEscalations, engineKey } from './notify.js';
 
 export class EngineError extends Error {
   constructor(status, message) {
@@ -387,19 +388,29 @@ export async function getDocumentForWorker(db, { companyId, definitionId }) {
   };
 }
 
-export async function listWorkerDocuments(db, { companyId }) {
+export async function listWorkerDocuments(db, { companyId, session }) {
   const cid = asId(companyId);
   if (!cid) throw new EngineError(400, 'Missing company id.');
   const settings = await many(db.from('company_documents').select('*').eq('company_id', cid).eq('is_enabled', true), 'list the documents');
-  if (settings.length === 0) return { documents: [] };
+  if (settings.length === 0) return { documents: [], assigned: [] };
   const ids = settings.map((s) => s.definition_id);
   const defs = await many(db.from('document_definitions').select('*').in('id', ids), 'list the documents');
-  return {
-    documents: defs
-      .filter((d) => d.current_version_id && !d.archived_at && (d.company_id == null || same(d.company_id, cid)))
-      .map((d) => ({ id: d.id, key: d.key, title: d.title, icon: d.icon, category: d.category }))
-      .sort((a, b) => String(a.title).localeCompare(String(b.title))),
-  };
+  let documents = defs
+    .filter((d) => d.current_version_id && !d.archived_at && (d.company_id == null || same(d.company_id, cid)))
+    .map((d) => ({ id: d.id, key: d.key, title: d.title, icon: d.icon, category: d.category }))
+    .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+  // An assignment narrows who may submit a document, and the menu only shows
+  // what the person may submit. The submit itself is checked again in
+  // submitRecord, so this is presentation. A read failure shows everything.
+  let assigned = [];
+  if (session) {
+    const access = await menuAccessFor(db, { ...session, companyId: cid }, documents.map((d) => engineKey(d.id)));
+    if (!access.error && access.allowedKeys) {
+      documents = documents.filter((d) => access.allowedKeys.has(engineKey(d.id)));
+      assigned = await withCompletion(db, { ...session, companyId: cid }, access.assigned);
+    }
+  }
+  return { documents, assigned };
 }
 
 // ── Records ────────────────────────────────────────────────────────────────
@@ -550,12 +561,18 @@ async function resolveCrew(db, { companyId, authorId, crew, resolveFile }) {
  * receipt into the stored path (null if it is not one this server issued for
  * this company). `deps.resolveSiteId(raw)` vets a site id.
  */
-export async function submitRecord(db, { session, companyId, definitionId, answers, notes, siteId, clientSubmissionId, signLater, signature, pdfReceipt, crew, deps }) {
+export async function submitRecord(db, { session, companyId, definitionId, answers, notes, siteId, clientSubmissionId, queuedAt, signLater, signature, pdfReceipt, crew, deps }) {
   const cid = asId(companyId);
   if (!cid) throw new EngineError(400, 'Missing company id.');
   const def = await loadDefinition(db, definitionId, { companyId: cid });
   const setting = await one(db.from('company_documents').select('*').eq('company_id', cid).eq('definition_id', def.id), 'read the document setting');
   if (!setting || !setting.is_enabled || !def.current_version_id || def.archived_at) throw new EngineError(403, 'This document is not switched on for your company.');
+
+  // Assignments can narrow who may submit. A replayed offline submit is judged
+  // as of the moment it was filled in (the 48 hour reach-back), so a form
+  // started before it was assigned away is not lost.
+  const denied = await requireAssignment(db, { ...session, companyId: cid }, engineKey(def.id), SUBMIT, { asOf: queuedAsOf({ clientSubmissionId, queuedAt }) });
+  if (denied) throw new EngineError(denied.status, denied.error);
 
   const csid = clientSubmissionId ? String(clientSubmissionId).slice(0, 100) : null;
   if (csid) {
@@ -573,7 +590,9 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
   const content = await readVersionContent(db, version);
   const flags = ruleFlags(content.rules);
 
-  const checked = validateAnswers(content.fields, answers, { notes, resolveFile: deps.resolveFile });
+  const ids = await resolveIdAnswers(db, { companyId: cid, session, fields: content.fields, answers, deps });
+  if (ids.error) throw new EngineError(ids.status || 400, ids.error);
+  const checked = validateAnswers(content.fields, answers, { notes, resolveFile: deps.resolveFile, resolved: ids.resolved });
   if (checked.error) throw new EngineError(400, checked.error);
 
   const authorId = authorRosterId(session);
@@ -650,6 +669,8 @@ async function loadRecord(db, recordId, companyId) {
 async function requireRecordView(db, session, record) {
   if (authorRosterId(session) != null && same(record.submitted_by_roster_id, authorRosterId(session))) return;
   if (!isSupervisorTier(session)) throw new EngineError(403, 'Not allowed.');
+  const viewDenied = await requireAssignment(db, { ...session, companyId: record.company_id }, engineKey(record.definition_id), VIEW);
+  if (viewDenied) throw new EngineError(viewDenied.status, viewDenied.error);
   const out = await scopeRecords(db, session, [record]);
   if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
   if (out.records.length === 0) throw new EngineError(403, 'Not allowed.');
@@ -713,7 +734,7 @@ export async function listRecords(db, { session, companyId, definitionId, status
   }
   const rows = await many(q.order('created_at', { ascending: false }).limit(max), 'list the records');
   if (!isSupervisorTier(session)) return { records: rows };
-  const out = await scopeRecords(db, session, rows);
+  const out = await listVisibleRecordsMulti(db, { ...session, companyId: cid }, rows, (r) => engineKey(r.definition_id));
   if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
   return { records: out.records };
 }
@@ -852,7 +873,9 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
     if (fieldTypeInfo(f.field_type)?.value === 'file' && keepPath.has(f.field_key) && (sent[f.field_key] == null || sent[f.field_key] === '')) sent[f.field_key] = KEEP;
   }
   const resolveFile = (raw, field) => (raw === KEEP ? (keepPath.get(field.field_key) || null) : deps.resolveFile(raw, field));
-  const checked = validateAnswers(content.fields, sent, { notes, resolveFile });
+  const ids = await resolveIdAnswers(db, { companyId: cid, session, fields: content.fields, answers: sent, deps });
+  if (ids.error) throw new EngineError(ids.status || 400, ids.error);
+  const checked = validateAnswers(content.fields, sent, { notes, resolveFile, resolved: ids.resolved });
   if (checked.error) throw new EngineError(400, checked.error);
 
   const pdfPath = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
@@ -954,7 +977,7 @@ export async function myInbox(db, { session, companyId }) {
   if (actor && (actor.role === 'supervisor' || actor.role === 'admin' || actor.founder || actor.isLead)) {
     let waiting = await many(db.from('document_records').select('*').eq('company_id', cid).eq('status', 'pending_approval').eq('awaiting_signature', false).order('submitted_at', { ascending: true }).limit(200), 'read the documents waiting for review');
     if (actor.role !== 'worker') {
-      const out = await scopeRecords(db, session, waiting);
+      const out = await listVisibleRecordsMulti(db, { ...session, companyId: cid }, waiting, (r) => engineKey(r.definition_id));
       if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
       waiting = out.records;
     }
