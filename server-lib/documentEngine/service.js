@@ -650,7 +650,7 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
     submitted_at: nowIso,
     // How the worker changed the AI's hazards. Kept with the record until it
     // counts (a sign-later record only counts once signed), then sent to the Brain.
-    meta: (() => { const sig = sanitizeAiEditSignal(aiEditSignal); return sig ? { ai_edit_signal: sig } : {}; })(),
+    meta: (() => { const sig = (content.fields || []).some((f) => f.field_type === 'hazard_table' && f.config && f.config.aiAssist) ? sanitizeAiEditSignal(aiEditSignal) : null; return sig ? { ai_edit_signal: sig } : {}; })(),
   }).select('*');
   if (error || !data || !data[0]) throw dbFail(error, 'save the document');
   const record = data[0];
@@ -959,6 +959,14 @@ export async function setRecordPdf(db, { session, companyId, recordId, pdfReceip
   const mine = (await many(db.from('document_signatures').select('signer_roster_id, meta').eq('record_id', record.id).eq('kind', 'approval'), 'read the approvals'))
     .filter((g) => same(g.signer_roster_id, me) && (Number(g.meta?.round) || 0) === round);
   if (mine.length === 0) throw new EngineError(403, 'Only a reviewer who approved this can update its PDF.');
+  if (record.status !== 'pending_approval' && record.status !== 'approved') throw new EngineError(409, 'This document is not open for a PDF update.');
+  // Same reach as reviewing: losing the view assignment or scope ends it.
+  if (session.role !== 'worker') {
+    const viewDenied = await requireAssignment(db, { ...session, companyId: cid }, engineKey(record.definition_id), VIEW);
+    if (viewDenied) throw new EngineError(viewDenied.status, viewDenied.error);
+    const out = await scopeRecords(db, session, [record]);
+    if (out.denied || out.records.length === 0) throw new EngineError(403, 'Not allowed.');
+  }
   const path = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
   if (!path) throw new EngineError(400, 'That PDF is not valid.');
   await must(db.from('document_records').update({ pdf_path: path, updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid), 'save the PDF');

@@ -207,3 +207,15 @@ test('the reviewer\'s browser redraws the PDF with every signature after approvi
   assert.deepEqual(await redrawRecordPdf('t', 1, 3, async () => { throw new Error('offline'); }, deps), { redrawn: false });
   assert.deepEqual(await redrawRecordPdf('t', 1, 3, call, { ...deps, upload: async () => null }), { redrawn: false });
 });
+
+test('an edit signal is kept only for a document with an AI hazard field', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  const sig = { added: ['Slip'], removed: [], riskChanged: [] };
+  const ok = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', answers: lowAnswers, aiEditSignal: sig, deps });
+  assert.deepEqual(ok.record.meta.ai_edit_signal, sig);
+  // Strip the AI assist from the published fields: the same input is ignored.
+  for (const f of db.tables.document_fields) if (f.config && f.config.aiAssist) f.config = { ...f.config, aiAssist: undefined };
+  const plain = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s2.png', answers: lowAnswers, aiEditSignal: sig, deps });
+  assert.equal(plain.record.meta && plain.record.meta.ai_edit_signal, undefined);
+});
