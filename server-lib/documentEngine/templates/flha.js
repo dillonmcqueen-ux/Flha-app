@@ -93,11 +93,17 @@ export const FLHA_TEMPLATE = {
  * { created, definitionId }.
  */
 export async function seedFlhaTemplate(db) {
-  const { data, error } = await db.from('document_definitions').select('id').is('company_id', null).eq('key', FLHA_TEMPLATE.key);
+  const { data, error } = await db.from('document_definitions').select('id, current_version_id').is('company_id', null).eq('key', FLHA_TEMPLATE.key);
   if (error) throw new Error(`Could not check for the FLHA template: ${error.message}`);
-  if (data && data.length > 0) return { created: false, definitionId: data[0].id };
-  const { definition } = await createDefinition(db, { companyId: null, title: FLHA_TEMPLATE.title, icon: FLHA_TEMPLATE.icon, category: FLHA_TEMPLATE.category, key: FLHA_TEMPLATE.key });
-  await saveDraft(db, { companyId: null, definitionId: definition.id, title: FLHA_TEMPLATE.title, fields: FLHA_TEMPLATE.fields, rules: FLHA_TEMPLATE.rules, layout: FLHA_TEMPLATE.layout });
-  await publishDraft(db, { companyId: null, definitionId: definition.id });
-  return { created: true, definitionId: definition.id };
+  if (data && data.length > 0 && data[0].current_version_id) return { created: false, definitionId: data[0].id };
+  // A definition with no published version is what a seed that stopped half way
+  // leaves behind: finish it instead of reporting it as done.
+  let definitionId = data && data.length > 0 ? data[0].id : null;
+  if (definitionId == null) {
+    const { definition } = await createDefinition(db, { companyId: null, title: FLHA_TEMPLATE.title, icon: FLHA_TEMPLATE.icon, category: FLHA_TEMPLATE.category, key: FLHA_TEMPLATE.key });
+    definitionId = definition.id;
+  }
+  await saveDraft(db, { companyId: null, definitionId, title: FLHA_TEMPLATE.title, fields: FLHA_TEMPLATE.fields, rules: FLHA_TEMPLATE.rules, layout: FLHA_TEMPLATE.layout });
+  await publishDraft(db, { companyId: null, definitionId });
+  return { created: true, definitionId };
 }

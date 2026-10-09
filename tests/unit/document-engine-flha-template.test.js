@@ -115,3 +115,30 @@ test('a bad hazard risk is refused and the hidden AI flag is stored as a plain a
   assert.equal(form.fields.find((f) => f.field_key === 'ai_assisted').config.hidden, true);
   assert.equal(form.fields.find((f) => f.field_key === 'hazards').config.aiAssist.taskField, 'task_summary');
 });
+
+test('a review condition must point at a field that can answer it', async () => {
+  const db = seedDb();
+  const { definition } = await (await import('../../server-lib/documentEngine/service.js')).createDefinition(db, { companyId: 1, title: 'Cond' });
+  const fields = [{ label: 'Hazards', fieldType: 'hazard_table' }, { label: 'Note', fieldType: 'short_text' }, { label: 'Injury?', fieldType: 'yesno' }];
+  const rule = (onlyIf) => [{ ruleType: 'reviewer_step', config: { onlyIf } }];
+  const save = (onlyIf) => saveDraft(db, { companyId: 1, definitionId: definition.id, fields, rules: rule(onlyIf) });
+  await assert.rejects(save({ field: 'typo', riskIn: ['Extreme'] }), /does not have/);
+  await assert.rejects(save({ field: 'note', riskIn: ['Extreme'] }), /no hazard risks/);
+  await assert.rejects(save({ field: 'hazards', riskIn: ['Severe'] }), /risk that does not exist/);
+  await assert.rejects(save({ field: 'hazards', riskIn: [] }), /risk that does not exist/);
+  await assert.rejects(save({ field: 'note', equalsAny: ['x'] }), /cannot decide/);
+  await assert.rejects(save({ field: 'hazards' }), /riskIn or equalsAny/);
+  await assert.rejects(save('nope'), /does not have/);
+  await save({ field: 'hazards', riskIn: ['Extreme', 'High'] });
+  await save({ field: 'injury', equalsAny: ['yes'] });
+});
+
+test('a seed that stopped half way is finished on the next run', async () => {
+  const db = seedDb();
+  const { createDefinition } = await import('../../server-lib/documentEngine/service.js');
+  await createDefinition(db, { companyId: null, title: 'FLHA', key: 'flha' }); // created, never saved or published
+  const out = await seedFlhaTemplate(db);
+  assert.equal(out.created, true);
+  assert.ok(db.tables.document_definitions[0].current_version_id);
+  assert.equal(db.tables.document_definitions.length, 1);
+});

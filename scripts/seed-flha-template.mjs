@@ -12,5 +12,6 @@ import { seedFlhaTemplate } from '../server-lib/documentEngine/templates/flha.js
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) { console.error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.'); process.exit(1); }
+console.log(`Target database: ${new URL(url).host}`);
 const out = await seedFlhaTemplate(createClient(url, key));
 console.log(out.created ? `Created the FLHA template (definition ${out.definitionId}).` : `The FLHA template already exists (definition ${out.definitionId}). Nothing changed.`);

@@ -725,7 +725,7 @@ test('reviewApplies: no steps never, a plain step always, conditional steps only
   const cond = [{ rule_type: 'reviewer_step', config: { onlyIf: { field: 'hazards', riskIn: ['Extreme'] } } }];
   assert.equal(reviewApplies(cond, rows('Extreme')), true);
   assert.equal(reviewApplies(cond, rows('High')), false);
-  assert.equal(reviewApplies(cond, []), false);
+  assert.equal(reviewApplies(cond, []), true, 'no answer to judge by: review applies');
   const answer = [{ rule_type: 'reviewer_step', config: { onlyIf: { field: 'injury', equalsAny: ['yes'] } } }];
   assert.equal(reviewApplies(answer, [{ field_key: 'injury', value_text: 'yes' }]), true);
   assert.equal(reviewApplies(answer, [{ field_key: 'injury', value_text: 'no' }]), false);

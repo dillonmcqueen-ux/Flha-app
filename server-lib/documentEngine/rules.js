@@ -16,7 +16,10 @@
 //                     { field, riskIn: ['Extreme'] } applies when that hazard table
 //                     has a row at one of those risks; { field, equalsAny: ['yes'] }
 //                     when that answer is one of those. The chain is skipped only
-//                     when every step has an onlyIf and none matches.
+//                     when every step has an onlyIf and none matches; a missing
+//                     answer counts as a match. onlyIf is a gate on the whole
+//                     chain, not a per-step switch: once a record is in review it
+//                     walks every step.
 //   notify            { extraRosterIds?: number[], departments?: string[] }
 //                     who is told on submit, on top of whoever the scope rules
 //                     already place the record with.
@@ -49,7 +52,9 @@ export function reviewSteps(rules) {
 function conditionMet(onlyIf, answerRows) {
   if (!onlyIf || typeof onlyIf !== 'object') return true;
   const row = (answerRows || []).find((r) => r.field_key === onlyIf.field);
-  if (!row) return false;
+  // No answer to judge by: review applies. A condition can only ever ADD review,
+  // never remove it because a worker left a field blank.
+  if (!row) return true;
   if (Array.isArray(onlyIf.riskIn)) {
     const rows = Array.isArray(row.value_json) ? row.value_json : [];
     return rows.some((r) => r && onlyIf.riskIn.includes(r.risk));
@@ -65,7 +70,8 @@ function conditionMet(onlyIf, answerRows) {
  * Does a record with these answers go through the reviewer chain? A chain with
  * no steps never does. A step with no onlyIf always applies. The chain is
  * skipped only when every step is conditional and none of the conditions hold
- * (the FLHA: only an Extreme risk hazard needs a supervisor).
+ * (the FLHA: only an Extreme risk hazard needs a supervisor). Once it applies,
+ * every step runs: onlyIf gates the chain, it does not skip single steps.
  */
 export function reviewApplies(rules, answerRows) {
   const steps = (rules || []).filter((r) => r.rule_type === 'reviewer_step');
