@@ -5,10 +5,11 @@
 
 const DEFAULTS = {
   company_documents: { is_enabled: false, brain_enabled: true, owner_muted: false },
-  document_records: { awaiting_signature: false, signature_requested_at: null, worker_signed_at: null, returned_reason: null, pdf_path: null, site_id: null, submitted_by_roster_id: null, client_submission_id: null },
+  document_records: { status: 'submitted', review_step: 0, unsigned_alerted_at: null, review_alerted_at: null, unsigned_closed_at: null, submitted_at: null, awaiting_signature: false, signature_requested_at: null, worker_signed_at: null, returned_reason: null, pdf_path: null, site_id: null, submitted_by_roster_id: null, client_submission_id: null },
   document_fields: { required: false, config: {}, attachment_rules: {}, section: null, help_text: null },
   document_definitions: { company_id: null, template_id: null, current_version_id: null, archived_at: null, icon: null, category: null },
   document_versions: { published_at: null },
+  document_escalations: { status: 'open', actioned_by_roster_id: null, actioned_at: null },
 };
 
 const CASCADES = {
@@ -37,6 +38,8 @@ export function makeDb(seed = {}) {
     eq(col, val) { this.filters.push((r) => same(r[col], val)); return this; }
     in(col, vals) { this.filters.push((r) => (vals || []).some((v) => same(r[col], v))); return this; }
     is(col, val) { this.filters.push((r) => (val === null ? r[col] == null : r[col] === val)); return this; }
+    not(col, op, val) { this.filters.push((r) => (op === 'is' && val === null ? r[col] != null : true)); return this; }
+    lt(col, val) { this.filters.push((r) => r[col] != null && r[col] < val); return this; }
     order(col, { ascending = true } = {}) { this._order = { col, ascending }; return this; }
     limit(n) { this._limit = n; return this; }
     then(resolve, reject) { return Promise.resolve(this.run()).then(resolve, reject); }
@@ -79,8 +82,27 @@ export function makeDb(seed = {}) {
       return { data: null, error: null };
     }
   }
+  // claim_notification_slot: the first 3 claims per (company, key, person) are
+  // allowed, the rest are held. refund_notification_slot is accepted and ignored.
+  const claims = new Map();
+  const rpcCalls = [];
+  const rpcHandlers = {};
+  const rpc = async (name, args) => {
+    rpcCalls.push({ name, args });
+    if (rpcHandlers[name]) return rpcHandlers[name](args);
+    if (name === 'claim_notification_slot') {
+      const k = `${args.p_company}:${args.p_key}:${args.p_roster}`;
+      const n = (claims.get(k) || 0) + 1;
+      claims.set(k, n);
+      return { data: [{ allowed: n <= 3, suppressed: 0 }], error: null };
+    }
+    return { data: null, error: null };
+  };
   return {
     tables,
+    rpc,
+    rpcCalls,
+    rpcHandlers,
     from: (name) => { t(name); return new Query(name); },
     failOn: (table, mode) => failures.push({ table, mode }),
     clearFailures: () => { failures.length = 0; },

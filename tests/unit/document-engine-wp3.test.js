@@ -1,0 +1,542 @@
+// WP3: the rules that do things. Reviewer chain, notifications, escalations,
+// the Brain signal, the inbox, and the time-based sweeps, driven against the
+// in-memory client (tests/unit/_fakeDb.js).
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { makeDb } from './_fakeDb.js';
+import {
+  EngineError, createDefinition, saveDraft, publishDraft, setCompanyDocument, submitRecord, resubmitRecord, signNow,
+  reviewRecord, myInbox, listEscalations, actionEscalation, setOwnerMute,
+} from '../../server-lib/documentEngine/service.js';
+import { closeStaleUnsignedEngine, alertOverdueUnsignedEngine, escalateStalePending } from '../../server-lib/documentEngine/sweeps.js';
+import { runDigest } from '../../server-lib/notifyDigest.js';
+
+const mail = () => {
+  const sent = [];
+  return { sent, sendEmail: async (m) => { sent.push(m); } };
+};
+const mkDeps = (m) => ({
+  resolveFile: (v) => (typeof v === 'string' && v.startsWith('rcpt:') ? v.slice(5) : null),
+  resolveSiteId: async (raw) => (Number(raw) === 5 ? 5 : null),
+  sendEmail: m ? m.sendEmail : null,
+});
+
+const worker = { role: 'worker', userId: 11, companyId: 1, name: 'Wes Worker' };
+const lead = { role: 'worker', userId: 12, companyId: 1, name: 'Lena Lead' };
+const supA = { role: 'supervisor', userId: 21, companyId: 1, name: 'Sue Super' };
+const supB = { role: 'supervisor', userId: 23, companyId: 1, name: 'Bo Super' };
+const owner = { role: 'supervisor', userId: 24, companyId: 1, name: 'Olive Owner', isOwner: true };
+const founder = { role: 'admin' };
+
+function seed(extra = {}) {
+  return makeDb({
+    sites: [{ id: 5, company_id: 1, name: 'North Yard' }],
+    companies: [{ id: 1, suspended: false }, { id: 2, suspended: false }],
+    roster: [
+      { id: 11, company_id: 1, name: 'Wes Worker', role: 'worker', active: true, email: 'wes@x.test', departments: ['crew1'], divisions: [], default_site_id: 5 },
+      { id: 12, company_id: 1, name: 'Lena Lead', role: 'worker', active: true, is_lead: true, email: 'lena@x.test', departments: ['crew1'], divisions: [], default_site_id: null },
+      { id: 13, company_id: 1, name: 'Lou Lead', role: 'worker', active: true, is_lead: true, email: 'lou@x.test', departments: ['crew1'], divisions: [], default_site_id: null },
+      { id: 15, company_id: 1, name: 'Out Crew', role: 'worker', active: true, email: 'out@x.test', departments: ['crew9'], divisions: [], default_site_id: 99 },
+      { id: 21, company_id: 1, name: 'Sue Super', role: 'supervisor', active: true, is_owner: false, email: 'sue@x.test', default_site_id: 5, departments: [], divisions: [] },
+      { id: 23, company_id: 1, name: 'Bo Super', role: 'supervisor', active: true, is_owner: false, email: 'bo@x.test', default_site_id: 5, departments: [], divisions: [] },
+      { id: 24, company_id: 1, name: 'Olive Owner', role: 'supervisor', active: true, is_owner: true, email: 'olive@x.test', default_site_id: null, departments: [], divisions: [] },
+      { id: 25, company_id: 1, name: 'Sal Safety', role: 'supervisor', active: true, is_owner: false, email: 'sal@x.test', default_site_id: 99, departments: ['safety'], divisions: [] },
+      { id: 31, company_id: 2, name: 'Other Oscar', role: 'supervisor', active: true, is_owner: true, email: 'oscar@other.test', default_site_id: 5, departments: ['safety'], divisions: [] },
+    ],
+    ...extra,
+  });
+}
+
+const FIELDS = [
+  { label: 'Task', fieldType: 'short_text', required: true },
+  { label: 'Injury?', fieldType: 'yesno' },
+  { label: 'Risk', fieldType: 'dropdown', config: { options: ['Low', 'High'] } },
+  { label: 'Notes', fieldType: 'long_text' },
+];
+const REVIEW = (config = {}) => ({ ruleType: 'reviewer_step', config });
+const SIGN = { ruleType: 'signature_step', config: { signer: 'worker' } };
+
+async function doc(db, { rules = [], fields = FIELDS, title = 'Pre Shift', setting = {} } = {}) {
+  const { definition } = await createDefinition(db, { companyId: 1, title });
+  await saveDraft(db, { companyId: 1, definitionId: definition.id, title, fields, rules });
+  await publishDraft(db, { companyId: 1, definitionId: definition.id });
+  await setCompanyDocument(db, { companyId: 1, definitionId: definition.id, isEnabled: true, ...setting });
+  return definition.id;
+}
+
+const file = (db, id, session, extra = {}, m) => submitRecord(db, {
+  session, companyId: 1, definitionId: id, answers: { task: 'Trench' }, siteId: 5, deps: mkDeps(m), ...extra,
+});
+
+async function rejects(promise, status, pattern) {
+  await assert.rejects(promise, (e) => {
+    assert.ok(e instanceof EngineError, `expected EngineError, got ${e && e.message}`);
+    assert.equal(e.status, status, e.message);
+    if (pattern) assert.match(e.message, pattern);
+    return true;
+  });
+}
+
+// ── Reviewer chain ─────────────────────────────────────────────────────────
+
+test('a two step chain: each step is a signature, the second needs a different person', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW({ label: 'Supervisor' }), REVIEW({ label: 'Second look' })] });
+  const rec = (await file(db, id, worker)).record;
+  assert.equal(rec.status, 'pending_approval');
+
+  const first = await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' });
+  assert.deepEqual(first, { status: 'pending_approval', step: 1 });
+  assert.equal(db.tables.document_records[0].review_step, 1);
+  await rejects(reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }), 403, /different person/);
+
+  const second = await reviewRecord(db, { session: supB, companyId: 1, recordId: rec.id, decision: 'approve' });
+  assert.deepEqual(second, { status: 'approved' });
+  assert.deepEqual(db.tables.document_signatures.filter((s) => s.kind === 'approval').map((s) => [s.step_key, s.signer_roster_id]), [['review_0', 21], ['review_1', 23]]);
+  await rejects(reviewRecord(db, { session: supB, companyId: 1, recordId: rec.id, decision: 'approve' }), 409, /not waiting/);
+});
+
+test('an owner step is for the Owner and the founder only', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW({ role: 'owner' })] });
+  const rec = (await file(db, id, worker)).record;
+  await rejects(reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }), 403);
+  assert.equal((await reviewRecord(db, { session: owner, companyId: 1, recordId: rec.id, decision: 'approve' })).status, 'approved');
+  const rec2 = (await file(db, id, worker)).record;
+  assert.equal((await reviewRecord(db, { session: founder, companyId: 1, recordId: rec2.id, decision: 'approve' })).status, 'approved');
+});
+
+test('a crew lead reviews their own crew on a step that allows leads, and nobody else', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW({ allowLeads: true })] });
+  const crewRec = (await file(db, id, worker)).record;
+  const leadRec = (await file(db, id, { ...worker, userId: 13, name: 'Lou Lead' })).record;
+  const outsider = (await file(db, id, { ...worker, userId: 15, name: 'Out Crew' }, { siteId: undefined })).record;
+
+  await rejects(reviewRecord(db, { session: lead, companyId: 1, recordId: leadRec.id, decision: 'approve' }), 403, /needs a supervisor/);
+  await rejects(reviewRecord(db, { session: lead, companyId: 1, recordId: outsider.id, decision: 'approve' }), 403);
+  assert.equal((await reviewRecord(db, { session: lead, companyId: 1, recordId: crewRec.id, decision: 'approve' })).status, 'approved');
+  assert.equal(db.tables.document_signatures.find((s) => s.kind === 'approval').signer_role, 'lead');
+});
+
+test('a lead cannot approve their own, nor on a step that does not allow leads, and a plain worker never can', async () => {
+  const db = seed();
+  const open = await doc(db, { rules: [REVIEW({ allowLeads: true })], title: 'Open' });
+  const closed = await doc(db, { rules: [REVIEW({})], title: 'Closed' });
+  const own = (await file(db, open, lead)).record;
+  await rejects(reviewRecord(db, { session: lead, companyId: 1, recordId: own.id, decision: 'approve' }), 403, /your own/);
+  const noLeads = (await file(db, closed, worker)).record;
+  await rejects(reviewRecord(db, { session: lead, companyId: 1, recordId: noLeads.id, decision: 'approve' }), 403);
+  const someone = (await file(db, open, worker)).record;
+  await rejects(reviewRecord(db, { session: { ...worker, userId: 15, name: 'Out Crew' }, companyId: 1, recordId: someone.id, decision: 'approve' }), 403);
+});
+
+test('two reviewers approving the same step at once only count once', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW(), REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  const results = await Promise.allSettled([
+    reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' }),
+    reviewRecord(db, { session: supB, companyId: 1, recordId: rec.id, decision: 'approve' }),
+  ]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(db.tables.document_records[0].review_step, 1);
+  assert.equal(db.tables.document_signatures.filter((s) => s.kind === 'approval').length, 1);
+});
+
+test('returning, then fixing, restarts the chain from its first step', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW(), REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve' });
+  await reviewRecord(db, { session: supB, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Wrong site' });
+  assert.equal(db.tables.document_records[0].status, 'returned');
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'Fixed' }, deps: mkDeps() });
+  assert.equal(db.tables.document_records[0].review_step, 0);
+  assert.equal(db.tables.document_records[0].status, 'pending_approval');
+});
+
+// ── Notifications ──────────────────────────────────────────────────────────
+
+test('a reviewer step tells the people who can open the record, never the author', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  const m = mail();
+  await file(db, id, worker, {}, m);
+  const to = m.sent.map((x) => x.to).sort();
+  assert.deepEqual(to, ['bo@x.test', 'lena@x.test', 'lou@x.test', 'sue@x.test'], 'supervisors at the site plus the leads of the author\'s crew');
+  assert.ok(m.sent.every((x) => x.subject === 'New Pre Shift at North Yard'));
+  const body = m.sent.map((x) => `${x.subject} ${x.text}`).join(' ');
+  assert.equal(body.includes('Trench'), false, 'no answers in the email');
+  assert.equal(body.includes('Wes'), false, 'no author in the email');
+});
+
+test('a document with no notify rule and no reviewer tells nobody', async () => {
+  const db = seed();
+  const id = await doc(db);
+  const m = mail();
+  await file(db, id, worker, {}, m);
+  assert.equal(m.sent.length, 0);
+});
+
+test('the Owner can mute a document, and unmute it', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  await setOwnerMute(db, { companyId: 1, definitionId: id, muted: true });
+  const m = mail();
+  await file(db, id, worker, {}, m);
+  assert.equal(m.sent.length, 0);
+  await setOwnerMute(db, { companyId: 1, definitionId: id, muted: false });
+  await file(db, id, worker, { clientSubmissionId: 'again' }, m);
+  assert.ok(m.sent.length > 0);
+  await rejects(setOwnerMute(db, { companyId: 1, definitionId: id, muted: 'yes' }), 400);
+});
+
+test('no mail key means no email and no failure', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  const out = await file(db, id, worker, {}, null);
+  assert.equal(out.record.status, 'pending_approval');
+});
+
+test('a notify rule can add named people and whole departments', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [{ ruleType: 'notify', config: { extraRosterIds: [24], departments: ['safety'] } }] });
+  const m = mail();
+  await file(db, id, worker, {}, m);
+  const to = m.sent.map((x) => x.to).sort();
+  assert.ok(to.includes('olive@x.test'), 'the named Owner');
+  assert.ok(to.includes('sal@x.test'), 'the safety supervisor, though not at this site');
+  assert.ok(!to.some((a) => a.endsWith('other.test')), 'never another company');
+});
+
+test('a person is told at most three times per window, the rest are held for the digest', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  const m = mail();
+  for (let i = 0; i < 5; i += 1) await file(db, id, worker, { clientSubmissionId: `s${i}` }, m);
+  assert.equal(m.sent.filter((x) => x.to === 'sue@x.test').length, 3);
+});
+
+test('a suspended company is not emailed', async () => {
+  const db = seed({ companies: [{ id: 1, suspended: true }] });
+  const id = await doc(db, { rules: [REVIEW()] });
+  const m = mail();
+  await file(db, id, worker, {}, m);
+  assert.equal(m.sent.length, 0);
+});
+
+test('the next reviewer is told when a step is approved, the one who approved is not', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW(), REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  const m = mail();
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'approve', deps: mkDeps(m) });
+  const to = m.sent.map((x) => x.to);
+  assert.ok(to.includes('bo@x.test'));
+  assert.ok(!to.includes('sue@x.test'));
+  assert.ok(!to.includes('wes@x.test'));
+});
+
+test('a returned document emails its author without the reason, and respects the mute', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  const rec = (await file(db, id, worker)).record;
+  const m = mail();
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Secret detail about Jamie', deps: mkDeps(m) });
+  assert.deepEqual(m.sent.map((x) => x.to), ['wes@x.test']);
+  assert.match(m.sent[0].subject, /sent back/);
+  assert.equal(m.sent[0].text.includes('Secret'), false);
+
+  const db2 = seed();
+  const id2 = await doc(db2, { rules: [REVIEW()] });
+  await setOwnerMute(db2, { companyId: 1, definitionId: id2, muted: true });
+  const rec2 = (await file(db2, id2, worker)).record;
+  const m2 = mail();
+  await reviewRecord(db2, { session: supA, companyId: 1, recordId: rec2.id, decision: 'return', reason: 'x', deps: mkDeps(m2) });
+  assert.equal(m2.sent.length, 0);
+});
+
+test('a sign-afterwards record tells nobody until it is signed', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [SIGN, REVIEW()] });
+  const m = mail();
+  const rec = (await file(db, id, worker, { signLater: true }, m)).record;
+  assert.equal(m.sent.length, 0);
+  await signNow(db, { session: worker, companyId: 1, recordId: rec.id, signature: 'rcpt:1/s.png', deps: mkDeps(m) });
+  assert.ok(m.sent.length > 0);
+});
+
+// ── Escalations ────────────────────────────────────────────────────────────
+
+const ROUTE = { ruleType: 'route_by_answer', config: { fieldKey: 'injury', equals: 'yes', department: 'safety' } };
+
+test('a routing rule must point at a real routable field and a real department', async () => {
+  const db = seed();
+  const { definition } = await createDefinition(db, { companyId: 1, title: 'Bad routes' });
+  const bad = (rule) => rejects(saveDraft(db, { companyId: 1, definitionId: definition.id, fields: FIELDS, rules: [rule] }), 400);
+  await bad({ ruleType: 'route_by_answer', config: { fieldKey: 'nope', equals: 'yes', department: 'safety' } });
+  await bad({ ruleType: 'route_by_answer', config: { fieldKey: 'notes', equals: 'yes', department: 'safety' } });
+  await bad({ ruleType: 'route_by_answer', config: { fieldKey: 'injury', equals: 'yes', department: 'catering' } });
+  await bad({ ruleType: 'notify', config: { departments: ['catering'] } });
+  await saveDraft(db, { companyId: 1, definitionId: definition.id, fields: FIELDS, rules: [ROUTE] });
+});
+
+test('a matching answer files an escalation and tells the department, never the answer', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  const m = mail();
+  const rec = (await file(db, id, worker, { answers: { task: 'Trench', injury: 'yes' } }, m)).record;
+  const esc = db.tables.document_escalations;
+  assert.equal(esc.length, 1);
+  assert.deepEqual([esc[0].record_id, esc[0].field_key, esc[0].trigger_value, esc[0].target_department, esc[0].status], [rec.id, 'injury', 'yes', 'safety', 'open']);
+  assert.deepEqual(m.sent.map((x) => x.to), ['sal@x.test']);
+  assert.match(m.sent[0].subject, /routed to Safety/);
+  assert.equal(m.sent[0].text.includes('Injury'), false, 'not even the question');
+});
+
+test('a non matching answer escalates nothing, and an empty department falls back to the Owner', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  const m = mail();
+  await file(db, id, worker, { answers: { task: 'x', injury: 'no' } }, m);
+  assert.equal((db.tables.document_escalations || []).length, 0);
+
+  const db2 = seed();
+  db2.tables.roster = db2.tables.roster.filter((r) => r.id !== 25);
+  const id2 = await doc(db2, { rules: [ROUTE] });
+  const m2 = mail();
+  await file(db2, id2, worker, { answers: { task: 'x', injury: 'yes' } }, m2);
+  assert.deepEqual(m2.sent.map((x) => x.to), ['olive@x.test']);
+});
+
+test('an escalation is filed once the record counts, not while it waits for a signature', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [SIGN, ROUTE] });
+  const rec = (await file(db, id, worker, { answers: { task: 'x', injury: 'yes' }, signLater: true })).record;
+  assert.equal((db.tables.document_escalations || []).length, 0);
+  await signNow(db, { session: worker, companyId: 1, recordId: rec.id, signature: 'rcpt:1/s.png', deps: mkDeps() });
+  assert.equal(db.tables.document_escalations.length, 1);
+});
+
+test('a returned record that is fixed does not escalate the same field twice', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW(), ROUTE] });
+  const rec = (await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } })).record;
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: rec.id, decision: 'return', reason: 'fix' });
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'y', injury: 'yes' }, deps: mkDeps() });
+  assert.equal(db.tables.document_escalations.length, 1);
+});
+
+test('escalations are seen and actioned by their department, the Owner and the founder only', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } });
+  const safety = { role: 'supervisor', userId: 25, companyId: 1, name: 'Sal Safety' };
+  assert.equal((await listEscalations(db, { session: safety, companyId: 1 })).escalations.length, 1);
+  assert.equal((await listEscalations(db, { session: supA, companyId: 1 })).escalations.length, 0);
+  assert.equal((await listEscalations(db, { session: owner, companyId: 1 })).escalations.length, 1);
+  assert.equal((await listEscalations(db, { session: founder, companyId: 1 })).escalations.length, 1);
+  await rejects(listEscalations(db, { session: worker, companyId: 1 }), 403);
+  const eid = db.tables.document_escalations[0].id;
+  await rejects(actionEscalation(db, { session: supA, companyId: 1, escalationId: eid }), 403);
+  await rejects(actionEscalation(db, { session: founder, companyId: 2, escalationId: eid }), 404);
+  await actionEscalation(db, { session: safety, companyId: 1, escalationId: eid });
+  await rejects(actionEscalation(db, { session: safety, companyId: 1, escalationId: eid }), 409);
+  assert.equal(db.tables.document_escalations[0].actioned_by_roster_id, 25);
+  assert.equal((await listEscalations(db, { session: owner, companyId: 1, status: 'open' })).escalations.length, 0);
+});
+
+test('a failure writing escalations never fails the submit', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  db.failOn('document_escalations', 'insert');
+  const out = await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } });
+  assert.equal(out.record.status, 'submitted');
+});
+
+// ── Brain ──────────────────────────────────────────────────────────────────
+
+test('a filed document tells the Brain option answers and flagged questions, nothing personal', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  await file(db, id, worker, { answers: { task: 'Jamie fell', injury: 'yes', risk: 'High', notes: 'Private note' } });
+  const sig = db.tables.company_signals[0];
+  assert.equal(sig.source_type, 'engine_document');
+  assert.equal(sig.company_id, 1);
+  const json = JSON.stringify(sig.signal_json);
+  assert.deepEqual(sig.signal_json.answers.map((a) => a.answer).sort(), ['High', 'yes']);
+  assert.deepEqual(sig.signal_json.flagged, [{ question: 'Injury?', department: 'safety' }]);
+  for (const secret of ['Jamie', 'Private', 'Wes']) assert.equal(json.includes(secret), false, secret);
+});
+
+test('Brain off for a document, or a record still unsigned, writes no signal', async () => {
+  const db = seed();
+  const id = await doc(db, { setting: { brainEnabled: false } });
+  await file(db, id, worker, { answers: { task: 'x', risk: 'High' } });
+  assert.equal((db.tables.company_signals || []).length, 0);
+
+  const db2 = seed();
+  const id2 = await doc(db2, { rules: [SIGN] });
+  const rec = (await file(db2, id2, worker, { answers: { task: 'x', risk: 'High' }, signLater: true })).record;
+  assert.equal((db2.tables.company_signals || []).length, 0);
+  await signNow(db2, { session: worker, companyId: 1, recordId: rec.id, signature: 'rcpt:1/s.png', deps: mkDeps() });
+  assert.equal(db2.tables.company_signals.length, 1);
+});
+
+// ── Inbox ──────────────────────────────────────────────────────────────────
+
+test('the inbox lists what is sent back, what needs a signature, and what a reviewer can act on', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [SIGN, REVIEW({ allowLeads: true })] });
+  const sent = (await file(db, id, worker, { signature: 'rcpt:1/s.png' })).record;
+  await file(db, id, worker, { signLater: true, clientSubmissionId: 'later' });
+  await reviewRecord(db, { session: supA, companyId: 1, recordId: sent.id, decision: 'return', reason: 'fix' });
+  const again = (await file(db, id, worker, { signature: 'rcpt:1/s.png', clientSubmissionId: 'third' })).record;
+
+  const mine = await myInbox(db, { session: worker, companyId: 1 });
+  assert.deepEqual(mine.mine.map((i) => i.kind).sort(), ['returned', 'sign']);
+  assert.equal(mine.mine.find((i) => i.kind === 'returned').reason, 'fix');
+  assert.equal(mine.review.length, 0);
+
+  const sup = await myInbox(db, { session: supB, companyId: 1 });
+  assert.deepEqual(sup.review.map((i) => i.recordId), [again.id], 'the unsigned one is not reviewable yet');
+  const lead = await myInbox(db, { session: { ...worker, userId: 12, name: 'Lena Lead' }, companyId: 1 });
+  assert.deepEqual(lead.review.map((i) => i.recordId), [again.id], 'a lead sees their crew\'s record on a step that allows leads');
+  const nobody = await myInbox(db, { session: { ...worker, userId: 15, name: 'Out Crew' }, companyId: 1 });
+  assert.equal(nobody.counts.total, 0);
+  assert.equal((await myInbox(db, { session: founder, companyId: 1 })).review.length, 1);
+});
+
+// ── Sweeps ─────────────────────────────────────────────────────────────────
+
+const HOUR = 60 * 60 * 1000;
+const ago = (ms) => new Date(Date.now() - ms).toISOString();
+
+async function unsignedRecord(db, id, hoursAgo, extra = {}) {
+  const rec = (await file(db, id, worker, { signLater: true, clientSubmissionId: `u${Math.random()}` })).record;
+  const row = db.tables.document_records.find((r) => r.id === rec.id);
+  row.signature_requested_at = ago(hoursAgo * HOUR);
+  Object.assign(row, extra);
+  return row;
+}
+
+test('an unsigned record gets one heads-up after 24 hours, to the people who would be told, and only once', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [SIGN, REVIEW()], title: 'Pre Shift' });
+  const fresh = await unsignedRecord(db, id, 2);
+  const old = await unsignedRecord(db, id, 30);
+  const m = mail();
+  const out = await alertOverdueUnsignedEngine(db, { sendEmail: m.sendEmail });
+  assert.equal(out.alerted, 1);
+  assert.ok(m.sent.length > 0);
+  assert.ok(m.sent.every((x) => /1 Pre Shift still unsigned/.test(x.subject)));
+  assert.ok(m.sent.every((x) => x.to !== 'wes@x.test'), 'not the author');
+  assert.ok(db.tables.document_records.find((r) => r.id === old.id).unsigned_alerted_at);
+  assert.equal(db.tables.document_records.find((r) => r.id === fresh.id).unsigned_alerted_at, null);
+  const again = await alertOverdueUnsignedEngine(db, { sendEmail: m.sendEmail });
+  assert.equal(again.alerted, 0);
+});
+
+test('the unsigned heads-up respects the mute and hands the claim back when nobody can be told', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [SIGN, REVIEW()], setting: { ownerMuted: true } });
+  await unsignedRecord(db, id, 30);
+  const m = mail();
+  await alertOverdueUnsignedEngine(db, { sendEmail: m.sendEmail });
+  assert.equal(m.sent.length, 0);
+
+  // Somebody is due to be told but every send fails: the claim is handed back, retried next run.
+  const db2 = seed();
+  const id2 = await doc(db2, { rules: [SIGN, REVIEW()] });
+  const row = await unsignedRecord(db2, id2, 30);
+  const out = await alertOverdueUnsignedEngine(db2, { sendEmail: async () => { throw new Error('mail is down'); } });
+  assert.equal(out.alerted, 0);
+  assert.ok(out.failed > 0);
+  assert.equal(db2.tables.document_records.find((r) => r.id === row.id).unsigned_alerted_at, null, 'retried next run');
+
+  // Nobody on the roster has an address: stamped and left alone, so it cannot hold up the queue forever.
+  const db3 = seed();
+  db3.tables.roster.forEach((r) => { r.email = null; });
+  const id3 = await doc(db3, { rules: [SIGN, REVIEW()] });
+  const row3 = await unsignedRecord(db3, id3, 30);
+  await alertOverdueUnsignedEngine(db3, { sendEmail: mail().sendEmail });
+  assert.ok(db3.tables.document_records.find((r) => r.id === row3.id).unsigned_alerted_at);
+});
+
+test('a record unsigned for 10 days closes, only after its heads-up, and can no longer be signed', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [SIGN] });
+  const alerted = await unsignedRecord(db, id, 24 * 11, { unsigned_alerted_at: ago(24 * 10 * HOUR) });
+  const silent = await unsignedRecord(db, id, 24 * 11);
+  const young = await unsignedRecord(db, id, 24 * 3, { unsigned_alerted_at: ago(HOUR) });
+  assert.equal(await closeStaleUnsignedEngine(db), 1);
+  assert.ok(db.tables.document_records.find((r) => r.id === alerted.id).unsigned_closed_at);
+  assert.equal(db.tables.document_records.find((r) => r.id === silent.id).unsigned_closed_at, null);
+  assert.equal(db.tables.document_records.find((r) => r.id === young.id).unsigned_closed_at, null);
+  await rejects(signNow(db, { session: worker, companyId: 1, recordId: alerted.id, signature: 'rcpt:1/s.png', deps: mkDeps() }), 409, /closed unsigned/);
+  assert.equal((await myInbox(db, { session: worker, companyId: 1 })).mine.some((i) => i.recordId === alerted.id), false);
+});
+
+test('a record waiting 48 hours for review escalates once to the Owner', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()] });
+  const old = (await file(db, id, worker)).record;
+  const fresh = (await file(db, id, worker, { clientSubmissionId: 'f' })).record;
+  db.tables.document_records.find((r) => r.id === old.id).submitted_at = ago(50 * HOUR);
+  const m = mail();
+  const out = await escalateStalePending(db, { sendEmail: m.sendEmail });
+  assert.deepEqual([out.escalated, out.emailed], [1, 1]);
+  assert.deepEqual(m.sent.map((x) => x.to), ['olive@x.test']);
+  assert.match(m.sent[0].subject, /1 document waiting for review/);
+  assert.ok(db.tables.document_records.find((r) => r.id === old.id).review_alerted_at);
+  assert.equal(db.tables.document_records.find((r) => r.id === fresh.id).review_alerted_at, null);
+  assert.equal((await escalateStalePending(db, { sendEmail: m.sendEmail })).escalated, 0);
+});
+
+test('a muted document does not escalate, and with no Owner address the stamp is handed back', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()], setting: { ownerMuted: true } });
+  const rec = (await file(db, id, worker)).record;
+  db.tables.document_records.find((r) => r.id === rec.id).submitted_at = ago(50 * HOUR);
+  const m = mail();
+  await escalateStalePending(db, { sendEmail: m.sendEmail });
+  assert.equal(m.sent.length, 0);
+
+  const db2 = seed();
+  db2.tables.roster.find((r) => r.id === 24).email = null;
+  const id2 = await doc(db2, { rules: [REVIEW()] });
+  const rec2 = (await file(db2, id2, worker)).record;
+  db2.tables.document_records.find((r) => r.id === rec2.id).submitted_at = ago(50 * HOUR);
+  const out = await escalateStalePending(db2, { sendEmail: mail().sendEmail });
+  assert.equal(out.escalated, 0);
+  assert.equal(db2.tables.document_records.find((r) => r.id === rec2.id).review_alerted_at, null);
+});
+
+test('the sweeps skip quietly when the WP3 columns are not there yet', async () => {
+  const db = seed();
+  db.failOn('document_records', 'update');
+  assert.equal(await closeStaleUnsignedEngine(db), 0);
+  const m = mail();
+  assert.deepEqual(await alertOverdueUnsignedEngine(db, { sendEmail: m.sendEmail }), { alerted: 0, emailed: 0, failed: 0 });
+});
+
+// ── Digest ─────────────────────────────────────────────────────────────────
+
+test('the digest reports held engine notices under the document title, and drops a muted document', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [REVIEW()], title: 'Pre Shift' });
+  const muted = await doc(db, { rules: [REVIEW()], title: 'Muted One', setting: { ownerMuted: true } });
+  db.rpcHandlers.claim_held_notices = async () => ({
+    data: [
+      { company_id: 1, roster_id: 21, document_key: `engine_${id}`, held: 2 },
+      { company_id: 1, roster_id: 21, document_key: `engine_${muted}`, held: 4 },
+    ],
+    error: null,
+  });
+  const m = mail();
+  const out = await runDigest(db, { sendEmail: m.sendEmail });
+  assert.equal(out.sent, 1);
+  assert.equal(out.dropped, 1);
+  assert.match(m.sent[0].subject, /^Pre Shift: 2 new$/);
+});

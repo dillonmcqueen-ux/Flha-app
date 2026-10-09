@@ -21,6 +21,8 @@ import crypto from 'crypto';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { createUploadUrl, resolveUploadReceipt } from '../server-lib/uploadUrls.js';
 import { resolveSiteId } from '../server-lib/siteScope.js';
+import { sendEmail } from '../server-lib/email.js';
+import { canManageCompany } from '../server-lib/ownerAccess.js';
 import {
   EngineError,
   createDefinition,
@@ -38,6 +40,10 @@ import {
   getRecord,
   listRecords,
   reviewRecord,
+  myInbox,
+  listEscalations,
+  actionEscalation,
+  setOwnerMute,
 } from '../server-lib/documentEngine/service.js';
 import { ENGINE_FIELD_TYPES, ENGINE_RULE_TYPES } from '../server-lib/documentEngine/fieldTypes.js';
 
@@ -121,6 +127,8 @@ export default async function handler(req, res) {
   const deps = {
     resolveFile: (value, field) => resolveUploadReceipt(value, bucketFor(field), companyId),
     resolveSiteId: (raw) => resolveSiteId(db, companyId, raw),
+    // Without the mail key nothing is sent, like server-lib/notifyAudience.js.
+    sendEmail: process.env.RESEND_API_KEY ? sendEmail : null,
   };
 
   try {
@@ -213,7 +221,25 @@ export default async function handler(req, res) {
       return res.status(200).json(await getRecord(db, { session, companyId, recordId: body.recordId }));
     }
     if (action === 'review') {
-      const out = await reviewRecord(db, { session, companyId, recordId: body.recordId, decision: body.decision, reason: body.reason });
+      const out = await reviewRecord(db, { session, companyId, recordId: body.recordId, decision: body.decision, reason: body.reason, deps });
+      return res.status(200).json({ ok: true, ...out });
+    }
+
+    if (action === 'my_inbox') {
+      return res.status(200).json(await myInbox(db, { session, companyId }));
+    }
+    if (action === 'list_escalations') {
+      return res.status(200).json(await listEscalations(db, { session, companyId, status: body.status }));
+    }
+    if (action === 'action_escalation') {
+      const out = await actionEscalation(db, { session, companyId, escalationId: body.escalationId });
+      return res.status(200).json({ ok: true, ...out });
+    }
+    // The Account Owner (or the founder) can mute one document's email.
+    // Everything else about a document stays founder only.
+    if (action === 'set_owner_mute') {
+      if (!canManageCompany(session)) return res.status(403).json({ error: 'Not allowed.' });
+      const out = await setOwnerMute(db, { companyId, definitionId: body.definitionId, muted: body.muted });
       return res.status(200).json({ ok: true, ...out });
     }
 

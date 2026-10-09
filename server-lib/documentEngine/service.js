@@ -23,7 +23,12 @@
 
 import { normalizeFields, normalizeLayout, normalizeRules, validateDefinitionInput, validateAnswers } from './validate.js';
 import { authorRosterId } from '../authorStamp.js';
-import { scopeRecords } from '../documentAccess.js';
+import { scopeRecords, loadActor } from '../documentAccess.js';
+import { crewIdSet } from '../leadAccess.js';
+import { validDepartmentKeys } from '../companyStructure.js';
+import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
+import { reviewSteps, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
+import { notifyRecord, notifyReturned, notifyEscalations } from './notify.js';
 
 export class EngineError extends Error {
   constructor(status, message) {
@@ -148,6 +153,36 @@ async function copyVersionContent(db, fromVersionId, toVersionId) {
   }
 }
 
+// A rule may only point at a field and a department that exist. A route that
+// names a field the document does not have, or a department the company does
+// not have, would never fire and would hide a mistake, so it is refused when
+// the draft is saved.
+const ROUTABLE = ['yesno', 'dropdown', 'multiselect', 'condition3'];
+async function checkRuleTargets(db, { companyId, rules, fields }) {
+  const needsDepartments = rules.some((r) => ['route_by_answer', 'route_by_scope', 'notify'].includes(r.rule_type));
+  if (!needsDepartments) return;
+  let valid;
+  try {
+    valid = companyId == null ? new Set(PORTAL_DEPARTMENTS) : await validDepartmentKeys(db, companyId);
+  } catch (e) {
+    throw dbFail(e, 'check the departments');
+  }
+  const byKey = new Map(fields.map((f) => [f.field_key, f]));
+  for (const r of rules) {
+    const c = r.config || {};
+    if (r.rule_type === 'route_by_answer') {
+      const f = byKey.get(c.fieldKey);
+      if (!f) throw new EngineError(400, 'A routing rule points at a field this document does not have.');
+      if (!ROUTABLE.includes(f.field_type)) throw new EngineError(400, `"${f.label}" cannot route: only Yes/No, Dropdown, Multi-select and Good/Monitor/Defective fields can.`);
+      if (!valid.has(c.department)) throw new EngineError(400, 'A routing rule names a department this company does not have.');
+    }
+    if (r.rule_type === 'route_by_scope' || r.rule_type === 'notify') {
+      const list = Array.isArray(c.departments) ? c.departments : [];
+      if (list.some((d) => !valid.has(d))) throw new EngineError(400, 'A rule names a department this company does not have.');
+    }
+  }
+}
+
 /**
  * Gives a company its own editable copy of a FORA template. The copy starts
  * as a draft so nothing reaches workers until it is published.
@@ -192,6 +227,7 @@ export async function saveDraft(db, { companyId, definitionId, title, fields, la
   if (l.error) throw new EngineError(400, l.error);
   const r = normalizeRules(rules);
   if (r.error) throw new EngineError(400, r.error);
+  await checkRuleTargets(db, { companyId, rules: r.rules, fields: f.fields });
   const cleanTitle = String(title || def.title || '').trim();
   if (!cleanTitle || cleanTitle.length > 150) throw new EngineError(400, 'Give the document a title (150 characters max).');
 
@@ -368,9 +404,73 @@ export async function listWorkerDocuments(db, { companyId }) {
 
 function ruleFlags(rules) {
   return {
-    needsReview: rules.some((r) => r.rule_type === 'reviewer_step'),
-    needsWorkerSignature: rules.some((r) => r.rule_type === 'signature_step' && r.config?.signer === 'worker'),
+    needsReview: reviewSteps(rules).length > 0,
+    needsWorkerSignature: needsWorkerSignature(rules),
   };
+}
+
+// ── What happens once a record counts ──────────────────────────────────────
+// A record counts when it is filed signed, or when its author signs it later.
+// Everything here is best effort: the record is already saved, and none of it
+// can fail the request.
+
+async function createEscalations(db, { companyId, record, matches }) {
+  if (!matches || matches.length === 0) return [];
+  const { data: existing, error: readErr } = await db.from('document_escalations').select('field_key').eq('record_id', record.id);
+  if (readErr) { console.error('documents: could not read escalations:', readErr.message); return []; }
+  const have = new Set((existing || []).map((e) => e.field_key));
+  const fresh = matches.filter((m) => !have.has(m.fieldKey));
+  if (fresh.length === 0) return [];
+  const { error } = await db.from('document_escalations').insert(fresh.map((m) => ({
+    company_id: companyId,
+    record_id: record.id,
+    field_key: m.fieldKey,
+    question_text: m.question,
+    trigger_value: m.value,
+    target_department: m.department,
+  })));
+  if (error) { console.error('documents: could not save escalations:', error.message); return []; }
+  return fresh;
+}
+
+async function writeBrainSignal(db, { companyId, definition, record, answerRows, matches }) {
+  const signal = brainSignalFor({
+    title: definition.title,
+    answerRows,
+    escalations: (matches || []).map((m) => ({ question: m.question, department: m.department })),
+  });
+  if (!signal) return;
+  const { error } = await db.from('company_signals').insert({
+    company_id: companyId,
+    source_type: 'engine_document',
+    source_id: String(record.id),
+    signal_json: signal,
+  });
+  if (error) console.error('documents: company_signals insert failed:', error.message);
+}
+
+async function afterRecordCounts(db, deps, { definition, setting, rules, record, answerRows }) {
+  try {
+    const companyId = Number(record.company_id);
+    const muted = setting.owner_muted === true;
+    const matches = matchRoutes(answerRoutes(rules), answerRows);
+    const created = await createEscalations(db, { companyId, record, matches });
+    await notifyRecord(db, deps, { companyId, definition, record, plan: notifyPlan(rules), ownerMuted: muted });
+    if (created.length > 0) await notifyEscalations(db, deps, { companyId, definition, matches: created, ownerMuted: muted });
+    if (setting.brain_enabled !== false) await writeBrainSignal(db, { companyId, definition, record, answerRows, matches });
+  } catch (e) {
+    console.error('documents: follow-ups failed:', e && e.message);
+  }
+}
+
+// What the follow-ups need, read fresh from the database: the definition, the
+// company's switch for it, the version's rules and the answers as filed.
+async function loadFollowUpContext(db, record) {
+  const definition = await one(db.from('document_definitions').select('*').eq('id', record.definition_id), 'load the document');
+  const setting = await one(db.from('company_documents').select('*').eq('company_id', record.company_id).eq('definition_id', record.definition_id), 'read the document setting');
+  const rules = await many(db.from('document_rules').select('*').eq('version_id', record.version_id), 'read the rules');
+  const answerRows = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the answers');
+  return { definition, setting: setting || {}, rules, answerRows };
 }
 
 /**
@@ -485,6 +585,11 @@ export async function submitRecord(db, { session, companyId, definitionId, answe
     await db.from('document_records').delete().eq('id', record.id);
     throw e;
   }
+  // A record saved to be signed later does not count yet: its follow-ups run
+  // when the author signs (signNow).
+  if (!wantsSignLater) {
+    await afterRecordCounts(db, deps, { definition: def, setting, rules: content.rules, record, answerRows: checked.rows });
+  }
   return { record, duplicate: false };
 }
 
@@ -539,60 +644,102 @@ export async function listRecords(db, { session, companyId, definitionId, status
 }
 
 /**
- * Approve or return a record that is waiting on a reviewer. Supervisor tier
- * only, and only inside the caller's scope. The general reviewer rules (own
- * document refused, crew only, no lead on lead) arrive with WP3; until then
- * a worker who is a crew lead cannot review engine records at all.
+ * Approve or return a record that is waiting on a reviewer. The record moves
+ * through the document's reviewer chain one step at a time: each approval is
+ * a signature, and the record is approved when the last step is.
+ *
+ * Who may act on a step is decided by reviewerMayAct (rules.js): a founder,
+ * the Owner on an owner step, a supervisor inside their scope, or, on a step
+ * that allows it, a crew lead for their own crew. Nobody reviews their own
+ * document, and by default nobody reviews two steps of the same record.
+ * Every change is a guarded update first, so a double submit cannot approve
+ * twice.
  */
-export async function reviewRecord(db, { session, companyId, recordId, decision, reason }) {
-  if (!isSupervisorTier(session)) throw new EngineError(403, 'Not allowed.');
+export async function reviewRecord(db, { session, companyId, recordId, decision, reason, deps }) {
   if (decision !== 'approve' && decision !== 'return') throw new EngineError(400, 'Choose approve or return.');
   const cid = asId(companyId);
+  // Who the caller is comes first: an ordinary worker is refused before any
+  // record is read, so they learn nothing about which record ids exist.
+  const { actor, error: actorErr } = await loadActor(db, session);
+  if (actorErr) throw new EngineError(503, "Couldn't check your access. Please try again.");
+  if (!actor) throw new EngineError(401, 'Not logged in. Please log in again.');
+  if (!(actor.founder || actor.role === 'supervisor' || actor.role === 'admin' || actor.isLead)) throw new EngineError(403, 'Not allowed.');
+
   const record = await loadRecord(db, recordId, cid);
-  await requireRecordView(db, session, record);
   if (record.awaiting_signature) throw new EngineError(409, "The worker hasn't signed this yet.");
   if (record.status !== 'pending_approval') throw new EngineError(409, 'This document is not waiting for review.');
-  const reviewerId = authorRosterId(session);
-  if (reviewerId != null && same(record.submitted_by_roster_id, reviewerId)) throw new EngineError(403, 'You cannot review your own document.');
 
+  const definition = await one(db.from('document_definitions').select('*').eq('id', record.definition_id), 'load the document');
+  const setting = (await one(db.from('company_documents').select('*').eq('company_id', cid).eq('definition_id', record.definition_id), 'read the document setting')) || {};
+  const rules = await many(db.from('document_rules').select('*').eq('version_id', record.version_id), 'read the rules');
+  const steps = reviewSteps(rules);
+  const step = steps[Number(record.review_step) || 0];
+  if (!step) throw new EngineError(409, 'This document is not waiting for review.');
+
+  let crew = null;
+  if (actor.isLead && step.allowLeads) {
+    const c = await crewIdSet(db, session, actor);
+    if (c.error) throw new EngineError(503, "Couldn't check your crew. Please try again.");
+    crew = c;
+  }
+  const earlier = await many(db.from('document_signatures').select('signer_roster_id').eq('record_id', record.id).eq('kind', 'approval'), 'read the earlier reviews');
+  const verdict = reviewerMayAct({ actor, record, step, crew, priorReviewerIds: earlier.map((e) => e.signer_roster_id).filter((v) => v != null) });
+  if (!verdict.ok) throw new EngineError(verdict.status, verdict.error);
+  // A supervisor reviews only what their scope places with them. A lead is
+  // held to their crew inside reviewerMayAct instead.
+  if (actor.role !== 'worker') {
+    const out = await scopeRecords(db, session, [record]);
+    if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
+    if (out.records.length === 0) throw new EngineError(403, 'Not allowed.');
+  }
+
+  const reviewerId = authorRosterId(session);
   const nowIso = new Date().toISOString();
-  // Each change is a guarded update FIRST (it only matches a record still
-  // waiting for review), so two reviewers, or one double click, cannot both
-  // win. The approval signature is written after, and undone if it fails.
+  const stillWaiting = (q) => q.eq('id', record.id).eq('company_id', cid).eq('status', 'pending_approval').eq('review_step', step.index);
+
   if (decision === 'return') {
     const text = String(reason || '').trim();
     if (!text) throw new EngineError(400, 'Say what needs fixing.');
     const hit = await updated(
-      db.from('document_records').update({ status: 'returned', returned_reason: text.slice(0, 1000), updated_at: nowIso }).eq('id', record.id).eq('company_id', cid).eq('status', 'pending_approval'),
+      stillWaiting(db.from('document_records').update({ status: 'returned', returned_reason: text.slice(0, 1000), updated_at: nowIso })),
       'return the document',
     );
     if (hit.length === 0) throw new EngineError(409, 'This document is not waiting for review.');
+    await notifyReturned(db, deps, { companyId: cid, definition, record, ownerMuted: setting.owner_muted === true });
     return { status: 'returned' };
   }
+
+  const isLast = step.index === steps.length - 1;
   const hit = await updated(
-    db.from('document_records').update({ status: 'approved', returned_reason: null, updated_at: nowIso }).eq('id', record.id).eq('company_id', cid).eq('status', 'pending_approval'),
+    stillWaiting(db.from('document_records').update(isLast
+      ? { status: 'approved', returned_reason: null, updated_at: nowIso }
+      : { review_step: step.index + 1, updated_at: nowIso })),
     'approve the document',
   );
   if (hit.length === 0) throw new EngineError(409, 'This document is not waiting for review.');
   const { error: sigErr } = await db.from('document_signatures').insert({
     record_id: record.id,
     kind: 'approval',
+    step_key: `review_${step.index}`,
     signer_roster_id: reviewerId,
     signer_name: sessionName(session),
-    signer_role: session.role,
+    signer_role: actor.isLead ? 'lead' : session.role,
     signed_at: nowIso,
   });
   if (sigErr) {
-    await db.from('document_records').update({ status: 'pending_approval' }).eq('id', record.id).eq('company_id', cid);
+    await db.from('document_records').update({ status: 'pending_approval', review_step: step.index }).eq('id', record.id).eq('company_id', cid);
     throw dbFail(sigErr, 'save the approval');
   }
-  return { status: 'approved' };
+  if (isLast) return { status: 'approved' };
+  // The next step's reviewers hear they are up. The reviewer who just acted is skipped.
+  await notifyRecord(db, deps, { companyId: cid, definition, record, plan: notifyPlan(rules), ownerMuted: setting.owner_muted === true, skipRosterId: reviewerId });
+  return { status: 'pending_approval', step: step.index + 1 };
 }
 
 /**
  * The worker fixes a returned document: the same record, same history. Only
- * the author, only while it is returned. Answers are replaced, the status
- * goes back to waiting on review.
+ * the author, only while it is returned. Answers are replaced, the review
+ * chain starts again from its first step.
  */
 export async function resubmitRecord(db, { session, companyId, recordId, answers, notes, deps }) {
   const cid = asId(companyId);
@@ -610,7 +757,7 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
   // Claim the record first (only one resubmit can move it out of
   // 'returned'), then replace the answers, and put it back if that fails.
   const claimed = await updated(
-    db.from('document_records').update({ status: 'pending_approval', returned_reason: null, updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid).eq('status', 'returned'),
+    db.from('document_records').update({ status: 'pending_approval', review_step: 0, returned_reason: null, review_alerted_at: null, submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid).eq('status', 'returned'),
     'resubmit',
   );
   if (claimed.length === 0) throw new EngineError(409, 'This document was not sent back.');
@@ -623,6 +770,19 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
     await db.from('document_records').update({ status: 'returned', returned_reason: record.returned_reason }).eq('id', record.id).eq('company_id', cid);
     throw e;
   }
+  // The reviewers hear it is back. Escalations are re-checked against the new
+  // answers (a field already escalated is not escalated twice). The Brain is
+  // not told again: it already heard about this document.
+  try {
+    const ctx = await loadFollowUpContext(db, { ...record, company_id: cid });
+    const matches = matchRoutes(answerRoutes(ctx.rules), ctx.answerRows);
+    const created = await createEscalations(db, { companyId: cid, record, matches });
+    const muted = ctx.setting.owner_muted === true;
+    await notifyRecord(db, deps, { companyId: cid, definition: ctx.definition, record, plan: notifyPlan(ctx.rules), ownerMuted: muted });
+    if (created.length > 0) await notifyEscalations(db, deps, { companyId: cid, definition: ctx.definition, matches: created, ownerMuted: muted });
+  } catch (e) {
+    console.error('documents: resubmit follow-ups failed:', e && e.message);
+  }
   return { status: 'pending_approval' };
 }
 
@@ -633,6 +793,7 @@ export async function signNow(db, { session, companyId, recordId, signature, pdf
   const own = authorRosterId(session);
   if (own == null || !same(record.submitted_by_roster_id, own)) throw new EngineError(403, 'Only the person who filed this can sign it.');
   if (!record.awaiting_signature) throw new EngineError(409, 'This document is not waiting for your signature.');
+  if (record.unsigned_closed_at) throw new EngineError(409, 'This document closed unsigned and can no longer be signed.');
   const sigPath = signature ? deps.resolveFile(signature, { field_type: 'signature' }) : null;
   if (!sigPath) throw new EngineError(400, 'Sign the document first.');
   const pdfPath = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
@@ -644,7 +805,7 @@ export async function signNow(db, { session, companyId, recordId, signature, pdf
   const patch = { awaiting_signature: false, worker_signed_at: nowIso, updated_at: nowIso };
   if (pdfPath) patch.pdf_path = pdfPath;
   const hit = await updated(
-    db.from('document_records').update(patch).eq('id', record.id).eq('company_id', cid).eq('awaiting_signature', true),
+    db.from('document_records').update(patch).eq('id', record.id).eq('company_id', cid).eq('awaiting_signature', true).is('unsigned_closed_at', null),
     'finish signing',
   );
   if (hit.length === 0) throw new EngineError(409, 'This document is not waiting for your signature.');
@@ -655,5 +816,112 @@ export async function signNow(db, { session, companyId, recordId, signature, pdf
     await db.from('document_records').update({ awaiting_signature: true, worker_signed_at: null }).eq('id', record.id).eq('company_id', cid);
     throw dbFail(sigErr, 'save the signature');
   }
+  // The record counts now: tell its audience, route its answers, tell the Brain.
+  try {
+    const ctx = await loadFollowUpContext(db, { ...record, company_id: cid });
+    if (ctx.definition) await afterRecordCounts(db, deps, { definition: ctx.definition, setting: ctx.setting, rules: ctx.rules, record: { ...record, awaiting_signature: false }, answerRows: ctx.answerRows });
+  } catch (e) {
+    console.error('documents: sign follow-ups failed:', e && e.message);
+  }
   return { signed: true };
+}
+
+// ── Inbox ──────────────────────────────────────────────────────────────────
+
+/**
+ * What needs this person's attention: their own records that were sent back
+ * or are waiting for their signature, and, for a reviewer, the records
+ * waiting on a step they may act on. Drives the in-app inbox and badge.
+ */
+export async function myInbox(db, { session, companyId }) {
+  const cid = asId(companyId);
+  if (!cid) throw new EngineError(400, 'Missing company id.');
+  const own = authorRosterId(session);
+  const mine = [];
+  if (own != null) {
+    const returned = await many(db.from('document_records').select('*').eq('company_id', cid).eq('submitted_by_roster_id', own).eq('status', 'returned').order('updated_at', { ascending: false }).limit(100), 'read your returned documents');
+    returned.forEach((r) => mine.push({ kind: 'returned', recordId: r.id, definitionId: r.definition_id, reason: r.returned_reason || null, at: r.updated_at }));
+    const unsigned = await many(db.from('document_records').select('*').eq('company_id', cid).eq('submitted_by_roster_id', own).eq('awaiting_signature', true).is('unsigned_closed_at', null).limit(100), 'read your unsigned documents');
+    unsigned.forEach((r) => mine.push({ kind: 'sign', recordId: r.id, definitionId: r.definition_id, at: r.signature_requested_at }));
+  }
+
+  const review = [];
+  const { actor, error: actorErr } = await loadActor(db, session);
+  if (actorErr) throw new EngineError(503, "Couldn't check your access. Please try again.");
+  if (actor && (actor.role === 'supervisor' || actor.role === 'admin' || actor.founder || actor.isLead)) {
+    let waiting = await many(db.from('document_records').select('*').eq('company_id', cid).eq('status', 'pending_approval').eq('awaiting_signature', false).order('submitted_at', { ascending: true }).limit(200), 'read the documents waiting for review');
+    if (actor.role !== 'worker') {
+      const out = await scopeRecords(db, session, waiting);
+      if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
+      waiting = out.records;
+    }
+    if (waiting.length > 0) {
+      const versionIds = [...new Set(waiting.map((r) => r.version_id))];
+      const rules = await many(db.from('document_rules').select('*').in('version_id', versionIds), 'read the rules');
+      const approvals = await many(db.from('document_signatures').select('record_id, signer_roster_id').in('record_id', waiting.map((r) => r.id)).eq('kind', 'approval'), 'read the earlier reviews');
+      let crew = null;
+      if (actor.isLead) {
+        const c = await crewIdSet(db, session, actor);
+        if (c.error) throw new EngineError(503, "Couldn't check your crew. Please try again.");
+        crew = c;
+      }
+      for (const r of waiting) {
+        const steps = reviewSteps(rules.filter((x) => same(x.version_id, r.version_id)));
+        const step = steps[Number(r.review_step) || 0];
+        if (!step) continue;
+        const v = reviewerMayAct({
+          actor, record: r, step, crew: step.allowLeads ? crew : null,
+          priorReviewerIds: approvals.filter((a) => same(a.record_id, r.id)).map((a) => a.signer_roster_id).filter((x) => x != null),
+        });
+        if (v.ok) review.push({ kind: 'review', recordId: r.id, definitionId: r.definition_id, step: step.label, at: r.submitted_at });
+      }
+    }
+  }
+  return { mine, review, counts: { mine: mine.length, review: review.length, total: mine.length + review.length } };
+}
+
+// ── Escalations ────────────────────────────────────────────────────────────
+
+// Founder, Owner, or a supervisor whose departments include the target.
+// Anyone else, and a supervisor of another company, gets one generic 403.
+async function escalationAccess(db, session, companyId) {
+  const { actor, error } = await loadActor(db, session);
+  if (error) throw new EngineError(503, "Couldn't check your access. Please try again.");
+  if (!actor || !(actor.founder || actor.role === 'supervisor' || actor.role === 'admin')) throw new EngineError(403, 'Not allowed.');
+  return actor;
+}
+
+export async function listEscalations(db, { session, companyId, status }) {
+  const cid = asId(companyId);
+  if (!cid) throw new EngineError(400, 'Missing company id.');
+  const actor = await escalationAccess(db, session, cid);
+  let q = db.from('document_escalations').select('*').eq('company_id', cid);
+  if (status === 'open' || status === 'actioned') q = q.eq('status', status);
+  let rows = await many(q.order('created_at', { ascending: false }).limit(200), 'read the escalations');
+  if (!actor.bypass) rows = rows.filter((e) => e.target_department && (actor.departments || []).includes(e.target_department));
+  return { escalations: rows };
+}
+
+export async function actionEscalation(db, { session, companyId, escalationId }) {
+  const cid = asId(companyId);
+  if (!cid) throw new EngineError(400, 'Missing company id.');
+  const actor = await escalationAccess(db, session, cid);
+  const id = asId(escalationId);
+  if (!id) throw new EngineError(400, 'Missing escalation id.');
+  const esc = await one(db.from('document_escalations').select('*').eq('id', id).eq('company_id', cid), 'load the escalation');
+  if (!esc) throw new EngineError(404, 'Escalation not found.');
+  if (!actor.bypass && !(esc.target_department && (actor.departments || []).includes(esc.target_department))) throw new EngineError(403, 'Not allowed.');
+  const hit = await updated(
+    db.from('document_escalations').update({ status: 'actioned', actioned_by_roster_id: authorRosterId(session), actioned_at: new Date().toISOString() }).eq('id', id).eq('company_id', cid).eq('status', 'open'),
+    'action the escalation',
+  );
+  if (hit.length === 0) throw new EngineError(409, 'This was already actioned.');
+  return { actioned: true };
+}
+
+/** The company Owner (or founder) mutes or unmutes one document's notifications. Nothing else changes. */
+export async function setOwnerMute(db, { companyId, definitionId, muted }) {
+  if (typeof muted !== 'boolean') throw new EngineError(400, 'Choose muted or not.');
+  const row = await setCompanyDocument(db, { companyId, definitionId, ownerMuted: muted });
+  return { ownerMuted: row.owner_muted === true };
 }

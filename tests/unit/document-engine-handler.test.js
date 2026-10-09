@@ -137,3 +137,34 @@ test('a missing company is never read as "template": the founder must say so', a
   const named = await call({ action: 'get_definition', token: admin, definitionId: 1, companyId: 1 });
   assert.equal(named.statusCode, 404, 'a named company passes the scope check and reaches the service');
 });
+
+test('only the Owner or the founder can mute a document, a plain supervisor cannot', async () => {
+  const owner = mintToken({ role: 'supervisor', companyId: 1, userId: 21, isOwner: true });
+  for (const token of [worker, supervisor]) {
+    assert.equal((await call({ action: 'set_owner_mute', token, definitionId: 1, muted: true })).statusCode, 403);
+  }
+  // The Owner gets past the gate and reaches the service (which finds no such document here).
+  assert.equal((await call({ action: 'set_owner_mute', token: owner, definitionId: 1, muted: true })).statusCode, 404);
+  assert.equal((await call({ action: 'set_owner_mute', token: admin, companyId: 1, definitionId: 1, muted: true })).statusCode, 404);
+});
+
+test('escalations are for supervisors, and the inbox is for anyone signed in', async () => {
+  assert.equal((await call({ action: 'list_escalations', token: worker })).statusCode, 403);
+  assert.equal((await call({ action: 'action_escalation', token: worker, escalationId: 1 })).statusCode, 403);
+  assert.equal((await call({ action: 'my_inbox', token: worker })).statusCode, 200);
+  assert.equal((await call({ action: 'list_escalations', token: supervisor })).statusCode, 200);
+});
+
+test('a review sends the mail deps through, and a worker is refused before any record is read', async () => {
+  const before = calls.length;
+  const out = await call({ action: 'review', token: worker, recordId: 1, decision: 'approve' });
+  assert.equal(out.statusCode, 403);
+  const touched = calls.slice(before).map((c) => c.table).filter((t) => t !== 'roster');
+  assert.deepEqual(touched, [], 'no record, rule or signature read for a plain worker');
+});
+
+import { readFileSync } from 'node:fs';
+test('the Brain tab counts engine_document signals', () => {
+  const src = readFileSync(new URL('../../api/companydata.js', import.meta.url), 'utf8');
+  assert.match(src, /const bySourceType = \{[^}]*engine_document: 0/);
+});

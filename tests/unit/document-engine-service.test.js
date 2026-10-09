@@ -36,6 +36,7 @@ function seedDb() {
       { id: 21, company_id: 1, name: 'Sue Super', role: 'supervisor', active: true, is_owner: false, default_site_id: 5, departments: [], divisions: [] },
       { id: 22, company_id: 1, name: 'Sam Other', role: 'supervisor', active: true, is_owner: false, default_site_id: 9, departments: [], divisions: [] },
       { id: 31, company_id: 2, name: 'Other Co Oscar', role: 'worker', active: true, departments: [], divisions: [] },
+      { id: 32, company_id: 2, name: 'Other Co Sara', role: 'supervisor', active: true, is_owner: false, default_site_id: 5, departments: [], divisions: [] },
     ],
   });
 }
@@ -416,7 +417,7 @@ test('review and records ignore a record id from another company', async () => {
   const db = seedDb();
   const id = await publishedDoc(db, { rules: [REVIEW_RULE] });
   const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x' }, deps })).record;
-  await rejects(reviewRecord(db, { session: { role: 'supervisor', userId: 21, companyId: 2, name: 'x' }, companyId: 2, recordId: rec.id, decision: 'approve' }), 404);
+  await rejects(reviewRecord(db, { session: { role: 'supervisor', userId: 32, companyId: 2, name: 'x' }, companyId: 2, recordId: rec.id, decision: 'approve' }), 404);
   await rejects(signNow(db, { session: worker, companyId: 2, recordId: rec.id, signature: 'rcpt:x', deps }), 404);
 });
 

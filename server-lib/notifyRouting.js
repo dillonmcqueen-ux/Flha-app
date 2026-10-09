@@ -269,8 +269,14 @@ async function loadDivisionSites(supabase, companyId, divisionIds) {
  * notifyOnSubmit, and by the Owner's "who would be notified" preview.
  * `enabled: false` means the document is off, not an error.
  */
-export async function routeNotification(supabase, { companyId, documentKey, record }) {
-  const setting = await loadNotifySetting(supabase, companyId, documentKey);
+export async function routeNotification(supabase, { companyId, documentKey, record, settingOverride }) {
+  // A unified-engine document is switched on by its builder and muted by the
+  // Owner (company_documents), not by the Owner's document_notifications
+  // row, so its caller hands the setting in. Every built-in and custom
+  // document passes none and reads its own row as before.
+  const setting = settingOverride
+    ? { enabled: settingOverride.enabled === true, extraRosterIds: toIdList(settingOverride.extraRosterIds), error: false }
+    : await loadNotifySetting(supabase, companyId, documentKey);
   if (setting.error) return { enabled: false, recipients: [], missingEmail: [], reason: 'error' };
   if (!setting.enabled) return { enabled: false, recipients: [], missingEmail: [], reason: 'off' };
 
@@ -351,9 +357,9 @@ export async function refundSlot(supabase, companyId, documentKey, rosterId, { s
  * `siteName` is the label shown in the email; with none, the email names the
  * document alone.
  */
-export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentKey, record, siteName, documentLabel }) {
+export async function notifyOnSubmit(supabase, { sendEmail, companyId, documentKey, record, siteName, documentLabel, settingOverride }) {
   try {
-    const routed = await routeNotification(supabase, { companyId, documentKey, record });
+    const routed = await routeNotification(supabase, { companyId, documentKey, record, settingOverride });
     if (!routed.enabled || routed.recipients.length === 0) return { sent: 0, failed: 0, held: 0, reason: routed.reason };
     // A custom form passes its own title; a built-in uses its fixed label.
     const label = DOCUMENT_LABELS[documentKey] || cleanLabel(documentLabel) || 'Custom document';
