@@ -12,6 +12,8 @@
 //
 // Returns { resolved: Map(fieldKey -> value_json) } or { error }.
 
+import { listVisibleRecordsMulti } from '../documentAccess.js';
+
 export const RESOLVABLE_ID_TYPES = ['equipment_picker', 'attachment_picker', 'site_picker', 'person_picker', 'linked_document'];
 
 const MAX_ATTACHMENTS = 10;
@@ -96,7 +98,14 @@ export async function resolveIdAnswers(db, { companyId, session, fields, answers
         const rec = rows[0];
         const mine = session && session.userId != null && Number(rec && rec.submitted_by_roster_id) === Number(session.userId);
         const tier = !!session && (session.role === 'admin' || session.role === 'supervisor');
-        if (!rec || !(mine || tier)) return bad('is not a document you can link.');
+        // A supervisor may link what they may read: the same view assignments
+        // and scope rule that decide what the document list shows them.
+        let visible = !!rec && mine;
+        if (rec && !mine && tier) {
+          const seen = await listVisibleRecordsMulti(db, { ...session, companyId }, [rec], (r) => `engine_${r.definition_id}`);
+          visible = !seen.denied && seen.records.length === 1;
+        }
+        if (!rec || !visible) return bad('is not a document you can link.');
         const defs = await readRows(db.from('document_definitions').select('id, title').eq('id', rec.definition_id), 'the document');
         resolved.set(f.field_key, { record_id: rec.id, definition_id: rec.definition_id, label: `${(defs[0] && defs[0].title) || 'Document'} #${rec.id}` });
       }
@@ -136,7 +145,11 @@ export async function listPickerOptions(db, { companyId, session, kind }) {
     if (!tier) {
       if (session && session.userId != null) q = q.eq('submitted_by_roster_id', session.userId); else return { options: [] };
     }
-    const recs = await readRows(q.order('created_at', { ascending: false }).limit(50), 'the documents');
+    let recs = await readRows(q.order('created_at', { ascending: false }).limit(50), 'the documents');
+    if (tier) {
+      const seen = await listVisibleRecordsMulti(db, { ...session, companyId }, recs, (r) => `engine_${r.definition_id}`);
+      recs = seen.denied ? [] : seen.records;
+    }
     const defIds = [...new Set(recs.map((r) => r.definition_id))];
     const defs = defIds.length ? await readRows(db.from('document_definitions').select('id, title').in('id', defIds), 'the documents') : [];
     const title = new Map(defs.map((d) => [Number(d.id), d.title]));

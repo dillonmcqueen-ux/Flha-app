@@ -788,6 +788,10 @@ export async function reviewRecord(db, { session, companyId, recordId, decision,
   // A supervisor reviews only what their scope places with them. A lead is
   // held to their crew inside reviewerMayAct instead.
   if (actor.role !== 'worker') {
+    // View assignments narrow review as they narrow reading: someone who may
+    // not see a document may not approve or return it either.
+    const viewDenied = await requireAssignment(db, { ...session, companyId: cid }, engineKey(record.definition_id), VIEW);
+    if (viewDenied) throw new EngineError(viewDenied.status, viewDenied.error);
     const out = await scopeRecords(db, session, [record]);
     if (out.denied) throw new EngineError(out.denied.status, out.denied.error);
     if (out.records.length === 0) throw new EngineError(403, 'Not allowed.');

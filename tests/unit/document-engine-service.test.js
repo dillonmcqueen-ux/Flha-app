@@ -792,3 +792,18 @@ test('picker option lists only hold this company\'s rows, split by kind', async 
   assert.equal((await opts('document', supervisor)).length, 2);
   assert.match((await listPickerOptions(db, { companyId: 1, session: worker, kind: 'bogus' })).error, /Unknown/);
 });
+
+test('a view assignment also stops a supervisor reviewing, linking or listing a document they may not see', async () => {
+  const db = pickerDb();
+  db.tables.roster.push({ id: 23, company_id: 1, name: 'Bo Super', role: 'supervisor', active: true, is_owner: false, default_site_id: 5, departments: [], divisions: [] });
+  const id = await publishedDoc(db, { fields: PICKER_FIELDS, rules: [REVIEW_RULE] });
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'x' } })).record;
+  // Sue and Bo are both at site 5, so scope alone lets both in. Only Bo may view.
+  db.tables.document_assignments = [assignRow(id, { audience_value: '23', action: 'view' })];
+  await rejects(reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'approve' }), 403);
+  assert.equal((await listPickerOptions(db, { companyId: 1, session: supervisor, kind: 'document' })).options.length, 0);
+  await rejects(submitRecord(db, { session: supervisor, companyId: 1, definitionId: id, siteId: 5, deps: pickDeps, answers: { task: 'y', related: { recordId: rec.id } } }), 400, /not a document you can link/);
+  const bo = { role: 'supervisor', userId: 23, companyId: 1, name: 'Bo Super' };
+  assert.equal((await listPickerOptions(db, { companyId: 1, session: bo, kind: 'document' })).options.length, 1);
+  await reviewRecord(db, { session: bo, companyId: 1, recordId: rec.id, decision: 'approve' });
+});
