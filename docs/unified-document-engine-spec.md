@@ -25,14 +25,29 @@ The founder builds each company's exact documents from the Admin Panel, with att
 | Notification channels | Email, in-app inbox and badge |
 | Routing | Fixed reviewer chain, route by answer, route by department or site, reject and send back |
 | Attachments | Photos on any field, documents (PDF, Word, Excel), required or optional per field, reference files shown to the worker |
-| Special modules | Equipment inspection, fuel log and corrective actions move into the engine |
+| Special modules | Equipment inspection, fuel log and corrective actions move into the engine. Certifications, time clock and roster do not |
 | Time clock | Stays a standalone module for now (2026-10-09) |
 | Roster | Stays the people directory the engine reads from (2026-10-09) |
+| Certifications | Stay their own module, tied to the roster by `roster_id`. The engine only reads them (expired ticket flags). Not an engine document type (2026-10-09) |
 | Layout editor | Full drag and drop editor (2026-10-09) |
 | First document | FLHA, as the end to end proof on ABC Earthworks (2026-10-09) |
 | Versioning | New version on every edit, old records keep their old layout |
 | Brain and Analytics | Per-document opt-in |
 | Process | Full spec before any code |
+| FLHA editability | Fully editable per company (2026-10-09) |
+| Template handling | Clone to customize. FORA templates stay pristine, a company gets its own copy on first change (2026-10-09) |
+| Worker form vs PDF | Worker form is a clean mobile layout. Only the PDF follows the paper layout (2026-10-09) |
+| Reject and send back | Same record returns to the worker, keeps history, worker fixes and resubmits (2026-10-09) |
+| Missing reviewer | Escalate to the next role up in the same department or site, then the Owner (2026-10-09) |
+| Inbox | Supervisors, Owner and workers all get the in-app inbox and badge (2026-10-09) |
+| Notification control | Builder defines the rules, the company Owner keeps a master mute per document (2026-10-09) |
+| Attachments in PDF | Images embedded. PDF, Word and Excel stored and linked or listed by name. About 10 MB per file (2026-10-09) |
+| Reference files | Per document and per field (2026-10-09) |
+| Signatures | Reviewer blocks appear in the PDF. Every signature is also stored as data. External link signers and typed-name fallback are out of phase 1 (2026-10-09) |
+| Brain default | On by default for new documents, with an opt-out toggle (2026-10-09) |
+| Analytics for custom documents | Counts and trends only (submissions per period, site, author, flagged answers). No builder-picked charts yet (2026-10-09) |
+| Billing | Not decided. Stays out of the engine for now (2026-10-09) |
+| Portal pricing source | Revisit with the engine, after FLHA works (2026-10-09) |
 
 ## 3. What exists today
 
@@ -83,7 +98,7 @@ New types needed to absorb the built-ins (from the module audit):
 | Type | Needed for | Behavior |
 |---|---|---|
 | condition3 | Equipment inspection | Good / Monitor / Defective / N/A, mandatory note when flagged, stable `item_key` |
-| equipment_picker | Inspection, fuel, daily | Fleet list, free text, rental auto-add. Stores `equipment_id` plus label snapshot. `equipment_id` is null for free text on purpose |
+| equipment_picker | Inspection, fuel, daily | Single or multi pick (decided 2026-10-09). Fleet list, free text, rental auto-add. Stores `equipment_id` plus label snapshot. `equipment_id` is null for free text on purpose |
 | attachment_picker | Inspection | Multi-pick of tow-capable attachments, each appends its own checklist |
 | reading | Inspection, fuel | Hours or KM value plus unit, previous-reading prefill, feeds the PM clock |
 | site_picker | Most documents | Stores `site_id`, vetted server-side |
@@ -157,7 +172,7 @@ Order (revised 2026-10-09: FLHA first as the proof):
 3. Custom Forms and Monthly Inspection (yes/no, already admin-built).
 4. Portal documents (already generic).
 5. Near miss, incident, toolbox, daily.
-6. Certifications (needs `person_picker`, `expiry_date`). Pending confirmation, see section 12.
+6. (Removed. Certifications stay their own module.)
 7. Fuel log (needs `equipment_picker`, `reading`, `quantity_unit`).
 8. Equipment inspection and corrective actions (linked documents, condition3, rules).
 9. Delete old code path by path, only after each is verified.
@@ -180,7 +195,7 @@ Time clock is not in this list. It stays a standalone module and keeps its own t
 - Size. This replaces the core of the product: about 25 hardcoded locations, 13 PDF generators, 9 handlers with `requireDocKey`. Staged delivery is the only safe way.
 - Equipment and corrective actions are the highest risk. They feed PM status, fuel burn rate, weekly reports, Brain and analytics. A missing link fails silently. The interaction map must be checked after each step.
 - Time clock stays standalone (confirmed 2026-10-09). The engine still reads from its data where needed, but it owns none of it.
-- The roster stays the people directory the engine reads from: reviewers, departments, signers, `roster_id` (confirmed 2026-10-09). Whether certifications become an engine document type is still open, see section 12.
+- The roster stays the people directory the engine reads from: reviewers, departments, signers, `roster_id` (confirmed 2026-10-09). Certifications stay their own module and read from the roster (confirmed 2026-10-09).
 - FLHA first is the hardest possible proof. It has the largest bespoke PDF (491 lines), a hazard table, SOP lookups, crew signatures, an extreme-risk approval state, sign-afterwards and amend flow. The upside is that if the engine can express FLHA, the simpler documents follow. The cost is that phase 1 is larger and slower before anything else migrates. Accepted by Dillon.
 - A full drag and drop editor is a large build on its own (canvas, resize, snap, block palette, undo). It is on the critical path for the FLHA proof only for the blocks FLHA uses. Everything else in the editor is staged after.
 - Matching exact paper layouts is the largest single feature. AI layout extraction will be imperfect and needs the founder to adjust. Budget for iteration.
@@ -205,9 +220,11 @@ Hardcoded document lists that become data driven: `server-lib/pricing.js` MODULE
 
 ## 12. Open questions (need Dillon's answer, no guessing)
 
-Answered 2026-10-09: 1 (time clock stays standalone), 2 (roster stays the directory), 5 (full drag and drop editor), 22 (FLHA first), 23 (commit to a branch, done). Still open: all others, plus the new question A below.
+Status as of 2026-10-09. Answered questions are recorded in section 2. Questions below are kept for reference.
 
-A. Certifications: should they become an engine document type (per-person upload with expiry), or stay in their own module like time clock? You confirmed the roster stays the directory but did not say either way on certifications.
+Answered: 1, 2, 3, 4, 5, 7, 8, 9, 10 (out of phase 1), 11, 12, 13, 14, 15, 16, 20, 21, 22, 23, and the certifications question.
+Deferred on purpose: 17 and 18 (billing), 19 (Portal pricing, revisit after FLHA).
+Still open: 6 (how exact the paper form match must be).
 
 Scope
 1. Time clock: stays a standalone module?
