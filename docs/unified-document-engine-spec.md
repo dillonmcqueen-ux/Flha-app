@@ -9,7 +9,7 @@ One document engine. FORA's built-in documents become pre-made templates inside 
 
 The founder builds each company's exact documents from the Admin Panel, with attachments, signatures, routing and notifications, and previews the form, the PDF and the routing for the selected company before publishing.
 
-## 2. Decisions locked (from Dillon, 2026-10-08)
+## 2. Decisions locked (from Dillon, 2026-10-08 and 2026-10-09)
 
 | Topic | Decision |
 |---|---|
@@ -25,7 +25,11 @@ The founder builds each company's exact documents from the Admin Panel, with att
 | Notification channels | Email, in-app inbox and badge |
 | Routing | Fixed reviewer chain, route by answer, route by department or site, reject and send back |
 | Attachments | Photos on any field, documents (PDF, Word, Excel), required or optional per field, reference files shown to the worker |
-| Special modules | Equipment inspection, fuel log, corrective actions and roster/certifications move into the engine |
+| Special modules | Equipment inspection, fuel log and corrective actions move into the engine |
+| Time clock | Stays a standalone module for now (2026-10-09) |
+| Roster | Stays the people directory the engine reads from (2026-10-09) |
+| Layout editor | Full drag and drop editor (2026-10-09) |
+| First document | FLHA, as the end to end proof on ABC Earthworks (2026-10-09) |
 | Versioning | New version on every edit, old records keep their old layout |
 | Brain and Analytics | Per-document opt-in |
 | Process | Full spec before any code |
@@ -126,8 +130,10 @@ Built entirely behind the existing admin session. No customer-facing builder.
 - One layout renderer driven by `document_layouts` JSON, replacing the per-document generators for form-style documents.
 - Layout supports header block, sections, columns, tables, repeating rows, images (photos and signatures embedded, not just "Attached"), per-document accent color, optional uploaded form as background.
 - AI step: upload the company's paper form, AI proposes fields and layout, founder adjusts in the builder. Extends `ai_draft_document` (today it returns a flat question list and no layout).
+- Editor: a full drag and drop layout editor (decided 2026-10-09). The founder places and resizes header blocks, sections, columns, tables, repeating rows, signature blocks and attachment slots on a page canvas, with the AI proposal as the starting point. The editor reads and writes the same `document_layouts` JSON the renderer consumes, so preview and PDF can never disagree. The worker form is a separate responsive rendering of the same fields.
+- Editor scope for the FLHA proof: it must at least place the specialised FLHA blocks (hazard table, PPE list, crew signature grid, approval stamps) and the standard blocks. Features beyond that (background image overlay, snap guides, undo history) are staged after FLHA works.
 - Stay separate: Safety Analytics PDF, Equipment Analytics PDF, Roster PIN sheet, Brain snapshot, server-rendered weekly equipment report (`server-lib/reportPdfs.js`).
-- FLHA and equipment inspection need specialised block types (hazard table, approval stamps, carried-forward lists). They move last.
+- FLHA and equipment inspection need specialised block types (hazard table, approval stamps, carried-forward lists). FLHA is the first document (decided 2026-10-09), so its blocks are built in phase 1. Equipment inspection blocks come later.
 
 ## 7. Unified setup flow
 
@@ -145,16 +151,18 @@ Preserved: every auto-approve check in `server-lib/onboardingApproval.js` (CLAUD
 
 No live clients, so no data migration risk. Plan: replace outright, staged and verified on ABC Earthworks (company code `abcworker`, the only company allowed for test data).
 
-Proposed order, easiest to hardest:
-1. Foundations: versioning, `company_documents`, notification service, signature storage, layout renderer.
-2. Custom Forms and Monthly Inspection (yes/no, already admin-built).
-3. Portal documents (already generic).
-4. Near miss, incident, toolbox, daily.
-5. Certifications (needs `person_picker`, `expiry_date`).
-6. Fuel log (needs `equipment_picker`, `reading`, `quantity_unit`).
-7. FLHA (hazard table, approval chain).
+Order (revised 2026-10-09: FLHA first as the proof):
+1. Foundations: versioning, `company_documents`, notification service, signature storage, layout renderer, drag and drop editor core.
+2. FLHA end to end on ABC Earthworks: seeded template, hazard table block, PPE list, crew signatures, extreme-risk approval chain, sign-afterwards, SOP alerts, offline queue, PDF matching today's output. Old `App.jsx` FLHA and `generatePDF.js` stay until the new one is verified, then are deleted.
+3. Custom Forms and Monthly Inspection (yes/no, already admin-built).
+4. Portal documents (already generic).
+5. Near miss, incident, toolbox, daily.
+6. Certifications (needs `person_picker`, `expiry_date`). Pending confirmation, see section 12.
+7. Fuel log (needs `equipment_picker`, `reading`, `quantity_unit`).
 8. Equipment inspection and corrective actions (linked documents, condition3, rules).
 9. Delete old code path by path, only after each is verified.
+
+Time clock is not in this list. It stays a standalone module and keeps its own tables, handlers and PDF.
 
 ## 9. Required reviews during build
 
@@ -171,8 +179,10 @@ Proposed order, easiest to hardest:
 
 - Size. This replaces the core of the product: about 25 hardcoded locations, 13 PDF generators, 9 handlers with `requireDocKey`. Staged delivery is the only safe way.
 - Equipment and corrective actions are the highest risk. They feed PM status, fuel burn rate, weekly reports, Brain and analytics. A missing link fails silently. The interaction map must be checked after each step.
-- Time clock was not in the list Dillon moved. This spec keeps it as a standalone module. Confirm.
-- "Roster / certifications" was selected. This spec reads it as: certifications become an engine document type, and the roster stays the people directory the engine reads from (reviewers, departments, signers, `roster_id`). Roster rows are people, not submissions. Confirm.
+- Time clock stays standalone (confirmed 2026-10-09). The engine still reads from its data where needed, but it owns none of it.
+- The roster stays the people directory the engine reads from: reviewers, departments, signers, `roster_id` (confirmed 2026-10-09). Whether certifications become an engine document type is still open, see section 12.
+- FLHA first is the hardest possible proof. It has the largest bespoke PDF (491 lines), a hazard table, SOP lookups, crew signatures, an extreme-risk approval state, sign-afterwards and amend flow. The upside is that if the engine can express FLHA, the simpler documents follow. The cost is that phase 1 is larger and slower before anything else migrates. Accepted by Dillon.
+- A full drag and drop editor is a large build on its own (canvas, resize, snap, block palette, undo). It is on the critical path for the FLHA proof only for the blocks FLHA uses. Everything else in the editor is staged after.
 - Matching exact paper layouts is the largest single feature. AI layout extraction will be imperfect and needs the founder to adjust. Budget for iteration.
 - Versioning plus "old records keep their layout" means the PDF renderer must stay backward compatible with old layout JSON forever.
 
@@ -194,6 +204,10 @@ Not part of this spec, but real:
 Hardcoded document lists that become data driven: `server-lib/pricing.js` MODULES and ALL_DOC_KEYS, `api/customforms.js` BUILTIN_DOC_KEYS and BUILTIN_LABELS, `assignmentAdmin.js`, `documentAccess.js`, `documentSources.js`, `notifyRouting.js`, `platformOverview.js`, `api/logs.js`, `api/reports.js`, `correctiveActionScope.js`, `companydata.js` (worker profile and Brain `bySourceType`), `companyBrainSummary.js`, `audit.js`, `WorkerMenu.jsx` (BUILTIN_TYPES, CATEGORIES, render chain), `Dashboard.jsx` (TAB_ICON, TAB_LABEL, TAB_VISIBLE, CATEGORIES, EQUIPMENT_SUBTABS), and `website/pricing.html`.
 
 ## 12. Open questions (need Dillon's answer, no guessing)
+
+Answered 2026-10-09: 1 (time clock stays standalone), 2 (roster stays the directory), 5 (full drag and drop editor), 22 (FLHA first), 23 (commit to a branch, done). Still open: all others, plus the new question A below.
+
+A. Certifications: should they become an engine document type (per-person upload with expiry), or stay in their own module like time clock? You confirmed the roster stays the directory but did not say either way on certifications.
 
 Scope
 1. Time clock: stays a standalone module?
