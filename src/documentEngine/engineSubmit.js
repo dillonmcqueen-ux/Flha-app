@@ -184,7 +184,7 @@ export async function amendEngineDocument(payload, recordId, record, signatures,
   let pdfReceipt = null;
   try {
     const links = await postDocuments({ action: 'get_record_links', token, companyId: payload.companyId, recordId }, deps.fetchFn || fetch).catch(() => ({ signatures: {} }));
-    const signatureInputs = await signatureInputsFor(signatures, links, fetchImage, record && record.review_round);
+    const signatureInputs = await signatureInputsFor(signatures, links, fetchImage, (Number(record && record.review_round) || 0) + 1); // the server moves the round on, so no earlier approval is drawn
     const now = new Date();
     pdfReceipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: await drawPdf({ ...payload, signatureInputs, amendedNote: `Amended ${now.toLocaleString('en-CA')}`, status: 'submitted' }, null, deps) });
   } catch (e) { /* the earlier PDF stays */ }

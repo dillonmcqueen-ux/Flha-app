@@ -313,7 +313,7 @@ test('amending redraws the PDF with the Amended note and without approvals from 
   const out = await amendEngineDocument(payload, 7, { review_round: 1 }, sigs, 't', deps);
   assert.equal(out.status, 'submitted');
   assert.match(drawn.record.amendedNote, /^Amended /);
-  assert.deepEqual(drawn.signatures.map((s) => s.signer_name), ['Wes', 'Bo']);
+  assert.deepEqual(drawn.signatures.map((s) => s.signer_name), ['Wes']);
   const amend = posted.find((b) => b.action === 'amend');
   assert.equal(amend.recordId, 7);
   assert.equal(amend.pdfReceipt, 'rcpt-pdf');
