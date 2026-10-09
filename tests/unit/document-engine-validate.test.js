@@ -154,3 +154,21 @@ test('a required file field fails when the receipt does not resolve', () => {
   const fields = [F({ id: 1, field_key: 'photo', label: 'Photo', field_type: 'photo', required: true })];
   assert.match(validateAnswers(fields, { photo: 'forged' }, { resolveFile: () => null }).error, /required/);
 });
+
+import { ATTACHMENT_EXTENSIONS } from '../../server-lib/documentEngine/validate.js';
+
+test('a file field only accepts the kinds the builder allowed, and photos default to images', () => {
+  const resolveFile = (v) => (typeof v === 'string' ? v : null);
+  const doc = { field_type: 'file_upload', label: 'Quote', attachment_rules: { allowed: ['pdf', 'word'] }, config: {} };
+  assert.deepEqual(validateAnswerValue(doc, '1/a-quote.docx', { resolveFile }), { file_path: '1/a-quote.docx' });
+  assert.deepEqual(validateAnswerValue(doc, '1/a-quote.pdf', { resolveFile }), { file_path: '1/a-quote.pdf' });
+  assert.match(validateAnswerValue(doc, '1/a-sheet.xlsx', { resolveFile }).error, /does not accept/);
+  const photo = { field_type: 'photo', label: 'Pic', attachment_rules: {}, config: {} };
+  assert.deepEqual(validateAnswerValue(photo, '1/a.jpg', { resolveFile }), { file_path: '1/a.jpg' });
+  assert.match(validateAnswerValue(photo, '1/a.pdf', { resolveFile }).error, /does not accept/);
+  const free = { field_type: 'file_upload', label: 'Any', attachment_rules: {}, config: {} };
+  assert.deepEqual(validateAnswerValue(free, '1/a.xls', { resolveFile }), { file_path: '1/a.xls' });
+  const sig = { field_type: 'signature', label: 'Sig', attachment_rules: { allowed: ['pdf'] }, config: {} };
+  assert.deepEqual(validateAnswerValue(sig, '1/s.png', { resolveFile }), { file_path: '1/s.png' });
+  assert.ok(!ATTACHMENT_EXTENSIONS.word.includes('docm') && !ATTACHMENT_EXTENSIONS.excel.includes('xlsm'));
+});

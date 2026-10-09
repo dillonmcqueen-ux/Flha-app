@@ -11,7 +11,7 @@ import crypto from 'crypto';
 import { sendEmail } from '../server-lib/email.js';
 import { runDigest } from '../server-lib/notifyDigest.js';
 import { alertOverdueUnsigned, closeStaleUnsigned } from '../server-lib/unsignedSweep.js';
-import { alertOverdueUnsignedEngine, closeStaleUnsignedEngine, escalateStalePending } from '../server-lib/documentEngine/sweeps.js';
+import { alertOverdueUnsignedEngine, closeStaleUnsignedEngine, escalateStalePending, retryFailedFollowUps } from '../server-lib/documentEngine/sweeps.js';
 import { recordPlatformEvent } from '../server-lib/platformEvents.js';
 import { encryptionKeyProblem } from '../server-lib/fieldCrypto.js';
 
@@ -55,6 +55,8 @@ export default async function handler(req, res) {
   const hourly = new Date().getUTCMinutes() < 10;
   const engineAlerts = hourly ? await alertOverdueUnsignedEngine(supabaseAdmin, { sendEmail }) : { alerted: 0, emailed: 0, failed: 0 };
   const engineReview = hourly ? await escalateStalePending(supabaseAdmin, { sendEmail }) : { escalated: 0, emailed: 0, failed: 0 };
+  // A record whose escalations, notifications or Brain signal failed when it was filed is tried again.
+  if (hourly) await retryFailedFollowUps(supabaseAdmin, { sendEmail });
   const closed = (await closeStaleUnsigned(supabaseAdmin)) + (await closeStaleUnsignedEngine(supabaseAdmin));
   const failed = result.failed + alerts.failed + engineAlerts.failed + engineReview.failed;
   await recordPlatformEvent(supabaseAdmin, {

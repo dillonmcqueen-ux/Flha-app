@@ -25,6 +25,24 @@ const MAX_RULES = 100;
 const MAX_LAYOUT_BYTES = 200 * 1024;
 const ATTACHMENT_KINDS = ['image', 'pdf', 'word', 'excel'];
 const MAX_ATTACHMENT_MB = 10;
+// File extensions each attachment kind stands for. The bucket has no type
+// check of its own, so this list, the upload extension list and this check
+// are the gate.
+export const ATTACHMENT_EXTENSIONS = {
+  image: ['png', 'jpg', 'jpeg', 'webp'],
+  pdf: ['pdf'],
+  word: ['doc', 'docx'],
+  excel: ['xls', 'xlsx'],
+};
+
+function fileKindOk(path, field) {
+  if (field.field_type === 'signature') return true;
+  const rules = field.attachment_rules || {};
+  const kinds = Array.isArray(rules.allowed) && rules.allowed.length ? rules.allowed : (field.field_type === 'photo' ? ['image'] : null);
+  if (!kinds) return true;
+  const ext = String(path).includes('.') ? String(path).split('.').pop().toLowerCase() : '';
+  return kinds.some((k) => (ATTACHMENT_EXTENSIONS[k] || []).includes(ext));
+}
 
 export function slugKey(text) {
   return String(text || '')
@@ -175,6 +193,7 @@ export function validateAnswerValue(field, raw, { resolveFile } = {}) {
     if (isEmptyValue(raw)) return {};
     const path = resolveFile ? resolveFile(raw, field) : null;
     if (!path) return {};
+    if (!fileKindOk(path, field)) return { error: `"${field.label}" does not accept that kind of file.` };
     return { file_path: path };
   }
 

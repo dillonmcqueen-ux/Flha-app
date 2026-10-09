@@ -29,6 +29,7 @@ test.describe('Engine document inbox', () => {
         answers: [{ id: 1, question_text: 'Is the yard safe?', field_type: 'yesno', value_text: 'no', notes: 'Wet ground' }],
         signatures: [{ id: 1, kind: 'worker', signer_name: 'Jamie Worker', signed_at: '2026-10-09T10:00:00Z' }],
       };
+      if (b.action === 'get_record_links') return { pdf: 'https://example.test/signed.pdf', files: {}, signatures: { 1: 'https://example.test/sig.png' } };
       if (b.action === 'review') { waiting = false; return { ok: true }; }
       return {};
     });
@@ -37,6 +38,8 @@ test.describe('Engine document inbox', () => {
     await page.getByRole('button', { name: 'Review', exact: true }).click();
     await expect(page.getByText('Is the yard safe?')).toBeVisible();
     await expect(page.getByText('Note: Wet ground')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open PDF' })).toHaveAttribute('href', 'https://example.test/signed.pdf');
+    await expect(page.getByRole('link', { name: 'View signature' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Send back' }).click();
     await expect(page.getByRole('alert')).toContainText('Say what needs fixing');

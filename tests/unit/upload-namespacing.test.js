@@ -59,3 +59,14 @@ test('a pre-namespaced filename (api/certifications.js style) is untouched by th
   await createUploadUrl(client, 'worker-certifications', '7/42/1758808000000-cert.pdf');
   assert.match(getPath(), /^7\/42\/[0-9a-f]{32}-1758808000000-cert\.pdf$/);
 });
+
+test('portal-attachments accepts Word and Excel but not macro formats or scripts', async () => {
+  for (const name of ['quote.docx', 'quote.doc', 'sheet.xlsx', 'sheet.xls']) {
+    const { client } = fakeSupabase();
+    assert.equal((await createUploadUrl(client, 'portal-attachments', name, 7)).error, undefined, name);
+  }
+  for (const name of ['m.docm', 'm.xlsm', 'run.js', 'page.html', 'noext']) {
+    const { client } = fakeSupabase();
+    assert.match((await createUploadUrl(client, 'portal-attachments', name, 7)).error || '', /Unsupported file type/, name);
+  }
+});

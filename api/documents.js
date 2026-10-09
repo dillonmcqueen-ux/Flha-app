@@ -38,6 +38,7 @@ import {
   resubmitRecord,
   signNow,
   getRecord,
+  getRecordLinks,
   listRecords,
   reviewRecord,
   myInbox,
@@ -46,6 +47,7 @@ import {
   setOwnerMute,
 } from '../server-lib/documentEngine/service.js';
 import { ENGINE_FIELD_TYPES, ENGINE_RULE_TYPES } from '../server-lib/documentEngine/fieldTypes.js';
+import { signTargets } from '../server-lib/documentEngine/links.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -215,6 +217,10 @@ export default async function handler(req, res) {
     if (action === 'sign_now') {
       const out = await signNow(db, { session, companyId, recordId: body.recordId, signature: body.signature, pdfReceipt: body.pdfReceipt, deps });
       return res.status(200).json({ ok: true, ...out });
+    }
+    if (action === 'get_record_links') {
+      const out = await getRecordLinks(db, { session, companyId, recordId: body.recordId, sign: (targets) => signTargets(supabaseAdmin, targets) });
+      return res.status(200).json(out);
     }
     if (action === 'list_records') {
       return res.status(200).json(await listRecords(db, { session, companyId, definitionId: body.definitionId, status: body.status, limit: body.limit }));

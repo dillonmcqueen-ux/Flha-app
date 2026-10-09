@@ -22,6 +22,7 @@ import { withDecryptedEmail } from '../fieldCrypto.js';
 import { SIGN_LATER_OVERDUE_MS, UNSIGNED_CLOSE_MS } from '../signLater.js';
 import { notifyPlan } from './rules.js';
 import { engineKey, engineSetting } from './notify.js';
+import { runFollowUpsAgain } from './service.js';
 
 export const STALE_REVIEW_MS = 48 * 60 * 60 * 1000;
 export const ALERT_BATCH = 50;
@@ -259,6 +260,43 @@ export async function escalateStalePending(db, { sendEmail, nowMs = Date.now() }
     }
   } catch (e) {
     console.error('escalateStalePending failed:', e && e.message);
+  }
+  return out;
+}
+
+export const RETRY_BATCH = 25;
+export const RETRY_AFTER_MS = 5 * 60 * 1000;
+
+/**
+ * Runs the follow-ups again for records whose first run failed part way
+ * (escalations, notifications, Brain). Steps already done are not repeated.
+ * A record is tried at most five times, then left alone. Returns { retried, stillFailing }.
+ */
+export async function retryFailedFollowUps(db, { sendEmail = null, nowMs = Date.now() } = {}) {
+  const out = { retried: 0, stillFailing: 0 };
+  try {
+    const { data, error } = await db.from('document_records').select('*')
+      .eq('meta->>followups_failed', 'true')
+      .eq('awaiting_signature', false)
+      .lt('created_at', iso(nowMs - RETRY_AFTER_MS))
+      .order('created_at', { ascending: true })
+      .limit(RETRY_BATCH);
+    if (error) {
+      if (!missingColumn(error)) console.error('engine follow-up retry read failed:', error.message);
+      return out;
+    }
+    for (const record of data || []) {
+      try {
+        const res = await runFollowUpsAgain(db, { sendEmail }, record);
+        out.retried += 1;
+        if (res.failed) out.stillFailing += 1;
+      } catch (e) {
+        out.stillFailing += 1;
+        console.error('engine follow-up retry failed:', e && e.message);
+      }
+    }
+  } catch (e) {
+    console.error('retryFailedFollowUps failed:', e && e.message);
   }
   return out;
 }

@@ -218,7 +218,9 @@ const ALLOWED_EXTENSIONS = {
   // api/portal.js's ai_draft_document). portal-attachments holds a
   // worker's per-question signature/file_upload answers.
   'portal-sources': ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
-  'portal-attachments': ['png', 'jpg', 'jpeg', 'webp', 'pdf'],
+  // Word and Excel are accepted for engine documents' file fields. Macro
+  // enabled formats (docm, xlsm) are deliberately not on the list.
+  'portal-attachments': ['png', 'jpg', 'jpeg', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx'],
 };
 
 // `companyId` binds the issued receipt to the caller's tenant, and (new,

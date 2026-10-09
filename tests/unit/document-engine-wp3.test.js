@@ -629,3 +629,51 @@ test('a crew lead can open a record they are asked to review, and nothing else',
   await reviewRecord(db, { session: supA, companyId: 1, recordId: crewRec.id, decision: 'approve' });
   await rejects(getRecord(db, { session: lead, companyId: 1, recordId: crewRec.id }), 403, undefined);
 });
+
+// ── Retrying failed follow-ups (interaction map weak point E-1) ─────────────
+
+import { retryFailedFollowUps } from '../../server-lib/documentEngine/sweeps.js';
+
+test('a record whose escalations failed is flagged, then the sweep finishes it without repeating what worked', async () => {
+  const db = seed();
+  const m = mail();
+  const id = await doc(db, { rules: [ROUTE, REVIEW()] });
+  db.failOn('document_escalations', 'insert');
+  const out = await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } }, m);
+  assert.equal(out.record.status, 'pending_approval');
+  let rec = db.tables.document_records[0];
+  assert.equal(rec.meta.followups_failed, true);
+  assert.equal(rec.meta.followups.notify, true, 'the notification that worked is remembered');
+  assert.equal(db.tables.document_escalations.length, 0);
+  const sentBefore = m.sent.length;
+  const signals = db.tables.company_signals.length;
+
+  // Too soon: the live run may still be finishing.
+  assert.equal((await retryFailedFollowUps(db, { sendEmail: m.sendEmail })).retried, 0);
+
+  db.clearFailures();
+  db.tables.document_records[0].created_at = new Date(Date.now() - 3600 * 1000).toISOString();
+  const res = await retryFailedFollowUps(db, { sendEmail: m.sendEmail });
+  assert.deepEqual(res, { retried: 1, stillFailing: 0 });
+  rec = db.tables.document_records[0];
+  assert.equal(rec.meta.followups_failed, false);
+  assert.equal(db.tables.document_escalations.length, 1);
+  assert.equal(db.tables.company_signals.length, signals, 'the Brain is told once');
+  assert.ok(m.sent.length >= sentBefore);
+
+  // Nothing left to do.
+  assert.equal((await retryFailedFollowUps(db, { sendEmail: m.sendEmail })).retried, 0);
+});
+
+test('a record that keeps failing is tried five times and then left alone', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  db.failOn('document_escalations', 'insert');
+  await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } });
+  db.tables.document_records[0].created_at = new Date(Date.now() - 3600 * 1000).toISOString();
+  let total = 0;
+  for (let i = 0; i < 8; i += 1) total += (await retryFailedFollowUps(db, {})).retried;
+  assert.equal(total, 4, 'one live attempt plus four retries makes five');
+  assert.equal(db.tables.document_records[0].meta.followups_failed, false);
+  assert.equal(db.tables.document_records[0].meta.followups_attempts, 5);
+});

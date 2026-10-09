@@ -28,6 +28,7 @@ import { crewIdSet } from '../leadAccess.js';
 import { validDepartmentKeys } from '../companyStructure.js';
 import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
 import { fieldTypeInfo } from './fieldTypes.js';
+import { linkTargets } from './links.js';
 import { reviewSteps, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
 import { notifyRecord, notifyReturned, notifyEscalations } from './notify.js';
 
@@ -418,7 +419,7 @@ function ruleFlags(rules) {
 async function createEscalations(db, { companyId, record, matches }) {
   if (!matches || matches.length === 0) return [];
   const { data: existing, error: readErr } = await db.from('document_escalations').select('field_key').eq('record_id', record.id);
-  if (readErr) { console.error('documents: could not read escalations:', readErr.message); return []; }
+  if (readErr) throw dbFail(readErr, 'read the escalations');
   const have = new Set((existing || []).map((e) => e.field_key));
   const fresh = matches.filter((m) => !have.has(m.fieldKey));
   if (fresh.length === 0) return [];
@@ -430,7 +431,7 @@ async function createEscalations(db, { companyId, record, matches }) {
     trigger_value: m.value,
     target_department: m.department,
   })));
-  if (error) { console.error('documents: could not save escalations:', error.message); return []; }
+  if (error) throw dbFail(error, 'save the escalations');
   return fresh;
 }
 
@@ -451,17 +452,52 @@ async function writeBrainSignal(db, { companyId, definition, record, answerRows,
 }
 
 async function afterRecordCounts(db, deps, { definition, setting, rules, record, answerRows }) {
+  const companyId = Number(record.company_id);
+  const muted = setting.owner_muted === true;
+  const matches = matchRoutes(answerRoutes(rules), answerRows);
+  const done = { ...((record.meta && record.meta.followups) || {}) };
+  let failed = false;
+  let fresh = null;
+  // Each step runs once. A step that fails is retried later by the sweep
+  // (retryFailedFollowUps) and the ones already done are not repeated, so a
+  // retry never tells anyone twice.
+  const step = async (name, fn) => {
+    if (done[name]) return;
+    try { await fn(); done[name] = true; } catch (e) { failed = true; console.error(`documents: follow-up ${name} failed:`, e && e.message); }
+  };
+  await step('escalations', async () => { fresh = await createEscalations(db, { companyId, record, matches }); });
+  await step('escalation_notify', async () => {
+    // First run: tell about the escalations just created. A retry after a
+    // failed notify has no "just created" list, so it uses every match.
+    const list = fresh != null ? fresh : matches;
+    if (list.length > 0) await notifyEscalations(db, deps, { companyId, definition, matches: list, ownerMuted: muted });
+  });
+  await step('notify', async () => { await notifyRecord(db, deps, { companyId, definition, record, plan: notifyPlan(rules), ownerMuted: muted }); });
+  await step('brain', async () => { if (setting.brain_enabled !== false) await writeBrainSignal(db, { companyId, definition, record, answerRows, matches }); });
+  // Remember what is done, and whether the sweep still has work to do. This
+  // write is itself best effort: if it fails the record is simply not retried.
   try {
-    const companyId = Number(record.company_id);
-    const muted = setting.owner_muted === true;
-    const matches = matchRoutes(answerRoutes(rules), answerRows);
-    const created = await createEscalations(db, { companyId, record, matches });
-    await notifyRecord(db, deps, { companyId, definition, record, plan: notifyPlan(rules), ownerMuted: muted });
-    if (created.length > 0) await notifyEscalations(db, deps, { companyId, definition, matches: created, ownerMuted: muted });
-    if (setting.brain_enabled !== false) await writeBrainSignal(db, { companyId, definition, record, answerRows, matches });
+    const attempts = (Number(record.meta && record.meta.followups_attempts) || 0) + (failed ? 1 : 0);
+    const meta = { ...(record.meta || {}), followups: done, followups_failed: failed && attempts < MAX_FOLLOWUP_ATTEMPTS ? true : false, followups_attempts: attempts };
+    if (failed || (record.meta && record.meta.followups_failed)) {
+      await db.from('document_records').update({ meta }).eq('id', record.id).eq('company_id', companyId);
+    }
   } catch (e) {
-    console.error('documents: follow-ups failed:', e && e.message);
+    console.error('documents: could not save follow-up state:', e && e.message);
   }
+  return { failed };
+}
+
+const MAX_FOLLOWUP_ATTEMPTS = 5;
+
+/**
+ * Runs the follow-ups again for a record whose first run failed part way.
+ * Used by the sweep. Reads everything fresh and skips the steps already done.
+ */
+export async function runFollowUpsAgain(db, deps, record) {
+  const ctx = await loadFollowUpContext(db, record);
+  if (!ctx.definition) return { failed: false };
+  return afterRecordCounts(db, deps, { definition: ctx.definition, setting: ctx.setting, rules: ctx.rules, record, answerRows: ctx.answerRows });
 }
 
 // What the follow-ups need, read fresh from the database: the definition, the
@@ -641,6 +677,21 @@ export async function getRecord(db, { session, companyId, recordId }) {
   const answers = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the answers');
   const signatures = await many(db.from('document_signatures').select('*').eq('record_id', record.id), 'read the signatures');
   return { record, answers, signatures };
+}
+
+/**
+ * Short-lived links for the files on one record. Seeing the record is the same
+ * check as getRecord (author, or supervisor tier inside scope, or a lead
+ * reviewing); `sign(targets)` turns the targets into a Map of id to URL.
+ */
+export async function getRecordLinks(db, { session, companyId, recordId, sign }) {
+  const { record, answers, signatures } = await getRecord(db, { session, companyId, recordId });
+  const targets = linkTargets({ companyId: asId(companyId), record, answers, signatures });
+  const urls = targets.length > 0 ? await sign(targets) : new Map();
+  const files = {}; const sigs = {};
+  for (const a of answers) if (urls.has(`file:${a.id}`)) files[a.id] = urls.get(`file:${a.id}`);
+  for (const g of signatures) if (urls.has(`sig:${g.id}`)) sigs[g.id] = urls.get(`sig:${g.id}`);
+  return { pdf: urls.get('pdf') || null, files, signatures: sigs };
 }
 
 export async function listRecords(db, { session, companyId, definitionId, status, limit }) {
