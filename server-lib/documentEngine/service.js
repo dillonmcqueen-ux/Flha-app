@@ -718,13 +718,22 @@ async function leadMayReadForReview(db, session, record) {
   return reviewerMayAct({ actor, record, step, crew }).ok;
 }
 
+/** A reviewer who gave an approval on this record in its current round may still read it, so the file can carry the approval. */
+async function approverMayRead(db, session, record) {
+  const me = authorRosterId(session);
+  if (me == null) return false;
+  const round = Number(record.review_round) || 0;
+  const mine = await many(db.from('document_signatures').select('signer_roster_id, meta').eq('record_id', record.id).eq('kind', 'approval'), 'read the approvals');
+  return mine.some((g) => same(g.signer_roster_id, me) && (Number(g.meta?.round) || 0) === round);
+}
+
 export async function getRecord(db, { session, companyId, recordId }) {
   const cid = asId(companyId);
   const record = await loadRecord(db, recordId, cid);
   try {
     await requireRecordView(db, session, record);
   } catch (e) {
-    if (!(e instanceof EngineError) || e.status !== 403 || !(await leadMayReadForReview(db, session, record))) throw e;
+    if (!(e instanceof EngineError) || e.status !== 403 || !((await leadMayReadForReview(db, session, record)) || (await approverMayRead(db, session, record)))) throw e;
   }
   const answers = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the answers');
   const signatures = await many(db.from('document_signatures').select('*').eq('record_id', record.id), 'read the signatures');

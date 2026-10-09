@@ -243,7 +243,7 @@ test('a person\'s own list and a member profile include their engine documents, 
   assert.deepEqual(await listAuthoredEngineDocuments(supabaseAdmin, worker, { companyId: 1, authorId: null }), []);
 });
 
-import { amendRecord, myInbox } from '../../server-lib/documentEngine/service.js';
+import { getRecord, amendRecord, myInbox } from '../../server-lib/documentEngine/service.js';
 
 const extremeAnswers = { ...lowAnswers, hazards: [{ task: 'Trenching', hazard: 'Cave-in', control: 'Trench box', sopRef: null, risk: 'Extreme' }] };
 
@@ -336,4 +336,18 @@ test('the Dashboard gets this company\'s engine FLHAs shaped like FLHA rows, for
   assert.equal(flhas[0].pdf_url, 'https://signed/1/a.pdf');
   await assert.rejects(listEngineFlhaRows(db, { session: worker, companyId: 1, sign }), /Not allowed/);
   assert.deepEqual((await listEngineFlhaRows(db, { session: { ...supervisor, companyId: 2 }, companyId: 2, sign })).flhas, []);
+});
+
+test('a crew lead who approved a record can still read it afterwards, a lead who did not cannot', async () => {
+  const db = seedDb();
+  db.tables.roster.push({ id: 13, company_id: 1, name: 'Lena Lead', role: 'worker', is_lead: true, active: true, default_site_id: 5, departments: [], divisions: [] });
+  db.tables.roster.find((r) => r.id === 11).default_site_id = 5;
+  const id = await companyFlha(db);
+  const lead = { role: 'worker', userId: 13, companyId: 1, name: 'Lena Lead' };
+  const filed = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', answers: extremeAnswers, deps });
+  await reviewRecord(db, { session: lead, companyId: 1, recordId: filed.record.id, decision: 'approve', deps });
+  const got = await getRecord(db, { session: lead, companyId: 1, recordId: filed.record.id });
+  assert.equal(got.record.status, 'approved');
+  const other = { role: 'worker', userId: 12, companyId: 1, name: 'Cora Crew' };
+  await assert.rejects(getRecord(db, { session: other, companyId: 1, recordId: filed.record.id }), /Not allowed/);
 });
