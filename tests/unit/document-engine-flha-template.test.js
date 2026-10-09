@@ -286,6 +286,9 @@ test('an FLHA is not amendable the next day, after it closed unsigned, or when t
   row().unsigned_closed_at = new Date().toISOString();
   await assert.rejects(amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /closed unsigned/);
   row().unsigned_closed_at = null;
+  row().awaiting_signature = true;
+  await assert.rejects(amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /Sign this document first/);
+  row().awaiting_signature = false;
   for (const r of db.tables.document_rules) if (r.rule_type === 'amend_same_day') r.rule_type = 'notify';
   await assert.rejects(amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /cannot be amended/);
 });

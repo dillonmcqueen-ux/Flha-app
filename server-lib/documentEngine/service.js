@@ -1001,6 +1001,7 @@ function amendAllowed(rules) {
 function amendBlock(record, rules) {
   if (!amendAllowed(rules)) return 'This document cannot be amended.';
   if (record.unsigned_closed_at) return 'This document closed unsigned and can no longer be changed.';
+  if (record.awaiting_signature === true) return 'Sign this document first, then you can amend it.';
   if (!AMENDABLE_STATUSES.includes(record.status)) return 'This document is not open for amendment.';
   if (!record.created_at || new Date(record.created_at) < startOfToday()) return 'This document is no longer open for amendment.';
   return null;
@@ -1168,7 +1169,7 @@ export async function myInbox(db, { session, companyId }) {
     unsigned.forEach((r) => mine.push({ kind: 'sign', recordId: r.id, definitionId: r.definition_id, at: r.signature_requested_at }));
     // Filed today and allowed to be changed (not counted: nothing is waiting on them).
     const todays = await many(db.from('document_records').select('*').eq('company_id', cid).eq('submitted_by_roster_id', own).gte('created_at', startOfToday().toISOString()).order('created_at', { ascending: false }).limit(50), 'read your documents from today');
-    const open = todays.filter((r) => AMENDABLE_STATUSES.includes(r.status) && !r.unsigned_closed_at);
+    const open = todays.filter((r) => AMENDABLE_STATUSES.includes(r.status) && !r.unsigned_closed_at && r.awaiting_signature !== true);
     if (open.length > 0) {
       const rules = await many(db.from('document_rules').select('*').in('version_id', [...new Set(open.map((r) => r.version_id))]), 'read the rules');
       for (const r of open) {
