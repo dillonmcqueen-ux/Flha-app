@@ -8,6 +8,8 @@ import DailyReport, { resubmitDaily } from "./DailyReport.jsx";
 import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import PortalDocumentForm, { resubmitPortalForm } from "./PortalDocumentForm.jsx";
+import EngineDocumentForm from "./documentEngine/EngineDocumentForm.jsx";
+import { resubmitEngineForm } from "./documentEngine/engineSubmit.js";
 import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
 import FieldService, { resubmitFieldService } from "./FieldService.jsx";
@@ -39,6 +41,7 @@ const RESUBMIT_HANDLERS = {
   fuellog: resubmitFuelLog,
   fieldservice: resubmitFieldService,
   portalform: resubmitPortalForm,
+  engineform: resubmitEngineForm,
 };
 
 // Built-in document types. `ready: false` shows a "coming soon" state.
@@ -90,6 +93,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // every worker, same interim behavior custom forms already have.
   const [portalDocumentId, setPortalDocumentId] = useState(null);
   const [portalDocuments, setPortalDocuments] = useState([]);
+  // Unified-engine documents the company has switched on (api/documents.js).
+  const [engineDocumentId, setEngineDocumentId] = useState(null);
+  const [engineDocuments, setEngineDocuments] = useState([]);
   // Documents the Owner assigned to this person, with due dates and whether
   // they have already filled them in. Shown first on the menu.
   const [assignedBuiltin, setAssignedBuiltin] = useState([]);
@@ -148,6 +154,18 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       } catch (e) { /* leave list empty on a transient error */ }
     }
     loadPortalDocs();
+
+    async function loadEngineDocs() {
+      try {
+        const res = await fetch("/api/documents", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_worker_documents", token, companyId }),
+        });
+        const data = await res.json();
+        if (res.ok) setEngineDocuments(data.documents || []);
+      } catch (e) { /* leave list empty on a transient error */ }
+    }
+    loadEngineDocs();
 
     async function loadCrew() {
       if (!userId) return;
@@ -279,6 +297,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           setShowMyDocs(false);
           if (type === "customform") { setCustomFormId(formId); setDoc("custom"); }
           else if (type === "portalform") { setPortalDocumentId(formId); setDoc("portal"); }
+          else if (type === "engineform") { setEngineDocumentId(String(formId).replace(/^engine_/, "")); setDoc("engine"); }
           else setDoc(type);
         }}
       />
@@ -308,6 +327,9 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   }
   if (doc === "custom" && customFormId) {
     return <CustomForm companyId={companyId} companyName={companyName} userName={userName} formId={customFormId} onBack={() => { setDoc(null); setCustomFormId(null); }} onLogout={onLogout} token={token} />;
+  }
+  if (doc === "engine" && engineDocumentId) {
+    return <EngineDocumentForm companyId={companyId} companyName={companyName} userName={userName} userId={userId} definitionId={Number(engineDocumentId)} onBack={() => { setDoc(null); setEngineDocumentId(null); }} token={token} />;
   }
   if (doc === "portal" && portalDocumentId) {
     return <PortalDocumentForm companyId={companyId} companyName={companyName} userName={userName} documentId={portalDocumentId} onBack={() => { setDoc(null); setPortalDocumentId(null); }} onLogout={onLogout} token={token} />;
@@ -372,7 +394,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
     .map(cat => ({ ...cat, ...categoryItems(cat) }))
     .filter(cat => cat.builtins.length > 0 || cat.forms.length > 0);
 
-  const totalItems = categorizedBuiltins.length + customForms.length + portalDocuments.length + (timeclockItem ? 1 : 0);
+  const totalItems = categorizedBuiltins.length + customForms.length + portalDocuments.length + engineDocuments.length + (timeclockItem ? 1 : 0);
 
   // "Assigned to you": built-in, custom and Portal documents the Owner named
   // this person for, soonest due first, finished ones last. The server has
@@ -456,6 +478,19 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // own section instead.
   const renderPortalCard = (d) => (
     <div key={d.id} style={s.card("#F97316", true)} onClick={() => { setPortalDocumentId(d.id); setDoc("portal"); }}>
+      <div style={s.iconTile("#F97316")}>
+        {d.icon ? <span style={{ fontSize: 22 }}>{d.icon}</span> : <FileText size={22} color="#F97316" strokeWidth={2.25} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{d.title}</div>
+        <div style={{ fontSize: 13, color: C.text.muted, marginTop: 1 }}>Company document</div>
+      </div>
+      <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+    </div>
+  );
+
+  const renderEngineCard = (d) => (
+    <div key={`engine_${d.id}`} style={s.card("#F97316", true)} onClick={() => { setEngineDocumentId(String(d.id)); setDoc("engine"); }}>
       <div style={s.iconTile("#F97316")}>
         {d.icon ? <span style={{ fontSize: 22 }}>{d.icon}</span> : <FileText size={22} color="#F97316" strokeWidth={2.25} />}
       </div>
@@ -765,6 +800,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           })}
 
           {portalDocuments.map(renderPortalCard)}
+          {engineDocuments.map(renderEngineCard)}
 
           {!loading && totalItems === 0 && (
             <div style={{ textAlign: "center", padding: "40px 0", color: C.text.muted }}>

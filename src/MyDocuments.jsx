@@ -35,6 +35,7 @@ const TYPE_META = {
   monthly: { label: "Monthly Inspection", icon: CalendarClock },
   customform: { label: "Custom Document", icon: FolderKanban },
   portalform: { label: "Portal Document", icon: FileText },
+  engineform: { label: "Company Document", icon: FileText },
 };
 
 // Every draft key looks like fora_draft_<formType>_<scopeId>, and scopeId is
