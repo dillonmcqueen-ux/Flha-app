@@ -516,3 +516,37 @@ test('resubmitting twice at once only lands once, and a failure puts the record 
   assert.equal(db2.tables.document_records[0].status, 'returned');
   assert.equal(db2.tables.document_records[0].returned_reason, 'fix it');
 });
+
+test('fixing a returned document keeps the photo the worker does not send again, and a required photo still counts', async () => {
+  const db = seedDb();
+  const fields = [
+    { label: 'Task', fieldType: 'short_text', required: true },
+    { label: 'Site photo', fieldType: 'photo', required: true },
+  ];
+  const id = await publishedDoc(db, { rules: [REVIEW_RULE], fields });
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'wrong', site_photo: 'rcpt:co1/photo-a.png' }, siteId: 5, deps })).record;
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Fix task' });
+
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'right' }, deps });
+  const rows = db.tables.document_answers.filter((a) => a.record_id === rec.id);
+  assert.equal(rows.find((r) => r.field_key === 'task').value_text, 'right');
+  assert.equal(rows.find((r) => r.field_key === 'site_photo').file_path, 'co1/photo-a.png');
+
+  // A sentinel for a field with no earlier file keeps nothing and still fails the required check.
+  const rec2 = (await submitRecord(db, { session: worker, companyId: 1, definitionId: await publishedDoc(db, { rules: [REVIEW_RULE], fields: [{ label: 'Task', fieldType: 'short_text' }, { label: 'Pic', fieldType: 'photo', required: true }], title: 'Other' }), answers: { task: 'a', pic: 'rcpt:co1/p.png' }, siteId: 5, deps })).record;
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec2.id, decision: 'return', reason: 'x' });
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec2.id, answers: { task: 'b', pic: 'rcpt:co1/new.png' }, deps });
+  assert.equal(db.tables.document_answers.find((a) => a.record_id === rec2.id && a.field_key === 'pic').file_path, 'co1/new.png');
+});
+
+test('a resubmit can bring the redrawn PDF, and a bad receipt is ignored', async () => {
+  const db = seedDb();
+  const id = await publishedDoc(db, { rules: [REVIEW_RULE] });
+  const rec = (await submitRecord(db, { session: worker, companyId: 1, definitionId: id, answers: { task: 'x' }, siteId: 5, pdfReceipt: 'rcpt:co1/old.pdf', deps })).record;
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Fix' });
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'y' }, pdfReceipt: 'rcpt:co1/new.pdf', deps });
+  assert.equal(db.tables.document_records[0].pdf_path, 'co1/new.pdf');
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: rec.id, decision: 'return', reason: 'Again' });
+  await resubmitRecord(db, { session: worker, companyId: 1, recordId: rec.id, answers: { task: 'z' }, pdfReceipt: 'forged', deps });
+  assert.equal(db.tables.document_records[0].pdf_path, 'co1/new.pdf');
+});

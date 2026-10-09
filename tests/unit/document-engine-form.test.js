@@ -90,3 +90,64 @@ test('network failure and server refusal are flagged differently', async () => {
   await assert.rejects(submitEngineDocument(payload(), 'c3', 't', { ...base, fetchFn: async () => { throw new TypeError('offline'); } }), (e) => e.isNetworkFailure === true);
   await assert.rejects(submitEngineDocument(payload(), 'c4', 't', { ...base, fetchFn: async () => ({ ok: false, status: 400, json: async () => ({ error: 'Nope.' }) }) }), (e) => e.isServerError === true && e.message === 'Nope.' && e.status === 400);
 });
+
+import { formatAnswer, rowsToForm, hasFiles, statusLabel, inboxCount } from '../../src/documentEngine/recordView.js';
+
+test('answers read back in plain words', () => {
+  assert.equal(formatAnswer({ field_type: 'yesno', value_text: 'yes' }), 'Yes');
+  assert.equal(formatAnswer({ field_type: 'multiselect', value_json: ['A', 'B'] }), 'A, B');
+  assert.equal(formatAnswer({ field_type: 'hazard_table', value_json: [{ hazard: 'Fall', risk: 'High', control: 'Rail' }] }), 'Fall (High): Rail');
+  assert.equal(formatAnswer({ file_path: 'x/y.png' }), 'File attached');
+  assert.equal(formatAnswer(null), '');
+  assert.equal(statusLabel('pending_approval'), 'Waiting for review');
+});
+
+test('stored rows go back into the form without files, and files are noticed', () => {
+  const rows = [
+    { field_key: 'a', value_text: 'x', notes: 'n' }, { field_key: 'b', value_json: ['1'] }, { field_key: 'c', file_path: 'p.png' },
+  ];
+  assert.deepEqual(rowsToForm(rows), { answers: { a: 'x', b: ['1'] }, notes: { a: 'n' } });
+  assert.equal(hasFiles(rows), true);
+  assert.equal(inboxCount({ counts: { review: 2 } }, [{}, {}, {}]), 5);
+  assert.equal(inboxCount(null, null), 0);
+});
+
+import { resubmitEngineDocument, signEngineDocument, loadRecordForWorker } from '../../src/documentEngine/engineSubmit.js';
+
+test('resubmit sends the fixed answers and a redrawn PDF; sign uploads the signature then the PDF', async () => {
+  const sent = [];
+  const deps = {
+    upload: async (u) => `rcpt-${u.kind}`, render: async () => new Blob(['x']), logo: null,
+    fetchFn: async (u, init) => { sent.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true }) }; },
+  };
+  await resubmitEngineDocument(payload(), 9, 't', deps);
+  assert.equal(sent[0].action, 'resubmit');
+  assert.equal(sent[0].recordId, 9);
+  assert.equal(sent[0].pdfReceipt, 'rcpt-pdf');
+  assert.equal(sent[0].answers.pic, 'rcpt-attachment');
+  await signEngineDocument(payload(), 9, DATA, 't', deps);
+  assert.deepEqual([sent[1].action, sent[1].signature, sent[1].pdfReceipt], ['sign_now', 'rcpt-signature', 'rcpt-pdf']);
+  await assert.rejects(signEngineDocument(payload(), 9, DATA, 't', { ...deps, upload: async () => null }), /signature did not upload/);
+});
+
+test('loadRecordForWorker flags a document that changed version since the record was filed', async () => {
+  const call = async (t, action) => (action === 'get_record' ? { record: { definition_id: 5, version_id: 11 }, answers: [], signatures: [] } : { versionId: 12, fields: [] });
+  assert.equal((await loadRecordForWorker('t', 1, 3, call)).sameVersion, false);
+  const call2 = async (t, action) => (action === 'get_record' ? { record: { definition_id: 5, version_id: 12 }, answers: [], signatures: [] } : { versionId: 12, fields: [] });
+  assert.equal((await loadRecordForWorker('t', 1, 3, call2)).sameVersion, true);
+});
+
+test('an earlier file satisfies a required photo when fixing a returned document', () => {
+  const f = [{ field_key: 'pic', label: 'Photo', field_type: 'photo', required: true, config: {} }];
+  assert.deepEqual(clientProblems(f, { pic: '' }), ['"Photo" is required.']);
+  assert.deepEqual(clientProblems(f, { pic: '' }, {}, ['pic']), []);
+});
+
+test('signing skips the PDF when the form changed since the document was filed', async () => {
+  const uploads = [];
+  await signEngineDocument({ ...payload(), skipPdf: true }, 9, DATA, 't', {
+    upload: async (u) => { uploads.push(u.kind); return `rcpt-${u.kind}`; }, render: async () => { throw new Error('should not draw'); }, logo: null,
+    fetchFn: async () => ({ ok: true, json: async () => ({}) }),
+  });
+  assert.deepEqual(uploads, ['signature']);
+});

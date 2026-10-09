@@ -5,7 +5,8 @@ import { loadDraft, clearDraft, useDraftAutosave } from "../useDraftAutosave.js"
 import { enqueueSubmission } from "../offlineQueue.js";
 import { callDocuments } from "./builderApi.js";
 import { initialAnswers, clientProblems, newClientSubmissionId, UNANSWERABLE_TYPES, RISKS, emptyHazard } from "./formModel.js";
-import { submitEngineDocument } from "./engineSubmit.js";
+import { submitEngineDocument, resubmitEngineDocument, loadRecordForWorker } from "./engineSubmit.js";
+import { rowsToForm, hasFiles } from "./recordView.js";
 import SignaturePad from "./SignaturePad.jsx";
 import { shrinkImage, readAsDataUrl } from "./shrinkImage.js";
 import { ArrowLeft, Loader2, CheckCircle2, AlertTriangle, WifiOff, PenLine } from "lucide-react";
@@ -20,7 +21,7 @@ async function postJson(action, token, extra) {
   return res.ok ? await res.json() : {};
 }
 
-export default function EngineDocumentForm({ companyId, companyName, userName = "", userId = null, definitionId, onBack, token }) {
+export default function EngineDocumentForm({ companyId, companyName, userName = "", userId = null, definitionId, resubmitRecordId = null, onBack, token }) {
   const [doc, setDoc] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [sites, setSites] = useState([]);
@@ -34,22 +35,38 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const [saveError, setSaveError] = useState("");
   const [showProblems, setShowProblems] = useState(false);
   const [restored, setRestored] = useState(false);
+  const [keptFileKeys, setKeptFileKeys] = useState([]);
+  const [returnedNote, setReturnedNote] = useState(null); // { reason, hadFiles } when fixing a sent-back document
 
   const accent = C.orange;
   const s = buildFormStyles(C, FONT, RAD, SHAD, accent);
-  const scope = companyId && definitionId ? `${companyId}::engine_${definitionId}` : null;
+  // A sent-back document is fixed from the saved record, never from a draft.
+  const scope = companyId && definitionId && !resubmitRecordId ? `${companyId}::engine_${definitionId}` : null;
 
   useEffect(() => {
     let live = true;
     (async () => {
       try {
-        const got = await callDocuments(token, "get_document", { companyId, definitionId });
-        if (!live) return;
-        setDoc(got);
-        const draft = scope ? loadDraft("engineform", scope) : null;
-        setAnswers({ ...initialAnswers(got.fields), ...(draft?.answers || {}) });
-        if (draft?.notes) setNotes(draft.notes);
-        if (draft?.siteId) setSiteId(draft.siteId);
+        if (resubmitRecordId) {
+          const rec = await loadRecordForWorker(token, companyId, resubmitRecordId, callDocuments);
+          if (!live) return;
+          if (!rec.sameVersion) throw new Error("This document was updated after you filed it. Ask your supervisor to cancel it and file it again.");
+          setDoc(rec.doc);
+          const prefill = rowsToForm(rec.answers);
+          setAnswers({ ...initialAnswers(rec.doc.fields), ...prefill.answers });
+          setNotes(prefill.notes);
+          setSiteId(rec.record.site_id ? String(rec.record.site_id) : "");
+          setKeptFileKeys(rec.answers.filter((r) => r.file_path).map((r) => r.field_key));
+          setReturnedNote({ reason: rec.record.returned_reason || "", hadFiles: hasFiles(rec.answers) });
+        } else {
+          const got = await callDocuments(token, "get_document", { companyId, definitionId });
+          if (!live) return;
+          setDoc(got);
+          const draft = scope ? loadDraft("engineform", scope) : null;
+          setAnswers({ ...initialAnswers(got.fields), ...(draft?.answers || {}) });
+          if (draft?.notes) setNotes(draft.notes);
+          if (draft?.siteId) setSiteId(draft.siteId);
+        }
       } catch (e) { if (live) setLoadError(e.message || "This document is not available."); }
       setRestored(true);
     })();
@@ -62,13 +79,13 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
       if (live) setCompanyLogo(l.logo_url || "");
     })();
     return () => { live = false; };
-  }, [companyId, definitionId, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [companyId, definitionId, resubmitRecordId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useDraftAutosave("engineform", scope, { answers, notes, siteId }, restored && !!doc && step === "form");
 
   const fields = doc?.fields || [];
   const needsSignature = (doc?.signatureSteps || []).some((x) => x.signer === "worker");
-  const problems = doc ? clientProblems(fields, answers, notes) : [];
+  const problems = doc ? clientProblems(fields, answers, notes, keptFileKeys) : [];
   const set = (k, v) => setAnswers((p) => ({ ...p, [k]: v }));
   const setNote = (k, v) => setNotes((p) => ({ ...p, [k]: v }));
   const siteName = sites.find((x) => String(x.id) === String(siteId))?.name || "";
@@ -76,6 +93,16 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   const submit = async (signLater) => {
     setShowProblems(true);
     if (problems.length) return;
+    if (resubmitRecordId) {
+      setSaving(true); setSaveError("");
+      const now = new Date();
+      try {
+        await resubmitEngineDocument({ title: doc.definition.title, layout: doc.layout, fields, answers, notes, siteName, companyName, companyLogo, submittedBy: userName, dateText: now.toLocaleDateString("en-CA"), dateTimeText: now.toLocaleString("en-CA"), status: "pending_approval" }, resubmitRecordId, token);
+        setStep("done");
+      } catch (e) { setSaveError(e.isNetworkFailure ? "No connection. Try again when you are back online." : e.message); }
+      setSaving(false);
+      return;
+    }
     if (needsSignature && !signLater && !signature) { setSaveError("Sign the document, or choose Sign later."); return; }
     setSaving(true); setSaveError("");
     const now = new Date();
@@ -184,14 +211,18 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
   let section = null;
   return shell(
     <>
-      <div style={s.card}>
+      {returnedNote && (
+        <div role="note" style={bannerStyle(C, RAD, "warning")}><AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span><strong>Sent back:</strong> {returnedNote.reason || "No reason given."}{returnedNote.hadFiles ? " Photos and files you already added stay unless you add new ones." : ""}</span></div>
+      )}
+      {!resubmitRecordId && <div style={s.card}>
         <label style={s.label} htmlFor="eng-site">Job site</label>
         <select id="eng-site" style={{ ...s.input, marginBottom: 0 }} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
           <option value="">Select a site...</option>
           {sites.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
         {userName && <div style={{ fontSize: 13, color: C.text.muted, marginTop: 10 }}>Filling in as <strong>{userName}</strong></div>}
-      </div>
+      </div>}
 
       {fields.filter((f) => !UNANSWERABLE_TYPES.includes(f.field_type)).map((f) => {
         const head = f.section && f.section !== section ? <div style={{ fontWeight: 800, fontSize: 13, color: accent, textTransform: "uppercase", margin: "6px 2px 8px" }}>{f.section}</div> : null;
@@ -208,7 +239,7 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
         );
       })}
 
-      {needsSignature && (
+      {needsSignature && !resubmitRecordId && (
         <div style={s.card}>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><PenLine size={18} color={accent} /> Your signature</div>
           <div style={{ fontSize: 11.5, color: C.text.faint, marginBottom: 8, lineHeight: 1.4 }}>By signing, you take full responsibility for the accuracy of this document.</div>
@@ -220,9 +251,9 @@ export default function EngineDocumentForm({ companyId, companyName, userName = 
       {showProblems && problems.length > 0 && <div role="alert" style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} style={{ flexShrink: 0 }} /><span>{problems[0]}{problems.length > 1 ? ` (and ${problems.length - 1} more)` : ""}</span></div>}
       {saveError && <div role="alert" style={bannerStyle(C, RAD, "danger")}><AlertTriangle size={16} style={{ flexShrink: 0 }} /><span>{saveError}</span></div>}
       <button style={s.btn(saving ? disabledBg(C) : C.status.success.solid)} disabled={saving} onClick={() => submit(false)}>
-        {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting...</> : <><CheckCircle2 size={16} /> {needsSignature ? "Sign and submit" : "Submit"}</>}
+        {saving ? <><Loader2 size={16} className="fora-spin" /> Submitting...</> : <><CheckCircle2 size={16} /> {resubmitRecordId ? "Send back for review" : needsSignature ? "Sign and submit" : "Submit"}</>}
       </button>
-      {needsSignature && userId && <button style={s.ghost} disabled={saving} onClick={() => submit(true)}>Submit now, sign later</button>}
+      {needsSignature && userId && !resubmitRecordId && <button style={s.ghost} disabled={saving} onClick={() => submit(true)}>Submit now, sign later</button>}
       <style>{"@keyframes fora-spin { to { transform: rotate(360deg); } } .fora-spin { animation: fora-spin 0.8s linear infinite; }"}</style>
     </>
   );

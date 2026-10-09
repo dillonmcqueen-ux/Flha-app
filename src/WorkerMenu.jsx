@@ -9,6 +9,7 @@ import MonthlyInspection, { resubmitMonthly } from "./MonthlyInspection.jsx";
 import CustomForm, { resubmitCustomForm } from "./CustomForm.jsx";
 import PortalDocumentForm, { resubmitPortalForm } from "./PortalDocumentForm.jsx";
 import EngineDocumentForm from "./documentEngine/EngineDocumentForm.jsx";
+import EngineWorkerInbox from "./documentEngine/EngineWorkerInbox.jsx";
 import { resubmitEngineForm } from "./documentEngine/engineSubmit.js";
 import TimeClock from "./TimeClock.jsx";
 import FuelLog, { resubmitFuelLog } from "./FuelLog.jsx";
@@ -96,6 +97,8 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // Unified-engine documents the company has switched on (api/documents.js).
   const [engineDocumentId, setEngineDocumentId] = useState(null);
   const [engineDocuments, setEngineDocuments] = useState([]);
+  const [engineInboxCount, setEngineInboxCount] = useState(0);
+  const [showEngineInbox, setShowEngineInbox] = useState(false);
   // Documents the Owner assigned to this person, with due dates and whether
   // they have already filled them in. Shown first on the menu.
   const [assignedBuiltin, setAssignedBuiltin] = useState([]);
@@ -166,6 +169,19 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       } catch (e) { /* leave list empty on a transient error */ }
     }
     loadEngineDocs();
+
+    async function loadEngineInbox() {
+      if (!userId) return;
+      try {
+        const res = await fetch("/api/documents", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "my_inbox", token, companyId }),
+        });
+        const data = await res.json();
+        if (res.ok) setEngineInboxCount(data.counts?.mine || 0);
+      } catch (e) { /* no badge on a transient error */ }
+    }
+    loadEngineInbox();
 
     async function loadCrew() {
       if (!userId) return;
@@ -275,6 +291,11 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
 
   if (showSecurity) {
     return <AccountSecurity token={token} onBack={() => setShowSecurity(false)} />;
+  }
+
+  if (showEngineInbox) {
+    const titles = Object.fromEntries(engineDocuments.map(d => [d.id, d.title]));
+    return <EngineWorkerInbox token={token} companyId={companyId} companyName={companyName} userName={userName} userId={userId} titles={titles} onBack={() => setShowEngineInbox(false)} onCount={setEngineInboxCount} />;
   }
 
   if (showSign) {
@@ -673,6 +694,27 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
               {openShiftWhileOff ? "You're still clocked in. Tap to clock out." : "Clock in and out"}
             </div>
           </button>
+        )}
+
+        {engineInboxCount > 0 && (
+          <div
+            onClick={() => setShowEngineInbox(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+              background: C.status.warning.bg,
+              border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.lg, padding: "14px 16px",
+              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
+            }}
+          >
+            <div style={s.iconTile(C.orange)}>
+              <Inbox size={22} color={C.orange} strokeWidth={2.25} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: C.status.warning.text }}>Company documents need you</div>
+              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{engineInboxCount} sent back or waiting for your signature</div>
+            </div>
+            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
+          </div>
         )}
 
         {unsignedCount > 0 && (

@@ -29,10 +29,11 @@ export function isFilled(field, value) {
 }
 
 /** What the worker still has to do before Submit. The server repeats every check. */
-export function clientProblems(fields, answers, notes = {}) {
+export function clientProblems(fields, answers, notes = {}, keptFileKeys = []) {
   const out = [];
   for (const f of fields || []) {
     if (UNANSWERABLE_TYPES.includes(f.field_type)) continue;
+    if (keptFileKeys.includes(f.field_key) && !isFilled(f, answers[f.field_key])) continue; // an earlier file stays
     const v = answers[f.field_key];
     if (f.required && !isFilled(f, v)) out.push(`"${f.label}" is required.`);
     if (f.field_type === 'condition3' && f.config?.requireNote !== false && (v === 'Monitor' || v === 'Defective') && !String(notes[f.field_key] || '').trim()) {

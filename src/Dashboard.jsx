@@ -35,6 +35,8 @@ import { EXPIRY_WARNING_DAYS, expiryStatus, expiryText, COMPLIANCE_DOC_TYPES, co
 import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW } from "./theme";
 import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
 import PortalReports from "./PortalReports.jsx";
+import EngineInbox from "./documentEngine/EngineInbox.jsx";
+import { useEngineInbox } from "./documentEngine/useEngineInbox.js";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
 import { formatOccurredAt, isLocalInput } from "./occurredAt.js";
@@ -71,6 +73,7 @@ const TAB_ICON = {
   certifications: ShieldCheck,
   workforcecustomdocs: FolderKanban,
   portal: FileText,
+  enginedocs: FileText,
 };
 const CATEGORY_ICON = { safety: HardHat, operations: Wrench, workforce: Users, portal: FileText };
 
@@ -83,7 +86,7 @@ const TAB_LABEL = {
   inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance", fuel: "Fuel Logs",
   customdocs: "Custom Docs", analytics: "Equipment Analytics",
   timeclock: "Time Clock", roster: "Roster", certifications: "Certifications", workforcecustomdocs: "Custom Docs",
-  portal: "Portal",
+  portal: "Portal", enginedocs: "Company Docs",
 };
 
 // Formats an ISO timestamp for a <input type="datetime-local"> value, in
@@ -3142,6 +3145,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // form assigned there.
   const hasActiveCustomFormIn = (category) => docSettings.some(d => d.isCustom && d.isActive && (d.category || "operations") === category);
 
+  const engineInbox = useEngineInbox(token, selectedCompany, !!selectedCompany);
   const TAB_VISIBLE = {
     flhas: isDocActive("flha"),
     inspections: isDocActive("inspection"),
@@ -3184,6 +3188,8 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // per supervisor, so this rides the same signal the "roster" tab
     // already uses rather than inventing a second one.
     portal: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    // Documents built in the unified engine. Shown once the company has one switched on, or something waits on this person.
+    enginedocs: engineInbox.docs.length > 0 || engineInbox.count > 0,
     analytics: true,
     sops: true,
   };
@@ -3204,7 +3210,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     // into Safety/Operations/Workforce, same reasoning WorkerMenu.jsx's
     // renderPortalCard gives: a Portal document's category is the
     // customer's own paperwork, not FORA's document taxonomy.
-    { key: "portal", label: "Portal", tabs: ["portal"] },
+    { key: "portal", label: "Portal", tabs: ["portal", "enginedocs"] },
   ];
   // The Equipment hub's own sub-tabs, in the order a supervisor actually
   // works through them: what do I own, what needs service, what has been
@@ -5396,6 +5402,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             // itself as a monthly-inspection problem in the nav. Each count
             // now sits on the tab that actually holds those rows.
             corrective: openSafetyActions.length,
+            enginedocs: engineInbox.count,
             // Equipment absorbed Maintenance, so the badge that used to sit
             // on that tab moves here with it — otherwise an overdue service
             // and an open defect stop being visible from the nav at all.
@@ -6570,6 +6577,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
         {activeTab === "safetycustomdocs" && TAB_VISIBLE.safetycustomdocs && renderCustomDocsTab(companySafetyCustomDocs, "safetycustomdocs")}
         {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
+
+        {activeTab === "enginedocs" && TAB_VISIBLE.enginedocs && (
+          <EngineInbox token={token} companyId={selectedCompany} docs={engineInbox.docs} inbox={engineInbox.inbox} escalations={engineInbox.escalations} onChanged={engineInbox.reload} />
+        )}
 
         {activeTab === "portal" && TAB_VISIBLE.portal && (
           <div style={styles.card}>

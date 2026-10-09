@@ -27,6 +27,7 @@ import { scopeRecords, loadActor } from '../documentAccess.js';
 import { crewIdSet } from '../leadAccess.js';
 import { validDepartmentKeys } from '../companyStructure.js';
 import { PORTAL_DEPARTMENTS } from '../portalDepartments.js';
+import { fieldTypeInfo } from './fieldTypes.js';
 import { reviewSteps, needsWorkerSignature, notifyPlan, answerRoutes, matchRoutes, reviewerMayAct, brainSignalFor } from './rules.js';
 import { notifyRecord, notifyReturned, notifyEscalations } from './notify.js';
 
@@ -776,7 +777,7 @@ export async function reviewRecord(db, { session, companyId, recordId, decision,
  * the author, only while it is returned. Answers are replaced, the review
  * chain starts again from its first step.
  */
-export async function resubmitRecord(db, { session, companyId, recordId, answers, notes, deps }) {
+export async function resubmitRecord(db, { session, companyId, recordId, answers, notes, pdfReceipt, deps }) {
   const cid = asId(companyId);
   const record = await loadRecord(db, recordId, cid);
   const own = authorRosterId(session);
@@ -786,13 +787,25 @@ export async function resubmitRecord(db, { session, companyId, recordId, answers
   const version = await one(db.from('document_versions').select('*').eq('id', record.version_id), 'read the version');
   if (!version) throw new EngineError(404, 'Document not found.');
   const content = await readVersionContent(db, version);
-  const checked = validateAnswers(content.fields, answers, { notes, resolveFile: deps.resolveFile });
+  // A file the worker does not send again stays as it was. Without this, fixing
+  // a typo on a returned document would silently delete its photos.
+  const oldAnswers = await many(db.from('document_answers').select('*').eq('record_id', record.id), 'read the earlier answers');
+  const keepPath = new Map(oldAnswers.filter((o) => o.file_path).map((o) => [o.field_key, o.file_path]));
+  const KEEP = '__keep_existing_file__';
+  const sent = answers && typeof answers === 'object' && !Array.isArray(answers) ? { ...answers } : {};
+  for (const f of content.fields) {
+    if (fieldTypeInfo(f.field_type)?.value === 'file' && keepPath.has(f.field_key) && (sent[f.field_key] == null || sent[f.field_key] === '')) sent[f.field_key] = KEEP;
+  }
+  const resolveFile = (raw, field) => (raw === KEEP ? (keepPath.get(field.field_key) || null) : deps.resolveFile(raw, field));
+  const checked = validateAnswers(content.fields, sent, { notes, resolveFile });
   if (checked.error) throw new EngineError(400, checked.error);
+
+  const pdfPath = pdfReceipt ? deps.resolveFile(pdfReceipt, { field_type: 'pdf' }) : null;
 
   // Claim the record first (only one resubmit can move it out of
   // 'returned'), then replace the answers, and put it back if that fails.
   const claimed = await updated(
-    db.from('document_records').update({ status: 'pending_approval', review_step: 0, review_round: (Number(record.review_round) || 0) + 1, returned_reason: null, review_alerted_at: null, submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', record.id).eq('company_id', cid).eq('status', 'returned'),
+    db.from('document_records').update({ status: 'pending_approval', review_step: 0, review_round: (Number(record.review_round) || 0) + 1, returned_reason: null, review_alerted_at: null, submitted_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...(pdfPath ? { pdf_path: pdfPath } : {}) }).eq('id', record.id).eq('company_id', cid).eq('status', 'returned'),
     'resubmit',
   );
   if (claimed.length === 0) throw new EngineError(409, 'This document was not sent back.');
