@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { sendEmail } from '../server-lib/email.js';
 import { runDigest } from '../server-lib/notifyDigest.js';
 import { alertOverdueUnsigned, closeStaleUnsigned } from '../server-lib/unsignedSweep.js';
+import { alertOverdueUnsignedEngine, closeStaleUnsignedEngine, escalateStalePending } from '../server-lib/documentEngine/sweeps.js';
 import { recordPlatformEvent } from '../server-lib/platformEvents.js';
 import { encryptionKeyProblem } from '../server-lib/fieldCrypto.js';
 
@@ -38,7 +39,7 @@ export default async function handler(req, res) {
   if (!process.env.RESEND_API_KEY || encryptionKeyProblem()) {
     console.error('notification digest skipped: email or encryption key not configured');
     // Closing a record unsigned needs no email, so it still runs.
-    const closedOnly = await closeStaleUnsigned(supabaseAdmin);
+    const closedOnly = (await closeStaleUnsigned(supabaseAdmin)) + (await closeStaleUnsignedEngine(supabaseAdmin));
     await recordPlatformEvent(supabaseAdmin, { eventType: 'cron_run', subtype: 'notification_digest', status: 'error', metrics: { skipped: 1, closed: closedOnly, duration_ms: Date.now() - startedAt } });
     return res.status(200).json({ skipped: true });
   }
@@ -49,11 +50,17 @@ export default async function handler(req, res) {
   const alerts = new Date().getUTCMinutes() < 10
     ? await alertOverdueUnsigned(supabaseAdmin, { sendEmail })
     : { alerted: 0, emailed: 0, failed: 0 };
-  const closed = await closeStaleUnsigned(supabaseAdmin);
+  // The unified document engine's records follow the same two rules, and a
+  // record waiting more than 48 hours for a reviewer escalates to the Owner.
+  const hourly = new Date().getUTCMinutes() < 10;
+  const engineAlerts = hourly ? await alertOverdueUnsignedEngine(supabaseAdmin, { sendEmail }) : { alerted: 0, emailed: 0, failed: 0 };
+  const engineReview = hourly ? await escalateStalePending(supabaseAdmin, { sendEmail }) : { escalated: 0, emailed: 0, failed: 0 };
+  const closed = (await closeStaleUnsigned(supabaseAdmin)) + (await closeStaleUnsignedEngine(supabaseAdmin));
+  const failed = result.failed + alerts.failed + engineAlerts.failed + engineReview.failed;
   await recordPlatformEvent(supabaseAdmin, {
-    eventType: 'cron_run', subtype: 'notification_digest', status: result.error || result.failed > 0 || alerts.failed > 0 ? 'error' : 'ok',
-    metrics: { claimed: result.claimed, sent: result.sent, dropped: result.dropped, failed: result.failed, alerted: alerts.alerted, closed, duration_ms: Date.now() - startedAt },
+    eventType: 'cron_run', subtype: 'notification_digest', status: result.error || failed > 0 ? 'error' : 'ok',
+    metrics: { claimed: result.claimed, sent: result.sent, dropped: result.dropped, failed: result.failed, alerted: alerts.alerted + engineAlerts.alerted, escalated: engineReview.escalated, closed, duration_ms: Date.now() - startedAt },
   });
   // Counts only: no addresses, no names.
-  return res.status(result.error ? 500 : 200).json({ claimed: result.claimed, sent: result.sent, dropped: result.dropped, failed: result.failed, alerted: alerts.alerted, closed });
+  return res.status(result.error ? 500 : 200).json({ claimed: result.claimed, sent: result.sent, dropped: result.dropped, failed: result.failed, alerted: alerts.alerted + engineAlerts.alerted, escalated: engineReview.escalated, closed });
 }

@@ -1785,6 +1785,12 @@ export default async function handler(req, res) {
       const { count: portalCount } = await supabaseAdmin
         .from('portal_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
       if (portalCount) blockers.push(`${portalCount} Company Portal submission${portalCount === 1 ? '' : 's'}`);
+      // Unified document engine records keep no free-text site name, so
+      // detaching the site would lose where they happened (and drop them from a
+      // site-scoped supervisor's view). A database without the table is fine.
+      const { count: engineCount } = await supabaseAdmin
+        .from('document_records').select('id', { count: 'exact', head: true }).eq('site_id', id);
+      if (engineCount) blockers.push(`${engineCount} document${engineCount === 1 ? '' : 's'} filed in the document engine`);
       if (blockers.length > 0) {
         return res.status(400).json({
           error: `This site can't be removed — it has ${blockers.join(' and ')} filed against it. Those records would lose the site they belong to.`,
@@ -2390,9 +2396,10 @@ export default async function handler(req, res) {
       // recorded and summarized. Writers today: api/flhas.js (flha_edit),
       // api/logs.js (toolbox_talk, equipment_inspection), api/reports.js
       // (incident, near_miss), api/monthly.js (monthly_inspection),
-      // api/logs.js again (daily_report), api/portal.js (portal_escalation).
-      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0, daily_report: 0, portal_escalation: 0 };
-      const tally = { portalFlagged: {}, addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {}, workingConditions: {} };
+      // api/logs.js again (daily_report), api/portal.js (portal_escalation),
+      // server-lib/documentEngine/service.js (engine_document).
+      const bySourceType = { flha_edit: 0, toolbox_talk: 0, incident: 0, near_miss: 0, equipment_inspection: 0, monthly_inspection: 0, daily_report: 0, portal_escalation: 0, engine_document: 0 };
+      const tally = { engineFlagged: {}, portalFlagged: {}, addedHazards: {}, removedHazards: {}, toolboxTopics: {}, incidentCategories: {}, nearMissInvolved: {}, defectiveItems: {}, inspectedEquipment: {}, monthlyFailures: {}, workingConditions: {} };
       const bump = (map, key) => { if (key) map[key] = (map[key] || 0) + 1; };
       (data || []).forEach((row) => {
         const j = row.signal_json || {};
@@ -2425,6 +2432,10 @@ export default async function handler(req, res) {
           // Question and document only. The answer and the worker are never
           // in the signal, so they cannot be in this list either.
           if (j.question && j.document) bump(tally.portalFlagged, `${j.question} (${j.document})`);
+        } else if (row.source_type === 'engine_document') {
+          // Unified-engine documents: only the questions that were routed to
+          // a department are counted here, by question and document.
+          (j.flagged || []).forEach((f) => { if (f.question && j.document) bump(tally.engineFlagged, `${f.question} (${j.document})`); });
         }
       });
       const topN = (map, n = 8) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
@@ -2442,6 +2453,7 @@ export default async function handler(req, res) {
         topInspectedEquipment: topN(tally.inspectedEquipment),
         topMonthlyFailures: topN(tally.monthlyFailures),
         topPortalFlagged: topN(tally.portalFlagged),
+        topEngineFlagged: topN(tally.engineFlagged),
       });
     }
 

@@ -45,8 +45,38 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
       console.error('claim_held_notices failed:', error.code, error.message);
       return { ...out, error: true };
     }
-    const rows = Array.isArray(claimed) ? claimed : [];
-    out.claimed = rows.length;
+    const allRows = Array.isArray(claimed) ? claimed : [];
+    out.claimed = allRows.length;
+    if (allRows.length === 0) return out;
+
+    // Unified-engine documents (engine_<definitionId>) are switched on by
+    // company_documents and muted by the Owner there, not by the Owner's
+    // document_notifications row. Look them up on their own. If that lookup
+    // fails, hand those counts back and carry on with everything else.
+    const engineKey = /^engine_([0-9]+)$/;
+    const engineRows = allRows.filter((r) => engineKey.test(r.document_key));
+    const engineOn = new Set();
+    const engineTitle = new Map();
+    let rows = allRows.filter((r) => !engineKey.test(r.document_key));
+    if (engineRows.length > 0) {
+      const defIds = [...new Set(engineRows.map((r) => Number(engineKey.exec(r.document_key)[1])))];
+      const engineCompanies = [...new Set(engineRows.map((r) => Number(r.company_id)))];
+      const [settingRows, defRows] = await Promise.all([
+        supabase.from('company_documents').select('company_id, definition_id, is_enabled, owner_muted')
+          .in('company_id', engineCompanies).in('definition_id', defIds).limit(5000),
+        supabase.from('document_definitions').select('id, title').in('id', defIds),
+      ]);
+      if (settingRows.error || defRows.error) {
+        console.error('notification digest engine lookups failed');
+        for (const r of engineRows) await refundSlot(supabase, Number(r.company_id), r.document_key, Number(r.roster_id), { held: Number(r.held) });
+        out.failed += engineRows.length;
+      } else {
+        (settingRows.data || []).filter((d) => d.is_enabled === true && d.owner_muted !== true)
+          .forEach((d) => engineOn.add(`${d.company_id}:engine_${d.definition_id}`));
+        (defRows.data || []).forEach((d) => engineTitle.set(`engine_${d.id}`, cleanLabel(d.title)));
+        rows = allRows;
+      }
+    }
     if (rows.length === 0) return out;
 
     const companyIds = [...new Set(rows.map((r) => Number(r.company_id)))];
@@ -68,6 +98,7 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
     }
 
     const on = new Set((settings.data || []).filter((s) => s.enabled === true).map((s) => `${s.company_id}:${s.document_key}`));
+    engineOn.forEach((k) => on.add(k));
     const suspended = new Set((companies.data || []).filter((c) => c.suspended === true).map((c) => Number(c.id)));
     // hadEmail is read BEFORE decrypting: an address that is stored but decrypts
     // to nothing is a key problem, which must not be mistaken for "no address".
@@ -82,6 +113,7 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
     const settingActive = new Map((docSettings.data || []).map((d) => [`${d.company_id}:${d.document_key}`, d.is_active === true]));
     const formTitle = new Map();
     const stillOffered = (company, key) => {
+      if (engineKey.test(key)) return true; // already judged through engineOn
       const m = /^custom_([0-9]+)$/.exec(key);
       if (!m) return settingActive.get(`${company}:${key}`) === true;
       const form = (forms.data || []).find((f) => Number(f.company_id) === company && Number(f.id) === Number(m[1]));
@@ -107,7 +139,7 @@ export async function runDigest(supabase, { sendEmail, windowSeconds = COOLDOWN_
         out.dropped += 1;
         return;
       }
-      const label = DOCUMENT_LABELS[row.document_key] || formTitle.get(`${company}:${row.document_key}`) || 'Custom document';
+      const label = DOCUMENT_LABELS[row.document_key] || formTitle.get(`${company}:${row.document_key}`) || engineTitle.get(row.document_key) || 'Custom document';
       const n = held >= 999 ? '999+' : String(held);
       try {
         await sendEmail({

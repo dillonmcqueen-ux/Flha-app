@@ -128,6 +128,15 @@ function summarizeSignalsForPrompt(signals) {
   // portal_escalation is aggregated, not one line per row, so a repeat issue
   // reads as a count rather than the same line many times.
   lines.push(...escalationLines(capped.filter((s) => s.source_type === 'portal_escalation')));
+  // A unified-engine document: its option answers, one line each. Only
+  // option-based answers and flagged question labels are ever in the signal.
+  capped.filter((s) => s.source_type === 'engine_document').forEach((s) => {
+    const j = s.signal_json || {};
+    if (!j.document) return;
+    const parts = (j.answers || []).map((a) => `${a.question}: ${a.answer}`);
+    (j.flagged || []).forEach((f) => parts.push(`flagged "${f.question}" (to ${f.department})`));
+    if (parts.length) lines.push(`- ${j.document}: ${parts.join('; ')}`);
+  });
   return lines.slice(0, MAX_SIGNALS_PER_COMPANY_IN_PROMPT).join('\n').slice(0, 6000);
 }
 
