@@ -677,3 +677,16 @@ test('a record that keeps failing is tried five times and then left alone', asyn
   assert.equal(db.tables.document_records[0].meta.followups_failed, false);
   assert.equal(db.tables.document_records[0].meta.followups_attempts, 5);
 });
+
+test('a retry is dropped for a document that was switched off after it was filed', async () => {
+  const db = seed();
+  const id = await doc(db, { rules: [ROUTE] });
+  db.failOn('document_escalations', 'insert');
+  await file(db, id, worker, { answers: { task: 'x', injury: 'yes' } });
+  db.clearFailures();
+  db.tables.document_records[0].created_at = new Date(Date.now() - 3600 * 1000).toISOString();
+  await setCompanyDocument(db, { companyId: 1, definitionId: id, isEnabled: false });
+  await retryFailedFollowUps(db, {});
+  assert.equal(db.tables.document_escalations.length, 0);
+  assert.equal(db.tables.document_records[0].meta.followups_failed, false);
+});

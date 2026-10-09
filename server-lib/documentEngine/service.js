@@ -496,7 +496,11 @@ const MAX_FOLLOWUP_ATTEMPTS = 5;
  */
 export async function runFollowUpsAgain(db, deps, record) {
   const ctx = await loadFollowUpContext(db, record);
-  if (!ctx.definition) return { failed: false };
+  // A document switched off since it was filed is not announced late: the retry is dropped.
+  if (!ctx.definition || !ctx.setting.is_enabled) {
+    await db.from('document_records').update({ meta: { ...(record.meta || {}), followups_failed: false } }).eq('id', record.id).eq('company_id', Number(record.company_id));
+    return { failed: false };
+  }
   return afterRecordCounts(db, deps, { definition: ctx.definition, setting: ctx.setting, rules: ctx.rules, record, answerRows: ctx.answerRows });
 }
 
