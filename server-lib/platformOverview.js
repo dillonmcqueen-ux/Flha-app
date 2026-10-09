@@ -38,6 +38,7 @@ export const DOC_TYPES = [
   { type: 'certifications', label: 'Certification', docKey: 'certifications' },
   { type: 'custom', label: 'Custom Document', docKey: null },
   { type: 'portal', label: 'Company Portal', docKey: null },
+  { type: 'engine', label: 'Company Document (engine)', docKey: null },
 ];
 
 // Doc keys that gate a module but have no filing of their own to count, so
@@ -253,6 +254,22 @@ export async function loadPlatformOverview(supabaseAdmin, now = new Date(), { ro
     const companyOf = new Map(parents.map((p) => [p.id, p.company_id]));
     const rows = keep(await fetchAll(() => supabaseAdmin.from(table).select(`${fk}, created_at`).order('created_at', { ascending: false }), rowCap));
     docs[type] = rows.map((r) => ({ company_id: companyOf.get(r[fk]) ?? null, created_at: r.created_at }));
+  }
+
+  // Documents filed through the unified engine. The FLHA template counts as an
+  // FLHA, so a company that moved to it keeps its FLHA numbers; every other
+  // engine document is one "engine" type, like custom documents.
+  docs.engine = [];
+  try {
+    const defs = keep(await fetchAll(() => supabaseAdmin.from('document_definitions').select('id, key').order('id'), rowCap));
+    const keyOf = new Map(defs.map((d) => [d.id, d.key]));
+    const recs = keep(await fetchAll(() => supabaseAdmin.from('document_records').select('company_id, definition_id, created_at').order('created_at', { ascending: false }), rowCap));
+    for (const r of recs) {
+      const row = { company_id: r.company_id, created_at: r.created_at };
+      if (keyOf.get(r.definition_id) === 'flha') docs.flha.push(row); else docs.engine.push(row);
+    }
+  } catch (e) {
+    console.error('engine documents read failed:', e.message);
   }
 
   // Platform health reads the last 30 days of platform_events. A failure here

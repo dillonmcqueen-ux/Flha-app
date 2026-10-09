@@ -219,3 +219,118 @@ test('an edit signal is kept only for a document with an AI hazard field', async
   const plain = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s2.png', answers: lowAnswers, aiEditSignal: sig, deps });
   assert.equal(plain.record.meta && plain.record.meta.ai_edit_signal, undefined);
 });
+
+import { listAuthoredEngineDocuments } from '../../server-lib/documentEngine/authoredRecords.js';
+
+test('a person\'s own list and a member profile include their engine documents, under the company and author, with a signed link only inside the company folder', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  const mine = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', pdfReceipt: 'rcpt:1/mine.pdf', answers: lowAnswers, deps });
+  // Same company, other author; and a record in another company with the same author id.
+  await submitRecord(db, { session: { ...worker, userId: 12, name: 'Cora Crew' }, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s2.png', answers: lowAnswers, deps });
+  (db.tables.document_records).push({ ...mine.record, id: 9999, company_id: 2, pdf_path: '2/other.pdf' });
+  const signed = [];
+  const supabaseAdmin = Object.assign(db, { storage: { from: (bucket) => ({ createSignedUrls: async (paths) => { signed.push(...paths); return { data: paths.map((p) => ({ path: p, signedUrl: `https://signed/${p}` })), error: null }; } }) } });
+  const rows = await listAuthoredEngineDocuments(supabaseAdmin, worker, { companyId: 1, authorId: 11 });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].type, 'engine');
+  assert.equal(rows[0].title, 'FLHA');
+  assert.equal(rows[0].pdf_url, 'https://signed/1/mine.pdf');
+  assert.deepEqual(signed, ['1/mine.pdf']);
+  // Another company asking for the same author id sees nothing of company 1.
+  assert.deepEqual((await listAuthoredEngineDocuments(supabaseAdmin, { ...worker, companyId: 3 }, { companyId: 3, authorId: 11 })), []);
+  // No author, no list.
+  assert.deepEqual(await listAuthoredEngineDocuments(supabaseAdmin, worker, { companyId: 1, authorId: null }), []);
+});
+
+import { amendRecord, myInbox } from '../../server-lib/documentEngine/service.js';
+
+const extremeAnswers = { ...lowAnswers, hazards: [{ task: 'Trenching', hazard: 'Cave-in', control: 'Trench box', sopRef: null, risk: 'Extreme' }] };
+
+test('the author can amend an FLHA the day it was filed; review starts over and only a record newly sent to review tells anyone', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  const filed = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', answers: lowAnswers, deps });
+  assert.equal(filed.record.status, 'submitted');
+  // It shows in the author's inbox as changeable, and does not count as waiting.
+  const inbox = await myInbox(db, { session: worker, companyId: 1 });
+  assert.equal(inbox.amendable.length, 1);
+  assert.equal(inbox.counts.mine, 0);
+  // Someone else cannot amend it.
+  await assert.rejects(amendRecord(db, { session: { ...worker, userId: 12 }, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /Only the person who filed/);
+  // Amended to Extreme: goes to review, round moves on.
+  const out = await amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: extremeAnswers, deps });
+  assert.equal(out.status, 'pending_approval');
+  const row = db.tables.document_records.find((r) => r.id === filed.record.id);
+  assert.equal(row.status, 'pending_approval');
+  assert.equal(row.review_round, (filed.record.review_round || 0) + 1);
+  const saved = db.tables.document_answers.filter((a) => a.record_id === filed.record.id && a.field_key === 'hazards');
+  assert.equal(saved.length, 1);
+  assert.equal(JSON.stringify(saved[0].value_json).includes('Extreme'), true);
+  // Approved, then amended back down: approval no longer counts, record is plain submitted.
+  await reviewRecord(db, { session: supervisor, companyId: 1, recordId: filed.record.id, decision: 'approve', deps });
+  assert.equal(db.tables.document_records.find((r) => r.id === filed.record.id).status, 'approved');
+  const down = await amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps });
+  assert.equal(down.status, 'submitted');
+});
+
+test('an FLHA is not amendable the next day, after it closed unsigned, or when the document does not allow it', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  const filed = await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', answers: lowAnswers, deps });
+  const row = () => db.tables.document_records.find((r) => r.id === filed.record.id);
+  row().created_at = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+  await assert.rejects(amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /no longer open/);
+  assert.equal((await myInbox(db, { session: worker, companyId: 1 })).amendable.length, 0);
+  row().created_at = new Date().toISOString();
+  row().unsigned_closed_at = new Date().toISOString();
+  await assert.rejects(amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /closed unsigned/);
+  row().unsigned_closed_at = null;
+  for (const r of db.tables.document_rules) if (r.rule_type === 'amend_same_day') r.rule_type = 'notify';
+  await assert.rejects(amendRecord(db, { session: worker, companyId: 1, recordId: filed.record.id, answers: lowAnswers, deps }), /cannot be amended/);
+});
+
+import { amendEngineDocument, signatureInputsFor } from '../../src/documentEngine/engineSubmit.js';
+
+test('amending redraws the PDF with the Amended note and without approvals from an earlier round', async () => {
+  const sigs = [
+    { id: 1, kind: 'worker', signer_name: 'Wes', signed_at: '2026-10-09T10:00:00Z' },
+    { id: 2, kind: 'approval', signer_name: 'Sue', meta: { round: 0 }, signed_at: '2026-10-09T11:00:00Z' },
+    { id: 3, kind: 'approval', signer_name: 'Bo', meta: { round: 1 }, signed_at: '2026-10-09T12:00:00Z' },
+  ];
+  const links = { signatures: { 1: 'https://s/1.png', 2: 'https://s/2.png', 3: 'https://s/3.png' } };
+  const inputs = await signatureInputsFor(sigs, links, async () => 'data:x', 1);
+  assert.deepEqual(inputs.map((s) => s.signer_name), ['Wes', 'Bo']);
+
+  const posted = [];
+  const fetchFn = async (url, init) => { const b = JSON.parse(init.body); posted.push(b); return { ok: true, json: async () => (b.action === 'get_record_links' ? links : { status: 'submitted' }) }; };
+  let drawn;
+  const deps = { upload: async () => 'rcpt-pdf', render: async (input) => { drawn = input; return new Blob(['x']); }, fetchImage: async () => 'data:x', fetchFn, logo: null };
+  const payload = { companyId: 1, title: 'FLHA', layout: {}, fields: [{ field_key: 'task_summary', label: 'Task', field_type: 'long_text' }], answers: { task_summary: 'Trench' }, notes: {}, submittedBy: 'Wes', dateText: 'd', dateTimeText: 'dt' };
+  const out = await amendEngineDocument(payload, 7, { review_round: 1 }, sigs, 't', deps);
+  assert.equal(out.status, 'submitted');
+  assert.match(drawn.record.amendedNote, /^Amended /);
+  assert.deepEqual(drawn.signatures.map((s) => s.signer_name), ['Wes', 'Bo']);
+  const amend = posted.find((b) => b.action === 'amend');
+  assert.equal(amend.recordId, 7);
+  assert.equal(amend.pdfReceipt, 'rcpt-pdf');
+});
+
+import { listEngineFlhaRows } from '../../server-lib/documentEngine/service.js';
+
+test('the Dashboard gets this company\'s engine FLHAs shaped like FLHA rows, for a supervisor only, never another company\'s', async () => {
+  const db = seedDb();
+  const id = await companyFlha(db);
+  await submitRecord(db, { session: worker, companyId: 1, definitionId: id, siteId: 5, signature: 'rcpt:1/s.png', pdfReceipt: 'rcpt:1/a.pdf', answers: extremeAnswers, deps });
+  const sign = async (targets) => new Map(targets.map((t) => [t.id, `https://signed/${t.path}`]));
+  const { flhas } = await listEngineFlhaRows(db, { session: supervisor, companyId: 1, sign });
+  assert.equal(flhas.length, 1);
+  assert.equal(flhas[0].source, 'engine');
+  assert.equal(flhas[0].worker_name, 'Wes Worker');
+  assert.equal(flhas[0].job_site, 'North Yard');
+  assert.equal(flhas[0].status, 'pending_approval');
+  assert.equal(flhas[0].hazards_json.hazards[0].risk, 'Extreme');
+  assert.equal(flhas[0].pdf_url, 'https://signed/1/a.pdf');
+  await assert.rejects(listEngineFlhaRows(db, { session: worker, companyId: 1, sign }), /Not allowed/);
+  assert.deepEqual((await listEngineFlhaRows(db, { session: { ...supervisor, companyId: 2 }, companyId: 2, sign })).flhas, []);
+});

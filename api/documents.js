@@ -36,6 +36,8 @@ import {
   listWorkerDocuments,
   submitRecord,
   resubmitRecord,
+  amendRecord,
+  listEngineFlhaRows,
   signNow,
   getRecord,
   getRecordLinks,
@@ -212,6 +214,10 @@ export default async function handler(req, res) {
       });
       return res.status(200).json({ ok: true, id: out.record.id, status: out.record.status, duplicate: out.duplicate });
     }
+    if (action === 'amend') {
+      const out = await amendRecord(db, { session, companyId, recordId: body.recordId, answers: body.answers, notes: body.notes, pdfReceipt: body.pdfReceipt, deps });
+      return res.status(200).json(out);
+    }
     if (action === 'resubmit') {
       const out = await resubmitRecord(db, { session, companyId, recordId: body.recordId, answers: body.answers, notes: body.notes, pdfReceipt: body.pdfReceipt, deps });
       return res.status(200).json({ ok: true, ...out });
@@ -235,6 +241,9 @@ export default async function handler(req, res) {
     }
     if (action === 'list_records') {
       return res.status(200).json(await listRecords(db, { session, companyId, definitionId: body.definitionId, status: body.status, limit: body.limit }));
+    }
+    if (action === 'list_flha_rows') {
+      return res.status(200).json(await listEngineFlhaRows(db, { session, companyId, sign: (targets) => signTargets(supabaseAdmin, targets) }));
     }
     if (action === 'get_record') {
       return res.status(200).json(await getRecord(db, { session, companyId, recordId: body.recordId }));

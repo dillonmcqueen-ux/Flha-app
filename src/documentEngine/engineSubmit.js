@@ -130,9 +130,9 @@ async function drawPdf(payload, signature, deps) {
   const render = deps.render || defaultRender;
   return render({
     layout: payload.layout, document: { title: payload.title }, company: { name: payload.companyName, logoDataUrl: payload.companyLogo || undefined },
-    record: { site: payload.siteName, author: payload.submittedBy, dateText: payload.dateText, dateTimeText: payload.dateTimeText, status: payload.status || 'submitted', awaitingSignature: false },
+    record: { site: payload.siteName, author: payload.submittedBy, dateText: payload.dateText, dateTimeText: payload.dateTimeText, status: payload.status || 'submitted', awaitingSignature: false, amendedNote: payload.amendedNote || null },
     fields: payload.fields, answers: payload.answers,
-    signatures: signature ? [{ kind: 'worker', signer_name: payload.submittedBy, signature, signedAtText: payload.dateTimeText }] : [],
+    signatures: payload.signatureInputs ? payload.signatureInputs : (signature ? [{ kind: 'worker', signer_name: payload.submittedBy, signature, signedAtText: payload.dateTimeText }] : []),
     assets: { foraLogoDataUrl: deps.logo !== undefined ? deps.logo : await foraLogoDataUrl() },
   });
 }
@@ -148,6 +148,47 @@ export async function resubmitEngineDocument(payload, recordId, token, deps = {}
   let pdfReceipt = null;
   try { pdfReceipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: await drawPdf(payload, payload.signature || null, deps) }); } catch (e) { /* the old PDF stays */ }
   return postDocuments({ action: 'resubmit', token, recordId, answers, notes: payload.notes || {}, pdfReceipt: pdfReceipt || undefined }, deps.fetchFn || fetch);
+}
+
+/**
+ * What the renderer draws for the signatures on a record. Approvals from an
+ * earlier review round are left out: they were given to content that has since
+ * changed. `links` is the get_record_links answer; `fetchImage` turns a signed
+ * URL into a data URL.
+ */
+export async function signatureInputsFor(signatures, links, fetchImage, reviewRound) {
+  const when = (t) => (t ? new Date(t).toLocaleString('en-CA') : '');
+  const out = [];
+  for (const g of signatures || []) {
+    const isApproval = g.kind === 'approval' || g.kind === 'reviewer';
+    if (isApproval && (Number(g.meta && g.meta.round) || 0) !== (Number(reviewRound) || 0)) continue;
+    const url = links && links.signatures && links.signatures[g.id];
+    out.push({ kind: isApproval ? 'approval' : g.kind, step_key: g.step_key, signer_name: g.signer_name, signature: url ? await fetchImage(url) : null, signedAtText: when(g.signed_at) });
+  }
+  return out;
+}
+
+/**
+ * The author amends a document they filed earlier today. The PDF is redrawn
+ * with the new answers, the signatures already on the record (no approvals
+ * from before the change) and an "Amended" note. Needs a connection.
+ */
+export async function amendEngineDocument(payload, recordId, record, signatures, token, deps = {}) {
+  const upload = deps.upload || defaultUpload;
+  const fetchImage = deps.fetchImage || defaultFetchImage;
+  const { values, uploads } = splitAnswers(payload.fields, payload.answers);
+  const answers = { ...values };
+  for (const u of uploads) {
+    try { const r = await upload({ token, kind: u.kind, filename: `${u.field_type}-${u.key}.${extForDataUrl(u.dataUrl)}`, blob: dataUrlToBlob(u.dataUrl) }); if (r) answers[u.key] = r; } catch (e) { /* keeps the earlier file */ }
+  }
+  let pdfReceipt = null;
+  try {
+    const links = await postDocuments({ action: 'get_record_links', token, companyId: payload.companyId, recordId }, deps.fetchFn || fetch).catch(() => ({ signatures: {} }));
+    const signatureInputs = await signatureInputsFor(signatures, links, fetchImage, record && record.review_round);
+    const now = new Date();
+    pdfReceipt = await upload({ token, kind: 'pdf', filename: 'document.pdf', blob: await drawPdf({ ...payload, signatureInputs, amendedNote: `Amended ${now.toLocaleString('en-CA')}`, status: 'submitted' }, null, deps) });
+  } catch (e) { /* the earlier PDF stays */ }
+  return postDocuments({ action: 'amend', token, companyId: payload.companyId, recordId, answers, notes: payload.notes || {}, pdfReceipt: pdfReceipt || undefined }, deps.fetchFn || fetch);
 }
 
 /** The author signs a document they saved unsigned. Needs a connection; it is not queued. */
@@ -200,14 +241,7 @@ export async function redrawRecordPdf(token, companyId, recordId, call, deps = {
       } catch (e) { return ''; }
     })();
     const when = (t) => (t ? new Date(t).toLocaleString('en-CA') : '');
-    const sigInputs = [];
-    for (const g of signatures) {
-      const url = links.signatures && links.signatures[g.id];
-      sigInputs.push({
-        kind: g.kind === 'reviewer' ? 'approval' : g.kind, step_key: g.step_key, signer_name: g.signer_name,
-        signature: url ? await fetchImage(url) : null, signedAtText: when(g.signed_at),
-      });
-    }
+    const sigInputs = await signatureInputsFor(signatures, links, fetchImage, record.review_round);
     const worker = signatures.find((g) => g.kind === 'worker');
     const { rowsToForm } = await import('./recordView.js');
     const render = deps.render || defaultRender;

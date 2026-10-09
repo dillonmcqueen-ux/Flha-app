@@ -14,8 +14,7 @@
 //     approve for their own crew
 //   - the PDF, laid out like today's
 //
-// Not carried here, tracked as the remaining parity items: amending a filed
-// FLHA, the flha_edit Brain signal and the 24 hour sign-afterwards alert wording.
+// Amending a filed FLHA on the day it was filed is the amend_same_day rule.
 
 import { createDefinition, saveDraft, publishDraft } from '../service.js';
 
@@ -46,6 +45,8 @@ export const FLHA_RULES = [
   },
   // Tell the people the scope rules place the record with (the FLHA's audience today).
   { ruleType: 'notify', config: {} },
+  // Today's FLHA can be amended by its author on the day it is filed.
+  { ruleType: 'amend_same_day', config: {} },
 ];
 
 // Box for box what src/generatePDF.js draws, in the order it draws it.
