@@ -17,6 +17,7 @@ import {
   MAX_LONG_TEXT,
   MAX_JSON_BYTES,
 } from './fieldTypes.js';
+import { validateLayout } from './layoutSchema.js';
 
 const KEY_RE = /^[a-z0-9_]{1,60}$/;
 const MAX_FIELDS = 200;
@@ -126,10 +127,9 @@ export function normalizeFields(rawFields) {
 }
 
 export function normalizeLayout(raw) {
-  if (raw == null) return { layout: {} };
-  if (typeof raw !== 'object' || Array.isArray(raw)) return { error: 'The layout is not valid.' };
-  if (JSON.stringify(raw).length > MAX_LAYOUT_BYTES) return { error: 'The layout is too large.' };
-  return { layout: raw };
+  // The shape of a layout (blocks, boxes, colors, bindings) is checked and
+  // cleaned by layoutSchema.js, which the browser renderer shares.
+  return validateLayout(raw);
 }
 
 export function normalizeRules(raw) {
