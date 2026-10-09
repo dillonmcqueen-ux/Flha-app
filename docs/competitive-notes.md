@@ -5,7 +5,10 @@ set, pricing, and market position change. Pull it up whenever a roadmap or
 pricing decision needs grounding in "how does this compare to the
 category," rather than re-deriving the comparison from scratch each time.
 
-Last reviewed: 2026-08-12.
+Last reviewed: 2026-10-09. The "FORA today" columns were re-checked against
+the code on that date (offline, certifications, conditional logic,
+integrations, PDF generators). Competitor-side claims are from the
+earlier review and were not re-verified.
 
 **Positioning today**: FORA is not trying to win at the enterprise tier yet.
 The advantage right now is being one person who can move fast and tailor the
@@ -34,12 +37,12 @@ pricing change — it will go stale.
 | # | Strength | FORA today |
 |---|---|---|
 | 1 | Digital forms replace paper — huge time savings, e-signatures | **Have it** — signature capture across every worker form, `src/CustomFormBuilder.jsx` for company-defined forms |
-| 2 | Offline-capable mobile app for jobsites with poor signal | **Gap** — no offline handling exists at all right now; see `docs/scope-offline-capability.md` |
+| 2 | Offline-capable mobile app for jobsites with poor signal | **Built, not field-tested** - all 5 phases of `docs/scope-offline-capability.md` are marked built: IndexedDB submission queue (`src/offlineQueue.js`), photo store for Incident, service worker (`public/sw.js`). Still a responsive web app, not a native app. Needs a real low-signal crew test before it is claimed as an advantage |
 | 3 | Centralized document repository (SOPs, certs, training records) | **Have it** — SOP management + 8 document types + custom docs, all company-scoped |
-| 4 | Automated cert/license expiry alerts | **Gap** — not built; no expiry-tracking table or cron exists yet |
+| 4 | Automated cert/license expiry alerts | **Partial** - expiry tracking exists: worker certifications with expired / expiring-soon (30 day) status (`api/certifications.js`, `src/WorkerCertifications.jsx`) and equipment compliance dates (`server-lib/compliance.js`). No push alert found: no cron or email for expiring certs (`vercel.json` crons are equipment reports, Brain summary, portal reports and notification digest only). Supervisors see it only when they open the dashboard |
 | 5 | Real-time visibility for admins/supervisors | **Have it** — Supervisor Dashboard reviews every submission type live |
 | 6 | Custom, flexible form builder | **Have it** — `src/CustomFormBuilder.jsx` |
-| 7 | Audit trail / compliance reporting for regulators | **Have it** — PDF generation per document type (11 generators), full submission history |
+| 7 | Audit trail / compliance reporting for regulators | **Have it** — PDF generation per document type (13 `src/generate*PDF.js` files), full submission history. Outside auditors also get read-only, time-limited access to chosen documents (`src/AuditorView.jsx`, `api/audit.js`; check that its migration is applied live before selling it) |
 | 8 | Photo attachments on inspections/incidents | **Have it** — signed-upload flow in `src/uploadViaSignedUrl.js` |
 | 9 | Reduces liability exposure via documented compliance history | **Have it**, same mechanism as #7 |
 | 10 | Trend/analytics dashboards | **Have it, tiered** — `src/Analytics.jsx`, Basic vs. Advanced |
@@ -50,13 +53,13 @@ pricing change — it will go stale.
 |---|---|---|
 | 1 | Pricing scales badly per-seat, expensive at any real headcount | **Already better** — flat Basic/Advanced tiers, no demo-call sales gate (`website/pricing.html`: "no demo calls, no sales team, just one email") |
 | 2 | Steep learning curve for less tech-savvy field workers | Untested at scale — worth field-checking with a real crew, not assumed |
-| 3 | Offline sync unreliable, data loss on spotty signal | **Currently worse, not better** — zero offline handling exists; this is the single highest-leverage gap to close (see scope doc) |
+| 3 | Offline sync unreliable, data loss on spotty signal | **Unproven.** The queue, photo store and service worker are built, so FORA is no longer behind by default, but there is no field evidence it syncs reliably. Test on a real crew before claiming it is better |
 | 4 | Dated, clunky UI | Subjective — worth revisiting once `design-token-builder`/`accessibility-builder` agent work matures |
-| 5 | Rigid form builders, can't handle conditional logic | Current `CustomFormBuilder.jsx` also has no conditional/branching logic — parity gap, not an advantage, yet |
+| 5 | Rigid form builders, can't handle conditional logic | **Partial.** The newer Document Engine builder supports show conditions (`showIf` in `src/documentEngine/builderModel.js`). The older `CustomFormBuilder.jsx` still has none. Parity at best until the engine replaces the old builder |
 | 6 | Slow, ticket-based support | **Structural advantage** — one person directly reachable, no support-ticket queue, by construction |
 | 7 | Aggressive sales tactics, hard-to-cancel contracts | **Already avoided** — direct email-based onboarding, no sales team to be aggressive |
 | 8 | Mobile app performance issues on older field devices | Untested — no dedicated mobile app; FORA is a responsive web app, worth checking on low-end Android in the field |
-| 9 | Weak integrations with payroll/HR/ERP | **Parity gap, not an advantage** — FORA has no outbound integrations either (only inbound Stripe billing webhook) |
+| 9 | Weak integrations with payroll/HR/ERP | **Parity gap, not an advantage.** Re-checked 2026-10-09: still no outbound integrations found in `api/` (Stripe billing is inbound only). Email notifications and PDF export are the only ways data leaves |
 | 10 | Reporting/export limited without paying more | Partial gap — no dashboard-level PDF export yet (open `TODO.md` item), per-document PDFs are unrestricted by tier |
 
 ## Five key differences FORA is betting on
@@ -94,14 +97,37 @@ messaging around — not a feature checklist, a strategic bet.
    stays simple because the target customer stays simple.
 
 5. **Fixing the category's best-known failure modes by design, not by
-   retrofit.** Offline reliability (category pain point #3) and cert/expiry
-   alerts (category strength #4, currently a FORA gap) are both still
-   open — see `docs/scope-offline-capability.md` for the first one — but the
-   plan is to build them right the first time, informed by what already
-   goes wrong in the incumbents, rather than shipping something and
-   patching sync bugs for three years the way the established players have.
-   This is a bet on sequencing, not a claim of a finished advantage yet —
-   update this doc once offline ships and it becomes real.
+   retrofit.** Offline reliability (category pain point #3) is now built
+   (`docs/scope-offline-capability.md`, all 5 phases) but unproven in the
+   field. Certification expiry is tracked and flagged on the dashboard, but
+   proactive expiry alerts are still not built (category strength #4). The
+   bet is still on sequencing, not a finished advantage: turn offline into a
+   real advantage by testing it on a crew, and close the alert gap.
+
+## Added since the August review
+
+Things the August version of this doc did not list, from
+`docs/feature-interaction-map.md` section 1. Several live on unmerged
+branches or need a migration applied, so confirm each is in production
+before using it in a sales conversation.
+
+- Equipment hub: fleet overview, preventative maintenance, fuel logs,
+  compliance, weekly hours and reports. This is the depth SiteDocs does not
+  match (see `docs/marketing/competitive-analysis.md` for the MaintainX
+  comparison).
+- Company Brain: signals from 7 document types feed an AI summary.
+- Corrective actions across document types.
+- Document assignments, crew lead role, sign-afterwards, notification routing.
+- Unified Document Engine (custom documents with conditions).
+- Company Portal (department documents, escalation, schedules).
+
+## Category label
+
+FORA is a field operations platform for small and mid-size contractors, not
+a construction business operating system. It has no estimating, scheduling,
+project accounting, payroll or invoicing. Use "all-in-one field management"
+(the current site wording) and avoid "business OS", which invites comparison
+with Procore and Buildertrend.
 
 ## How to keep this useful
 
