@@ -54,6 +54,8 @@ tool rather than reviewing it inline.
 | A new file under `api/`, `vercel.json`, `api/cron-equipment-reports.js`, or `api/stripe-webhook.js` | `vercel-function-budget-guardian` | `api/` is on Vercel's Pro-plan serverless function cap (far higher than the old Hobby-plan 12, but not infinite — see `.claude/agents/vercel-function-budget-guardian.md`). |
 | `website/pricing.html`, `terms.html`, `index.html`, or `custom-builds.html` when pricing, plans, or Stripe links are involved | `pricing-legal-consistency-reviewer` | This exact drift (displayed price ↔ actual Stripe amount ↔ fee disclosure ↔ Terms language) took 5 separate follow-up PRs to fully resolve once (PRs #2–#6) — see `.claude/agents/pricing-legal-consistency-reviewer.md`. |
 | Any wording change to `website/*.html` | `admin-access-copy-guard` | Customers only ever have a worker or supervisor login — there is no customer "admin" role, and the Admin Panel (`AdminPanel.jsx`) is founder-only, gated by a single global `ADMIN_CODE`. The site previously claimed clients could access "the Admin Panel" and self-serve the Brain profile; both were false. This checklist exists so that mistake can never silently reappear — see `.claude/agents/admin-access-copy-guard.md`. **Always run this one, even when another row above also matches the same diff.** |
+| Any wording change to `website/*.html` | `product-boundary-guard` | FORA is sold as two standalone products, the FORA Field Management Platform (self-serve, published pricing, Stripe checkout) and the FORA Field Portal (done for you, quoted by email). The site was split because one blended pitch confused buyers. This checklist keeps the Portal from being described as self-serve, the Platform from being described as quoted, retired names (Company Portal, Documentation portal, Custom Builds) from coming back, and "portal" from being used for the app login. See `.claude/agents/product-boundary-guard.md`. **Run it together with `admin-access-copy-guard` on every website copy change.** |
+| Any customer-facing draft: website copy, social posts, ads, emails, decks, proposals, PDFs | `brand-voice-reviewer` | Checks the draft against `brand.md` and the off-limits list in `about-me.md`: the em dash character, the cringe list, generic SaaS filler, reassuring language, and personal details (phone number, family, home address, current employer) that must never appear publicly. See `.claude/agents/brand-voice-reviewer.md`. |
 | Substantive text changes to `website/privacy.html` or `website/terms.html` | `legal-revision-date-updater` | The "Last updated" date on both pages was set once at creation (July 28, 2026) and then silently went stale through three later commits that changed real legal text without bumping it. Unlike the other rows, this agent edits — it bumps the "Last updated" date on whichever of the two files actually changed (never "Effective date", never the legal wording itself). `src/Onboarding.jsx`/`src/Login.jsx` link straight to the live pages rather than embedding a copy, so there's nothing else to update — see `.claude/agents/legal-revision-date-updater.md`. |
 | A new feature, table, document key, pricing module, or any column that joins two features (`equipment_id`, `site_id`/`site`/`job_site`, `roster_id`, `reading_unit`, `source_type`, `answer_id`, `document_key`) | `interaction-map-keeper` | FORA is sold as products that feed each other, and a missing link between them fails *silently* — no error, no failing test, the customer just never gets what they paid for. This agent owns `docs/feature-interaction-map.md` and checks that a change is actually reachable from the features it should connect to. It edits only the map, never application code — see `.claude/agents/interaction-map-keeper.md`. |
 
@@ -318,6 +320,20 @@ finished report gets committed (just the report file, not the researcher's
 scratch findings file) via the same branch → commit → push → draft-PR
 pattern as everywhere else in this repo, rather than left untracked. See
 `docs/marketing/reports/`.
+
+## Social posts and direct outreach
+
+Paid ads are $0 until there is profit, so the two cheapest channels are free
+social posts and Dillon going straight to businesses. Two agents support
+that. Neither one publishes or sends anything; Dillon does that himself.
+
+| Agent | Job |
+|---|---|
+| `social-content-writer` | Writes a week of drafts for the FORA Field Solutions Facebook page (parent brand and Platform, 3 posts a week), the FORA Field Portal Facebook page (1 to 2 a week) and Dillon's personal LinkedIn (1 to 2 a week). Saves them under `docs/marketing/social/`. |
+| `outreach-prospector` | Builds about 10 target businesses a week from public business information into Dillon's Google Sheet, picks the Platform or Portal door for each, and creates Gmail **drafts** only. It has no send tool. Cold email in Canada is covered by the anti-spam law, so until a lawyer has confirmed the rules the agent leans on walk in and phone first contact and puts a reminder banner on every email draft. |
+
+Run `brand-voice-reviewer` over anything either agent produces before Dillon
+uses it.
 
 ## Prospect pitch decks
 
