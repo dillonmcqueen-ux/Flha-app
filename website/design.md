@@ -9,7 +9,7 @@ modern-minimal (B2B SaaS / dev-tool school — Stripe/Linear/Vercel nav and
 component voice), applied to FORA's existing dark, industrial-adjacent brand.
 
 ## Macrostructure family
-- Marketing pages (index, features, custom-builds, pricing, about): shared
+- Marketing pages (index, features, portal, pricing, about, security): shared
   hero → section-rhythm shell, each page varies its own section content but
   keeps the same nav/footer/type/color system. The five-page structure
   replaced the earlier seven-page one — `what-is-fora.html`, `big-five.html`
@@ -86,7 +86,8 @@ hard-right. Frost-on-scroll behavior (existing `.solid` class via JS)
 preserved.
 
 The cluster carries four categories, each with a dropdown of sub-items:
-Platform, Custom Builds, Pricing, Company. The top-level item is itself a
+Platform, Portal, Security, Company (Pricing sits inside the Platform
+dropdown). The top-level item is itself a
 link to that page, so the dropdown is additive rather than a gate. "Get
 started" is the hard-right CTA. This replaced a flat two-link cluster,
 because the sections people actually wanted (the Brain, the market
@@ -103,7 +104,8 @@ Mechanics:
 - Sub-items anchor to real section ids. Every marketing section that the nav
   points at carries one (`#demo`, `#documents`, `#dashboard`, `#brain`,
   `#platform`, `#security`, `#examples`, `#tailored`, `#process`, `#cost`,
-  `#plans`, `#build`, `#no-enterprise`, `#cancel`, `#market`,
+  `#plans`, `#build`, `#no-enterprise`, `#cancel`, `#market`, `#paper`, `#how`,
+`#send`, `#quote`,
   `#getting-started`, `#story`, `#tradeoffs`). Keep the id when moving a
   section; the nav is the only thing pointing at it.
 
@@ -133,9 +135,13 @@ colors, no new type families):
 - `.cart` / `.mod` / `.cart-total` — the build-your-own plan calculator on
   `pricing.html` (vanilla JS, no dependency; the only stateful UI on the site)
 - `.statement` — the large pull-quote block (anti-enterprise statement)
-- `.ideas` / `.idea` — the Custom Builds niche-example cards
+- `.ideas` / `.idea` — the old niche-example cards. No page uses them since Custom Builds left the site; safe to delete
 - `.bio-hero` — the About page portrait + body layout
 - `.navitem` / `.dropdown` / `.navtoggle` / `.mobilenav` — the category nav
+- `.hub-card` / `.hub-actions` / `.hub-help` — the two-product cards on the
+  home page. A card here is a div with its own buttons, because a link cannot
+  contain links. Built on `.teaser-card`.
+- `.foot-parent` — the parent-company line in every marketing footer
 
 ## Per-page allowances
 - Marketing pages MAY use the existing CSS-only enrichment (grain texture,

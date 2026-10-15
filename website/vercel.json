@@ -1,0 +1,6 @@
+{
+  "redirects": [
+    { "source": "/custom-builds", "destination": "/portal.html", "permanent": false },
+    { "source": "/custom-builds.html", "destination": "/portal.html", "permanent": false }
+  ]
+}
