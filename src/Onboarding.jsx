@@ -600,10 +600,6 @@ export default function Onboarding() {
               <div style={styles.fileList}>{files.map((f) => f.name).join(", ")}</div>
             )}
 
-            <div style={styles.label}>Custom form or custom build request</div>
-            <div style={styles.hint}>Optional — describe anything beyond the standard five you'd like built.</div>
-            <textarea style={styles.textarea} value={form.customRequest} onChange={set("customRequest")} placeholder="e.g. a monthly fuel log, or a preventative maintenance tracker for our fleet" />
-            <div style={{ marginBottom: 6 }} />
           </div>
 
           <div style={{ ...styles.section, paddingBottom: 22 }}>
