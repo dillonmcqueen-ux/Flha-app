@@ -570,8 +570,11 @@ re-check items flagged at that time are now answered:
 - **`document_key`-style gating:** still not applied. Company Portal is
   still absent from `server-lib/pricing.js`'s `MODULES` (confirmed:
   `grep -n "portal" server-lib/pricing.js` → no hits), and the new
-  `src/Dashboard.jsx` Portal tab is gated on the same `roster_enabled`
-  boolean the Roster tab uses (`Dashboard.jsx`'s `TAB_VISIBLE.portal`), not
+  `src/Dashboard.jsx` Portal tab was gated on the same `roster_enabled`
+  boolean the Roster tab uses (`Dashboard.jsx`'s `TAB_VISIBLE.portal`).
+  **Update 2026-10-16:** it is now `portalTabVisible(company)`
+  (`src/Dashboard.jsx:3209`) = `roster_enabled && portal_enabled`
+  (`server-lib/portalEnabled.js:45-47`); see the changelog row. Still not
   on a doc key or a `MODULES` entry. This is the same open flag carried
   from the phase-1 and phase-2 entries, not a new break — filed once, not
   refiled with each phase that touches it.
@@ -924,7 +927,10 @@ not assumed), and updated by the phase-3 pass below:**
   vs. a real module. Flagged already at the phase-1 entry above; **still
   true as of phase 3** — the new `src/Dashboard.jsx` Portal tab is gated on
   `roster_enabled`, not a doc key or a `MODULES` entry (see the
-  `roster.departments` section above) — not refiled as a new break, since
+  `roster.departments` section above). **Update 2026-10-16:** the tab now
+  also needs `portal_enabled` (at least one `portal_documents` row,
+  `server-lib/portalEnabled.js:26-39`, `src/Dashboard.jsx:3209`); still no
+  doc key or `MODULES` entry — not refiled as a new break, since
   it is the same open item, not a new one.
 
 **Break #32, filed at the phase-2 pass: CLOSED, PR #149 (branch
@@ -1070,8 +1076,13 @@ suspended` and only runs schedules for companies where `roster_enabled &&
 !suspended` (`api/cron-portal-reports.js:36-39`, applied at `:43`), and
 `runSchedule` returns `marked: false, reason: 'email_not_configured'` without
 `RESEND_API_KEY` (`server-lib/portalReports.js:128`). The gate is on
-`roster_enabled` because that is what the Portal UI tab rides, not a Portal
-doc key; still no `MODULES` entry.
+`roster_enabled` because that is what the Portal UI tab rode, not a Portal
+doc key; still no `MODULES` entry. **Update 2026-10-16:** the tab no longer
+rides `roster_enabled` alone (`src/Dashboard.jsx:3209`), but this cron was
+deliberately left on `roster_enabled && !suspended`
+(`api/cron-portal-reports.js:40-41`), so the cron can run for a company whose
+Portal tab is hidden. Harmless today: it only emails schedules that exist,
+and a schedule needs a Portal document.
 
 **Encryption spine this rides on** (earlier merged steps, recorded so the
 next pass doesn't re-derive it): `roster.email` is AES-256-GCM via
@@ -4855,8 +4866,11 @@ Do **not** flag these. They are decisions, not gaps.
   (`src/Dashboard.jsx:4278-4282`). Decided with #40, 2026-09-29.
 - **Company Portal is not in `server-lib/pricing.js`.** Known and unchanged
   (`grep -n "portal" server-lib/pricing.js` returns nothing, 2026-09-29). The
-  Portal tab rides `roster_enabled`; the department-report cron gates on it
-  too (`api/cron-portal-reports.js:36-39`).
+  Portal tab shows only for `roster_enabled && portal_enabled` (company has
+  at least one `portal_documents` row, active or not;
+  `src/Dashboard.jsx:3209`, `server-lib/portalEnabled.js:45-47`, changed
+  2026-10-16); the department-report cron still gates on `roster_enabled`
+  alone (`api/cron-portal-reports.js:40-41`), on purpose.
 
 - **Gatehouse is gone, not a non-connection.** Removed 2026-09-30 by
   Dillon's decision (it belongs in a separate project). Do not file its
@@ -5061,7 +5075,7 @@ Do **not** flag these. They are decisions, not gaps.
   re-verified as new (§4's break #32 entry). Company Portal still missing
   from `server-lib/pricing.js`'s `MODULES`, and the Portal dashboard tab
   (now including the phase-4 Assignments and phase-5 Escalations sub-tabs)
-  riding `roster_enabled` instead of a doc key, is also not a new item
+  riding `roster_enabled` (since 2026-10-16 plus `portal_enabled`) instead of a doc key, is also not a new item
   here — it's the same open flag carried from the phase-1 entry, not a new
   one.
 - **Phase 4's targeting deviation: no department-based ("group")
@@ -5259,3 +5273,4 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-10-09 | WP8a branch `claude/document-engine-wp8a-flha-template` (correction to the rows above) | Break #53 is CLOSED and WP7c-2 is merged (#216): the live `document_assignments_document_key_check` was read, widened to allow `engine_[0-9]+` by migration `document_engine_wp7c2_assignment_keys` (Dillon's yes), and verified. Rows above that say "unmerged", "branch `claude/document-engine-wp7c-access`" or "table CHECK not widened" describe the state before that and are not re-swept here. The engine FLHA therefore can be assigned. |
 | 2026-10-09 | branch `claude/document-engine-wp8b-parity` (uncommitted; map only, no application code touched by the keeper) | **WP8b FLHA parity placed.** Closed: (a) `flha_edit` signal on engine submit (`service.js:505-510,653`; `aiEditSignal.js`), (b) engine records on `get_crew_documents` (`customforms.js:496-507`), (c) approval PDF refresh (`set_record_pdf`, `documents.js:223-224`, `service.js:953-966`; `redrawRecordPdf`, `engineSubmit.js:187-227`, called at `EngineInbox.jsx:50`). Engine-section rows updated: not-connected table, parity table, matrix cell for the crew lead list. Still open: amend of a filed FLHA (`service.js:907`), analytics and Platform overview counts, Dashboard FLHA tab and counters, sign-afterwards wording (`sweeps.js:157`), offline draft crew restore (`?`), and the built-in `flhas` readers `companydata.js:930` and `customforms.js:554`. Unverified: client render of the engine row on `CrewScreen.jsx`. No new numbered break. |
 | 2026-10-09 | branch `claude/document-engine-wp8b-parity`, `3e53b2f` on top of `1a6b767` and `1210d48` (working tree clean and level with origin when read; map only, no application code touched by the keeper; no PR number looked up, not merged) | **WP8b finishes FLHA parity.** Closed, each re-read in code: (1) same-day amend of a filed engine FLHA (`amend_same_day` rule `fieldTypes.js:77-78`, `flha.js:49`; `amendRecord` `service.js:1017-1079`; action `documents.js:217-219`; `myInbox.amendable` `service.js:1163-1176,1212`; client `engineSubmit.js:176-192`, `EngineDocumentForm.jsx:28,120`, `EngineWorkerInbox.jsx:66-76`, `WorkerMenu.jsx:729`); (2) sign-afterwards alert wording, subject and body byte-identical to the built-in (`sweeps.js:156-157` vs `unsignedSweep.js:166-167`), label `FLHA` on both sides; (3) offline draft restore of crew (`EngineDocumentForm.jsx:79,95`); (4) `get_my_documents` (`customforms.js:616`) and `get_worker_profile` (`companydata.js:1004`) append the person's engine documents through `authoredRecords.js:13-36`; (5) Platform overview counts engine FLHAs as `flha` and other engine documents as a new `engine` type (`platformOverview.js:41,262-269`); (6) Dashboard reads engine FLHAs through `list_flha_rows` (`documents.js:245-247`, `listEngineFlhaRows` `service.js:776`, `Dashboard.jsx:2727-2740`). New: **break #54** (`delete_company` does not count engine records, `admin.js:659`), weak points **E-8** (the amended PDF still carries the approval from the round the amend retires) and **E-9** ("today" is the server's day). Open: Founder per-company views other than the overview (not enumerated, `?`), per-company Platform detail. |
+| 2026-10-16 | branch `split/portal-tab-gate` (uncommitted when read; map only, no application code touched by the keeper; not merged) | **Portal tab gate changed: `roster_enabled` alone to `roster_enabled && portal_enabled`.** Before, every provisioned company has `roster_enabled`, so Platform-only customers saw an empty Portal tab. Now `list_companies_brief` (`api/companydata.js:343-350`) returns each company with `portal_enabled` from `withPortalFlag` (`server-lib/portalEnabled.js:26-39`: one `portal_documents` lookup per company on `company_id`, any row counts, active or not; a lookup error returns `true`, fail open). `src/Dashboard.jsx:3209` sets `TAB_VISIBLE.portal = portalTabVisible(company)` (`server-lib/portalEnabled.js:45-47`); the Overview Portal records feed and the Portal fetch both read `TAB_VISIBLE.portal` (`src/Dashboard.jsx:3551-3552,4415-4416,4427`), so they follow. No migration. Join key: `portal_documents.company_id`, the same company key every other Portal table uses. Rows are created only by the founder builder (`api/portal.js:427`, mounted `src/AdminPanel.jsx:1360`), not from the Portal tab, so a hidden tab cannot block building the first document. Unchanged on purpose: `api/cron-portal-reports.js:40-41` still gates on `roster_enabled && !suspended`. Still no `MODULES` entry or doc key for Portal (not refiled). No new break; two notes: (1) `withPortalFlag` runs one query per company, so the founder's list costs N lookups per load (`server-lib/portalEnabled.js:27-39`), fine at today's size; (2) a company whose last Portal document is deleted loses the tab, which `api/companydata.js:1315-1319` should only permit when no answers exist, not re-read further. Re-check: `grep -n "portalTabVisible\|portal_enabled" api/companydata.js src/Dashboard.jsx server-lib/portalEnabled.js`. |
