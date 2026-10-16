@@ -35,6 +35,7 @@ import { auditorAccessLive, auditorAccessEmail, validateAuditorScope, listAudita
 import { listAssignableDocuments, validateAssignment, describeAssignments, assignmentsNamingAudience, BUILTIN_DOCUMENT_LABELS, MAX_ACTIVE_ASSIGNMENTS } from '../server-lib/assignmentAdmin.js';
 import { readSignedOnly } from '../server-lib/signLater.js';
 import { listNotifySettings, saveNotifySetting } from '../server-lib/notifySettings.js';
+import { withPortalFlag } from '../server-lib/portalEnabled.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -344,7 +345,9 @@ export default async function handler(req, res) {
       if (session.role === 'supervisor') query = query.eq('id', session.companyId);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: 'Could not load companies.' });
-      return res.status(200).json({ companies: data || [] });
+      // portal_enabled: does this company have any Portal documents. The
+      // dashboard shows the Portal tab only when it does (server-lib/portalEnabled.js).
+      return res.status(200).json({ companies: await withPortalFlag(supabaseAdmin, data || []) });
     }
 
     if (action === 'get_company_logo') {
