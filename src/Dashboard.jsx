@@ -39,6 +39,7 @@ import EngineInbox from "./documentEngine/EngineInbox.jsx";
 import { useEngineInbox } from "./documentEngine/useEngineInbox.js";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
+import { portalTabVisible } from "../server-lib/portalEnabled";
 import { formatOccurredAt, isLocalInput } from "./occurredAt.js";
 import {
   HardHat, Wrench, CalendarClock, FileText, LogOut, ClipboardList,
@@ -3199,13 +3200,13 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
     safetyanalytics: true,
-    // Company Portal isn't in server-lib/pricing.js's MODULES yet (a known,
-    // already-flagged gap — see docs/feature-interaction-map.md), so there
-    // is no company_document_settings key to gate this on the way every
-    // other tab here is gated. Department scoping needs a real roster row
-    // per supervisor, so this rides the same signal the "roster" tab
-    // already uses rather than inventing a second one.
-    portal: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    // The FORA Field Portal is a separate, quoted product and has no entry in
+    // server-lib/pricing.js's MODULES, so there is no company_document_settings
+    // key to gate on. A company sees the tab only when FORA has built it
+    // Portal documents (portal_enabled, from list_companies_brief) and it has
+    // a roster, because department scoping needs a real roster row per
+    // supervisor. See server-lib/portalEnabled.js.
+    portal: portalTabVisible(companies.find(c => c.id === selectedCompany)),
     // Documents built in the unified engine. Shown once the company has one switched on, or something waits on this person.
     enginedocs: engineInbox.docs.length > 0 || engineInbox.count > 0,
     analytics: true,
