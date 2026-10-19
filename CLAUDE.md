@@ -415,26 +415,42 @@ rather than Ted's intake happening live in the room.
 existing edit/claim tokens). That endpoint creates the Stripe customer and
 invoice server-side, sends it, and notifies Dillon (Slack/email). Payment
 confirmation arrives separately as an `invoice.paid` event on the existing
-`api/stripe-webhook.js`, which marks the row `paid` and notifies Dillon
-again — that's his cue to request the client's documents and start the
-build. **Nothing in this pipeline automates past payment confirmation**:
-document collection and the actual build stay Dillon's manual work, since
-Portal builds are more hands-on than a standard module signup. No agent
-in this pipeline ever sends a client-facing email itself — `ted` only
-ever produces a Gmail draft for Dillon to review and send.
+`api/stripe-webhook.js`, which marks the row `paid`, notifies Dillon again,
+and starts the monthly Stripe subscription for the engagement's monthly
+fee (`server-lib/portalCompanySetup.js`: CAD, billed by invoice with 7 days
+to pay, first invoice 30 days after the setup payment, one place to change
+that: `PORTAL_FIRST_INVOICE_DELAY_DAYS`). The proposal page says so. The
+subscription is tied to the company by the Stripe customer id, so the
+existing suspend/restore sync covers a Portal company. **Nothing else in
+this pipeline automates past payment confirmation**: Dillon creates the
+company with the Admin Panel's **Set up Portal company** button (Onboarding
+tab, "Portal engagements" card; Platform document types off, roster on, the
+proposal's contact as Account Owner, nothing emailed), collects the
+client's documents, builds them by hand, and sends the Owner their setup
+link from the roster's "Send setup links" when they are ready. No agent in
+this pipeline ever sends a client-facing email itself. `ted` only ever
+produces a Gmail draft for Dillon to review and send.
 
 Payment terms: full setup fee due on receipt (7-day invoice), no deposit
 structure, matching how Custom Builds are already quoted elsewhere in
-this repo.
+this repo. Monthly fee billed by invoice starting 30 days after the setup
+payment.
 
-**One-time setup still needed, outside this repo**: the Stripe Dashboard's
-webhook endpoint needs the `invoice.paid` event added to what it sends to
-`/api/stripe-webhook` (currently only `checkout.session.completed`,
-`customer.subscription.updated`, `customer.subscription.deleted` are
-enabled, per the "Post-upgrade cleanup" section above) — otherwise payment
-confirmations for this pipeline never arrive. `DILLON_NOTIFY_EMAIL` is an
-optional env var (alongside the existing `SLACK_ONBOARDING_WEBHOOK_URL`)
-for the approval/payment notifications both endpoints send.
+**Sender**: Portal emails come from `quotes@forafieldsolutions.com`
+(Cloudflare Email Routing forwards it to the shared inbox). The Gmail draft
+tool has no From field, so `ted` drafts in the connected account and tells
+Dillon to switch From to quotes@ before sending; that needs the "Send mail
+as" alias set up in Gmail.
+
+**Stripe setup (done 2026-10-19)**: `invoice.paid` is enabled on the live
+webhook endpoint alongside `checkout.session.completed`,
+`customer.subscription.updated` and `customer.subscription.deleted`. Ordinary
+subscription invoices fire it too and the handler ignores any invoice
+without a `portal_scope_request_id`. Still a Stripe Dashboard decision: what
+happens to a client who never pays a monthly invoice (only `canceled` and
+`unpaid` suspend a company). `DILLON_NOTIFY_EMAIL` is an optional env var
+(alongside the existing `SLACK_ONBOARDING_WEBHOOK_URL`) for the
+approval/payment notifications both endpoints send.
 
 Schema: `docs/schema/portal-scope-requests-migration.sql`
 (`portal_scope_requests` table — deliberately not company-scoped, since
