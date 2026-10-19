@@ -57,6 +57,23 @@ test('a live company with no plan tier is counted as unpriced, not as zero reven
   assert.equal(b.perCompany[0].monthly, null);
 });
 
+test('break 55: a Portal company is priced at its approved monthly fee, not the Platform base', () => {
+  const companies = [co({ id: 1, plan_tier: 'basic' }), co({ id: 2, name: 'Portal Co', plan_tier: 'basic' })];
+  const b = buildBusinessMetrics({ companies, docSettings: on(1, 'flha'), portalFees: { 2: 45 } }, { typeByDocKey }, NOW);
+  const portal = b.perCompany.find((c) => c.id === 2);
+  assert.equal(portal.monthly, 45);
+  assert.equal(portal.portal, true);
+  assert.equal(b.perCompany.find((c) => c.id === 1).monthly, BASE.basic + MODULES.safety.price.basic);
+  assert.equal(b.mrr.estimated, 45 + BASE.basic + MODULES.safety.price.basic);
+});
+
+test('a Portal company with no fee on record is unpriced, and keeps its seat cap from plan_tier', () => {
+  const b = buildBusinessMetrics({ companies: [co({ plan_tier: 'basic' })], portalFees: { 1: 0 } }, { typeByDocKey }, NOW);
+  assert.equal(b.perCompany[0].monthly, null);
+  assert.ok(b.perCompany[0].seatCap > 0);
+  assert.equal(b.mrr.unpriced, 1);
+});
+
 test('seat usage is active roster over the tier cap, flagged at 80 percent', () => {
   const roster = [];
   for (let i = 0; i < 8; i++) roster.push({ company_id: 1, active: true, last_login_at: ago(1) });

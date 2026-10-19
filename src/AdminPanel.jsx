@@ -432,6 +432,7 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
     enroll_mfa_confirm: "Enabled MFA",
     disable_mfa: "Disabled MFA",
     create_company: "Created company",
+    create_portal_company: "Created Portal company",
     update_company_codes: "Changed company code",
     unlock_roster_pin: "Unlocked a login",
     toggle_suspend: "Changed suspension",
@@ -549,6 +550,44 @@ export default function AdminPanel({ onViewDashboard, onLogout, token }) {
       if (res.ok) setOnboardingRequests(data.requests || []);
     } catch (e) { /* leave list as-is if the request fails */ }
     setLoadingOnboarding(false);
+  };
+
+  // ── FORA Field Portal engagements (Ted's proposals) ────────────────────
+  const [portalScopes, setPortalScopes] = useState([]);
+  const [settingUpScopeId, setSettingUpScopeId] = useState(null);
+  const [portalMsg, setPortalMsg] = useState("");
+
+  const loadPortalScopes = async () => {
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_portal_scopes", token }),
+      });
+      const data = await res.json();
+      if (res.ok) setPortalScopes(data.scopes || []);
+    } catch (e) { /* leave list as-is if the request fails */ }
+  };
+
+  const setUpPortalCompany = async (scopeId) => {
+    setPortalMsg("");
+    setSettingUpScopeId(scopeId);
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_portal_company", token, scopeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) setPortalMsg(data.error || "Couldn't set up the company.");
+      else {
+        // "could not" in a warning puts the banner into its error colours.
+        setPortalMsg(data.warning || `Company ready. Code ${data.companyCode}. Build their documents, then send the Owner their setup link from the roster.`);
+        await loadAll();
+      }
+      await loadPortalScopes();
+    } catch (e) {
+      setPortalMsg("Couldn't set up the company. Try again.");
+    }
+    setSettingUpScopeId(null);
   };
 
   const updateOnboardingStatus = async (id, status, note) => {
@@ -1283,7 +1322,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     const msgIsError = /(could not|couldn't|failed|error|enter)/.test(msg.toLowerCase());
     const goToTab = (key) => {
       setMsg("");
-      if (key === "onboarding") { setView("onboardingRequests"); loadOnboardingRequests(); }
+      if (key === "onboarding") { setView("onboardingRequests"); loadOnboardingRequests(); loadPortalScopes(); }
       else if (key === "codes") { setView("allCodes"); loadAllCodesView(); }
       else if (key === "documentBuilder") { setView("documentBuilder"); }
       else if (key === "documentLayouts") { setView("documentLayouts"); }
@@ -1560,6 +1599,35 @@ Respond ONLY with valid JSON (no markdown, no backticks):
             {/* ── Onboarding Requests ────────────────────────────────── */}
             {activeAdminTab === "onboarding" && (
               <>
+                {portalScopes.length > 0 && (
+                  <div style={{ ...st.card, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginBottom: 4 }}>Portal engagements</div>
+                    <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10 }}>
+                      Proposals Ted has sent. Once the setup invoice is paid, set up the company here, then build their documents.
+                    </div>
+                    {portalMsg && (
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: /could not|couldn't/i.test(portalMsg) ? C.status.danger.text : C.ink }}>{portalMsg}</div>
+                    )}
+                    {portalScopes.map((sc, i, arr) => (
+                      <div key={sc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{sc.client_name}</div>
+                          <div style={{ fontSize: 12, color: C.muted }}>
+                            {sc.status}
+                            {sc.monthly_fee_cents ? ` · $${(sc.monthly_fee_cents / 100).toLocaleString()}/mo` : ""}
+                            {sc.stripe_subscription_id ? " · monthly billing started" : ""}
+                            {sc.company_code ? ` · company code ${sc.company_code}` : ""}
+                          </div>
+                        </div>
+                        {sc.status === "paid" && !sc.company_id && (
+                          <button style={st.amberBtn} disabled={settingUpScopeId === sc.id} onClick={() => setUpPortalCompany(sc.id)}>
+                            {settingUpScopeId === sc.id ? "Setting up…" : "Set up Portal company"}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {archivedCount > 0 && (
                   <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.inkSoft, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
                     <input type="checkbox" checked={showArchivedOnboarding} onChange={e => setShowArchivedOnboarding(e.target.checked)} />

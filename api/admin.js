@@ -25,6 +25,7 @@ import {
   generateBackupCodes,
   consumeBackupCode,
 } from '../server-lib/totp.js';
+import { provisionPortalCompany, cancelPortalSubscriptionForCompany } from '../server-lib/portalCompanySetup.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { loadPlatformOverview } from '../server-lib/platformOverview.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
@@ -594,6 +595,48 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ── FORA Field Portal engagements (Ted's scoping pipeline) ──────────
+    // The founder's view of every proposal past draft, and the one action that
+    // turns a paid one into a company Dillon builds documents into. Not
+    // company-scoped: these rows exist before a company does.
+    if (action === 'list_portal_scopes') {
+      const { data: scopes, error: scopeErr } = await supabaseAdmin
+        .from('portal_scope_requests')
+        .select('id, client_name, contact_name, contact_email, status, setup_fee_cents, monthly_fee_cents, company_id, stripe_subscription_id, paid_at, created_at')
+        .neq('status', 'draft')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (scopeErr) return res.status(500).json({ error: 'Could not load Portal engagements.' });
+      const companyIds = (scopes || []).map(s => s.company_id).filter(Boolean);
+      let codeById = {};
+      if (companyIds.length > 0) {
+        const { data: cos } = await supabaseAdmin.from('companies').select('id, company_code').in('id', companyIds);
+        codeById = Object.fromEntries((cos || []).map(c => [c.id, c.company_code]));
+      }
+      return res.status(200).json({ scopes: (scopes || []).map(s => ({ ...s, company_code: s.company_id ? (codeById[s.company_id] || null) : null })) });
+    }
+
+    // Creates (or finishes) the company for a PAID engagement: Platform
+    // document types off, roster on, the contact seeded as Account Owner. It
+    // sends nothing to the client; the Owner's setup link goes out later from
+    // the roster's "Send setup links", once the documents are built.
+    if (action === 'create_portal_company') {
+      const { scopeId } = req.body;
+      if (!scopeId || typeof scopeId !== 'string') return res.status(400).json({ error: 'Missing engagement.' });
+      const result = await provisionPortalCompany(supabaseAdmin, stripe, scopeId);
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      if (result.created) {
+        await logAuditEvent(supabaseAdmin, { actorRole: 'admin', action: 'create_portal_company', companyId: result.companyId, targetType: 'company', targetId: result.companyId, details: { scopeId } });
+      }
+      return res.status(200).json({
+        ok: true,
+        companyId: result.companyId,
+        companyCode: result.companyCode,
+        created: result.created,
+        ...(result.warnings.length ? { warning: result.warnings.join(' ') } : {}),
+      });
+    }
+
     // ── Edit a company's code ───────────────────────────────────────────
     // company_code is what the company's staff type on the login page to find
     // their company. It is not a login by itself: it only opens that company's
@@ -713,6 +756,14 @@ export default async function handler(req, res) {
           error: `Couldn't delete: this company has ${parts.join(', ')}. Companies with submitted records can't be deleted.`,
         });
       }
+
+      // A Portal company's monthly subscription is billed to its Stripe
+      // customer, not to the company row, so deleting the row would leave the
+      // client invoiced forever (break #56). Cancel it first, and refuse the
+      // delete if it cannot be cancelled. Runs after the records guard so a
+      // refused delete cancels nothing.
+      const portalBilling = await cancelPortalSubscriptionForCompany(stripe, supabaseAdmin, companyId);
+      if (!portalBilling.ok) return res.status(502).json({ error: portalBilling.error });
 
       // No submitted records remain — safe to clean up company-scoped
       // config/settings. Children before parents where FK-constrained.

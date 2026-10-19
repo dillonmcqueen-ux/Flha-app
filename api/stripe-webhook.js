@@ -21,6 +21,7 @@ import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { sendEmail } from '../server-lib/email.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
+import { ensurePortalSubscription } from '../server-lib/portalCompanySetup.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -50,31 +51,45 @@ const RESTORE_STATUSES = new Set(['active', 'trialing']);
 // webhook itself created via api/scope-approval.js carry this metadata key
 // — a company's ordinary subscription invoices (created by Stripe's own
 // billing cycle, not by that endpoint) don't, so this is a no-op for those.
-async function notifyPortalScopePaid(invoice) {
+//
+// Two steps, split so a failure in the second is retried: mark paid and tell
+// Dillon (once), then start the monthly subscription (once, on every delivery
+// until it exists). A retry finds the row already paid, skips the first step
+// and goes straight to the subscription.
+async function handlePortalScopePaid(invoice) {
   const scopeId = invoice.metadata?.portal_scope_request_id;
   if (!scopeId) return;
 
   const { data: scope, error: findErr } = await supabaseAdmin
     .from('portal_scope_requests')
-    .select('id, client_name, status')
+    .select('id, client_name, status, monthly_fee_cents, stripe_customer_id, stripe_subscription_id, company_id')
     .eq('id', scopeId)
     .maybeSingle();
   if (findErr) throw new Error(`portal_scope_requests lookup failed: ${findErr.message}`);
-  if (!scope || scope.status === 'paid') return; // already handled, or the row is gone
+  if (!scope) return; // the row is gone
+  // The metadata is ours, but a hand-made invoice could carry a copied id.
+  if (scope.stripe_customer_id && invoice.customer && invoice.customer !== scope.stripe_customer_id) {
+    console.error('invoice.paid customer does not match its Portal engagement:', scopeId, invoice.customer);
+    return;
+  }
 
-  const { error: updateErr } = await supabaseAdmin
-    .from('portal_scope_requests')
-    .update({ status: 'paid', paid_at: new Date().toISOString() })
-    .eq('id', scopeId);
-  if (updateErr) throw new Error(`portal_scope_requests paid update failed: ${updateErr.message}`);
+  if (scope.status !== 'paid') {
+    const { error: updateErr } = await supabaseAdmin
+      .from('portal_scope_requests')
+      .update({ status: 'paid', paid_at: new Date().toISOString() })
+      .eq('id', scopeId);
+    if (updateErr) throw new Error(`portal_scope_requests paid update failed: ${updateErr.message}`);
 
-  const text = `Payment confirmed: ${scope.client_name} paid their Portal setup fee. Time to request their documents and start the build.`;
-  await Promise.allSettled([
-    sendSlackNotification(text),
-    process.env.DILLON_NOTIFY_EMAIL
-      ? sendEmail({ to: process.env.DILLON_NOTIFY_EMAIL, subject: `Payment confirmed: ${scope.client_name}`, text })
-      : Promise.resolve(),
-  ]);
+    const text = `Payment confirmed: ${scope.client_name} paid their Portal setup fee. Time to set up their company in the Admin Panel, request their documents and start the build.`;
+    await Promise.allSettled([
+      sendSlackNotification(text),
+      process.env.DILLON_NOTIFY_EMAIL
+        ? sendEmail({ to: process.env.DILLON_NOTIFY_EMAIL, subject: `Payment confirmed: ${scope.client_name}`, text })
+        : Promise.resolve(),
+    ]);
+  }
+
+  await ensurePortalSubscription(stripe, supabaseAdmin, scope);
 }
 
 async function syncSubscriptionToCompany(subscription) {
@@ -196,7 +211,7 @@ export default async function handler(req, res) {
     } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
       await syncSubscriptionToCompany(event.data.object);
     } else if (event.type === 'invoice.paid') {
-      await notifyPortalScopePaid(event.data.object);
+      await handlePortalScopePaid(event.data.object);
     }
   } catch (e) {
     // Deliberately no processed_at stamp: the claim stays unfinished so

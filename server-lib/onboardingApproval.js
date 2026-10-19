@@ -57,7 +57,7 @@ export function hashPin(pin, salt) {
 // Same shape as the manual "Onboard Company" flow's suggested code, for
 // when a company is created automatically from an onboarding request
 // instead of typed in by hand.
-function randomSuffix(len = 3) {
+export function randomSuffix(len = 3) {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let s = '';
   for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
@@ -76,7 +76,7 @@ export function codePrefix(name) {
 // 6 digits (1,000,000 possible values), not 4 — see PIN_LOCKOUT_AFTER_ATTEMPTS
 // in api/login.js and docs/security/soc2-readiness-gaps.md item 8. Bumped
 // 2026-09-25 as part of SOC 2 readiness remediation.
-function genPin() {
+export function genPin() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 

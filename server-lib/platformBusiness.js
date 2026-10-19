@@ -6,9 +6,10 @@
 // These are ESTIMATES built from data FORA holds, not from Stripe. MRR is
 // each live company's list price (server-lib/pricing.js: platform base plus
 // every module it has switched on, before the 3% card surcharge). The result
-// is labelled as an estimate everywhere it is shown. It does not include
-// Company Portal engagements or Custom Builds, which are priced
-// outside pricing.js.
+// is labelled as an estimate everywhere it is shown. A Company Portal company
+// is priced at its approved monthly fee instead (portalFees below), since it
+// buys no Platform modules and pricing.js has no price for it. Custom Builds
+// are priced outside pricing.js and are not included.
 //
 // Pure and DB-free: server-lib/platformOverview.js loads the rows and calls
 // buildBusinessMetrics(). Like that file, it must only ever be reached from
@@ -57,7 +58,7 @@ export function bandFor(score) {
 
 // typeByDocKey maps a document_key to the key its filings are stored under in
 // `docs`, so "used" can be judged the same way the module adoption table does.
-export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], docSettings = [] } = {}, { typeByDocKey = {} } = {}, now = new Date()) {
+export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], docSettings = [], portalFees = {} } = {}, { typeByDocKey = {} } = {}, now = new Date()) {
   const t = now.getTime();
   const live = companies.filter((c) => !c.suspended);
 
@@ -96,7 +97,13 @@ export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], d
 
   const perCompany = live.map((c) => {
     const modules = boughtModuleKeys(enabled.get(c.id));
-    const monthly = estimateMonthly(c.plan_tier, modules);
+    // A Portal company is billed its own monthly fee, not the Platform base.
+    // plan_tier stays on it for the seat cap, which is why this has to be
+    // checked here rather than by the tier being absent.
+    const isPortal = Object.prototype.hasOwnProperty.call(portalFees, c.id);
+    const monthly = isPortal
+      ? (portalFees[c.id] > 0 ? portalFees[c.id] : null)
+      : estimateMonthly(c.plan_tier, modules);
     const status = c.stripe_subscription_status || null;
     const billed = status ? BILLED_STATUSES.has(status) : false;
     const paymentRisk = status ? PAYMENT_RISK_STATUSES.has(status) : false;
@@ -155,7 +162,7 @@ export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], d
 
     return {
       id: c.id, name: c.name, tier: c.plan_tier || null, subscription: status,
-      modules: modules.length, monthly, billed, paymentRisk,
+      modules: modules.length, monthly, portal: isPortal, billed, paymentRisk,
       seatsUsed, seatCap: cap, seatPct,
       nearCap: seatPct !== null && seatPct >= NEAR_CAP_PCT, atCap: seatPct !== null && seatPct >= 100,
       ageDays, daysSinceLastDoc, daysToFirstDoc,
@@ -178,7 +185,7 @@ export function buildBusinessMetrics({ companies = [], docs = {}, roster = [], d
       atRisk: sum(priced.filter((c) => c.paymentRisk)),
       byTier,
       unpriced: perCompany.length - priced.length,
-      note: 'List price estimate: platform base plus switched-on modules, before the 3% card surcharge. Excludes Company Portal engagements and Custom Builds.',
+      note: 'List price estimate: platform base plus switched-on modules, before the 3% card surcharge. Company Portal companies use their approved monthly fee. Excludes Custom Builds.',
     },
     seats: {
       nearCap: perCompany.filter((c) => c.nearCap).map((c) => ({ id: c.id, name: c.name, used: c.seatsUsed, cap: c.seatCap, pct: c.seatPct })),

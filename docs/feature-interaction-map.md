@@ -1153,6 +1153,52 @@ Portal isn't a checkout-purchasable module yet — `portalScopePricing.js:11-13`
 says the monthly fee "would be entered into MODULES... when Portal ships as
 a real subscribable module," which is the trigger to re-open this question).
 
+### `portal_scope_requests.company_id` and `.stripe_subscription_id` (the paid scope becomes a company and a monthly bill)
+Placed 2026-10-19 against branch `split/portal-company-setup` (HEAD `3b30055`
+plus a small uncommitted follow-up; not merged). Read: `server-lib/portalCompanySetup.js`,
+`api/stripe-webhook.js`, `api/admin.js`, `src/AdminPanel.jsx`,
+`docs/schema/portal-scope-company-link-migration.sql`, `server-lib/platformBusiness.js`.
+Supersedes the "paid does not join `companies`" reading above in one respect:
+a manual, founder-clicked join now exists. The 2026-09-28 text is kept as written.
+
+| Link | Producer | Consumer | Key agrees? |
+|---|---|---|---|
+| scope to company | `provisionPortalCompany` inserts `companies` (`portalCompanySetup.js:~130-140`) and claims the scope with `update company_id ... where company_id is null` (`:149-153`); button `create_portal_company` (`api/admin.js:623`, `AdminPanel.jsx:571-588,1623`) | `list_portal_scopes` shows the code (`admin.js:602-621`); a second run finds the link and only repairs (`portalCompanySetup.js` else-branch after `:160`) | Yes. Both bigint `companies.id` (migration `:14`), unique partial index so one company per scope (`migration :17-18`) |
+| company to Stripe customer | `stripe_customer_id: scope.stripe_customer_id` on the new company (`portalCompanySetup.js:139`) | `syncSubscriptionToCompany` matches `companies.stripe_customer_id = subscription.customer` (`stripe-webhook.js:110`) | Yes. The scope's customer id is written at `scope-approval.js:145`. A pre-check refuses a customer another company already holds (`portalCompanySetup.js:~124-127`), because the sync would otherwise suspend or restore both |
+| scope to subscription | `ensurePortalSubscription` (`portalCompanySetup.js:203-239`), called from `handlePortalScopePaid` (`stripe-webhook.js:92`, `invoice.paid` at `:214`); `send_invoice`, `days_until_due` 7, `trial_end` 30 days out (`:216-218`), CAD from `monthly_fee_cents` (`:219`), idempotency keys per scope (`:210,222`) | Read back as the "already started" guard (`:204`) and carried to `companies.stripe_subscription_id/_status` (`:232-237`, or backfilled by `provisionPortalCompany` `:~183-190` when the company comes second) | Yes. Both orders (company first, or subscription first) end with the same two company columns |
+| subscription to suspend/restore | Stripe `customer.subscription.updated/deleted` (`stripe-webhook.js:211-212`) | `syncSubscriptionToCompany` suspends on `canceled/unpaid/incomplete_expired`, restores on `active/trialing` (`:47-48,101-103`) | Yes for those statuses. `past_due` is left alone on purpose (`:44-46`) |
+
+**The monthly fee is now billed.** Before this branch the proposal page showed
+"Monthly $X/mo" (`api/scope-approval.js:176`) and nothing in the repo created a
+subscription for it: `scope-approval.js:115-131` creates one setup invoice item
+and one invoice only, and the old `notifyPortalScopePaid` only stamped `paid`.
+That was a silent "shown but never billed" gap, never filed. It is closed in
+code on this branch, not in production until the branch merges and the
+migration is applied. Re-check: `grep -n "subscriptions.create" api/ server-lib/`
+hits `server-lib/portalCompanySetup.js:213` and nothing else (checkout uses Checkout Sessions, not a direct create).
+
+**Gating, checked.** The new company gets explicit `is_active: false` rows for every
+Platform key (`documentSettingsFor(companyId, [])`, `portalCompanySetup.js:68`;
+`pricing.js:233-240`). `BUILTIN_DOC_KEYS` (`api/customforms.js:136`, 13 keys)
+and `pricing.js` `docKeys` (13 keys across 7 modules) still match, so no key is
+missed. Portal itself still has no doc key (§5), and the Portal tab appears only
+once a `portal_documents` row exists (`server-lib/portalEnabled.js:38,46`), so a
+fresh Portal company correctly shows nothing until Dillon builds the first
+document. Not a break.
+
+**Closed 2026-10-19 (`f6c0726`, not merged):** #55 (founder MRR now prices a Portal company at its approved monthly fee, `platformBusiness.js:103-106`, `platformOverview.js:251-255`) and #56 (`delete_company` cancels the subscription first, `api/admin.js:765`).
+**Open edges.**
+Unverified, marked `?`: (a) RESOLVED 2026-10-19: `portal-scope-company-link-migration.sql` was applied to the live database (per Dillon; not re-checked by the keeper), so the code is no longer ahead of the schema. The
+webhook now selects `company_id, stripe_subscription_id` (`stripe-webhook.js:65`)
+and `list_portal_scopes` selects them too (`admin.js:605`), so code deployed ahead
+of the migration would make every Portal `invoice.paid` throw, 500 and retry
+without stamping `paid` (the shape of closed #52). (b) Whether `invoice.paid` is
+enabled on the live Stripe endpoint, still a hand step per CLAUDE.md. (c) What
+Stripe does with an unpaid `send_invoice` subscription: only `canceled/unpaid`
+suspend a company (`stripe-webhook.js:47`), and `past_due` does not, so whether a
+Portal customer who never pays a monthly invoice is ever suspended depends on the
+Stripe Dashboard's failed-payment setting, which is not in the repo.
+
 ### `platform_events` (founder telemetry; producer side only, by design)
 Recorded 2026-09-29 against the **uncommitted** working tree on branch
 `platform-events-instrumentation`. Table `platform_events`
@@ -4633,6 +4679,24 @@ Was built from the full company set (`patternsByEquipment(enriched)`). Now `equi
 
 **Verified 2026-10-08 (was `?`), read-only pass, no code change:** (1) **Analytics.** `Dashboard.jsx` `loadAll` (`:2683-2694`) feeds every Analytics input from list actions that all pass through `listVisibleRecords` / `listVisibleRecordsMulti`: FLHA `flhas.js:612`, near miss and incident `reports.js:481`, inspection, toolbox and daily `logs.js:781`, monthly records `monthly.js:529`, corrective actions `monthly.js:900`, custom documents `customforms.js:764`, fuel `fuellogs.js:326`. The client only filters by `company_id` (`Dashboard.jsx:4070-4077`), so the narrowing is server side. A scoped supervisor's Analytics totals shrink with their lists. Expected, same as Portal under #47. (2) **Maintenance status** (`Equipment Analytics` `maintenanceStatus`, `maintenance.js:139`) is the one input that is not narrowed: it reads every inspection and fuel reading for the company to compute due, overdue and current reading (`:195-240`) and returns equipment labels, numbers and the equipment's own service log, never inspection text. Equipment reference data, supervisor and admin only, behind the Maintenance module, so not a break. (3) **Brain.** Not a supervisor view and not scoped per viewer. `runCompanyBrainSummary` is a cron (`api/cron-company-brain-summary.js:39`) that writes one `company_profiles` row per company. The only reads are `get_company_profile` (`companydata.js:2337`, company scoped, returns industry, equipment summary, terminology notes and hazard emphasis, used as prompt context by the forms, `companyProfile.js:15`) and the founder-only Brain tab in `AdminPanel.jsx`. Company-wide by design. **Residual to decide, not filed:** the profile is built from every signal in the company, so a supervisor limited to one site gets prompt context learned partly from sites they cannot open. It is paraphrased emphasis and terminology, not records. Left as is unless Dillon says otherwise.
 
+### #55 - The founder's MRR counted a Portal company at the Platform base price (CLOSED in code 2026-10-19 on `split/portal-company-setup`, `f6c0726`, not merged)
+Was: `platformBusiness.js` priced every live company with `estimateMonthly(c.plan_tier, modules)`, so a Portal company (zero modules, `plan_tier` set for the seat cap at `portalCompanySetup.js:138`) landed at `BASE`, overstating the Admin Panel revenue estimate by $60 (basic) or $140 (advanced).
+**Fix evidence:** `platformOverview.js:251-255` loads `portalFees` (`company_id` to `monthly_fee_cents / 100`) from `portal_scope_requests` where `company_id` is not null, and passes it through (`:53,:192,:299`). `buildBusinessMetrics` takes `portalFees` (`platformBusiness.js:61`) and prices a company that has an entry at its fee (`isPortal`, `:103-106`), else `estimateMonthly` as before. `plan_tier` is untouched, so the seat cap stays. A fee of 0 yields `null`, not the base price. Guard: `tests/unit/platform-business.test.js`. Closes when the PR merges.
+**Re-check:** `sed -n 100,107p server-lib/platformBusiness.js; sed -n 251,255p server-lib/platformOverview.js`.
+
+### #56 - Deleting a Portal company left its monthly subscription billing (CLOSED in code 2026-10-19 on `split/portal-company-setup`, `f6c0726`, not merged)
+Was: `delete_company` had no Stripe cancel call, and the scope link is `on delete set null`, so the subscription kept invoicing the client after the company was gone.
+**Fix evidence:** `delete_company` calls `cancelPortalSubscriptionForCompany(stripe, supabaseAdmin, companyId)` (`api/admin.js:765`, imported `:28`), after the records guard and before any cleanup, and returns 502 without deleting if `ok` is false (`:766`). The helper (`portalCompanySetup.js:247-271`) reads the company's scopes, retrieves and cancels each `stripe_subscription_id`, treats `resource_missing` as already gone, and refuses (`ok: false`) on any other error or when Stripe is not configured. Guard: `tests/unit/portal-company-setup.test.js`. Closes when the PR merges.
+**Not covered:** checkout (non-Portal) companies still have no cancel on delete; never numbered as its own break.
+**Re-check:** `grep -n "cancelPortalSubscriptionForCompany" api/admin.js server-lib/portalCompanySetup.js`.
+
+**Weak link, not numbered: the proposal never says when the first monthly invoice
+arrives.** Setup is invoiced on approval (`scope-approval.js:115-131`); the first
+monthly invoice goes out 30 days after payment (`portalCompanySetup.js:33,218`).
+The proposal page shows only "Monthly ... /mo" (`scope-approval.js:176`) and no
+`grep` hit for "30 days" in that file. Customer-facing wording, so
+`pricing-legal-consistency-reviewer`'s territory, not filed as a break.
+
 ## Known pending links (intentional, not breaks)
 
 A producer with no consumer **yet**, where the consumer is a scheduled phase
@@ -5032,7 +5096,15 @@ Do **not** flag these. They are decisions, not gaps.
   a future HRIS sync; there is no internal consumer that should be reading it
   today. See §2 and §4b.
 - **A paid `portal_scope_requests` row never becomes an `onboarding_requests`
-  row or a `companies` row automatically.** `notifyPortalScopePaid`
+  row or a `companies` row automatically.** *(Updated 2026-10-19: still true
+  of the company. The webhook's `handlePortalScopePaid`
+  (`api/stripe-webhook.js:59-92`) now also starts the monthly subscription,
+  but writes `companies` only if Dillon already built one
+  (`portalCompanySetup.js:232-237`); it never creates it. The company comes
+  only from the Admin Panel button, `create_portal_company`
+  (`api/admin.js:623`). See the §2 entry on `portal_scope_requests.company_id`.
+  The original reading below is the 2026-09-28 one.)*
+  `notifyPortalScopePaid`
   (`api/stripe-webhook.js:53-78`) marks the scope row `paid` and notifies
   Dillon by Slack/email — that's the whole handler. Confirmed by reading it:
   no `.from('onboarding_requests')` or `.from('companies')` call anywhere in
@@ -5274,3 +5346,6 @@ workforce src/Analytics.jsx src/analyticsUtils.js` returns nothing.
 | 2026-10-09 | branch `claude/document-engine-wp8b-parity` (uncommitted; map only, no application code touched by the keeper) | **WP8b FLHA parity placed.** Closed: (a) `flha_edit` signal on engine submit (`service.js:505-510,653`; `aiEditSignal.js`), (b) engine records on `get_crew_documents` (`customforms.js:496-507`), (c) approval PDF refresh (`set_record_pdf`, `documents.js:223-224`, `service.js:953-966`; `redrawRecordPdf`, `engineSubmit.js:187-227`, called at `EngineInbox.jsx:50`). Engine-section rows updated: not-connected table, parity table, matrix cell for the crew lead list. Still open: amend of a filed FLHA (`service.js:907`), analytics and Platform overview counts, Dashboard FLHA tab and counters, sign-afterwards wording (`sweeps.js:157`), offline draft crew restore (`?`), and the built-in `flhas` readers `companydata.js:930` and `customforms.js:554`. Unverified: client render of the engine row on `CrewScreen.jsx`. No new numbered break. |
 | 2026-10-09 | branch `claude/document-engine-wp8b-parity`, `3e53b2f` on top of `1a6b767` and `1210d48` (working tree clean and level with origin when read; map only, no application code touched by the keeper; no PR number looked up, not merged) | **WP8b finishes FLHA parity.** Closed, each re-read in code: (1) same-day amend of a filed engine FLHA (`amend_same_day` rule `fieldTypes.js:77-78`, `flha.js:49`; `amendRecord` `service.js:1017-1079`; action `documents.js:217-219`; `myInbox.amendable` `service.js:1163-1176,1212`; client `engineSubmit.js:176-192`, `EngineDocumentForm.jsx:28,120`, `EngineWorkerInbox.jsx:66-76`, `WorkerMenu.jsx:729`); (2) sign-afterwards alert wording, subject and body byte-identical to the built-in (`sweeps.js:156-157` vs `unsignedSweep.js:166-167`), label `FLHA` on both sides; (3) offline draft restore of crew (`EngineDocumentForm.jsx:79,95`); (4) `get_my_documents` (`customforms.js:616`) and `get_worker_profile` (`companydata.js:1004`) append the person's engine documents through `authoredRecords.js:13-36`; (5) Platform overview counts engine FLHAs as `flha` and other engine documents as a new `engine` type (`platformOverview.js:41,262-269`); (6) Dashboard reads engine FLHAs through `list_flha_rows` (`documents.js:245-247`, `listEngineFlhaRows` `service.js:776`, `Dashboard.jsx:2727-2740`). New: **break #54** (`delete_company` does not count engine records, `admin.js:659`), weak points **E-8** (the amended PDF still carries the approval from the round the amend retires) and **E-9** ("today" is the server's day). Open: Founder per-company views other than the overview (not enumerated, `?`), per-company Platform detail. |
 | 2026-10-16 | branch `split/portal-tab-gate` (uncommitted when read; map only, no application code touched by the keeper; not merged) | **Portal tab gate changed: `roster_enabled` alone to `roster_enabled && portal_enabled`.** Before, every provisioned company has `roster_enabled`, so Platform-only customers saw an empty Portal tab. Now `list_companies_brief` (`api/companydata.js:343-350`) returns each company with `portal_enabled` from `withPortalFlag` (`server-lib/portalEnabled.js:26-39`: one `portal_documents` lookup per company on `company_id`, any row counts, active or not; a lookup error returns `true`, fail open). `src/Dashboard.jsx:3209` sets `TAB_VISIBLE.portal = portalTabVisible(company)` (`server-lib/portalEnabled.js:45-47`); the Overview Portal records feed and the Portal fetch both read `TAB_VISIBLE.portal` (`src/Dashboard.jsx:3551-3552,4415-4416,4427`), so they follow. No migration. Join key: `portal_documents.company_id`, the same company key every other Portal table uses. Rows are created only by the founder builder (`api/portal.js:427`, mounted `src/AdminPanel.jsx:1360`), not from the Portal tab, so a hidden tab cannot block building the first document. Unchanged on purpose: `api/cron-portal-reports.js:40-41` still gates on `roster_enabled && !suspended`. Still no `MODULES` entry or doc key for Portal (not refiled). No new break; two notes: (1) `withPortalFlag` runs one query per company, so the founder's list costs N lookups per load (`server-lib/portalEnabled.js:27-39`), fine at today's size; (2) a company whose last Portal document is deleted loses the tab, but `delete_document` refuses once the document has any record (`api/portal.js:463-467`), so submitted history cannot be stranded behind a hidden tab (the whole-company purge at `api/admin.js:736` is the only other deleter). Re-check: `grep -n "portalTabVisible\|portal_enabled" api/companydata.js src/Dashboard.jsx server-lib/portalEnabled.js`. |
+| 2026-10-19 | branch `split/portal-company-setup`, `3b30055` plus uncommitted follow-up (map only, no application code touched by the keeper; not merged) | **Portal setup path placed: paid scope to company to monthly subscription.** New join keys `portal_scope_requests.company_id` (bigint FK, `on delete set null`, unique partial index) and `.stripe_subscription_id` (`docs/schema/portal-scope-company-link-migration.sql`, repo file only, live status `?`). `create_portal_company` (`api/admin.js:623`) builds a company with every Platform doc key off (`portalCompanySetup.js:68`), roster on, Account Owner seeded, nothing emailed. `handlePortalScopePaid` (`stripe-webhook.js:59-92`) now starts a CAD `send_invoice` subscription with a 30-day trial (`portalCompanySetup.js:203-239`); `companies.stripe_customer_id` (`:139`) lets `syncSubscriptionToCompany` (`stripe-webhook.js:110`) suspend and restore it. Read all of it; key agrees on both sides in both orders. **Closed in code, a gap never filed before: the monthly fee was shown (`scope-approval.js:176`) and never billed.** Mechanical checks: `BUILTIN_DOC_KEYS` (13) matches `pricing.js` `docKeys` (13); `isDocKeyActive` crons unchanged. **Breaks filed: #55** (founder MRR prices a Portal company at the Platform base, `platformBusiness.js:41-43,112` with `plan_tier` set at `portalCompanySetup.js:138`), **#56** (`delete_company` never cancels the subscription, `admin.js:698`). Weak link: proposal omits the 30-day first-invoice timing. `?` items: migration live, `invoice.paid` enabled on the live Stripe endpoint, and Stripe's unpaid-invoice setting decides whether a non-paying Portal client is ever suspended (`past_due` does not suspend, `stripe-webhook.js:47`). §5 non-connection bullet amended. No application code touched. |
+
+| 2026-10-19 | branch `split/portal-company-setup`, `f6c0726` (map only, no application code touched by the keeper; not merged) | **Breaks #55 and #56 closed in code.** #55: `platformOverview.js:251-255` loads each Portal company's `monthly_fee_cents`, `platformBusiness.js:103-106` prices it at that fee instead of the Platform base. #56: `delete_company` calls `cancelPortalSubscriptionForCompany` (`api/admin.js:765`, helper `portalCompanySetup.js:247-271`) and refuses the delete if the cancel fails. Both close on merge. Also recorded: `portal-scope-company-link-migration.sql` applied to the live database 2026-10-19 (Dillon's word, not re-verified), which resolves open edge (a) in the Portal section. |

@@ -33,6 +33,7 @@ export function makeDb(seed = {}) {
     constructor(name) { this.name = name; this.mode = 'select'; this.filters = []; this._order = null; this._limit = null; this.payload = null; this.returning = false; }
     select() { if (this.mode !== 'select') this.returning = true; return this; }
     insert(rows) { this.mode = 'insert'; this.payload = Array.isArray(rows) ? rows : [rows]; return this; }
+    upsert(rows, opts = {}) { this.mode = 'upsert'; this.payload = Array.isArray(rows) ? rows : [rows]; this.onConflict = String(opts.onConflict || 'id').split(','); return this; }
     update(patch) { this.mode = 'update'; this.payload = patch; return this; }
     delete() { this.mode = 'delete'; return this; }
     eq(col, val) {
@@ -42,6 +43,8 @@ export function makeDb(seed = {}) {
       else this.filters.push((r) => same(r[col], val));
       return this;
     }
+    ilike(col, val) { this.filters.push((r) => r[col] != null && String(r[col]).toLowerCase() === String(val).toLowerCase()); return this; }
+    maybeSingle() { this._maybe = true; return this; }
     in(col, vals) { this.filters.push((r) => (vals || []).some((v) => same(r[col], v))); return this; }
     is(col, val) { this.filters.push((r) => (val === null ? r[col] == null : r[col] === val)); return this; }
     not(col, op, val) { this.filters.push((r) => (op === 'is' && val === null ? r[col] != null : true)); return this; }
@@ -62,6 +65,7 @@ export function makeDb(seed = {}) {
           out.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (ascending ? 1 : -1));
         }
         if (this._limit != null) out = out.slice(0, this._limit);
+        if (this._maybe) return { data: out[0] || null, error: null };
         return { data: out, error: null };
       }
       if (this.mode === 'insert') {
@@ -81,6 +85,14 @@ export function makeDb(seed = {}) {
           return row;
         });
         return { data: this.returning ? made.map((r) => ({ ...r })) : null, error: null };
+      }
+      if (this.mode === 'upsert') {
+        for (const p of this.payload) {
+          const hit = rows.find((r) => this.onConflict.every((c) => same(r[c], p[c])));
+          if (hit) Object.assign(hit, p);
+          else { const row = { ...(DEFAULTS[this.name] || {}), ...p }; if (row.id == null) { row.id = nextId[this.name]; nextId[this.name] += 1; } rows.push(row); }
+        }
+        return { data: null, error: null };
       }
       if (this.mode === 'update') {
         const hit = match();
