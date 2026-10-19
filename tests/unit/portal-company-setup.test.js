@@ -284,3 +284,10 @@ test('delete_company cancels billing after the records guard and before any clea
   assert.ok(guard > 0 && cancel > guard);
   assert.ok(cancel < body.indexOf('cleanupSteps'));
 });
+
+test('the setup invoice pulls in its pending fee item, or it is created at $0 and paid for free', () => {
+  const src = readFileSync(new URL('../../api/scope-approval.js', import.meta.url), 'utf8');
+  const start = src.indexOf('stripe.invoices.create(');
+  const call = src.slice(start, src.indexOf('});', start));
+  assert.match(call, /pending_invoice_items_behavior: 'include'/);
+});

@@ -130,6 +130,11 @@ export default async function handler(req, res) {
       customer: customer.id,
       collection_method: 'send_invoice',
       days_until_due: 7,
+      // Required: since API version 2022-08-01 an invoice created without this
+      // leaves the pending setup-fee item off, so the invoice is $0, is paid
+      // the moment it is finalized, and the engagement is marked paid for free.
+      // Found in the Stripe sandbox run on 2026-10-19.
+      pending_invoice_items_behavior: 'include',
       metadata: { portal_scope_request_id: scope.id },
     });
     const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
