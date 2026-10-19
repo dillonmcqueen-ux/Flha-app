@@ -5032,7 +5032,15 @@ Do **not** flag these. They are decisions, not gaps.
   a future HRIS sync; there is no internal consumer that should be reading it
   today. See §2 and §4b.
 - **A paid `portal_scope_requests` row never becomes an `onboarding_requests`
-  row or a `companies` row automatically.** `notifyPortalScopePaid`
+  row or a `companies` row automatically.** *(Updated 2026-10-19: still true
+  of the company. The webhook's `handlePortalScopePaid`
+  (`api/stripe-webhook.js:59-92`) now also starts the monthly subscription,
+  but writes `companies` only if Dillon already built one
+  (`portalCompanySetup.js:232-237`); it never creates it. The company comes
+  only from the Admin Panel button, `create_portal_company`
+  (`api/admin.js:623`). See the §2 entry on `portal_scope_requests.company_id`.
+  The original reading below is the 2026-09-28 one.)*
+  `notifyPortalScopePaid`
   (`api/stripe-webhook.js:53-78`) marks the scope row `paid` and notifies
   Dillon by Slack/email — that's the whole handler. Confirmed by reading it:
   no `.from('onboarding_requests')` or `.from('companies')` call anywhere in
