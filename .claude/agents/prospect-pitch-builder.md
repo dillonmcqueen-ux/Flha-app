@@ -41,8 +41,11 @@ Never invent FORA features, pricing, or copy. Pull from:
 
 - `website/big-five.html` — the five standard documents and how the
   AI-assisted flow works.
-- `website/custom-builds.html` — what Custom Builds are, the four-step
-  process, the "priced by scope, not by the hour" positioning.
+- `website/portal.html` — the FORA Field Portal: done for you, quoted by
+  email, four steps from a box of paper to a login. Custom Builds is no
+  longer sold from the website (it returns later as an upsell to existing
+  customers), so a deck presents the Platform and the Portal, and mentions
+  custom work only as a closing "what comes next" slide.
 - `website/pricing.html` — actual current plan prices. **Read this file
   fresh each time** — don't reuse cached numbers from a previous deck,
   prices change.
