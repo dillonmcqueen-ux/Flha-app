@@ -1153,6 +1153,52 @@ Portal isn't a checkout-purchasable module yet — `portalScopePricing.js:11-13`
 says the monthly fee "would be entered into MODULES... when Portal ships as
 a real subscribable module," which is the trigger to re-open this question).
 
+### `portal_scope_requests.company_id` and `.stripe_subscription_id` (the paid scope becomes a company and a monthly bill)
+Placed 2026-10-19 against branch `split/portal-company-setup` (HEAD `3b30055`
+plus a small uncommitted follow-up; not merged). Read: `server-lib/portalCompanySetup.js`,
+`api/stripe-webhook.js`, `api/admin.js`, `src/AdminPanel.jsx`,
+`docs/schema/portal-scope-company-link-migration.sql`, `server-lib/platformBusiness.js`.
+Supersedes the "paid does not join `companies`" reading above in one respect:
+a manual, founder-clicked join now exists. The 2026-09-28 text is kept as written.
+
+| Link | Producer | Consumer | Key agrees? |
+|---|---|---|---|
+| scope to company | `provisionPortalCompany` inserts `companies` (`portalCompanySetup.js:~130-140`) and claims the scope with `update company_id ... where company_id is null` (`:149-153`); button `create_portal_company` (`api/admin.js:623`, `AdminPanel.jsx:571-588,1623`) | `list_portal_scopes` shows the code (`admin.js:602-621`); a second run finds the link and only repairs (`portalCompanySetup.js` else-branch after `:160`) | Yes. Both bigint `companies.id` (migration `:14`), unique partial index so one company per scope (`migration :17-18`) |
+| company to Stripe customer | `stripe_customer_id: scope.stripe_customer_id` on the new company (`portalCompanySetup.js:139`) | `syncSubscriptionToCompany` matches `companies.stripe_customer_id = subscription.customer` (`stripe-webhook.js:110`) | Yes. The scope's customer id is written at `scope-approval.js:145`. A pre-check refuses a customer another company already holds (`portalCompanySetup.js:~124-127`), because the sync would otherwise suspend or restore both |
+| scope to subscription | `ensurePortalSubscription` (`portalCompanySetup.js:203-239`), called from `handlePortalScopePaid` (`stripe-webhook.js:92`, `invoice.paid` at `:214`); `send_invoice`, `days_until_due` 7, `trial_end` 30 days out (`:216-218`), CAD from `monthly_fee_cents` (`:219`), idempotency keys per scope (`:210,222`) | Read back as the "already started" guard (`:204`) and carried to `companies.stripe_subscription_id/_status` (`:232-237`, or backfilled by `provisionPortalCompany` `:~183-190` when the company comes second) | Yes. Both orders (company first, or subscription first) end with the same two company columns |
+| subscription to suspend/restore | Stripe `customer.subscription.updated/deleted` (`stripe-webhook.js:213`) | `syncSubscriptionToCompany` suspends on `canceled/unpaid/incomplete_expired`, restores on `active/trialing` (`:47-48,101-103`) | Yes for those statuses. `past_due` is left alone on purpose (`:44-46`) |
+
+**The monthly fee is now billed.** Before this branch the proposal page showed
+"Monthly $X/mo" (`api/scope-approval.js:176`) and nothing in the repo created a
+subscription for it: `scope-approval.js:115-131` creates one setup invoice item
+and one invoice only, and the old `notifyPortalScopePaid` only stamped `paid`.
+That was a silent "shown but never billed" gap, never filed. It is closed in
+code on this branch, not in production until the branch merges and the
+migration is applied. Re-check: `grep -n "subscriptions.create" api/ server-lib/`
+should hit `portalCompanySetup.js:213` and `api/checkout.js` only.
+
+**Gating, checked.** The new company gets explicit `is_active: false` rows for every
+Platform key (`documentSettingsFor(companyId, [])`, `portalCompanySetup.js:68`;
+`pricing.js:233-240`). `BUILTIN_DOC_KEYS` (`api/customforms.js:136`, 13 keys)
+and `pricing.js` `docKeys` (13 keys across 7 modules) still match, so no key is
+missed. Portal itself still has no doc key (§5), and the Portal tab appears only
+once a `portal_documents` row exists (`server-lib/portalEnabled.js:38,46`), so a
+fresh Portal company correctly shows nothing until Dillon builds the first
+document. Not a break.
+
+**Open edges, filed in §4:** #55 (founder MRR counts a Portal company at the
+Platform base price), #56 (deleting the company leaves the subscription billing).
+Unverified, marked `?`: (a) the migration is not known to be applied live. The
+webhook now selects `company_id, stripe_subscription_id` (`stripe-webhook.js:65`)
+and `list_portal_scopes` selects them too (`admin.js:605`), so code deployed ahead
+of the migration would make every Portal `invoice.paid` throw, 500 and retry
+without stamping `paid` (the shape of closed #52). (b) Whether `invoice.paid` is
+enabled on the live Stripe endpoint, still a hand step per CLAUDE.md. (c) What
+Stripe does with an unpaid `send_invoice` subscription: only `canceled/unpaid`
+suspend a company (`stripe-webhook.js:47`), and `past_due` does not, so whether a
+Portal customer who never pays a monthly invoice is ever suspended depends on the
+Stripe Dashboard's failed-payment setting, which is not in the repo.
+
 ### `platform_events` (founder telemetry; producer side only, by design)
 Recorded 2026-09-29 against the **uncommitted** working tree on branch
 `platform-events-instrumentation`. Table `platform_events`
