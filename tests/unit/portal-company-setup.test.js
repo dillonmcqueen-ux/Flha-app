@@ -128,6 +128,19 @@ test('losing the claim race removes only the company this call created', async (
   assert.deepEqual(db.tables.companies.map((c) => c.id), [99], 'the other company is untouched, ours is gone');
 });
 
+test('a Stripe customer already used by another company is refused', async () => {
+  const db = makeDb({ portal_scope_requests: [scope()], companies: [{ id: 3, name: 'Standard', stripe_customer_id: 'cus_1' }] });
+  const r = await provisionPortalCompany(db, null, 's1');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 409);
+  assert.equal(db.tables.companies.length, 1);
+});
+
+test('a webhook invoice for a different customer is ignored', () => {
+  const src = readFileSync(new URL('../../api/stripe-webhook.js', import.meta.url), 'utf8');
+  assert.match(src, /invoice\.customer !== scope\.stripe_customer_id/);
+});
+
 test('the Owner comes from the contact, as a supervisor', () => {
   const o = portalOwnerFor({ contact_name: 'Sam Lee', contact_email: 'sam@prairie.example' });
   assert.equal(o.isOwner, true);

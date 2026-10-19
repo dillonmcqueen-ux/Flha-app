@@ -77,13 +77,20 @@ async function ensureOwner(supabaseAdmin, companyId, owner) {
   if (!existing || existing.length === 0) {
     const salt = genSalt();
     // Never surfaced: the Owner chooses their own PIN from the setup link.
-    const { error } = await supabaseAdmin.from('roster').insert({
+    const { data: made, error } = await supabaseAdmin.from('roster').insert({
       company_id: companyId, name: owner.name, role: owner.role, is_owner: true, active: true,
       pin_hash: hashPin(genPin(), salt), pin_salt: salt,
       email: owner.email ? encryptField(owner.email) : null,
       title: owner.title || null, departments: [], divisions: [],
-    });
+    }).select('id');
     if (error) return error;
+    // roster has no unique constraint on is_owner, so two runs at once could
+    // both pass the check above. Keep the lowest id and remove ours if we lost.
+    const { data: owners } = await supabaseAdmin.from('roster').select('id').eq('company_id', companyId).eq('is_owner', true).order('id', { ascending: true });
+    const myId = made?.[0]?.id;
+    if (myId != null && owners && owners.length > 1 && owners[0].id !== myId) {
+      await supabaseAdmin.from('roster').delete().eq('id', myId).eq('company_id', companyId);
+    }
   }
   const { error: rosterOnErr } = await supabaseAdmin.from('companies').update({ roster_enabled: true }).eq('id', companyId);
   return rosterOnErr || null;
@@ -112,6 +119,12 @@ export async function provisionPortalCompany(supabaseAdmin, stripe, scopeId) {
   let created = false;
 
   if (!companyId) {
+    // syncSubscriptionToCompany matches companies on stripe_customer_id, so two
+    // companies sharing one would suspend or restore each other.
+    if (scope.stripe_customer_id) {
+      const { data: shared } = await supabaseAdmin.from('companies').select('id').eq('stripe_customer_id', scope.stripe_customer_id).limit(1);
+      if (shared && shared.length > 0) return fail(409, 'Another company already uses this engagement\'s Stripe customer. Sort that out in Stripe before creating the company.');
+    }
     companyCode = await freeCompanyCode(supabaseAdmin, scope.client_name);
     if (!companyCode) return fail(500, "Couldn't generate a unique company code. Try again.");
     const accountNumber = await freeAccountNumber(supabaseAdmin);

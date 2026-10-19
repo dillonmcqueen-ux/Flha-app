@@ -67,6 +67,11 @@ async function handlePortalScopePaid(invoice) {
     .maybeSingle();
   if (findErr) throw new Error(`portal_scope_requests lookup failed: ${findErr.message}`);
   if (!scope) return; // the row is gone
+  // The metadata is ours, but a hand-made invoice could carry a copied id.
+  if (scope.stripe_customer_id && invoice.customer && invoice.customer !== scope.stripe_customer_id) {
+    console.error('invoice.paid customer does not match its Portal engagement:', scopeId, invoice.customer);
+    return;
+  }
 
   if (scope.status !== 'paid') {
     const { error: updateErr } = await supabaseAdmin
