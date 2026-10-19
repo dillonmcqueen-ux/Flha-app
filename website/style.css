@@ -887,3 +887,15 @@ footer{ border-top:1px solid var(--line); padding:64px 0 40px; }
 @media (prefers-reduced-motion: reduce){
   .wave i, .led.pulse, .glow{ animation:none !important; }
 }
+
+/* Two-product hub: each card carries its own pair of buttons, so the card
+   is a div (a link cannot contain links). */
+.hub-card{ display:flex; flex-direction:column; }
+.hub-card:hover{ transform:none; }
+.hub-actions{ display:flex; gap:12px; flex-wrap:wrap; margin-top:auto; padding-top:26px; }
+.hub-actions .cta-btn, .hub-actions .cta-ghost{ padding:12px 22px; font-size:14.5px; }
+.hub-help{ margin-top:28px; color:var(--muted); font-size:15.5px; }
+.hub-help a{ color:var(--orange); font-weight:600; border-bottom:1px solid var(--orange-dim); }
+
+/* Parent-company line in the footer, shown on every marketing page. */
+.foot-parent{ flex-basis:100%; margin:0; font-size:13px; color:var(--muted); opacity:.75; }

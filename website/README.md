@@ -7,15 +7,19 @@ app in this repo (`src/`, `api/`). No build step, no dependencies.
 
 Five marketing pages, each answering the next question a visitor has.
 
-- `index.html`: Home. The all-in-one pitch, the cost of the usual
-  multi-vendor stack versus one FORA plan, every built-in feature at a
-  glance, the Brain, and the founder.
+- `index.html`: Home, and the hub for the two products. Two equal cards, one
+  for the FORA Field Management Platform and one for the FORA Field Portal,
+  each with its own pair of buttons. The page does one job: send the visitor
+  to the right door.
 - `features.html`: Everything that is built, in detail. The interactive
   FLHA demo, all ten built-in document types, the supervisor dashboard,
   the Brain in full (`#brain` anchor), the platform underneath, and the
   security model.
-- `custom-builds.html`: What a custom build is versus a form builder, six
-  niche worked examples, how scoping actually happens, and pricing-by-scope.
+- `portal.html`: The FORA Field Portal. Done for you: a company sends its
+  existing paper forms and FORA builds them into one login. Sold by quote
+  only, through `quotes@forafieldsolutions.com` (a `mailto:` link, no
+  checkout, no published prices). Sections: `#paper`, `#how`, `#send`,
+  `#quote`.
 - `pricing.html`: The platform base fee, the module menu, the interactive
   calculator, the anti-enterprise statement, the cancel-any-time /
   seasonal-pause terms, and the market comparison tables. There is no plan
@@ -43,13 +47,34 @@ Five marketing pages, each answering the next question a visitor has.
   by the `legal-revision-date-updater` agent on substantive changes).
 - `style.css`: Shared styles for every page above.
 
-The four marketing pages share a category nav with dropdowns (Platform,
-Custom Builds, Pricing, Company). It is generated markup duplicated into
+The marketing pages share a category nav with dropdowns (Platform, Portal,
+Security, Company). It is generated markup duplicated into
 each page, since this site has no build step, so a nav change means editing
 every page. Sub-items anchor to section ids listed in `design.md`.
 - `icons.svg`: The single line-icon set. No emoji-as-icon anywhere.
 - `demo.js` / `demo-data.js`: The interactive FLHA demo on `features.html`.
   Pre-authored scenarios, no network requests.
+
+## The two products
+
+FORA Field Solutions is the parent company. It sells two standalone
+products, each complete without the other:
+
+- **FORA Field Management Platform** (short form: the Platform).
+  Self-serve, published pricing, Stripe checkout. Lives on `features.html`
+  and `pricing.html`.
+- **FORA Field Portal** (short form: the Portal). Done for you, quoted by
+  email. Lives on `portal.html`.
+
+Rules that keep them apart: never call the app login "the portal" (the app
+lives at `portal.forafieldsolutions.com`, which is only ever a link target);
+no prices on Portal pages; no "request a quote" on Platform pages; every
+marketing page footer carries the line "FORA Field Management Platform and
+FORA Field Portal are products of FORA Field Solutions." Custom Builds is no
+longer sold from this site, so the old `custom-builds.html` URL redirects to
+`portal.html` through `vercel.json` (a temporary redirect, because Custom
+Builds is expected to come back later as an upsell for existing customers).
+The `product-boundary-guard` agent checks these rules on every copy change.
 
 `what-is-fora.html`, `big-five.html` and `the-brain.html` were absorbed into
 `index.html` and `features.html` in the five-page rebuild. Footer links on
