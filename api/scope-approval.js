@@ -20,6 +20,7 @@ import Stripe from 'stripe';
 import { checkIpThrottle } from '../server-lib/ipThrottle.js';
 import { sendEmail } from '../server-lib/email.js';
 import { sendSlackNotification } from '../server-lib/slack.js';
+import { PORTAL_FIRST_INVOICE_DELAY_DAYS, PORTAL_INVOICE_DAYS_UNTIL_DUE } from '../server-lib/portalCompanySetup.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -64,7 +65,7 @@ function money(cents) {
 function pageShell({ title, body }) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)} — FORA</title>
+<title>${escapeHtml(title)} | FORA</title>
 <style>
   body { background:#0d0d0d; color:#f2f2f2; font-family:-apple-system,Inter,Segoe UI,sans-serif; margin:0; padding:0; }
   .wrap { max-width:640px; margin:0 auto; padding:48px 24px; }
@@ -123,7 +124,7 @@ export default async function handler(req, res) {
       customer: customer.id,
       currency: 'cad',
       amount: scope.setup_fee_cents,
-      description: `FORA Company Portal — setup (${scope.document_count} documents, ${scope.doc_band} band)`,
+      description: `FORA Company Portal setup (${scope.document_count} documents, ${scope.doc_band} band)`,
     });
 
     const invoice = await stripe.invoices.create({
@@ -164,11 +165,11 @@ export default async function handler(req, res) {
     return res.status(200).send(renderConfirmedPage({ ...scope, status: 'invoiced' }));
   } catch (e) {
     console.error('scope-approval approve failed:', scope.id, e.message);
-    return res.status(500).send('Something went wrong sending your invoice. FORA has been notified — we\'ll follow up directly.');
+    return res.status(500).send('Something went wrong sending your invoice. FORA has been notified and will follow up directly.');
   }
 }
 
-function renderScopePage(scope) {
+export function renderScopePage(scope) {
   if (scope.status !== 'sent') return renderConfirmedPage(scope);
   return pageShell({
     title: `Proposal for ${scope.client_name}`,
@@ -180,6 +181,7 @@ function renderScopePage(scope) {
         <div class="row"><span class="label">One-time setup</span><span class="value">${money(scope.setup_fee_cents)}</span></div>
         <div class="row"><span class="label">Monthly</span><span class="value">${money(scope.monthly_fee_cents)}/mo</span></div>
         <div class="row"><span class="label">Estimated timeline</span><span class="value">${escapeHtml(scope.timeline_weeks || 'TBD')}</span></div>
+        ${scope.monthly_fee_cents > 0 ? `<p class="fine">Monthly billing starts ${PORTAL_FIRST_INVOICE_DELAY_DAYS} days after your setup invoice is paid. After that you get an invoice each month, due within ${PORTAL_INVOICE_DAYS_UNTIL_DUE} days.</p>` : ''}
       </div>
       <form method="POST">
         <button type="submit">Approve Scope</button>
@@ -191,7 +193,7 @@ function renderScopePage(scope) {
 
 function renderConfirmedPage(scope) {
   const message = scope.status === 'paid'
-    ? 'Payment received — FORA will be in touch shortly to collect your documents and get started.'
+    ? 'Payment received. FORA will be in touch shortly to collect your documents and get started.'
     : 'Approved. An invoice for the setup fee has been sent to your email.';
   return pageShell({
     title: `Proposal for ${scope.client_name}`,

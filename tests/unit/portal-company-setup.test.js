@@ -291,3 +291,17 @@ test('the setup invoice pulls in its pending fee item, or it is created at $0 an
   const call = src.slice(start, src.indexOf('});', start));
   assert.match(call, /pending_invoice_items_behavior: 'include'/);
 });
+
+test('the proposal page says when the first monthly invoice arrives, with no em dashes', async () => {
+  process.env.SUPABASE_URL ||= 'http://localhost:54321';
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
+  process.env.STRIPE_SECRET_KEY ||= 'sk_test_placeholder';
+  const { renderScopePage } = await import('../../api/scope-approval.js');
+  const html = renderScopePage({ status: 'sent', client_name: 'Prairie', scope_summary: 'x', setup_fee_cents: 100000, monthly_fee_cents: 4500, timeline_weeks: '4 weeks' });
+  assert.match(html, new RegExp(`Monthly billing starts ${PORTAL_FIRST_INVOICE_DELAY_DAYS} days after your setup invoice is paid`));
+  assert.ok(!html.includes('\u2014'));
+  const noFee = renderScopePage({ status: 'sent', client_name: 'Prairie', scope_summary: 'x', setup_fee_cents: 100000, monthly_fee_cents: null });
+  assert.ok(!noFee.includes('Monthly billing starts'));
+  const confirmed = renderScopePage({ status: 'paid', client_name: 'Prairie' });
+  assert.ok(!confirmed.includes('\u2014'));
+});
