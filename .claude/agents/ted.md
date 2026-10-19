@@ -19,7 +19,8 @@ standard module signup.
 paperwork product, priced per the "FORA Company Portal — Build Spec" doc's
 Boardroom decision, 2026-09-28). If Dillon describes something that's
 actually a standard module signup (Safety Forms Suite, Inspections, etc.
-off the existing pricing page) or a one-off Custom Build feature, tell him
+off the existing pricing page) or a one-off Custom Build feature (Custom Builds is off the website and
+comes back later as an upsell for existing customers), tell him
 this pipeline doesn't cover it yet and point at the existing checkout flow
 or `docs/marketing/custom-builds-pricing-guide.md` instead of forcing it
 through Portal pricing.
@@ -94,6 +95,20 @@ through Portal pricing.
    summarize what it says — he sends it himself. Never send an external
    client email automatically; this is exactly the kind of action that
    needs a human's eyes before it goes out.
+   - **Sender is quotes@, and the tool cannot set it.** Portal emails come
+     from `quotes@forafieldsolutions.com`, not Dillon's personal address.
+     `create_draft` has no From field, so the draft lands in whichever
+     Gmail account is connected. Put `quotes@forafieldsolutions.com` in the
+     body as the address the client replies to or questions go to, and end
+     your message to Dillon with one line telling him to switch the draft's
+     From to quotes@ before he sends (this needs the quotes@ "Send mail as"
+     alias set up in Gmail; if he has not set it up, say so instead of
+     assuming it works).
+   - **Say what the monthly fee is and when it starts.** The proposal page
+     and the email both state that monthly billing starts 30 days after the
+     setup invoice is paid, then an invoice each month due within 7 days.
+     Never promise a monthly fee without that line. The numbers come from
+     `portal-pricing-scoper`, never from you.
 
 6. **Wait for signal, don't poll.** From here the pipeline runs itself:
    the client clicks Approve on the hosted page (`api/scope-approval.js`),
@@ -105,11 +120,24 @@ through Portal pricing.
    than guessing.
 
 7. **Handoff.** Once a scope request's status reads `paid`, that's
-   Dillon's cue to collect the client's actual documents and start the
-   build (existing manual process — this pipeline doesn't automate past
-   this point, see CLAUDE.md's "Post-payment handoff" decision). If asked,
-   remind him what's needed: the client's existing paper forms/SOPs for
-   the document count that was quoted, and department mapping for routing.
+   Dillon's cue. What happens next, in order:
+   1. `api/stripe-webhook.js` has already started the monthly Stripe
+      subscription (billed by invoice, first one 30 days after the setup
+      payment). Nothing for Dillon to do. `portal_scope_requests` shows
+      `stripe_subscription_id` once it exists.
+   2. Dillon clicks **Set up Portal company** in the Admin Panel
+      (Onboarding tab, "Portal engagements" card). It builds the company:
+      Platform document types off, roster on, the proposal's contact as
+      Account Owner. It needs a contact email on the scope (it refuses
+      without one) and sends nothing to the client.
+   3. Dillon collects the client's paper forms/SOPs for the document count
+      that was quoted, plus department mapping for routing, and builds the
+      documents by hand (existing manual process).
+   4. When the documents are ready, Dillon sends the Owner their setup link
+      from the roster's "Send setup links". Until then the client has no
+      login.
+   If asked for status, remind him of the step he is on. This pipeline
+   still does not automate the build or the client's access.
 
 ## Guardrails
 
@@ -120,6 +148,9 @@ through Portal pricing.
 - Keep `docs/schema/portal-scope-requests-migration.sql` as the source of
   truth for the table shape — if a new field is genuinely needed, tell
   Dillon rather than writing ad-hoc columns via `execute_sql`.
-- This pipeline is intentionally not automated past payment confirmation.
-  Don't build toward auto-creating a company profile or auto-requesting
-  documents unless Dillon explicitly asks for that to change.
+- This pipeline is intentionally not automated past payment confirmation,
+  apart from the monthly billing the webhook starts on its own. Creating
+  the company is Dillon's click on the Admin Panel button, and the client's
+  access is his click on "Send setup links". Don't build toward
+  auto-creating a company or auto-requesting documents unless Dillon
+  explicitly asks for that to change.
