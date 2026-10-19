@@ -4679,6 +4679,48 @@ Was built from the full company set (`patternsByEquipment(enriched)`). Now `equi
 
 **Verified 2026-10-08 (was `?`), read-only pass, no code change:** (1) **Analytics.** `Dashboard.jsx` `loadAll` (`:2683-2694`) feeds every Analytics input from list actions that all pass through `listVisibleRecords` / `listVisibleRecordsMulti`: FLHA `flhas.js:612`, near miss and incident `reports.js:481`, inspection, toolbox and daily `logs.js:781`, monthly records `monthly.js:529`, corrective actions `monthly.js:900`, custom documents `customforms.js:764`, fuel `fuellogs.js:326`. The client only filters by `company_id` (`Dashboard.jsx:4070-4077`), so the narrowing is server side. A scoped supervisor's Analytics totals shrink with their lists. Expected, same as Portal under #47. (2) **Maintenance status** (`Equipment Analytics` `maintenanceStatus`, `maintenance.js:139`) is the one input that is not narrowed: it reads every inspection and fuel reading for the company to compute due, overdue and current reading (`:195-240`) and returns equipment labels, numbers and the equipment's own service log, never inspection text. Equipment reference data, supervisor and admin only, behind the Maintenance module, so not a break. (3) **Brain.** Not a supervisor view and not scoped per viewer. `runCompanyBrainSummary` is a cron (`api/cron-company-brain-summary.js:39`) that writes one `company_profiles` row per company. The only reads are `get_company_profile` (`companydata.js:2337`, company scoped, returns industry, equipment summary, terminology notes and hazard emphasis, used as prompt context by the forms, `companyProfile.js:15`) and the founder-only Brain tab in `AdminPanel.jsx`. Company-wide by design. **Residual to decide, not filed:** the profile is built from every signal in the company, so a supervisor limited to one site gets prompt context learned partly from sites they cannot open. It is paraphrased emphasis and terminology, not records. Left as is unless Dillon says otherwise.
 
+### #55 - The founder's MRR counts a Portal company at the Platform base price (OPEN, filed 2026-10-19 on `split/portal-company-setup`, not approved)
+**What it costs:** the Admin Panel revenue estimate overstates by $60 (basic) or
+$140 (advanced) for every Portal engagement, and a Portal company's health
+score judges it against modules it never bought.
+**Evidence:** `provisionPortalCompany` sets `plan_tier` from the scope when it is
+`basic` or `advanced` (`server-lib/portalCompanySetup.js:138`). `platformBusiness.js`
+prices every live company with `estimateMonthly(c.plan_tier, modules)` (`:112`),
+and `estimateMonthly` returns `BASE[tier]` plus modules (`:41-43`, `BASE =
+{ basic: 60, advanced: 140 }` at `pricing.js:37`). A Portal company has zero
+modules, so it lands at `BASE`, not at its real fee (`PORTAL_MONTHLY_FEE`
+`{ 45, 100 }`, `portalScopePricing.js:~30`). The file's own header says it
+"does not include Company Portal engagements" (`platformBusiness.js:9-11`); that
+held only while Portal companies had no `plan_tier`. The tier is also what gives
+the company a seat cap, so dropping it is not free.
+**Fix would touch:** `platformBusiness.js` (skip or price a company with no bought
+module, or read the scope's `monthly_fee_cents` via `company_id`), plus its test.
+**Re-check:** `grep -n "estimateMonthly\|BASE\[" server-lib/platformBusiness.js`.
+
+### #56 - Deleting a Portal company leaves its monthly subscription billing (OPEN, filed 2026-10-19 on `split/portal-company-setup`, not approved)
+**What it costs:** a client's card-less monthly invoice keeps going out after the
+founder removes their company, and nothing in the product shows it.
+**Evidence:** the subscription is created in Stripe at `portalCompanySetup.js:213-223`.
+`delete_company` (`api/admin.js:698`) counts rows and deletes, and `admin.js` has
+no Stripe cancel call anywhere (`grep -n "subscriptions\.\(cancel\|update\|del\)" api/admin.js`
+returns nothing; the only `stripe` uses are `:8,38,503,626`). The link column is
+`on delete set null` (`portal-scope-company-link-migration.sql:14`), so the scope
+survives with `company_id` null and `stripe_subscription_id` set;
+`ensurePortalSubscription` then skips ("already started", `:204`) and the "Set up
+Portal company" button offers a fresh company, which would sit under the same
+Stripe customer. Same gap exists for checkout companies (not checked as a separate
+break), but this branch is the first to create a subscription outside checkout.
+**Fix would touch:** `delete_company` (cancel or warn on a live subscription), or
+refuse delete while `stripe_subscription_id` is set.
+**Re-check:** `grep -n "stripe" api/admin.js`.
+
+**Weak link, not numbered: the proposal never says when the first monthly invoice
+arrives.** Setup is invoiced on approval (`scope-approval.js:115-131`); the first
+monthly invoice goes out 30 days after payment (`portalCompanySetup.js:33,218`).
+The proposal page shows only "Monthly ... /mo" (`scope-approval.js:176`) and no
+`grep` hit for "30 days" in that file. Customer-facing wording, so
+`pricing-legal-consistency-reviewer`'s territory, not filed as a break.
+
 ## Known pending links (intentional, not breaks)
 
 A producer with no consumer **yet**, where the consumer is a scheduled phase
