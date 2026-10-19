@@ -25,7 +25,7 @@ import {
   generateBackupCodes,
   consumeBackupCode,
 } from '../server-lib/totp.js';
-import { provisionPortalCompany } from '../server-lib/portalCompanySetup.js';
+import { provisionPortalCompany, cancelPortalSubscriptionForCompany } from '../server-lib/portalCompanySetup.js';
 import { logAuditEvent } from '../server-lib/auditLog.js';
 import { loadPlatformOverview } from '../server-lib/platformOverview.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
@@ -756,6 +756,14 @@ export default async function handler(req, res) {
           error: `Couldn't delete: this company has ${parts.join(', ')}. Companies with submitted records can't be deleted.`,
         });
       }
+
+      // A Portal company's monthly subscription is billed to its Stripe
+      // customer, not to the company row, so deleting the row would leave the
+      // client invoiced forever (break #56). Cancel it first, and refuse the
+      // delete if it cannot be cancelled. Runs after the records guard so a
+      // refused delete cancels nothing.
+      const portalBilling = await cancelPortalSubscriptionForCompany(stripe, supabaseAdmin, companyId);
+      if (!portalBilling.ok) return res.status(502).json({ error: portalBilling.error });
 
       // No submitted records remain — safe to clean up company-scoped
       // config/settings. Children before parents where FK-constrained.

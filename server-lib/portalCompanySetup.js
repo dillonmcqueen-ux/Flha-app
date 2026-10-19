@@ -187,6 +187,7 @@ export async function provisionPortalCompany(supabaseAdmin, stripe, scopeId) {
         stripe_subscription_id: sub.id,
         stripe_subscription_status: sub.status,
       }).eq('id', companyId);
+      if (sub.status === 'canceled') warnings.push('This engagement\'s monthly billing was cancelled (the earlier company was deleted). Nothing is billing monthly now. Start a new subscription in Stripe.');
     } catch (e) {
       console.error('provisionPortalCompany: could not read the subscription:', e.message);
     }
@@ -236,4 +237,35 @@ export async function ensurePortalSubscription(stripe, supabaseAdmin, scope, now
     if (coErr) throw new Error(`companies subscription update failed: ${coErr.message}`);
   }
   return { started: true, subscriptionId: sub.id, firstInvoiceAt };
+}
+
+// Cancels the monthly subscription of the engagement a company was built for,
+// so deleting the company does not leave the client being invoiced. Nothing to
+// do when the company has no engagement or no subscription. Returns
+// { ok: true } or { ok: false, error }, and never throws: the caller refuses
+// the delete on ok: false rather than orphan a live subscription.
+export async function cancelPortalSubscriptionForCompany(stripe, supabaseAdmin, companyId) {
+  const { data: scopes, error } = await supabaseAdmin
+    .from('portal_scope_requests')
+    .select('id, stripe_subscription_id')
+    .eq('company_id', companyId);
+  if (error) return { ok: false, error: 'Could not check this company\'s Portal billing.' };
+  const subIds = (scopes || []).map((s) => s.stripe_subscription_id).filter(Boolean);
+  if (subIds.length === 0) return { ok: true, cancelled: 0 };
+  if (!stripe) return { ok: false, error: 'This company has Portal monthly billing but Stripe is not configured here, so it cannot be cancelled. Cancel it in Stripe first.' };
+  let cancelled = 0;
+  for (const id of subIds) {
+    try {
+      const sub = await stripe.subscriptions.retrieve(id);
+      if (sub.status !== 'canceled') {
+        await stripe.subscriptions.cancel(id);
+        cancelled += 1;
+      }
+    } catch (e) {
+      if (e?.code === 'resource_missing') continue; // already gone in Stripe
+      console.error('cancelPortalSubscriptionForCompany failed:', id, e.message);
+      return { ok: false, error: "Couldn't cancel this company's Portal monthly billing in Stripe, so nothing was deleted. Try again, or cancel it in Stripe first." };
+    }
+  }
+  return { ok: true, cancelled };
 }

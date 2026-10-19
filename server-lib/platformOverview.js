@@ -50,7 +50,7 @@ export const UNMEASURED_DOC_KEYS = ['equipment_reports', 'maintenance', 'equipme
 
 const dayKey = (d) => new Date(d).toISOString().slice(0, 10);
 
-export function buildPlatformOverview({ companies = [], docs = {}, roster = [], docSettings = [], onboarding = [], events = null, truncated = false } = {}, now = new Date()) {
+export function buildPlatformOverview({ companies = [], docs = {}, roster = [], docSettings = [], onboarding = [], events = null, truncated = false, portalFees = {} } = {}, now = new Date()) {
   const t = now.getTime();
   const since = (days) => t - days * DAY;
   const liveCompanies = companies.filter((c) => !c.suspended);
@@ -189,7 +189,7 @@ export function buildPlatformOverview({ companies = [], docs = {}, roster = [], 
     plans: { byTier, bySubscription },
     modules,
     perCompany,
-    business: buildBusinessMetrics({ companies, docs, roster, docSettings }, { typeByDocKey }, now),
+    business: buildBusinessMetrics({ companies, docs, roster, docSettings, portalFees }, { typeByDocKey }, now),
     // null means the telemetry table could not be read (not applied yet, or a
     // database error), which is different from an empty table.
     platformHealth: events === null ? { unavailable: true } : buildPlatformHealth({ events, companies }, now),
@@ -245,6 +245,18 @@ export async function loadPlatformOverview(supabaseAdmin, now = new Date(), { ro
   const onboarding = keep(await fetchAll(() => supabaseAdmin.from('onboarding_requests')
     .select('status, created_at').order('created_at'), rowCap));
 
+  // Portal companies are priced at the monthly fee their engagement was
+  // approved at, in dollars. A failure leaves them priced as Platform
+  // companies rather than taking the dashboard down.
+  const portalFees = {};
+  try {
+    const scopes = keep(await fetchAll(() => supabaseAdmin.from('portal_scope_requests')
+      .select('company_id, monthly_fee_cents').not('company_id', 'is', null).order('created_at'), rowCap));
+    for (const sc of scopes) portalFees[sc.company_id] = sc.monthly_fee_cents ? sc.monthly_fee_cents / 100 : 0;
+  } catch (e) {
+    console.error('portal scope fees read failed:', e.message);
+  }
+
   const docs = {};
   for (const { type, table } of DOC_SOURCES) {
     docs[type] = keep(await fetchAll(() => supabaseAdmin.from(table).select('company_id, created_at').order('created_at', { ascending: false }), rowCap));
@@ -284,5 +296,5 @@ export async function loadPlatformOverview(supabaseAdmin, now = new Date(), { ro
     console.error('platform_events read failed:', e.message);
   }
 
-  return buildPlatformOverview({ companies, docs, roster, docSettings, onboarding, events, truncated }, now);
+  return buildPlatformOverview({ companies, docs, roster, docSettings, onboarding, events, truncated, portalFees }, now);
 }

@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { makeDb } from './_fakeDb.js';
 import { ALL_DOC_KEYS } from '../../server-lib/pricing.js';
 import {
+  cancelPortalSubscriptionForCompany,
   provisionPortalCompany,
   ensurePortalSubscription,
   portalOwnerFor,
@@ -223,4 +224,63 @@ test('the admin actions are admin-only and never email the client', () => {
   const start = src.indexOf("if (action === 'create_portal_company')");
   const body = src.slice(start, src.indexOf("if (action === 'update_company_codes')"));
   assert.ok(!/sendEmail|issueAndEmailPinLink/.test(body));
+});
+
+// ---------------------------------------------------------------- break 56
+
+function stripeWithSubs(subs) {
+  const cancelled = [];
+  return {
+    cancelled,
+    subscriptions: {
+      retrieve: async (id) => { if (!subs[id]) { const e = new Error('No such subscription'); e.code = 'resource_missing'; throw e; } return { id, status: subs[id] }; },
+      cancel: async (id) => { cancelled.push(id); subs[id] = 'canceled'; return { id, status: 'canceled' }; },
+    },
+  };
+}
+
+test('break 56: deleting a Portal company cancels its monthly subscription', async () => {
+  const db = makeDb({ portal_scope_requests: [scope({ company_id: 5, stripe_subscription_id: 'sub_1' })] });
+  const stripe = stripeWithSubs({ sub_1: 'trialing' });
+  const r = await cancelPortalSubscriptionForCompany(stripe, db, 5);
+  assert.deepEqual(r, { ok: true, cancelled: 1 });
+  assert.deepEqual(stripe.cancelled, ['sub_1']);
+});
+
+test('a company with no engagement, or an already cancelled subscription, cancels nothing', async () => {
+  const db = makeDb({ portal_scope_requests: [scope({ company_id: 5, stripe_subscription_id: 'sub_1' })] });
+  const stripe = stripeWithSubs({ sub_1: 'canceled' });
+  assert.deepEqual(await cancelPortalSubscriptionForCompany(stripe, db, 5), { ok: true, cancelled: 0 });
+  assert.deepEqual(await cancelPortalSubscriptionForCompany(stripe, db, 77), { ok: true, cancelled: 0 });
+  assert.equal(stripe.cancelled.length, 0);
+});
+
+test('a subscription already gone in Stripe does not block the delete', async () => {
+  const db = makeDb({ portal_scope_requests: [scope({ company_id: 5, stripe_subscription_id: 'sub_gone' })] });
+  assert.equal((await cancelPortalSubscriptionForCompany(stripeWithSubs({}), db, 5)).ok, true);
+});
+
+test('a Stripe failure refuses the delete instead of leaving a live subscription', async () => {
+  const db = makeDb({ portal_scope_requests: [scope({ company_id: 5, stripe_subscription_id: 'sub_1' })] });
+  const stripe = { subscriptions: { retrieve: async () => { throw new Error('network'); } } };
+  const quiet = console.error; console.error = () => {};
+  const r = await cancelPortalSubscriptionForCompany(stripe, db, 5);
+  console.error = quiet;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /nothing was deleted/);
+});
+
+test('with billing on record but no Stripe client, the delete is refused', async () => {
+  const db = makeDb({ portal_scope_requests: [scope({ company_id: 5, stripe_subscription_id: 'sub_1' })] });
+  assert.equal((await cancelPortalSubscriptionForCompany(null, db, 5)).ok, false);
+});
+
+test('delete_company cancels billing after the records guard and before any cleanup', () => {
+  const src = readFileSync(new URL('../../api/admin.js', import.meta.url), 'utf8');
+  const start = src.indexOf("if (action === 'delete_company')");
+  const body = src.slice(start, start + 9000);
+  const guard = body.indexOf('Companies with submitted records');
+  const cancel = body.indexOf('cancelPortalSubscriptionForCompany');
+  assert.ok(guard > 0 && cancel > guard);
+  assert.ok(cancel < body.indexOf('cleanupSteps'));
 });
