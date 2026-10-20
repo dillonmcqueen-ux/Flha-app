@@ -20,9 +20,7 @@ See pricing on the site.
 **Draft:**
 Generic template apps hand you a blank page and call it a system.
 
-Field work isn't blank. Your equipment, your sites and your crew should already be in the form when you open it.
-
-That's the difference.
+Field work isn't blank. Your forms shouldn't be either.
 
 **Image idea:** Attitude layer, stencil style. Skeleton foreman with folded arms next to a blank clipboard. One line of text: "Blank forms aren't a system."
 **Call to action:** See pricing.
@@ -42,7 +40,7 @@ We turn your own documents into a digital login your crew can use from a phone. 
 **Draft:**
 Audit day shouldn't mean digging through a box.
 
-If your paperwork lives in binders, finding last March's inspection is a scavenger hunt. Digital forms are searchable the second they're filed.
+Binders mean finding last March's inspection is a scavenger hunt. Nobody should have to audit that way.
 
 **Image idea:** Primary brand look. Split image, a sagging binder on the left and a clean phone screen on the right. Made-up form.
 **Call to action:** Request a quote at quotes@forafieldsolutions.com
@@ -50,7 +48,7 @@ If your paperwork lives in binders, finding last March's inspection is a scaveng
 ## 5. LinkedIn (Dillon's profile), Thursday
 
 **Draft:**
-I've run heavy equipment for 15 years. Every site I've been on had the same problem: the safety paperwork got done, then went in a box nobody opened.
+I've run heavy equipment for 15 years. On a lot of sites I've worked, the problem was the same: the safety paperwork got done, then went in a box nobody opened.
 
 So I built FORA. Not a template builder. Something that uses those documents.
 
