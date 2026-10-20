@@ -329,7 +329,7 @@ that. Neither one publishes or sends anything; Dillon does that himself.
 
 | Agent | Job |
 |---|---|
-| `social-content-writer` | Writes a week of drafts for the FORA Field Solutions Facebook page (parent brand and Platform, 3 posts a week), the FORA Field Portal Facebook page (1 to 2 a week) and Dillon's personal LinkedIn (1 to 2 a week). Saves them under `docs/marketing/social/`. |
+| `social-content-writer` | Writes a week of drafts for the FORA Field Management Platform Facebook page (the all-in-one Platform, 2 posts a week), the FORA Field Solutions Facebook page (the Portal, turning a company's own documents digital, 2 posts a week) and Dillon's personal LinkedIn (1 to 2 a week). Saves them under `docs/marketing/social/`. |
 | `outreach-prospector` | Builds about 10 target businesses a week from public business information into Dillon's Google Sheet, picks the Platform or Portal door for each, and creates Gmail **drafts** only. It has no send tool. Cold email in Canada is covered by the anti-spam law, so until a lawyer has confirmed the rules the agent leans on walk in and phone first contact and puts a reminder banner on every email draft. |
 
 Run `brand-voice-reviewer` over anything either agent produces before Dillon
