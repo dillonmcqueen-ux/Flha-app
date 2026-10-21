@@ -63,7 +63,7 @@ async function call(body) {
   return { ok: res.ok, data };
 }
 
-export default function SentDocuments({ token, companyId, roster = [] }) {
+export default function SentDocuments({ token, companyId }) {
   const scope = companyId ? { companyId } : {};
 
   // ── Send form ──
@@ -86,10 +86,16 @@ export default function SentDocuments({ token, companyId, roster = [] }) {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
 
-  const people = useMemo(
-    () => roster.filter((m) => m.active && m.role !== "auditor").sort((a, b) => String(a.name).localeCompare(String(b.name))),
-    [roster]
-  );
+  // Only the people this sender may actually send to. The server decides.
+  const [people, setPeople] = useState([]);
+  useEffect(() => {
+    let live = true;
+    call({ action: "list_sendable_people", token, ...scope }).then(({ ok, data }) => {
+      if (live && ok) setPeople(data.people || []);
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, companyId]);
   const visiblePeople = useMemo(() => {
     const q = search.trim().toLowerCase();
     return q ? people.filter((m) => String(m.name).toLowerCase().includes(q)) : people;

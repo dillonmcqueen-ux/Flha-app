@@ -25,6 +25,7 @@ const LIST_LIMIT = 500;
 
 export const SENT_DOC_ACTIONS = new Set([
   'create_sent_document_upload_url',
+  'list_sendable_people',
   'send_document',
   'list_sent_documents',
   'open_sent_document',
@@ -155,6 +156,24 @@ export async function handleSentDocument({ supabase, session, companyId: rawComp
     const result = await createUploadUrl(supabase, SENT_DOCS_BUCKET, `originals/${base}`, companyId);
     if (result.error) return fail(400, result.error);
     return { status: 200, body: { ok: true, path: result.path, uploadToken: result.uploadToken, receipt: result.receipt } };
+  }
+
+  // ── The people this sender may pick: the same rule send_document applies,
+  // so the picker never offers someone the server would refuse.
+  if (action === 'list_sendable_people') {
+    if (isWorker) return fail(403, 'Not allowed.');
+    const { data, error } = await supabase
+      .from('roster')
+      .select('id, name, role, departments, divisions, default_site_id')
+      .eq('company_id', companyId)
+      .eq('active', true)
+      .neq('role', 'auditor')
+      .order('name', { ascending: true });
+    if (error) return fail(500, 'Could not load the roster.');
+    const people = (data || [])
+      .filter((p) => senderMayTarget(actor, p))
+      .map(({ id, name, role }) => ({ id, name, role }));
+    return { status: 200, body: { people } };
   }
 
   // ── Step 2: record one row per recipient ────────────────────────────────

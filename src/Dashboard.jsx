@@ -3477,7 +3477,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   };
 
   useEffect(() => {
-    if ((activeTab !== "roster" && activeTab !== "sentdocs") || !selectedCompany) return;
+    if (activeTab !== "roster" || !selectedCompany) return;
     setRosterRevealedPin(null);
     loadRosterList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6602,7 +6602,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
         {activeTab === "safetycustomdocs" && TAB_VISIBLE.safetycustomdocs && renderCustomDocsTab(companySafetyCustomDocs, "safetycustomdocs")}
         {activeTab === "sentdocs" && TAB_VISIBLE.sentdocs && (
-          <SentDocuments token={token} companyId={selectedCompany} roster={rosterList} />
+          <SentDocuments token={token} companyId={selectedCompany} />
         )}
 
         {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}

@@ -157,3 +157,29 @@ test('a company id that is not a plain positive integer is refused', async () =>
     assert.equal(out.status, 400, String(bad));
   }
 });
+
+test('list_sendable_people returns only the people the sender may reach', async () => {
+  const rows = [
+    { id: 1, name: 'Same dept', role: 'worker', departments: ['safety'], divisions: [], default_site_id: null },
+    { id: 2, name: 'Other dept', role: 'worker', departments: ['hr'], divisions: [], default_site_id: null },
+  ];
+  const db = {
+    from(table) {
+      const q = {};
+      q.select = () => q; q.eq = () => q; q.neq = () => q;
+      q.order = () => Promise.resolve({ data: table === 'roster' ? rows : [], error: null });
+      q.in = () => q;
+      q.limit = () => Promise.resolve({
+        data: [{ id: 10, role: 'supervisor', is_owner: false, departments: ['safety'], divisions: [], default_site_id: null, company_id: 5 }],
+        error: null,
+      });
+      return q;
+    },
+  };
+  const out = await handleSentDocument({
+    supabase: db, session: { role: 'supervisor', userId: 10, companyId: 5 }, companyId: 5,
+    action: 'list_sendable_people', body: {},
+  });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.deepEqual(out.body.people.map((p) => p.id), [1]);
+});
