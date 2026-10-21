@@ -33,6 +33,21 @@ test('decodeSignatureDataUrl accepts a PNG and rejects everything else', () => {
   assert.ok(decodeSignatureDataUrl(`data:image/png;base64,${huge.toString('base64')}`).error);
 });
 
+test('decodeSignatureDataUrl rejects a PNG that declares an oversized canvas', () => {
+  const header = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+  header.writeUInt32BE(13, 8); header.write('IHDR', 12, 'ascii');
+  header.writeUInt32BE(60000, 16); header.writeUInt32BE(60000, 20);
+  assert.ok(decodeSignatureDataUrl(`data:image/png;base64,${header.toString('base64')}`).error);
+});
+
+test('an encrypted or oversized PDF is refused rather than signed', async () => {
+  const { PDFDocument: P } = await import('pdf-lib');
+  const big = await P.create();
+  for (let i = 0; i < 501; i++) big.addPage([100, 100]);
+  await assert.rejects(appendSignaturePage({ originalBytes: Buffer.from(await big.save()), signerName: 'A', title: 'T', mode: 'read' }), /more than 500 pages/);
+});
+
 test('a signed copy is the original pages plus one record page', async () => {
   const original = await samplePdf(2);
   const out = await appendSignaturePage({

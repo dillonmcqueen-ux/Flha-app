@@ -13,6 +13,11 @@ import crypto from 'crypto';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 export const MAX_SIGNATURE_BYTES = 300 * 1024;
+// A tiny, highly compressed PNG can declare a huge canvas and make the decoder
+// allocate for it. The pad draws 600x180, so this is generous.
+export const MAX_SIGNATURE_WIDTH = 2000;
+export const MAX_SIGNATURE_HEIGHT = 1000;
+export const MAX_PDF_PAGES = 500;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export function sha256Hex(bytes) {
@@ -30,6 +35,13 @@ export function decodeSignatureDataUrl(dataUrl) {
   const bytes = Buffer.from(match[1], 'base64');
   if (bytes.length === 0 || bytes.length > MAX_SIGNATURE_BYTES) return { error: 'That signature is not valid. Clear it and sign again.' };
   if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) return { error: 'That signature is not valid. Clear it and sign again.' };
+  // IHDR is the first chunk: width at byte 16, height at byte 20, big endian.
+  if (bytes.length < 24) return { error: 'That signature is not valid. Clear it and sign again.' };
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width < 1 || height < 1 || width > MAX_SIGNATURE_WIDTH || height > MAX_SIGNATURE_HEIGHT) {
+    return { error: 'That signature is not valid. Clear it and sign again.' };
+  }
   return { bytes };
 }
 
@@ -60,7 +72,10 @@ function formatUtc(date) {
  */
 export async function appendSignaturePage({ originalBytes, signerName, title, mode, signatureBytes, companyName = '', signedAt = new Date() }) {
   const originalSha256 = sha256Hex(originalBytes);
-  const doc = await PDFDocument.load(originalBytes, { ignoreEncryption: true });
+  // No ignoreEncryption: an encrypted PDF fails here, so we never hand back a
+  // "signed" copy whose original pages are unreadable.
+  const doc = await PDFDocument.load(originalBytes);
+  if (doc.getPageCount() > MAX_PDF_PAGES) throw new Error(`PDF has more than ${MAX_PDF_PAGES} pages`);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
@@ -88,7 +103,7 @@ export async function appendSignaturePage({ originalBytes, signerName, title, mo
   y -= 10;
 
   line(mode === 'sign' ? 'Signed by' : 'Read and acknowledged by', { size: 9, color: grey, gap: 13 });
-  line(signerName, { size: 14, face: bold, gap: 24 });
+  line(String(signerName || '').slice(0, 70), { size: 14, face: bold, gap: 24 });
 
   line('Date and time', { size: 9, color: grey, gap: 13 });
   line(formatUtc(signedAt), { size: 12, gap: 26 });
