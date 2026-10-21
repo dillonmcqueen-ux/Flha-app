@@ -1,8 +1,9 @@
 -- docs/schema/sent-documents-migration.sql
 --
--- Send & Sign, PR 1 of 6. NOT YET APPLIED: nothing reads or writes these
--- objects yet. Apply in the Supabase dashboard SQL editor (or
--- mcp__Supabase__apply_migration) only with Dillon's yes.
+-- Send & Sign, PR 1 of 6. APPLIED to the live FORA Supabase project
+-- (wzyvbtzxxdcxgvbkcqmt) via mcp__Supabase__apply_migration, migration name
+-- "sent_documents_schema", 2026-10-21. Verified after applying: RLS on, no
+-- policies, bucket private with the PDF-only and 20 MB limits.
 --
 -- A supervisor uploads a PDF, sends it to one or more roster members, and
 -- each recipient either signs it (mode 'sign') or taps "Got it" (mode
