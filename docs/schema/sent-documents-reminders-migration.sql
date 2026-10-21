@@ -1,6 +1,8 @@
 -- docs/schema/sent-documents-reminders-migration.sql
 --
--- Send & Sign, overdue reminders. NOT YET APPLIED. Additive and nullable:
+-- Send & Sign, overdue reminders. APPLIED to the live FORA Supabase project
+-- (wzyvbtzxxdcxgvbkcqmt) via mcp__Supabase__apply_migration, migration name
+-- "sent_documents_reminders", 2026-10-21. Additive and nullable:
 -- nothing existing changes, and server-lib/sentDocumentsSweep.js does nothing
 -- (and logs once) until the column exists, so the code can ship ahead of this.
 --
