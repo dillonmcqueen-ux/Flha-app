@@ -149,3 +149,11 @@ test('a worker cannot send, upload or cancel', async () => {
     assert.equal(out.status, 403, action);
   }
 });
+
+test('a company id that is not a plain positive integer is refused', async () => {
+  const db = fakeSupabase({ inserted: [], rosterRows: [] });
+  for (const bad of ['5/../9', '0', -1, '1e3', null, undefined, '5 ']) {
+    const out = await handleSentDocument({ supabase: db, session: { role: 'admin' }, companyId: bad, action: 'create_sent_document_upload_url', body: { filename: 'a.pdf' } });
+    assert.equal(out.status, 400, String(bad));
+  }
+});

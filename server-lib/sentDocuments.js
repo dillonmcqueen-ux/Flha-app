@@ -21,6 +21,7 @@ export const MODES = ['sign', 'read'];
 export const MAX_RECIPIENTS = 100;
 const MAX_TITLE = 200;
 const MAX_NOTE = 1000;
+const LIST_LIMIT = 500;
 
 export const SENT_DOC_ACTIONS = new Set([
   'create_sent_document_upload_url',
@@ -134,7 +135,10 @@ async function supervisorMaySee(supabase, companyId, actor, row) {
   return !!(data && data[0] && senderMayTarget(actor, data[0]));
 }
 
-export async function handleSentDocument({ supabase, session, companyId, action, body }) {
+export async function handleSentDocument({ supabase, session, companyId: rawCompanyId, action, body }) {
+  // A founder session names the company in the request body. It goes into
+  // storage paths and receipts, so it must be a plain positive integer.
+  const companyId = /^[1-9][0-9]*$/.test(String(rawCompanyId ?? '')) ? Number(rawCompanyId) : null;
   if (!companyId) return fail(400, 'Missing company.');
   const { actor, error: actorError } = await loadActor(supabase, session);
   if (actorError) return fail(503, 'Connection error. Please try again.');
@@ -182,7 +186,7 @@ export async function handleSentDocument({ supabase, session, companyId, action,
 
     let senderName = 'FORA';
     if (actor.rosterId != null) {
-      const { data: me } = await supabase.from('roster').select('name').eq('id', actor.rosterId).limit(1);
+      const { data: me } = await supabase.from('roster').select('name').eq('id', actor.rosterId).eq('company_id', companyId).limit(1);
       senderName = (me && me[0] && me[0].name) || '';
     }
 
@@ -214,7 +218,9 @@ export async function handleSentDocument({ supabase, session, companyId, action,
       .select(ROW_COLUMNS)
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
-      .limit(500);
+      // A scoped supervisor is filtered after the read, so read deeper to
+      // keep in-scope documents from falling off the end.
+      .limit(isWorker || actor.bypass ? LIST_LIMIT : LIST_LIMIT * 4);
     if (isWorker) {
       query = query.eq('roster_id', session.userId).neq('status', 'cancelled');
     } else {
@@ -236,6 +242,7 @@ export async function handleSentDocument({ supabase, session, companyId, action,
         (actor.rosterId != null && Number(r.sent_by_roster_id) === actor.rosterId)
         || (byId.has(Number(r.roster_id)) && senderMayTarget(actor, byId.get(Number(r.roster_id)))));
     }
+    rows = rows.slice(0, LIST_LIMIT);
     const names = await nameMap(supabase, companyId, [...new Set(rows.map((r) => Number(r.roster_id)))]);
     return { status: 200, body: { documents: rows.map((r) => shape(r, names, now)) } };
   }
@@ -259,6 +266,9 @@ export async function handleSentDocument({ supabase, session, companyId, action,
       row.status = 'opened';
     }
     const path = row.signed_path || row.original_path;
+    // Every stored path was issued under this company's prefix. A row that
+    // says otherwise is inert rather than signed.
+    if (!String(path).startsWith(`${companyId}/`)) return fail(404, 'Not found.');
     const { data: signed } = await supabase.storage.from(SENT_DOCS_BUCKET).createSignedUrl(path, 3600);
     return { status: 200, body: { document: shape(row, new Map(), now), fileUrl: signed?.signedUrl || null } };
   }
