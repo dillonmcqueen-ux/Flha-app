@@ -583,7 +583,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             </div>
             <div style={{ fontSize: 13, color: C.text.muted, marginTop: 4 }}>{cat.blurb}</div>
           </div>
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
             {cat.builtins.map(renderItemCard)}
             {cat.forms.map(renderFormCard)}
           </div>
@@ -821,7 +821,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: C.text.muted, marginBottom: 8 }}>
               Assigned to you
             </div>
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
               {assignedItems.map(it => (
                 <div key={it.key} style={s.card(it.accent, true)} onClick={it.open}>
                   <div style={s.iconTile(it.accent)}>{it.iconNode}</div>
@@ -838,7 +838,10 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           </div>
         )}
 
-        <div style={{ display: "grid", gap: 12 }}>
+        {/* minmax(0, 1fr): a bare grid column sizes to its widest child's
+            min-content, so the long no-wrap category blurbs pushed every card
+            (and the page) wider than a phone screen. */}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
           {visibleCategories.map(cat => {
             const Icon = cat.icon;
             const items = [...cat.builtins.map(d => d.title), ...cat.forms.map(f => f.title)];
@@ -861,7 +864,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
                   <div style={{ fontFamily: FONT.heading, fontWeight: 700, fontSize: 19, color: C.text.primary, letterSpacing: "-0.01em" }}>
                     {cat.label}
                   </div>
-                  <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 2, lineHeight: 1.4, overflowWrap: "anywhere" }}>
                     {items.join(" · ")}
                   </div>
                 </div>
