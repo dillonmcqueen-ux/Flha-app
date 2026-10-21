@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Mail, Phone, HardHat, CircleUserRound, ShieldCheck, MapPin, Building2, Crown } from "lucide-react";
 import TimeClockMap from "./TimeClockMap";
+import ProfileSentDocuments from "./ProfileSentDocuments.jsx";
 import CollapsibleGroup from "./CollapsibleGroup";
 import { colors as C, radius as RAD, shadow as SHAD } from "./theme";
 import { SUGGESTED_JOB_TITLES } from "../server-lib/jobTitles";
@@ -26,6 +27,8 @@ const rowBtn = (tone) => ({
 // whichever tab it was opened from.
 export default function WorkerProfileDrawer({
   open, loading, error, profile, certifications, certsModuleActive,
+  // Send & Sign: the module switch and what the list call needs.
+  sentDocsActive = false, token = null, companyId = null,
   onClose, onSave, saving, saveError, onToggleActive, togglingActive,
   // Owner or founder. Everyone else sees the structural fields read-only.
   canManage = false, departments = [], divisions = [], sites = [],
@@ -247,6 +250,8 @@ export default function WorkerProfileDrawer({
                 )}
               </div>
             )}
+
+            {sentDocsActive && token && member && <ProfileSentDocuments token={token} companyId={companyId} rosterId={member.id} />}
 
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.text.primary, marginBottom: 8 }}>Signed Documents ({(profile.documents || []).length})</div>

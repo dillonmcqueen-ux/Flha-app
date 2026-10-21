@@ -140,7 +140,8 @@ export default function SentDocuments({ token, companyId }) {
         dueAt: dueAt || null, rosterIds: [...picked],
       });
       if (!ok) { setFormError(data.error || "Could not send the document."); setSending(false); return; }
-      setSentMessage(`Sent to ${data.sent} ${data.sent === 1 ? "person" : "people"}.`);
+      const missing = data.noEmail ? ` ${data.noEmail} ${data.noEmail === 1 ? "has" : "have"} no email on file and will see it when they sign in.` : "";
+      setSentMessage(`Sent to ${data.sent} ${data.sent === 1 ? "person" : "people"}. ${data.emailed} emailed.${missing}`);
       setFile(null); setTitle(""); setNote(""); setDueAt(""); setPicked(new Set());
       await load();
     } catch (e) {

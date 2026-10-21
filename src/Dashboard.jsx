@@ -8254,6 +8254,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         profile={profileData}
         certifications={employeeDirectory.find(e => e.id === profileRosterId)?.certifications}
         certsModuleActive={isDocActive("certifications")}
+        sentDocsActive={TAB_VISIBLE.sentdocs === true}
+        token={token}
+        companyId={selectedCompany}
         onClose={closeWorkerProfile}
         onSave={saveWorkerProfile}
         saving={savingProfile}

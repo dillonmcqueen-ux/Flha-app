@@ -14,6 +14,7 @@ import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { SENT_DOC_ACTIONS, handleSentDocument } from '../server-lib/sentDocuments.js';
+import { siteOrigin } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -163,6 +164,7 @@ export default async function handler(req, res) {
         companyId: resolveCompanyId(session, req.body.companyId),
         action,
         body: req.body,
+        origin: siteOrigin(req),
       });
       return res.status(result.status).json(result.body);
     }

@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { sendEmail } from '../server-lib/email.js';
 import { runDigest } from '../server-lib/notifyDigest.js';
 import { alertOverdueUnsigned, closeStaleUnsigned } from '../server-lib/unsignedSweep.js';
+import { remindOverdueSentDocuments } from '../server-lib/sentDocumentsSweep.js';
 import { alertOverdueUnsignedEngine, closeStaleUnsignedEngine, escalateStalePending, retryFailedFollowUps } from '../server-lib/documentEngine/sweeps.js';
 import { recordPlatformEvent } from '../server-lib/platformEvents.js';
 import { encryptionKeyProblem } from '../server-lib/fieldCrypto.js';
@@ -57,6 +58,8 @@ export default async function handler(req, res) {
   const engineReview = hourly ? await escalateStalePending(supabaseAdmin, { sendEmail }) : { escalated: 0, emailed: 0, failed: 0 };
   // A record whose escalations, notifications or Brain signal failed when it was filed is tried again.
   if (hourly) await retryFailedFollowUps(supabaseAdmin, { sendEmail });
+  // Send & Sign: one reminder per document that is past due and still open.
+  if (hourly) await remindOverdueSentDocuments(supabaseAdmin, { sendEmail, origin: 'https://portal.forafieldsolutions.com' });
   const closed = (await closeStaleUnsigned(supabaseAdmin)) + (await closeStaleUnsignedEngine(supabaseAdmin));
   const failed = result.failed + alerts.failed + engineAlerts.failed + engineReview.failed;
   await recordPlatformEvent(supabaseAdmin, {

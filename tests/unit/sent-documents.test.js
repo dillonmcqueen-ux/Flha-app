@@ -88,6 +88,7 @@ function fakeSupabase({ rosterRows, inserted }) {
   return {
     from(table) {
       if (table === 'roster') return chain(rosterRows);
+      if (table === 'companies') return chain([{ name: 'ABC Earthworks Company' }]);
       if (table === 'sent_documents') {
         return { insert(rows) { inserted.push(...rows); return { select: () => Promise.resolve({ data: rows.map((_, i) => ({ id: i + 1 })), error: null }) }; } };
       }
@@ -193,4 +194,91 @@ test('Send & Sign is a standalone, priced module with its own document key', asy
   assert.deepEqual(resolveModules('sendsign').modules, ['sendsign']);
   assert.equal(quote('basic', ['sendsign']).monthly, 80);
   assert.equal(quote('advanced', ['sendsign']).monthly, 185);
+});
+
+// ── email on send, and the overdue sweep ──────────────────────────────────
+
+test('buildSentEmail names the document and what to do, without an em dash', async () => {
+  const { buildSentEmail } = await import('../../server-lib/sentDocuments.js');
+  const mail = buildSentEmail({ senderName: 'Pat', companyName: 'ABC Earthworks Company', title: 'Winter driving', mode: 'sign', dueAt: '2026-11-01T12:00:00Z', origin: 'https://x.test' });
+  assert.match(mail.subject, /Pat sent you a document to sign/);
+  assert.match(mail.text, /"Winter driving"/);
+  assert.match(mail.text, /due 2026-11-01/);
+  assert.match(mail.text, /https:\/\/x\.test/);
+  assert.equal(/—/.test(mail.subject + mail.text), false);
+});
+
+test('send_document emails people with an address and counts the ones without', async () => {
+  const supa = fakeSupabase({ rosterRows: [], inserted: [] });
+  const { receipt } = await createUploadUrl(supa, 'sent-documents', 'originals/a.pdf', 5);
+  const sent = [];
+  const rows = [{ id: 3, name: 'A', email: 'a@example.com', departments: [], divisions: [], default_site_id: null }, { id: 4, name: 'B', email: null, departments: [], divisions: [], default_site_id: null }];
+  const db = fakeSupabase({ inserted: [], rosterRows: rows });
+  const out = await handleSentDocument({
+    supabase: db, session: { role: 'admin' }, companyId: 5, action: 'send_document', body: { ...base, receipt },
+    sendEmail: async (m) => { sent.push(m); }, origin: 'https://x.test',
+  });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.equal(out.body.emailed, 1);
+  assert.equal(out.body.noEmail, 1);
+  assert.equal(sent[0].to, 'a@example.com');
+});
+
+test('a failing mail provider never fails the send', async () => {
+  const supa = fakeSupabase({ rosterRows: [], inserted: [] });
+  const { receipt } = await createUploadUrl(supa, 'sent-documents', 'originals/a.pdf', 5);
+  const rows = [{ id: 3, name: 'A', email: 'a@example.com', departments: [], divisions: [], default_site_id: null }, { id: 4, name: 'B', email: 'b@example.com', departments: [], divisions: [], default_site_id: null }];
+  const out = await handleSentDocument({
+    supabase: fakeSupabase({ inserted: [], rosterRows: rows }), session: { role: 'admin' }, companyId: 5, action: 'send_document',
+    body: { ...base, receipt }, sendEmail: async () => { throw new Error('down'); },
+  });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.sent, 2);
+  assert.equal(out.body.emailed, 0);
+});
+
+test('the overdue sweep reminds once per person, skips suspended and unlicensed companies, and hands back on failure', async () => {
+  const { remindOverdueSentDocuments, buildReminderEmail } = await import('../../server-lib/sentDocumentsSweep.js');
+  const docRows = [
+    { id: 1, company_id: 5, roster_id: 3 }, { id: 2, company_id: 5, roster_id: 3 },
+    { id: 3, company_id: 6, roster_id: 7 },   // suspended
+    { id: 4, company_id: 8, roster_id: 9 },   // module off
+  ];
+  const claimed = []; const handedBack = [];
+  const db = {
+    from(table) {
+      const q = { f: {} };
+      q.select = () => q; q.in = (k, v) => { q.f[k] = v; return q; }; q.eq = (k, v) => { q.f[k] = v; return q; };
+      q.is = () => q; q.not = () => q; q.lt = () => q; q.order = () => q;
+      q.update = (patch) => { q.patch = patch; return q; };
+      q.limit = () => {
+        if (table === 'sent_documents') return Promise.resolve({ data: docRows, error: null });
+        if (table === 'roster') return Promise.resolve({ data: [{ id: q.f.id, name: 'Dana', email: 'dana@example.com', active: true }], error: null });
+        return Promise.resolve({ data: [], error: null });
+      };
+      q.then = (resolve) => {
+        if (table === 'companies') return resolve({ data: [{ id: 5, name: 'ABC', suspended: false }, { id: 6, name: 'S', suspended: true }, { id: 8, name: 'N', suspended: false }], error: null });
+        if (table === 'company_document_settings') return resolve({ data: [{ company_id: 5, is_active: true }, { company_id: 6, is_active: true }], error: null });
+        if (q.patch) {
+          if (q.patch.reminded_at === null) { handedBack.push(q.f.id); return resolve({ data: [], error: null }); }
+          claimed.push(q.f.id); return resolve({ data: [{ id: q.f.id }], error: null });
+        }
+        return resolve({ data: [], error: null });
+      };
+      return q;
+    },
+  };
+  const sent = [];
+  const ok = await remindOverdueSentDocuments(db, { sendEmail: async (m) => { sent.push(m); }, origin: 'https://x.test', nowMs: Date.parse('2026-11-10T00:00:00Z') });
+  assert.deepEqual(claimed, [1, 2]);
+  assert.equal(ok.reminded, 2);
+  assert.equal(ok.emailed, 1);          // one email for two documents
+  assert.match(sent[0].subject, /^2 documents are past due$/);
+
+  claimed.length = 0;
+  const bad = await remindOverdueSentDocuments(db, { sendEmail: async () => { throw new Error('down'); }, nowMs: Date.parse('2026-11-10T00:00:00Z') });
+  assert.equal(bad.failed, 1);
+  assert.equal(bad.reminded, 0);
+  assert.deepEqual(handedBack.flat(), [[1, 2]].flat());
+  assert.match(buildReminderEmail({ name: 'D', count: 1 }).subject, /^1 document is past due$/);
 });

@@ -14,6 +14,9 @@
 import crypto from 'crypto';
 import { loadActor } from './documentAccess.js';
 import { createUploadUrl, resolveUploadReceipt } from './uploadUrls.js';
+import { sendEmail as defaultSendEmail } from './email.js';
+import { withDecryptedEmail } from './fieldCrypto.js';
+import { isValidEmail } from './onboardingHelpers.js';
 import { appendSignaturePage, decodeSignatureDataUrl, sha256Hex } from './signaturePage.js';
 
 export const SENT_DOCS_BUCKET = 'sent-documents';
@@ -74,6 +77,24 @@ export function senderMayTarget(actor, target) {
   if (divisions.some((d) => actor.divisionIds.includes(d))) return true;
   if (target.default_site_id != null && actor.siteIds.has(Number(target.default_site_id))) return true;
   return false;
+}
+
+/** The email a recipient gets when something is sent to them. Pure. */
+export function buildSentEmail({ senderName, companyName, title, mode, dueAt, origin }) {
+  const verb = mode === 'sign' ? 'sign' : 'read';
+  const due = dueAt ? new Date(dueAt).toLocaleDateString('en-CA', { timeZone: 'UTC' }) : '';
+  return {
+    subject: `${senderName || 'Your supervisor'} sent you a document to ${verb}`,
+    text: [
+      'Hi,',
+      '',
+      `${senderName || 'Your supervisor'}${companyName ? ` at ${companyName}` : ''} sent you "${title}" to ${verb}.${due ? ` It is due ${due}.` : ''}`,
+      '',
+      `Sign in to FORA and look under "Sent to you": ${origin || 'https://portal.forafieldsolutions.com'}`,
+      '',
+      'FORA Field Solutions',
+    ].join('\n'),
+  };
 }
 
 /** The status a person sees. "Overdue" is derived, never stored. Pure. */
@@ -138,7 +159,7 @@ async function supervisorMaySee(supabase, companyId, actor, row) {
   return !!(data && data[0] && senderMayTarget(actor, data[0]));
 }
 
-export async function handleSentDocument({ supabase, session, companyId: rawCompanyId, action, body }) {
+export async function handleSentDocument({ supabase, session, companyId: rawCompanyId, action, body, sendEmail = defaultSendEmail, origin }) {
   // A founder session names the company in the request body. It goes into
   // storage paths and receipts, so it must be a plain positive integer.
   const companyId = /^[1-9][0-9]*$/.test(String(rawCompanyId ?? '')) ? Number(rawCompanyId) : null;
@@ -229,7 +250,30 @@ export async function handleSentDocument({ supabase, session, companyId: rawComp
       .insert(rows.map((r) => ({ ...r, batch_id: batchId })))
       .select('id');
     if (error) return fail(500, 'Could not send the document.');
-    return { status: 200, body: { ok: true, batchId, sent: (data || []).length } };
+
+    // Best effort: the document is already recorded, so a mail failure never
+    // fails the send. People with no email on file just see it next time they
+    // sign in.
+    const mail = { emailed: 0, noEmail: 0 };
+    try {
+      const { data: people } = await supabase.from('roster').select('id, email').eq('company_id', companyId).in('id', input.rosterIds);
+      const { data: cos } = await supabase.from('companies').select('name').eq('id', companyId).limit(1);
+      const message = buildSentEmail({
+        senderName, companyName: cos && cos[0] && cos[0].name, title: input.title, mode: input.mode, dueAt: input.dueAt, origin,
+      });
+      for (const person of (people || []).map(withDecryptedEmail)) {
+        if (!isValidEmail(person.email)) { mail.noEmail += 1; continue; }
+        try {
+          await sendEmail({ to: person.email, subject: message.subject, text: message.text });
+          mail.emailed += 1;
+        } catch (e) {
+          console.error('sent document email failed:', e.message);
+        }
+      }
+    } catch (e) {
+      console.error('sent document emails failed:', e.message);
+    }
+    return { status: 200, body: { ok: true, batchId, sent: (data || []).length, emailed: mail.emailed, noEmail: mail.noEmail } };
   }
 
   // ── List: a worker gets their own, a supervisor gets their scope ────────
