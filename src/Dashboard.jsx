@@ -3202,9 +3202,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
     // Send & Sign: documents a supervisor sends to roster members. Needs a
-    // roster because every recipient is a roster row. Not a purchasable
-    // module yet, so there is no document key to gate on.
-    sentdocs: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
+    // roster because every recipient is a roster row, and the Send & Sign
+    // module (document key sent_documents).
+    sentdocs: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("sent_documents"),
     safetyanalytics: true,
     // The FORA Field Portal is a separate, quoted product and has no entry in
     // server-lib/pricing.js's MODULES, so there is no company_document_settings

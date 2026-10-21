@@ -183,3 +183,14 @@ test('list_sendable_people returns only the people the sender may reach', async 
   assert.equal(out.status, 200, JSON.stringify(out.body));
   assert.deepEqual(out.body.people.map((p) => p.id), [1]);
 });
+
+test('Send & Sign is a standalone, priced module with its own document key', async () => {
+  const { MODULES, quote, ALL_DOC_KEYS, resolveModules } = await import('../../server-lib/pricing.js');
+  assert.deepEqual(MODULES.sendsign.docKeys, ['sent_documents']);
+  assert.deepEqual(MODULES.sendsign.price, { basic: 20, advanced: 45 });
+  assert.equal(MODULES.sendsign.requires, undefined);
+  assert.ok(ALL_DOC_KEYS.includes('sent_documents'));
+  assert.deepEqual(resolveModules('sendsign').modules, ['sendsign']);
+  assert.equal(quote('basic', ['sendsign']).monthly, 80);
+  assert.equal(quote('advanced', ['sendsign']).monthly, 185);
+});

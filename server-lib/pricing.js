@@ -107,6 +107,12 @@ export const MODULES = {
     price: { basic: 15, advanced: 35 },
     docKeys: ['fuellog'],
   },
+  sendsign: {
+    label: 'Send & Sign',
+    blurb: 'Send a PDF to your crew to sign or read, tracked and filed by category',
+    price: { basic: 20, advanced: 45 },
+    docKeys: ['sent_documents'],
+  },
   monthly: {
     label: 'Monthly Site Inspections',
     blurb: 'Recurring compliance walk-throughs from your own checklist',

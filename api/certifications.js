@@ -151,10 +151,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Send & Sign. Not gated on the `certifications` doc key: these are
-    // documents a supervisor sends, not wallet tickets. All the rules live in
-    // server-lib/sentDocuments.js.
+    // Send & Sign. Gated on its own `sent_documents` key (the Send & Sign
+    // module), not `certifications`: these are documents a supervisor sends,
+    // not wallet tickets. All the rules live in server-lib/sentDocuments.js.
     if (SENT_DOC_ACTIONS.has(action)) {
+      const denied = await requireDocKey(supabaseAdmin, session, 'sent_documents');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
       const result = await handleSentDocument({
         supabase: supabaseAdmin,
         session,
