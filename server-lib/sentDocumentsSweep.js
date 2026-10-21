@@ -17,6 +17,7 @@ export const REMINDER_SCAN = 100;
 // Stop starting sends after this long; the digest cron has a 60 second limit and
 // runs four other sweeps before this one.
 export const REMINDER_BUDGET_MS = 15 * 1000;
+let warnedMissingColumn = false;
 const isMissingColumn = (error) => !!error && (error.code === '42703' || /reminded_at/.test(error.message || ''));
 
 /** The reminder email for one person. Pure. */
@@ -64,7 +65,14 @@ export async function remindOverdueSentDocuments(supabase, { sendEmail, origin, 
       .order('due_at', { ascending: true })
       .limit(REMINDER_SCAN);
     if (error) {
-      if (!isMissingColumn(error)) console.error('sent document reminder lookup failed:', error.message);
+      if (isMissingColumn(error)) {
+        // Logged once per server instance, not every hour: the migration
+        // simply has not been applied yet.
+        if (!warnedMissingColumn) console.warn('sent document reminders skipped: sent_documents.reminded_at does not exist yet (docs/schema/sent-documents-reminders-migration.sql)');
+        warnedMissingColumn = true;
+      } else {
+        console.error('sent document reminder lookup failed:', error.message);
+      }
       return out;
     }
     if (!rows || rows.length === 0) return out;
