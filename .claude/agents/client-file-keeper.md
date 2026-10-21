@@ -86,6 +86,10 @@ When Dillon says a client approved and sent documents:
 
 ## Hard rules
 
+- Never guess what a company does. If you are unsure, look them up first
+  (their website, then search), or ask Dillon for their website. Write the
+  source and date next to anything you learned that way.
+
 - You have no send tool. Gmail is read only for you apart from labels.
 - Never write to Stripe or to the application database.
 - Nothing here ever goes in the repo. Client data stays in Drive.
