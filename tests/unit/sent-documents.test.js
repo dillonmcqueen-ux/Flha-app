@@ -237,18 +237,19 @@ test('a failing mail provider never fails the send', async () => {
   assert.equal(out.body.emailed, 0);
 });
 
-test('the overdue sweep reminds once per person, skips suspended and unlicensed companies, and hands back on failure', async () => {
+test('the overdue sweep reminds once per person, claims-without-email for suspended and unlicensed companies, and hands back on failure', async () => {
   const { remindOverdueSentDocuments, buildReminderEmail } = await import('../../server-lib/sentDocumentsSweep.js');
   const docRows = [
     { id: 1, company_id: 5, roster_id: 3 }, { id: 2, company_id: 5, roster_id: 3 },
     { id: 3, company_id: 6, roster_id: 7 },   // suspended
     { id: 4, company_id: 8, roster_id: 9 },   // module off
   ];
-  const claimed = []; const handedBack = [];
+  let claimed = []; let handedBack = [];
   const db = {
     from(table) {
       const q = { f: {} };
-      q.select = () => q; q.in = (k, v) => { q.f[k] = v; return q; }; q.eq = (k, v) => { q.f[k] = v; return q; };
+      q.select = () => q; q.eq = (k, v) => { q.f[k] = v; return q; };
+      q.in = (k, v) => { q.f[k] = v; return q; };
       q.is = () => q; q.not = () => q; q.lt = () => q; q.order = () => q;
       q.update = (patch) => { q.patch = patch; return q; };
       q.limit = () => {
@@ -260,8 +261,9 @@ test('the overdue sweep reminds once per person, skips suspended and unlicensed 
         if (table === 'companies') return resolve({ data: [{ id: 5, name: 'ABC', suspended: false }, { id: 6, name: 'S', suspended: true }, { id: 8, name: 'N', suspended: false }], error: null });
         if (table === 'company_document_settings') return resolve({ data: [{ company_id: 5, is_active: true }, { company_id: 6, is_active: true }], error: null });
         if (q.patch) {
-          if (q.patch.reminded_at === null) { handedBack.push(q.f.id); return resolve({ data: [], error: null }); }
-          claimed.push(q.f.id); return resolve({ data: [{ id: q.f.id }], error: null });
+          const ids = q.f.id;
+          if (q.patch.reminded_at === null) { handedBack.push(ids); return resolve({ data: [], error: null }); }
+          claimed.push(ids); return resolve({ data: ids.map((id) => ({ id })), error: null });
         }
         return resolve({ data: [], error: null });
       };
@@ -269,16 +271,23 @@ test('the overdue sweep reminds once per person, skips suspended and unlicensed 
     },
   };
   const sent = [];
-  const ok = await remindOverdueSentDocuments(db, { sendEmail: async (m) => { sent.push(m); }, origin: 'https://x.test', nowMs: Date.parse('2026-11-10T00:00:00Z') });
-  assert.deepEqual(claimed, [1, 2]);
+  const now = Date.parse('2026-11-10T00:00:00Z');
+  const ok = await remindOverdueSentDocuments(db, { sendEmail: async (m) => { sent.push(m); }, origin: 'https://x.test', nowMs: now });
+  // The suspended and unlicensed companies' rows are claimed (so they leave the queue) but nobody is emailed.
+  assert.deepEqual(claimed.sort(), [[1, 2], [3], [4]]);
   assert.equal(ok.reminded, 2);
   assert.equal(ok.emailed, 1);          // one email for two documents
   assert.match(sent[0].subject, /^2 documents are past due$/);
 
-  claimed.length = 0;
-  const bad = await remindOverdueSentDocuments(db, { sendEmail: async () => { throw new Error('down'); }, nowMs: Date.parse('2026-11-10T00:00:00Z') });
+  claimed = [];
+  const bad = await remindOverdueSentDocuments(db, { sendEmail: async () => { throw new Error('down'); }, nowMs: now });
   assert.equal(bad.failed, 1);
   assert.equal(bad.reminded, 0);
-  assert.deepEqual(handedBack.flat(), [[1, 2]].flat());
+  assert.deepEqual(handedBack, [[1, 2]]);
+
+  // A spent time budget stops new people from being started.
+  claimed = [];
+  const none = await remindOverdueSentDocuments(db, { sendEmail: async () => {}, nowMs: now, budgetMs: -1 });
+  assert.equal(none.reminded, 0);
   assert.match(buildReminderEmail({ name: 'D', count: 1 }).subject, /^1 document is past due$/);
 });
