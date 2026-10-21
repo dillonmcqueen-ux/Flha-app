@@ -14,6 +14,7 @@
 import crypto from 'crypto';
 import { loadActor } from './documentAccess.js';
 import { createUploadUrl, resolveUploadReceipt } from './uploadUrls.js';
+import { appendSignaturePage, decodeSignatureDataUrl, sha256Hex } from './signaturePage.js';
 
 export const SENT_DOCS_BUCKET = 'sent-documents';
 export const CATEGORIES = ['training', 'onboarding', 'notices', 'policies', 'other'];
@@ -29,6 +30,7 @@ export const SENT_DOC_ACTIONS = new Set([
   'send_document',
   'list_sent_documents',
   'open_sent_document',
+  'complete_sent_document',
   'cancel_sent_document',
 ]);
 
@@ -290,6 +292,71 @@ export async function handleSentDocument({ supabase, session, companyId: rawComp
     if (!String(path).startsWith(`${companyId}/`)) return fail(404, 'Not found.');
     const { data: signed } = await supabase.storage.from(SENT_DOCS_BUCKET).createSignedUrl(path, 3600);
     return { status: 200, body: { document: shape(row, new Map(), now), fileUrl: signed?.signedUrl || null } };
+  }
+
+  // ── Complete: the recipient signs, or taps Got it ───────────────────────
+  // Only the person it was sent to, and only after they opened it. The server
+  // builds the signed copy (original + one record page) and files it under
+  // <company>/<recipient>/<category>/, so nothing about the signed file comes
+  // from the browser except the drawn signature.
+  if (action === 'complete_sent_document') {
+    if (session.userId == null) return fail(403, 'Not allowed.');
+    const { row, failure } = await loadRow(supabase, companyId, body.id);
+    if (failure) return failure;
+    if (Number(row.roster_id) !== Number(session.userId)) return fail(403, 'Not allowed.');
+    if (row.status === 'completed') return fail(400, 'You already finished this one.');
+    if (row.status === 'cancelled') return fail(404, 'Not found.');
+    if (row.status !== 'opened') return fail(400, 'Open the document first.');
+
+    let signatureBytes = null;
+    if (row.mode === 'sign') {
+      const decoded = decodeSignatureDataUrl(body.signature);
+      if (decoded.error) return fail(400, decoded.error);
+      signatureBytes = decoded.bytes;
+    }
+
+    if (!String(row.original_path).startsWith(`${companyId}/`)) return fail(404, 'Not found.');
+    const { data: file, error: downloadError } = await supabase.storage.from(SENT_DOCS_BUCKET).download(row.original_path);
+    if (downloadError || !file) return fail(500, 'Could not load the document. Please try again.');
+    const originalBytes = Buffer.from(await file.arrayBuffer());
+
+    const { data: people } = await supabase.from('roster').select('name').eq('id', session.userId).eq('company_id', companyId).limit(1);
+    const { data: companies } = await supabase.from('companies').select('name').eq('id', companyId).limit(1);
+    const signerName = (people && people[0] && people[0].name) || 'Unknown';
+
+    let signed;
+    try {
+      signed = await appendSignaturePage({
+        originalBytes, signerName, title: row.title, mode: row.mode, signatureBytes,
+        companyName: (companies && companies[0] && companies[0].name) || '', signedAt: new Date(now),
+      });
+    } catch (e) {
+      console.error('sent document signing failed:', e.message);
+      return fail(422, 'This PDF could not be signed. Ask the sender to send it again as a standard PDF.');
+    }
+
+    const signedPath = `${companyId}/${Number(row.roster_id)}/${row.category}/${now}-${crypto.randomBytes(8).toString('hex')}-signed.pdf`;
+    const { error: uploadError } = await supabase.storage.from(SENT_DOCS_BUCKET)
+      .upload(signedPath, signed.bytes, { contentType: 'application/pdf', upsert: false });
+    if (uploadError) return fail(500, 'Could not save the signed copy. Please try again.');
+
+    const { data: updated, error: updateError } = await supabase.from('sent_documents')
+      .update({
+        status: 'completed',
+        completed_at: new Date(now).toISOString(),
+        signed_path: signedPath,
+        signed_sha256: sha256Hex(signed.bytes),
+        original_sha256: signed.originalSha256,
+      })
+      .eq('id', row.id).eq('company_id', companyId).eq('roster_id', session.userId).eq('status', 'opened')
+      .select('id');
+    if (updateError || !updated || updated.length === 0) {
+      // Lost a race (cancelled or finished in the meantime) or the write
+      // failed: do not leave an orphaned signed file behind.
+      await supabase.storage.from(SENT_DOCS_BUCKET).remove([signedPath]);
+      return fail(updateError ? 500 : 409, updateError ? 'Could not save the signed copy. Please try again.' : 'This document changed. Reload and try again.');
+    }
+    return { status: 200, body: { ok: true } };
   }
 
   // ── Cancel: the sender or the Owner pulls back an unfinished document ───
