@@ -485,6 +485,31 @@ The 9am firing time is stored in UTC and will drift by an hour across the
 Mountain-time DST boundary (~early Nov, ~early Mar) until the trigger's cron expression is
 manually adjusted.
 
+## Client files
+
+`client-file-keeper` keeps one living file per client or prospect, so every
+email, attachment and key fact is in one place. Dillon says things like "ABC
+reached out and wants to go ahead, watch for payment and onboarding, they gave
+me these documents" and the agent updates the file.
+
+| Piece | Where |
+|---|---|
+| Top folder | Google Drive "FORA Clients" (`1BSGBLP3nuNIWEixKP5DO_zYNRIqbRk4Q`) |
+| Index | Google Sheet "Client List" (`1WLCPXl8NWt-QH3Hknw5pgnr_nqCbb-f5NiwjkatO_1c`) |
+| Per client | A subfolder holding the "<Company>: Client File" Google Doc and all attachments |
+
+**Always ask Dillon before adding someone to the list.** Whenever a company
+comes up that is not on it, ask first. Nothing is created until he says yes.
+Kinsley (Delburne, AB) was the first entry, added 2026-10-21.
+
+A daily scan reads Gmail for new messages from listed clients, logs them, and
+checks payment: Stripe and `portal_scope_requests`, read only. It runs together
+with `gmail-inbox-organizer`, scan first, so a client's mail is filed under a
+label named for the company. See `.claude/agents/client-file-keeper.md`.
+
+**Client data stays in Drive and is never committed to this repo.** The agent
+has no send tool and no Stripe or database write access.
+
 ## Daily inbox organizer
 
 `gmail-inbox-organizer` fires once a day at 2:00am Mountain time via a scheduled Routine
