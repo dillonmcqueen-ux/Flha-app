@@ -899,3 +899,55 @@ footer{ border-top:1px solid var(--line); padding:64px 0 40px; }
 
 /* Parent-company line in the footer, shown on every marketing page. */
 .foot-parent{ flex-basis:100%; margin:0; font-size:13px; color:var(--muted); opacity:.75; }
+
+/* Home page, visual blocks (added with Send & Sign) -------------------- */
+.chiprow{ display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 0; }
+.chip{ display:inline-flex; align-items:center; gap:8px; background:var(--black); border:1px solid var(--line-soft);
+  border-radius:4px; padding:7px 11px; font-size:13px; color:var(--text); }
+.chip .icon-svg{ width:16px; height:16px; color:var(--orange); }
+.chip.is-new{ border-color:var(--orange); background:var(--orange-tint); }
+.hub-card .num{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px; letter-spacing:.1em;
+  color:var(--orange); text-transform:uppercase; margin-bottom:14px; }
+.hub-card .price-from{ display:flex; align-items:baseline; gap:8px; margin:20px 0 0; }
+.hub-card .price-from b{ font-family:'Space Grotesk',sans-serif; font-size:30px; color:var(--text); letter-spacing:-.02em; }
+.hub-card .price-from span{ color:var(--muted); font-size:13.5px; }
+
+/* Send & Sign visual: a phone showing a document being signed, next to a
+   tracker board. Pure HTML/CSS/inline SVG, no images. */
+.ss-demo{ display:grid; grid-template-columns:auto 1fr; gap:28px; align-items:center; }
+.phone{ width:232px; background:var(--black); border:2px solid var(--line); border-radius:28px; padding:12px 12px 16px;
+  box-shadow:0 24px 60px -28px var(--orange-dim); }
+.phone .notch{ width:56px; height:5px; border-radius:3px; background:var(--line); margin:0 auto 12px; }
+.phone .doc{ background:#F8FAFC; border-radius:6px; padding:12px; color:#0B0F15; }
+.phone .doc .ttl{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:12px; line-height:1.2; }
+.phone .doc .ln{ height:5px; border-radius:3px; background:#CBD5E1; margin-top:7px; }
+.phone .doc .ln.s{ width:62%; }
+.phone .pad{ margin-top:12px; border:1.5px dashed #94A3B8; border-radius:4px; height:58px; display:flex; align-items:center; justify-content:center; }
+.phone .pad svg{ width:100%; height:100%; }
+.phone .btns{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+.phone .btns span{ text-align:center; padding:9px 0; border-radius:4px; font-size:12px; font-weight:700; }
+.phone .btns .go{ background:var(--orange); color:#0B0F15; }
+.phone .btns .alt{ border:1px solid var(--line); color:var(--muted); }
+.ss-board{ background:var(--black); border:1px solid var(--line); border-radius:8px; padding:16px; }
+.ss-board .ss-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:4px; }
+.ss-board .ss-head b{ font-family:'Space Grotesk',sans-serif; font-size:15px; }
+.ss-count{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:12px 0; }
+
+/* Three-step strip: Send, Sign, Filed. */
+.steps3{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:28px; }
+.step3{ background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; display:flex; gap:14px; align-items:flex-start; }
+.step3 .ico{ width:40px; height:40px; border-radius:6px; background:var(--orange-tint-2); border:1px solid var(--orange-dim);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.step3 .ico .icon-svg{ width:20px; height:20px; }
+.step3 h3{ font-size:16px; font-weight:600; margin-bottom:2px; }
+.step3 p{ font-size:13.5px; color:var(--muted); line-height:1.45; }
+.step3 .n{ font-family:'Space Grotesk',sans-serif; font-weight:700; color:var(--orange); font-size:12px; letter-spacing:.1em; }
+
+.spotlight.ss{ grid-template-columns:1fr; gap:28px; }
+.spotlight.ss .ss-top{ display:grid; grid-template-columns:1fr; gap:6px; }
+
+@media (max-width:960px){
+  .ss-demo{ grid-template-columns:1fr; justify-items:center; }
+  .ss-demo .ss-board{ width:100%; }
+  .steps3{ grid-template-columns:1fr; }
+}

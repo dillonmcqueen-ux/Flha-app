@@ -77,7 +77,7 @@ emoji glyph previously used as a feature/document/flow icon across
 every marketing page. No emoji-as-icon anywhere in the marketing site going
 forward — new sections must draw from `icons.svg` or add a new symbol to it.
 Symbols added for the five-page rebuild: `pin`, `lock`, `calendar`,
-`offline`, `pdf`, `stack`.
+`offline`, `pdf`, `stack`. Added with Send & Sign: `send`, `folder`, `bell`, `phone`.
 
 ## Nav archetype
 N1b — canonical SaaS three-section: wordmark hard-left, link cluster
@@ -105,7 +105,7 @@ Mechanics:
   points at carries one (`#demo`, `#documents`, `#dashboard`, `#brain`,
   `#platform`, `#security`, `#examples`, `#tailored`, `#process`, `#cost`,
   `#plans`, `#build`, `#no-enterprise`, `#cancel`, `#market`, `#paper`, `#how`,
-`#send`, `#quote`,
+`#send`, `#send-sign`, `#quote`,
   `#getting-started`, `#story`, `#tradeoffs`). Keep the id when moving a
   section; the nav is the only thing pointing at it.
 
@@ -141,6 +141,11 @@ colors, no new type families):
 - `.hub-card` / `.hub-actions` / `.hub-help` — the two-product cards on the
   home page. A card here is a div with its own buttons, because a link cannot
   contain links. Built on `.teaser-card`.
+- `.chiprow` / `.chip` — icon chips for module lists on the home page
+- `.ss-demo` / `.phone` / `.ss-board` / `.steps3` / `.step3` — the Send & Sign
+  visual (phone signing a PDF, tracker board, three-step strip). Pure
+  HTML/CSS/inline SVG. The same block sits on `index.html` and
+  `features.html#send-sign`
 - `.foot-parent` — the parent-company line in every marketing footer
 
 ## Per-page allowances

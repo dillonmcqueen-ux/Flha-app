@@ -29,6 +29,7 @@
           <a href="features.html#documents">The field documents<span class="d-sub">What a worker sees on their phone</span></a>
           <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
           <a href="features.html#compliance">Equipment Compliance<span class="d-sub">New: CVIP, registration, insurance</span></a>
+          <a href="features.html#send-sign">Send &amp; Sign<span class="d-sub">New: sign and file documents</span></a>
           <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
           <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
           <a href="features.html#pricing">Pricing<span class="d-sub">Published, no quote required</span></a>
@@ -86,6 +87,7 @@
       <a href="features.html#documents">The field documents<span class="d-sub">What a worker sees on their phone</span></a>
       <a href="features.html#dashboard">Supervisor dashboard<span class="d-sub">Safety, Operations, Workforce</span></a>
       <a href="features.html#compliance">Equipment Compliance<span class="d-sub">New: CVIP, registration, insurance</span></a>
+      <a href="features.html#send-sign">Send &amp; Sign<span class="d-sub">New: sign and file documents</span></a>
       <a href="features.html#brain">The Brain<span class="d-sub">Trained on your SOPs, not the internet</span></a>
       <a href="features.html#platform">Offline and exports<span class="d-sub">The parts nobody lists</span></a>
       <a href="features.html#pricing">Pricing<span class="d-sub">Published, no quote required</span></a>
@@ -160,9 +162,11 @@
     <div class="layers" data-reveal>
       <div class="layer"><svg class="icon-svg"><use href="icons.svg#key"/></svg><div><h3>HMAC-signed sessions</h3><p>Every request must carry a session token signed server-side with HMAC-SHA256. The signing secret lives only in the server environment, so a token can't be forged from the browser or replayed after tampering with its payload.</p></div></div>
       <div class="layer"><svg class="icon-svg"><use href="icons.svg#users"/></svg><div><h3>Tenant scoping lives in the handler</h3><p>The signed session carries the caller's company id. Every query in every serverless function scopes explicitly to it. This, not a database policy, is where one company's data actually gets kept out of another's.</p></div></div>
-      <div class="layer"><svg class="icon-svg"><use href="icons.svg#lock"/></svg><div><h3>RLS: deny by default, zero policies</h3><p>Row Level Security is enabled on every table with no policies defined. A request using the public/anon key is refused unconditionally by Postgres itself, before any application code runs at all &mdash; a backstop under the real boundary above, not a substitute for it.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#lock"/></svg><div><h3>RLS: deny by default, zero policies</h3><p>Row Level Security is enabled on every table with no policies defined. A request using the public/anon key is refused unconditionally by Postgres itself, before any application code runs at all, a backstop under the real boundary above, not a substitute for it.</p></div></div>
       <div class="layer"><svg class="icon-svg"><use href="icons.svg#shield"/></svg><div><h3>The one bypass key never reaches a browser</h3><p>The service-role credential that can bypass RLS exists only inside the Vercel serverless environment. It is never in a client bundle, never in a repo, never shipped anywhere a browser can read it.</p></div></div>
       <div class="layer"><svg class="icon-svg"><use href="icons.svg#pdf"/></svg><div><h3>Signed, time-limited file URLs</h3><p>Documents and photos sit in private storage buckets. Every link the app hands out is signed and expires; there is no permanent public URL for a private object, and code that would build one is checked for on a recurring schedule.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#edit"/></svg><div><h3>Signed copies you can check</h3><p>The record page added to a signed document carries a SHA-256 fingerprint of the original, so anyone holding the original can show it matches what was signed.</p></div></div>
+      <div class="layer"><svg class="icon-svg"><use href="icons.svg#folder"/></svg><div><h3>Sent documents stay private</h3><p>PDFs sent through Send &amp; Sign sit in a private bucket and open only through signed links that expire.</p></div></div>
       <div class="layer"><svg class="icon-svg"><use href="icons.svg#card"/></svg><div><h3>Card data never touches our servers</h3><p>Checkout runs entirely on Stripe's hosted page. FORA never receives, sees or stores a card number, and an incoming Stripe webhook is refused unless its signature verifies against our signing secret.</p></div></div>
     </div>
   </div>
@@ -182,7 +186,7 @@
           <tr><td class="lead">Storage exposure</td><td>Every storage bucket except the one deliberately public asset bucket is confirmed private, tested live against unauthenticated requests, not just read from config.</td></tr>
           <tr><td class="lead">RLS coverage</td><td>Row Level Security is confirmed enabled with zero policies on every table in the schema, including any added since the last pass.</td></tr>
           <tr><td class="lead">Secret hygiene</td><td>Tracked files are scanned for hardcoded credentials, and env-file coverage in <code style="background:var(--panel-2); padding:1px 5px; border-radius:4px; font-size:13px;">.gitignore</code> is confirmed.</td></tr>
-          <tr><td class="lead">Signed-URL discipline</td><td>Code paths that build a storage URL are checked for one that constructs an unsigned public URL for a private object &mdash; a specific bug class, checked because it has recurred before.</td></tr>
+          <tr><td class="lead">Signed-URL discipline</td><td>Code paths that build a storage URL are checked for one that constructs an unsigned public URL for a private object, a specific bug class, checked because it has recurred before.</td></tr>
           <tr><td class="lead">External surface</td><td>Vercel preview-deployment access control and Stripe webhook signature verification, since this exposure lives in connected services, not in this repository's source.</td></tr>
           <tr><td class="lead">Adversarial review</td><td>A broader pass across authentication, authorization, injection, cross-tenant data access, file-upload handling, rate limiting and dependency vulnerabilities, not limited to one checklist.</td></tr>
         </tbody>
