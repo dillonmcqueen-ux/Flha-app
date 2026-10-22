@@ -26,7 +26,9 @@ import {
   Clock, PenLine, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
   HardHat, Wrench, Layers, ShieldCheck, Users,
 } from "lucide-react";
-import SentToYou from "./SentToYou.jsx";
+import SentDocDetail, { listSentDocuments, sentDocToItem } from "./SentToYou.jsx";
+import { InboxCard, InboxScreen } from "./Inbox.jsx";
+import { splitInbox } from "./inbox.js";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
 // docs/scope-offline-capability.md Phase 1) — now all 8 worker-facing forms
@@ -116,6 +118,14 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   const [unsignedCount, setUnsignedCount] = useState(0);
   const [showSign, setShowSign] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
+  // The inbox pulls together everything sent to or waiting on this person
+  // (src/Inbox.jsx). Sent documents are loaded here so the home card can show
+  // a count; `sentDoc` is the one being opened from the inbox.
+  const [showInbox, setShowInbox] = useState(false);
+  const [sentDocs, setSentDocs] = useState([]);
+  const [sentDoc, setSentDoc] = useState(null);
+  // FLHAs a crew lead still has to sign off.
+  const [crewWaiting, setCrewWaiting] = useState(0);
   const [activeCategory, setActiveCategory] = useState(null); // null = home screen; else a CATEGORIES key
   const [certAlerts, setCertAlerts] = useState({ expiredCount: 0, expiringSoonCount: 0 });
   // True when the company no longer has Time Clock but this person is still
@@ -123,6 +133,23 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   // this case (api/companydata.js), and without this the card that leads to
   // it was hidden with the module, stranding the shift.
   const [openShiftWhileOff, setOpenShiftWhileOff] = useState(false);
+
+  const refreshSentDocs = async () => {
+    if (!userId) return;
+    setSentDocs(await listSentDocuments(token));
+  };
+
+  const refreshCrewWaiting = async () => {
+    try {
+      const res = await fetch("/api/flhas", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list", token }),
+      });
+      const data = res.ok ? await res.json() : {};
+      // Same rule CrewScreen uses for its "waiting for sign-off" list.
+      setCrewWaiting((data.flhas || []).filter(f => f.status === "pending_approval" && f.awaiting_signature !== true && Number(f.submitted_by_roster_id) !== Number(userId)).length);
+    } catch (e) { /* no crew row on a transient error */ }
+  };
 
   useEffect(() => {
     async function loadDocs() {
@@ -194,7 +221,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           body: JSON.stringify({ action: "get_my_crew", token }),
         });
         const data = await res.json();
-        if (res.ok && data.isLead) setCrewInfo({ isLead: true, crew: data.crew || [] });
+        if (res.ok && data.isLead) { setCrewInfo({ isLead: true, crew: data.crew || [] }); refreshCrewWaiting(); }
       } catch (e) { /* not a lead, or offline: no crew card */ }
     }
     loadCrew();
@@ -216,6 +243,7 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       } catch (e) { /* offline: no card */ }
     }
     loadUnsigned();
+    refreshSentDocs();
   }, [token]);
 
   // Certification expiry notification (onboarding wallet, Phase 3) — only
@@ -306,7 +334,12 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
   }
 
   if (showCrew) {
-    return <CrewScreen token={token} userId={userId} userName={userName} companyName={companyName} crew={crewInfo.crew} onBack={() => setShowCrew(false)} />;
+    return <CrewScreen token={token} userId={userId} userName={userName} companyName={companyName} crew={crewInfo.crew} onBack={() => { setShowCrew(false); refreshCrewWaiting(); }} />;
+  }
+
+  if (sentDoc) {
+    const leave = () => { setSentDoc(null); refreshSentDocs(); };
+    return <SentDocDetail token={token} doc={sentDoc} onBack={leave} onDone={leave} />;
   }
 
   if (showMyDocs) {
@@ -468,6 +501,27 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       return new Date(x.a.dueAt || "9999-01-01") - new Date(y.a.dueAt || "9999-01-01");
     });
 
+  // Everything waiting on this person, or done, in one list for the inbox.
+  const inbox = splitInbox([
+    ...sentDocs.map(d => sentDocToItem(d, () => setSentDoc(d))),
+    ...assignedItems.map(it => ({
+      key: `assigned:${it.key}`, iconNode: it.iconNode, accent: it.accent, onOpen: it.open,
+      title: it.title, subtitle: it.statusText,
+      status: it.status === "done" ? "done" : it.status === "overdue" ? "overdue" : "open",
+      dueAt: it.a.dueAt, doneAt: it.a.completedAt,
+    })),
+    ...(unsignedCount > 0 ? [{
+      key: "unsigned", Icon: PenLine, status: "open", onOpen: () => setShowSign(true),
+      title: "Documents to sign",
+      subtitle: `${unsignedCount} saved ${unsignedCount === 1 ? "document is" : "documents are"} waiting for your signature`,
+    }] : []),
+    ...(crewWaiting > 0 ? [{
+      key: "crew-signoffs", Icon: Users, status: "open", onOpen: () => setShowCrew(true),
+      title: "Crew sign-offs",
+      subtitle: `${crewWaiting} ${crewWaiting === 1 ? "FLHA is" : "FLHAs are"} waiting for your sign-off`,
+    }] : []),
+  ]);
+
   const renderItemCard = (d) => {
     const Icon = d.icon;
     return (
@@ -569,6 +623,11 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       )}
     </header>
   );
+
+  // ── INBOX ────────────────────────────────────────────────
+  if (showInbox) {
+    return <InboxScreen companyName={companyName} needs={inbox.needs} done={inbox.done} onBack={() => setShowInbox(false)} />;
+  }
 
   // ── CATEGORY SUB-MENU ────────────────────────────────────
   if (activeCategory) {
@@ -706,6 +765,12 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           </button>
         )}
 
+        {/* Everything sent to this person or waiting on them, in one place:
+            sent documents, assigned forms, documents to sign, crew sign-offs. */}
+        {inbox.needs.length + inbox.done.length > 0 && (
+          <InboxCard needs={inbox.needs} done={inbox.done} onClick={() => setShowInbox(true)} />
+        )}
+
         {engineInboxCount > 0 && (
           <div
             onClick={() => setShowEngineInbox(true)}
@@ -742,27 +807,6 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>Change a document from today</div>
               <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{engineAmendCount} you can still amend</div>
-            </div>
-            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
-          </div>
-        )}
-
-        {unsignedCount > 0 && (
-          <div
-            onClick={() => setShowSign(true)}
-            style={{
-              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
-              background: C.status.warning.bg,
-              border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.lg, padding: "14px 16px",
-              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
-            }}
-          >
-            <div style={s.iconTile(C.orange)}>
-              <PenLine size={22} color={C.orange} strokeWidth={2.25} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: C.status.warning.text }}>Needs your signature</div>
-              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{unsignedCount} saved {unsignedCount === 1 ? "document is" : "documents are"} waiting for you to sign</div>
             </div>
             <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
           </div>
@@ -815,30 +859,6 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
           >
             Sign-in security
           </button>
-        )}
-
-        {userId && <SentToYou token={token} />}
-
-        {assignedItems.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: C.text.muted, marginBottom: 8 }}>
-              Assigned to you
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
-              {assignedItems.map(it => (
-                <div key={it.key} style={s.card(it.accent, true)} onClick={it.open}>
-                  <div style={s.iconTile(it.accent)}>{it.iconNode}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 16, color: C.text.primary }}>{it.title}</div>
-                    <div style={{ fontSize: 13, marginTop: 1, fontWeight: it.status === "overdue" ? 700 : 400, color: it.status === "done" ? C.status.success.text : it.status === "overdue" ? C.status.danger.text : C.text.muted }}>
-                      {it.statusText}
-                    </div>
-                  </div>
-                  <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
-                </div>
-              ))}
-            </div>
-          </div>
         )}
 
         {/* minmax(0, 1fr): a bare grid column sizes to its widest child's

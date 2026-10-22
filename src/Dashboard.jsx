@@ -37,6 +37,9 @@ import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
 import PortalReports from "./PortalReports.jsx";
 import EngineInbox from "./documentEngine/EngineInbox.jsx";
 import SentDocuments from "./SentDocuments.jsx";
+import SentDocDetail, { listSentDocuments, sentDocToItem } from "./SentToYou.jsx";
+import { InboxCard, InboxScreen } from "./Inbox.jsx";
+import { splitInbox, summariseSentBatches, describeBatch } from "./inbox.js";
 import { useEngineInbox } from "./documentEngine/useEngineInbox.js";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
@@ -2423,6 +2426,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   // needs the explicit carve-out below wherever this app decides whether
   // the current tab is still valid.
   const [activeTab, setActiveTab] = useState("overview");
+  // Overview inbox (src/Inbox.jsx): what needs this person's review, plus
+  // Send & Sign documents sent to them or by them.
+  const [showInbox, setShowInbox] = useState(false);
+  const [inboxDocs, setInboxDocs] = useState([]);
+  const [inboxSentDoc, setInboxSentDoc] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Company Portal (phase 3) — Inbox (portal_records) and the read-only
   // Document Library (portal_documents). Department scoping for the Inbox
@@ -3562,6 +3570,18 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     loadPortalEscalations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompany, token]);
+
+  // Send & Sign rows for the Overview inbox. The server scopes them: a
+  // supervisor gets what they sent plus what was sent to people in their scope.
+  const loadInboxDocs = async () => {
+    if (!token || !selectedCompany || !TAB_VISIBLE.sentdocs) { setInboxDocs([]); return; }
+    setInboxDocs(await listSentDocuments(token, { companyId: selectedCompany }));
+  };
+
+  useEffect(() => {
+    if (activeTab === "overview") loadInboxDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedCompany, token, !!TAB_VISIBLE.sentdocs]);
 
   const openPortalRecord = async (record) => {
     try {
@@ -5627,8 +5647,54 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
             if (type === "portalescalation") return C.status.warning;
             return neutralTone;
           };
+          // Inbox: what is waiting on this person. "Needs review" is the same
+          // set the Report Review ring counts (signed, unreviewed near
+          // misses and incidents) plus FLHAs awaiting sign-off, documents
+          // sent to them, and their own sends that are still outstanding.
+          const reviewable = (r) => r.awaiting_signature !== true && !r.unsigned_closed_at;
+          const reportItem = (kind) => (r) => {
+            const isInc = kind === "incident";
+            const who = !isInc && r.is_anonymous ? "Anonymous" : r.reporter_name;
+            const when = r.occurred_at ? formatOccurredAt(r.occurred_at) : "";
+            const done = !!r.reviewed;
+            return {
+              key: `${kind}:${r.id}`, Icon: isInc ? Siren : AlertTriangle, accent: isInc ? "#DC2626" : "#D97706",
+              title: `${isInc ? "Incident" : "Near miss"}${r.site ? `: ${r.site}` : ""}`,
+              subtitle: done ? `Reviewed by ${r.reviewed_by || "a supervisor"}` : [who, when].filter(Boolean).join(" · ") || "Needs your review",
+              status: done ? "done" : "open", doneAt: r.reviewed_at,
+              onOpen: () => { setShowInbox(false); (isInc ? setSelectedIncident : setSelectedNearMiss)(r); },
+            };
+          };
+          const inboxMine = userId == null ? [] : inboxDocs.filter(d => String(d.roster_id) === String(userId));
+          const inboxSent = userId == null ? [] : summariseSentBatches(inboxDocs.filter(d => String(d.sent_by_roster_id) === String(userId) && String(d.roster_id) !== String(userId)));
+          const inbox = splitInbox([
+            ...companyIncidents.filter(r => !r.reviewed ? reviewable(r) : true).map(reportItem("incident")),
+            ...companyNearMisses.filter(r => !r.reviewed ? reviewable(r) : true).map(reportItem("nearmiss")),
+            ...companyFlhas.filter(f => f.status === "pending_approval" && f.awaiting_signature !== true).map(f => ({
+              key: `flha:${f.id}`, Icon: ClipboardList, accent: "#F97316", status: "open",
+              title: `FLHA${f.job_site ? `: ${f.job_site}` : ""}`,
+              subtitle: ["Needs sign-off", f.worker_name].filter(Boolean).join(" · "),
+              onOpen: () => { setShowInbox(false); if (f.source === "engine") { if (f.pdf_url) window.open(f.pdf_url, "_blank", "noopener"); else setActiveTab("enginedocs"); } else setSelectedFlha(f); },
+            })),
+            ...inboxMine.map(d => sentDocToItem(d, () => setInboxSentDoc(d))),
+            ...inboxSent.map(b => ({
+              key: `batch:${b.id}`, Icon: FileText, accent: "#F97316", status: b.status, dueAt: b.dueAt, doneAt: b.lastDoneAt,
+              title: `You sent: ${b.title}`, subtitle: describeBatch(b),
+              onOpen: () => { setShowInbox(false); setActiveTab("sentdocs"); },
+            })),
+          ]);
           return (
         <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 16 }}>
+          {inbox.needs.length + inbox.done.length > 0 && (
+            <InboxCard needs={inbox.needs} done={inbox.done} needsWord="need review" marginBottom={0} onClick={() => setShowInbox(true)} />
+          )}
+          {showInbox && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 1000, overflowY: "auto", background: C.bg }}>
+              {inboxSentDoc
+                ? <SentDocDetail token={token} doc={inboxSentDoc} onBack={() => { setInboxSentDoc(null); loadInboxDocs(); }} onDone={() => { setInboxSentDoc(null); loadInboxDocs(); }} />
+                : <InboxScreen companyName={(companies.find(c => c.id === selectedCompany) || {}).name} needs={inbox.needs} done={inbox.done} needsLabel="Needs review" onBack={() => setShowInbox(false)} />}
+            </div>
+          )}
           <div className="fora-kpi-row">
             {ringTile(
               "Sign-Off Status",
