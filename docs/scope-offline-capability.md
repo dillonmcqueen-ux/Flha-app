@@ -10,7 +10,7 @@ own network egress policy 403s all `*.vercel.app` requests, confirmed via
 the agent proxy status log and a direct `curl`, so no in-session browser
 could reach the real deploy — a human had to). Confirmed so far:
 
-- Login succeeds when online (worker role, `abcworker` test company) —
+- Login succeeds when online (worker role, `ABCEARTH` test company) —
   confirmed both from the user reaching the worker menu and from the
   deployment's own server logs (`get_runtime_logs`) showing two successful
   `POST /api/login` calls followed by a successful `/api/customforms` call,
@@ -274,7 +274,7 @@ bolted this on late).
   - **Still not verified end-to-end against a live backend**, for a
     different reason than Phase 0's original gap. This pass had real
     Supabase/Vercel API access (via MCP tools) — enough to find a ready test
-    company (`ABC Earthworks Company`, company code `abcworker`, worker
+    company (`ABC Earthworks Company`, company code `ABCEARTH`, worker
     login) and apply the migration above — but this session's own network
     egress policy blocked every request to `*.vercel.app` with a `403`
     (confirmed via the agent proxy's status endpoint and a direct `curl`),
