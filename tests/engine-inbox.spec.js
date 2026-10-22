@@ -70,6 +70,7 @@ test.describe('Engine document inbox', () => {
       return {};
     });
     await loginAsWorker(page);
+    await page.getByRole('button', { name: /^Inbox,/ }).click();
     await page.getByText('Company documents need you').click();
     await expect(page.getByText('Sent back: Wrong answer')).toBeVisible();
     await page.getByRole('button', { name: /Fix and resend/ }).click();
@@ -104,6 +105,7 @@ test.describe('Engine document inbox', () => {
       return {};
     });
     await loginAsWorker(page);
+    await page.getByRole('button', { name: /^Inbox,/ }).click();
     await page.getByText('Change a document from today').click();
     await page.getByRole('button', { name: /Amend/ }).click();
     await expect(page.getByRole('note')).toContainText('Amending');
