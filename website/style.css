@@ -700,6 +700,9 @@ footer{ border-top:1px solid var(--line); padding:64px 0 40px; }
 .mpanel{ display:none; padding:0 2px 16px; }
 .mpanel.open{ display:block; }
 .mpanel a{ display:block; padding:11px 0 11px 14px; font-size:14.5px; color:var(--muted); border-left:1px solid var(--line); }
+.mpanel a .d-sub{ display:block; font-size:12px; opacity:.62; margin-top:3px; line-height:1.35; }
+.mpanel a.d-lead{ color:var(--text); font-weight:600; }
+.mpanel .d-rule{ height:1px; background:var(--line); margin:6px 0 6px 14px; }
 .mpanel a:active, .mpanel a:hover{ color:var(--orange); border-left-color:var(--orange); }
 .mobilenav .cta-btn{ display:block; text-align:center; margin-top:26px; }
 
