@@ -23,7 +23,7 @@ check code compiles.
 
 ## Test company: ABC Earthworks
 
-**ABC Earthworks (`ABC Earthworks Company`, company code `abcworker`) is a TEST-ONLY
+**ABC Earthworks (`ABC Earthworks Company`, company code `ABCEARTH`) is a TEST-ONLY
 company.** None of its data is real, and it does not represent a real company or
 customer. Dillon's standing instruction (2026-10-06):
 

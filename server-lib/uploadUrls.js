@@ -210,6 +210,9 @@ const ALLOWED_EXTENSIONS = {
   'onboarding-uploads': ['pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg'],
   'worker-certifications': ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
   'worker-photos': ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'],
+  // Send & Sign (docs/schema/sent-documents-migration.sql): the supervisor's
+  // uploaded PDF, and the signed copy the server writes back.
+  'sent-documents': ['pdf'],
   // Company Portal (docs/schema/company-portal-phase2-migration.sql):
   // portal-sources holds the admin builder's uploaded source document
   // (the customer's own paper form, as PDF or a photo of it) that the AI

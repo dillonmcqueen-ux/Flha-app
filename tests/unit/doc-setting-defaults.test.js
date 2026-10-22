@@ -109,7 +109,7 @@ test('it covers exactly the built-in keys the gate reads, not a stale subset', (
   const m = SRC.match(/const BUILTIN_DOC_KEYS = \[([^\]]+)\]/);
   assert.ok(m, 'could not find BUILTIN_DOC_KEYS in api/customforms.js');
   const builtin = m[1].split(',').map(x => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-  assert.equal(builtin.length, 13, 'expected 13 built-in keys');
+  assert.equal(builtin.length, 14, 'expected 14 built-in keys');
 
   const covered = allDocumentSettingsOn(1).map(r => r.document_key).sort();
   assert.deepEqual(covered, [...builtin].sort());

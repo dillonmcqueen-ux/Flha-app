@@ -13,6 +13,8 @@ import { encryptField, withDecryptedEmail, keyProblemMessage } from '../server-l
 import { isValidEmail } from '../server-lib/onboardingHelpers.js';
 import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
+import { SENT_DOC_ACTIONS, handleSentDocument } from '../server-lib/sentDocuments.js';
+import { siteOrigin } from '../server-lib/email.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -150,6 +152,23 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Send & Sign. Gated on its own `sent_documents` key (the Send & Sign
+    // module), not `certifications`: these are documents a supervisor sends,
+    // not wallet tickets. All the rules live in server-lib/sentDocuments.js.
+    if (SENT_DOC_ACTIONS.has(action)) {
+      const denied = await requireDocKey(supabaseAdmin, session, 'sent_documents');
+      if (denied) return res.status(denied.status).json({ error: denied.error });
+      const result = await handleSentDocument({
+        supabase: supabaseAdmin,
+        session,
+        companyId: resolveCompanyId(session, req.body.companyId),
+        action,
+        body: req.body,
+        origin: siteOrigin(req),
+      });
+      return res.status(result.status).json(result.body);
+    }
+
     // ── Step 1: request a signed upload slot for one cert file ──────────
     if (action === 'create_certification_upload_url') {
       const denied = await requireDocKey(supabaseAdmin, session, 'certifications');

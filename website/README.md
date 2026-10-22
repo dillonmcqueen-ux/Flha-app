@@ -12,7 +12,7 @@ Five marketing pages, each answering the next question a visitor has.
   each with its own pair of buttons. The page does one job: send the visitor
   to the right door.
 - `features.html`: Everything that is built, in detail. The interactive
-  FLHA demo, all ten built-in document types, the supervisor dashboard,
+  FLHA demo, all ten modules, the supervisor dashboard,
   the Brain in full (`#brain` anchor), the platform underneath, and the
   security model.
 - `portal.html`: The FORA Field Portal. Done for you: a company sends its

@@ -36,6 +36,7 @@ import { colors as C, font as FONT, radius as RAD, shadow as SHAD, glow as GLOW 
 import PortalAssignmentRules from "./PortalAssignmentRules.jsx";
 import PortalReports from "./PortalReports.jsx";
 import EngineInbox from "./documentEngine/EngineInbox.jsx";
+import SentDocuments from "./SentDocuments.jsx";
 import { useEngineInbox } from "./documentEngine/useEngineInbox.js";
 import { generateAndUploadPortalDocument } from "./generatePortalDocumentPDF";
 import { PORTAL_DEPARTMENTS, PORTAL_DEPARTMENT_LABELS } from "../server-lib/portalDepartments";
@@ -46,7 +47,7 @@ import {
   Hammer, AlertTriangle, Siren, FolderKanban, BarChart3, ClipboardCheck, Settings2,
   Clock, KeyRound, Users, FilePlus2, Building2, CircleUserRound, MapPin, X,
   Radio, CircleCheckBig, Search, Download, Trash2, Flag, Mic, ShieldCheck, Menu, Fuel,
-  RefreshCw, Repeat, ChevronRight,
+  RefreshCw, Repeat, ChevronRight, FileSignature,
 } from "lucide-react";
 
 // Tab/category icon set — replaces the emoji this screen used to render as
@@ -72,6 +73,7 @@ const TAB_ICON = {
   timeclock: Clock,
   roster: KeyRound,
   certifications: ShieldCheck,
+  sentdocs: FileSignature,
   workforcecustomdocs: FolderKanban,
   portal: FileText,
   enginedocs: FileText,
@@ -86,7 +88,7 @@ const TAB_LABEL = {
   monthly: "Monthly", corrective: "Corrective Actions", sops: "SOPs", safetycustomdocs: "Custom Docs", safetyanalytics: "Safety Analytics",
   inspections: "Inspections", daily: "Daily", equipment: "Equipment", maintenance: "Maintenance", fuel: "Fuel Logs",
   customdocs: "Custom Docs", analytics: "Equipment Analytics",
-  timeclock: "Time Clock", roster: "Roster", certifications: "Certifications", workforcecustomdocs: "Custom Docs",
+  timeclock: "Time Clock", roster: "Roster", certifications: "Certifications", sentdocs: "Send & Sign", workforcecustomdocs: "Custom Docs",
   portal: "Portal", enginedocs: "Company Docs",
 };
 
@@ -3199,6 +3201,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
     timeclock: timeClockEnabled || timeClockHistory,
     roster: (companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false,
     certifications: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("certifications"),
+    // Send & Sign: documents a supervisor sends to roster members. Needs a
+    // roster because every recipient is a roster row, and the Send & Sign
+    // module (document key sent_documents).
+    sentdocs: ((companies.find(c => c.id === selectedCompany) || {}).roster_enabled || false) && isDocActive("sent_documents"),
     safetyanalytics: true,
     // The FORA Field Portal is a separate, quoted product and has no entry in
     // server-lib/pricing.js's MODULES, so there is no company_document_settings
@@ -3224,7 +3230,7 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
   const CATEGORIES = [
     { key: "safety", label: "Safety", tabs: ["flhas", "toolbox", "nearmiss", "incident", "monthly", "corrective", "sops", "safetycustomdocs", "safetyanalytics"] },
     { key: "operations", label: "Operations", tabs: ["inspections", "daily", "equipment", "customdocs", "analytics"] },
-    { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "certifications", "workforcecustomdocs"] },
+    { key: "workforce", label: "Workforce", tabs: ["timeclock", "roster", "certifications", "sentdocs", "workforcecustomdocs"] },
     // Company Portal (phase 3) — its own top-level group rather than folded
     // into Safety/Operations/Workforce, same reasoning WorkerMenu.jsx's
     // renderPortalCard gives: a Portal document's category is the
@@ -6595,6 +6601,10 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
 
         {activeTab === "customdocs" && TAB_VISIBLE.customdocs && renderCustomDocsTab(companyOperationsCustomDocs, "customdocs")}
         {activeTab === "safetycustomdocs" && TAB_VISIBLE.safetycustomdocs && renderCustomDocsTab(companySafetyCustomDocs, "safetycustomdocs")}
+        {activeTab === "sentdocs" && TAB_VISIBLE.sentdocs && (
+          <SentDocuments token={token} companyId={selectedCompany} />
+        )}
+
         {activeTab === "workforcecustomdocs" && TAB_VISIBLE.workforcecustomdocs && renderCustomDocsTab(companyWorkforceCustomDocs, "workforcecustomdocs")}
 
         {activeTab === "enginedocs" && TAB_VISIBLE.enginedocs && (
@@ -8244,6 +8254,9 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
         profile={profileData}
         certifications={employeeDirectory.find(e => e.id === profileRosterId)?.certifications}
         certsModuleActive={isDocActive("certifications")}
+        sentDocsActive={TAB_VISIBLE.sentdocs === true}
+        token={token}
+        companyId={selectedCompany}
         onClose={closeWorkerProfile}
         onSave={saveWorkerProfile}
         saving={savingProfile}

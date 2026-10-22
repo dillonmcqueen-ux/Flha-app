@@ -26,6 +26,7 @@ import {
   Clock, PenLine, LogOut, ChevronRight, ChevronLeft, FileText, Inbox, FolderClock, Fuel,
   HardHat, Wrench, Layers, ShieldCheck, Users,
 } from "lucide-react";
+import SentToYou from "./SentToYou.jsx";
 
 // Which form types have a queue-drain function wired up (offlineQueue.js +
 // docs/scope-offline-capability.md Phase 1) — now all 8 worker-facing forms
@@ -815,6 +816,8 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             Sign-in security
           </button>
         )}
+
+        {userId && <SentToYou token={token} />}
 
         {assignedItems.length > 0 && (
           <div style={{ marginBottom: 20 }}>

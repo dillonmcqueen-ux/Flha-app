@@ -4,7 +4,7 @@ Status: plan only. No code written. Spec approved by Dillon on 2026-10-09 (`docs
 
 ## Goal of phase 1
 
-FLHA works end to end through the new engine on ABC Earthworks (`abcworker`), with the same behavior as today's FLHA, a box-for-box PDF built in the new drag and drop editor, and the old FLHA code still in place until the new one is verified.
+FLHA works end to end through the new engine on ABC Earthworks (`ABCEARTH`), with the same behavior as today's FLHA, a box-for-box PDF built in the new drag and drop editor, and the old FLHA code still in place until the new one is verified.
 
 ## What "same behavior as today" means (from the FLHA audit)
 

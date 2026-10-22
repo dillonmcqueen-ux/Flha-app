@@ -36,6 +36,7 @@ export const DOC_TYPES = [
   { type: 'fuellog', label: 'Fuel Log', docKey: 'fuellog' },
   { type: 'timeclock', label: 'Time Clock', docKey: 'timeclock' },
   { type: 'certifications', label: 'Certification', docKey: 'certifications' },
+  { type: 'sent_documents', label: 'Sent Document', docKey: 'sent_documents' },
   { type: 'custom', label: 'Custom Document', docKey: null },
   { type: 'portal', label: 'Company Portal', docKey: null },
   { type: 'engine', label: 'Company Document (engine)', docKey: null },
@@ -222,6 +223,7 @@ const DOC_SOURCES = [
   { type: 'fuellog', table: 'fuel_logs' },
   { type: 'timeclock', table: 'time_clock_entries' },
   { type: 'certifications', table: 'worker_certifications' },
+  { type: 'sent_documents', table: 'sent_documents' },
 ];
 
 // Tables with no company_id of their own: their records hang off a form or

@@ -29,7 +29,7 @@ async function post(url, body) {
 
 const card = { background: `linear-gradient(160deg, ${C.panelRaised} 0%, ${C.panel} 100%)`, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: 16, boxShadow: SHAD.md, marginBottom: 14 };
 
-function SignaturePad({ onChange }) {
+export function SignaturePad({ onChange }) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const [has, setHas] = useState(false);

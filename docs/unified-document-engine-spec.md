@@ -166,7 +166,7 @@ Preserved: every auto-approve check in `server-lib/onboardingApproval.js` (CLAUD
 
 ## 8. Migration approach
 
-No live clients, so no data migration risk. Plan: replace outright, staged and verified on ABC Earthworks (company code `abcworker`, the only company allowed for test data).
+No live clients, so no data migration risk. Plan: replace outright, staged and verified on ABC Earthworks (company code `ABCEARTH`, the only company allowed for test data).
 
 Order (revised 2026-10-09: FLHA first as the proof):
 1. Foundations: versioning, `company_documents`, notification service, signature storage, layout renderer, drag and drop editor core.
