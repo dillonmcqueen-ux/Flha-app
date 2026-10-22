@@ -5676,6 +5676,11 @@ export default function Dashboard({ forcedCompanyId = null, isAdmin = false, vie
               subtitle: ["Needs sign-off", f.worker_name].filter(Boolean).join(" · "),
               onOpen: () => { setShowInbox(false); if (f.source === "engine") { if (f.pdf_url) window.open(f.pdf_url, "_blank", "noopener"); else setActiveTab("enginedocs"); } else setSelectedFlha(f); },
             })),
+            ...(engineInbox.count > 0 ? [{
+              key: "engine-review", Icon: FileText, accent: "#F97316", status: "open",
+              title: "Company documents", subtitle: `${engineInbox.count} waiting for your review`,
+              onOpen: () => { setShowInbox(false); setActiveTab("enginedocs"); },
+            }] : []),
             ...inboxMine.map(d => sentDocToItem(d, () => setInboxSentDoc(d))),
             ...inboxSent.map(b => ({
               key: `batch:${b.id}`, Icon: FileText, accent: "#F97316", status: b.status, dueAt: b.dueAt, doneAt: b.lastDoneAt,

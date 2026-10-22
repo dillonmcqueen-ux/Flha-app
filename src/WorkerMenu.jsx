@@ -515,6 +515,16 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
       title: "Documents to sign",
       subtitle: `${unsignedCount} saved ${unsignedCount === 1 ? "document is" : "documents are"} waiting for your signature`,
     }] : []),
+    ...(engineInboxCount > 0 ? [{
+      key: "engine-inbox", Icon: Inbox, status: "open", onOpen: () => setShowEngineInbox(true),
+      title: "Company documents need you",
+      subtitle: `${engineInboxCount} sent back or waiting for your signature`,
+    }] : []),
+    ...(engineAmendCount > 0 ? [{
+      key: "engine-amend", Icon: Inbox, status: "open", onOpen: () => setShowEngineInbox(true),
+      title: "Change a document from today",
+      subtitle: `${engineAmendCount} you can still amend`,
+    }] : []),
     ...(crewWaiting > 0 ? [{
       key: "crew-signoffs", Icon: Users, status: "open", onOpen: () => setShowCrew(true),
       title: "Crew sign-offs",
@@ -769,47 +779,6 @@ export default function WorkerMenu({ companyId, companyName, userName = "", user
             sent documents, assigned forms, documents to sign, crew sign-offs. */}
         {inbox.needs.length + inbox.done.length > 0 && (
           <InboxCard needs={inbox.needs} done={inbox.done} onClick={() => setShowInbox(true)} />
-        )}
-
-        {engineInboxCount > 0 && (
-          <div
-            onClick={() => setShowEngineInbox(true)}
-            style={{
-              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
-              background: C.status.warning.bg,
-              border: `1px solid ${C.status.warning.border}`, borderRadius: RAD.lg, padding: "14px 16px",
-              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
-            }}
-          >
-            <div style={s.iconTile(C.orange)}>
-              <Inbox size={22} color={C.orange} strokeWidth={2.25} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: C.status.warning.text }}>Company documents need you</div>
-              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{engineInboxCount} sent back or waiting for your signature</div>
-            </div>
-            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
-          </div>
-        )}
-
-        {engineInboxCount === 0 && engineAmendCount > 0 && (
-          <div
-            onClick={() => setShowEngineInbox(true)}
-            style={{
-              display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
-              background: C.panel, border: `1px solid ${C.line}`, borderRadius: RAD.lg, padding: "14px 16px",
-              boxShadow: SHAD.md, marginBottom: 12, minHeight: 64, boxSizing: "border-box",
-            }}
-          >
-            <div style={s.iconTile(C.orange)}>
-              <Inbox size={22} color={C.orange} strokeWidth={2.25} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: C.text.primary }}>Change a document from today</div>
-              <div style={{ fontSize: 12.5, color: C.text.muted, marginTop: 1 }}>{engineAmendCount} you can still amend</div>
-            </div>
-            <ChevronRight size={20} color={C.text.faint} style={{ flexShrink: 0 }} />
-          </div>
         )}
 
         {crewInfo.isLead && (
