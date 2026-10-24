@@ -15,6 +15,7 @@ import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { SENT_DOC_ACTIONS, handleSentDocument } from '../server-lib/sentDocuments.js';
 import { siteOrigin } from '../server-lib/email.js';
+import { isOwnedPath } from '../server-lib/ownedPath.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -201,7 +202,7 @@ export default async function handler(req, res) {
       // The uploaded path must actually live under this company/roster's
       // own namespace — stops a caller from recording a cert that points
       // at a path it never uploaded (or one from another company/roster).
-      if (!filePath.startsWith(`${companyId}/${rosterId}/`)) {
+      if (!isOwnedPath(filePath, `${companyId}/${rosterId}/`)) {
         return res.status(400).json({ error: 'Invalid file path.' });
       }
       const { data, error } = await supabaseAdmin
@@ -457,7 +458,7 @@ export default async function handler(req, res) {
     if (action === 'set_profile_photo') {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const { photoPath } = req.body;
-      if (!photoPath || !photoPath.startsWith(`${session.companyId}/${session.userId}/`)) {
+      if (!isOwnedPath(photoPath, `${session.companyId}/${session.userId}/`)) {
         return res.status(400).json({ error: 'Invalid file path.' });
       }
       const { error } = await supabaseAdmin.from('roster').update({ photo_path: photoPath }).eq('id', session.userId).eq('company_id', session.companyId);
