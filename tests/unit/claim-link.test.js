@@ -23,13 +23,13 @@ const server = http.createServer(async (req, res) => {
   const table = url.pathname.replace('/rest/v1/', '');
   let raw = '';
   await new Promise(r => { req.on('data', c => { raw += c; }); req.on('end', r); });
-  seen.push({ method: req.method, table });
+  seen.push({ method: req.method, table, url: req.url });
   const send = (code, payload) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(payload)); };
   if (table === 'rpc/bump_ip_throttle') return send(200, throttleCount);
   if (table === 'onboarding_requests') {
     return send(200, [{ id: 5, created_company_id: 1, claim_token: 'tok', claim_token_expires_at: new Date(Date.now() + 3600e3).toISOString(), draft_status: 'done', claimed_at: claimedAt }]);
   }
-  if (table === 'roster') return send(200, req.method === 'GET' ? [rosterRow] : (rosterRow.pin_set_at || !patchMatches ? [] : [{ id: rosterRow.id }]));
+  if (table === 'roster') return send(200, req.method === 'GET' ? [rosterRow] : (rosterRow.pin_set_at || rosterRow.pin_assigned_at || !patchMatches ? [] : [{ id: rosterRow.id }]));
   return send(200, []);
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -49,7 +49,7 @@ async function call(body) {
 
 test.beforeEach(() => {
   throttleCount = 1;
-  rosterRow = { id: 11, company_id: 1, pin_set_at: null, active: true, role: 'worker' };
+  rosterRow = { id: 11, company_id: 1, pin_set_at: null, pin_assigned_at: null, active: true, role: 'worker' };
   seen = [];
   patchMatches = true;
   claimedAt = null;
@@ -69,6 +69,21 @@ test('a PIN the person set through their own setup link is left alone', async ()
   const out = await setPin();
   assert.equal(out.statusCode, 409);
   assert.equal(writes('roster').length, 0);
+});
+
+test('a PIN an administrator or the person set while signed in is left alone', async () => {
+  rosterRow.pin_assigned_at = '2026-10-24T20:00:00Z';
+  const out = await setPin();
+  assert.equal(out.statusCode, 409);
+  assert.equal(writes('roster').length, 0);
+});
+
+test('the guarded UPDATE requires both pin_set_at and pin_assigned_at to be null', async () => {
+  await setPin();
+  const patch = seen.find(r => r.table === 'roster' && r.method === 'PATCH');
+  assert.ok(patch);
+  assert.match(patch.url, /pin_set_at=is\.null/);
+  assert.match(patch.url, /pin_assigned_at=is\.null/);
 });
 
 test('a spent per-IP budget refuses every claim action', async () => {

@@ -448,7 +448,7 @@ export default async function handler(req, res) {
       const pin = genPin();
       const { data, error } = await supabaseAdmin
         .from('roster')
-        .insert({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt, employee_id: employeeId || null })
+        .insert({ company_id: companyId, name, role, pin_hash: hashPin(pin, salt), pin_salt: salt, pin_assigned_at: new Date().toISOString(), employee_id: employeeId || null })
         .select('id, name, role, active, created_at, employee_id')
         .single();
       if (error) {
@@ -659,7 +659,7 @@ export default async function handler(req, res) {
       const pin = genPin();
       const { error } = await supabaseAdmin
         .from('roster')
-        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null })
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_assigned_at: new Date().toISOString(), mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null })
         .eq('id', id);
       if (error) return res.status(500).json({ error: "Couldn't reset the PIN." });
       return res.status(200).json({ ok: true, pin });
@@ -886,7 +886,7 @@ export default async function handler(req, res) {
         const pin = genPin();
         const { error } = await supabaseAdmin
           .from('roster')
-          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null })
+          .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_assigned_at: new Date().toISOString(), mfa_setup_jti_hash: null, mfa_setup_expires_at: null, pin_link_jti_hash: null, pin_link_expires_at: null })
           .eq('id', m.id);
         if (error) return res.status(500).json({ error: `Couldn't regenerate the PIN for ${m.name}.` });
         roster.push({ id: m.id, name: m.name, role: m.role, pin });

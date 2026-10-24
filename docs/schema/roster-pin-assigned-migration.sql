@@ -1,0 +1,18 @@
+-- roster.pin_assigned_at: set when a person or an administrator deliberately
+-- sets a PIN after the account exists (add person with a shown PIN, reset a
+-- PIN, regenerate all PINs, a person's own set_own_pin). Placeholder PINs
+-- written at company creation leave it null.
+--
+-- Why: the onboarding claim link (api/login.js claim_set_roster_pin) may fill
+-- in placeholder PINs but must never overwrite one somebody chose. pin_set_at
+-- only records "chose it through the emailed setup link", and setting it from
+-- the admin paths would also hide the "Send setup link" button for people who
+-- still need one. A separate column keeps both meanings.
+--
+-- Additive and nullable, so the code and this migration can land in either
+-- order only if this is applied first: api/companydata.js and
+-- api/certifications.js write the column.
+--
+-- APPLIED to the live FORA project (wzyvbtzxxdcxgvbkcqmt) on 2026-10-24 as
+-- "roster_pin_assigned_at".
+alter table roster add column if not exists pin_assigned_at timestamptz;

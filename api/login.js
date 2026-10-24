@@ -1304,15 +1304,17 @@ async function loginHandler(req, res) {
     // this claim token resolved to, never trusted from the client alone.
     const { data: memberRows, error: memberErr } = await supabaseAdmin
       .from('roster')
-      .select('id, company_id, pin_set_at, active, role')
+      .select('id, company_id, pin_set_at, pin_assigned_at, active, role')
       .eq('id', rosterId)
       .limit(1);
     if (memberErr || !memberRows || memberRows.length === 0 || memberRows[0].company_id !== request.created_company_id) {
       return res.status(404).json({ error: 'Roster member not found.' });
     }
-    // A PIN the person chose themselves through their own setup link is theirs.
-    // This link only fills in PINs nobody has set yet, or ones typed here.
-    if (memberRows[0].pin_set_at) {
+    // A PIN somebody chose (through their own setup link, or set by an
+    // administrator or the person while signed in) is not this link's to
+    // replace. It only fills in the placeholders written at company creation,
+    // or PINs typed here.
+    if (memberRows[0].pin_set_at || memberRows[0].pin_assigned_at) {
       return res.status(409).json({ error: 'That person has already set their own PIN.' });
     }
     // Nobody who cannot sign in (deactivated) or who is not company staff
@@ -1331,6 +1333,7 @@ async function loginHandler(req, res) {
       .eq('id', rosterId)
       .eq('company_id', request.created_company_id)
       .is('pin_set_at', null)
+      .is('pin_assigned_at', null)
       .select('id');
     if (updateErr) return res.status(500).json({ error: "Couldn't save that PIN." });
     if (!updated || updated.length === 0) {

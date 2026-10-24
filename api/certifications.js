@@ -439,7 +439,7 @@ export default async function handler(req, res) {
       const salt = genSalt();
       const { error } = await supabaseAdmin
         .from('roster')
-        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_link_jti_hash: null, pin_link_expires_at: null })
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_assigned_at: new Date().toISOString(), pin_link_jti_hash: null, pin_link_expires_at: null })
         .eq('id', session.userId)
         .eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your PIN.' });
