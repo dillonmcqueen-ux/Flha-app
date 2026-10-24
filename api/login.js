@@ -620,7 +620,7 @@ async function loginHandler(req, res) {
   if (action === 'roster_login') {
     const { companyTicket, rosterId, pin } = req.body;
     const ticket = verifyTicket(companyTicket);
-    if (!ticket) return res.status(401).json({ error: 'That took too long — please start over.' });
+    if (!ticket) return res.status(401).json({ error: 'That took too long. Please start over.' });
     if (!rosterId || !pin) return res.status(400).json({ error: 'Missing details.' });
 
     const pinIpAllowed = await checkIpThrottle(`pin:${ipBucket(clientIp(req))}`, PIN_IP_THROTTLE_MAX_FAILURES, PIN_IP_THROTTLE_WINDOW_MS);
@@ -634,7 +634,7 @@ async function loginHandler(req, res) {
       .limit(1);
     if (error) return res.status(500).json({ error: 'Connection error. Please try again.' });
     const member = rows && rows[0];
-    if (!member) return res.status(404).json({ error: 'Not found — please start over.' });
+    if (!member) return res.status(404).json({ error: 'Not found. Please start over.' });
 
     if (!member.active) {
       return res.status(403).json({ error: 'This account is no longer active. Contact your administrator.' });
@@ -926,7 +926,7 @@ async function loginHandler(req, res) {
   if (action === 'master_login') {
     const { masterTicket, companyId, role: pickedRole } = req.body;
     const ticket = verifyMasterTicket(masterTicket);
-    if (!ticket) return res.status(401).json({ error: 'That took too long — please start over.' });
+    if (!ticket) return res.status(401).json({ error: 'That took too long. Please start over.' });
     if (!companyId || (pickedRole !== 'worker' && pickedRole !== 'supervisor')) {
       return res.status(400).json({ error: 'Missing details.' });
     }
@@ -1065,9 +1065,9 @@ async function loginHandler(req, res) {
         .limit(1);
       if (findErr) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
       const existing = existingRows && existingRows[0];
-      if (!existing) return res.status(404).json({ error: "That edit link isn't valid — please use the link from your confirmation email." });
+      if (!existing) return res.status(404).json({ error: "That edit link isn't valid. Use the link you were given when you submitted." });
       if (existing.created_company_id) {
-        return res.status(400).json({ error: 'This request has already been approved — contact FORA support for changes.' });
+        return res.status(400).json({ error: 'This request has already been approved. Contact FORA support for changes.' });
       }
       // Back to "new" so it resurfaces at the top of the admin's queue —
       // this is the self-serve half of the loop; the admin doesn't have to
@@ -1223,7 +1223,7 @@ async function loginHandler(req, res) {
     const request = rows && rows[0];
     if (!request || !request.created_company_id) return { error: "That claim link isn't valid." };
     if (!request.claim_token_expires_at || new Date(request.claim_token_expires_at) < new Date()) {
-      return { error: 'This claim link has expired — contact FORA support for a new one.' };
+      return { error: 'This claim link has expired. Contact FORA support for a new one.' };
     }
     // One use: once the contact finishes (claim_finalize), the link is dead.
     // Support reissues a fresh one from the Admin Panel (get_claim_link).
