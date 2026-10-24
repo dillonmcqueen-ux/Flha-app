@@ -15,6 +15,7 @@ process.env.ADMIN_CODE = 'a-long-admin-code-123456';
 let throttleCount;
 let rosterRow;
 let seen; // { method, table }
+let claimedAt; // onboarding_requests.claimed_at
 let patchMatches; // whether the guarded UPDATE finds a row
 
 const server = http.createServer(async (req, res) => {
@@ -26,7 +27,7 @@ const server = http.createServer(async (req, res) => {
   const send = (code, payload) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(payload)); };
   if (table === 'rpc/bump_ip_throttle') return send(200, throttleCount);
   if (table === 'onboarding_requests') {
-    return send(200, [{ id: 5, created_company_id: 1, claim_token: 'tok', claim_token_expires_at: new Date(Date.now() + 3600e3).toISOString(), draft_status: 'done' }]);
+    return send(200, [{ id: 5, created_company_id: 1, claim_token: 'tok', claim_token_expires_at: new Date(Date.now() + 3600e3).toISOString(), draft_status: 'done', claimed_at: claimedAt }]);
   }
   if (table === 'roster') return send(200, req.method === 'GET' ? [rosterRow] : (rosterRow.pin_set_at || !patchMatches ? [] : [{ id: rosterRow.id }]));
   return send(200, []);
@@ -51,6 +52,7 @@ test.beforeEach(() => {
   rosterRow = { id: 11, company_id: 1, pin_set_at: null, active: true, role: 'worker' };
   seen = [];
   patchMatches = true;
+  claimedAt = null;
 });
 
 const writes = (table) => seen.filter(r => r.table === table && r.method !== 'GET');
@@ -112,4 +114,20 @@ test('a setup link finished between the read and the write wins', async () => {
   patchMatches = false;
   const out = await setPin();
   assert.equal(out.statusCode, 409);
+});
+
+test('once the contact finishes, the link is dead for every action', async () => {
+  claimedAt = '2026-10-24T20:00:00Z';
+  for (const body of [
+    { action: 'claim_get_details' },
+    { action: 'claim_set_roster_pin', rosterId: 11, pin: '493817' },
+    { action: 'claim_confirm_equipment', items: [{ make: 'CAT' }] },
+    { action: 'claim_confirm_sops', policies: ['Wear a hard hat.'] },
+    { action: 'claim_finalize' },
+  ]) {
+    const out = await call({ claimToken: 'tok', ...body });
+    assert.equal(out.statusCode, 400, body.action);
+    assert.match(out.body.error, /already been used/, body.action);
+  }
+  assert.equal(writes('roster').length + writes('equipment').length + writes('sops').length + writes('onboarding_requests').length, 0);
 });

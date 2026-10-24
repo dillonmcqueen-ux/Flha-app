@@ -172,7 +172,7 @@ export default function ClaimAccount() {
           <div style={{ fontSize: 20, fontWeight: 700, color: "#F97316", marginBottom: 8 }}>You're all set</div>
           <div style={{ fontSize: 14, color: "#9CA3AF", lineHeight: 1.6 }}>
             Your team can sign in now with company code <span style={styles.code}>{company?.company_code}</span>: type it on the login page, pick your name, and enter the PIN you set.
-            This link still works if you need to come back and finish anything.
+            This link is now closed. If you need to change anything later, contact FORA support for a new one.
           </div>
         </div>
       </div>

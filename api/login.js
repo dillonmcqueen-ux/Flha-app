@@ -1203,6 +1203,11 @@ async function loginHandler(req, res) {
     if (!request.claim_token_expires_at || new Date(request.claim_token_expires_at) < new Date()) {
       return { error: 'This claim link has expired — contact FORA support for a new one.' };
     }
+    // One use: once the contact finishes (claim_finalize), the link is dead.
+    // Support reissues a fresh one from the Admin Panel (get_claim_link).
+    if (request.claimed_at) {
+      return { error: 'This claim link has already been used. Contact FORA support for a new one.' };
+    }
     return { request };
   }
 

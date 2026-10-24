@@ -516,7 +516,7 @@ export default async function handler(req, res) {
       if (!companyId) return res.status(400).json({ error: 'Missing company id.' });
       const { data: rows, error } = await supabaseAdmin
         .from('onboarding_requests')
-        .select('id, claim_token, claim_token_expires_at')
+        .select('id, claim_token, claim_token_expires_at, claimed_at')
         .eq('created_company_id', companyId)
         .limit(1);
       if (error) return res.status(500).json({ error: 'Could not load claim link.' });
@@ -525,11 +525,13 @@ export default async function handler(req, res) {
 
       let claimToken = request.claim_token;
       const expired = !request.claim_token_expires_at || new Date(request.claim_token_expires_at) < new Date();
-      if (!claimToken || expired) {
+      // A used link (claimed_at set) is dead, so a reissue rotates it and reopens it.
+      if (!claimToken || expired || request.claimed_at) {
         claimToken = randomToken();
         await supabaseAdmin.from('onboarding_requests').update({
           claim_token: claimToken,
           claim_token_expires_at: new Date(Date.now() + CLAIM_TOKEN_TTL_MS).toISOString(),
+          claimed_at: null,
         }).eq('id', request.id);
       }
       return res.status(200).json({ ok: true, claimUrl: `${siteOrigin(req)}/claim?token=${claimToken}` });
