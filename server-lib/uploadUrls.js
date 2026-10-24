@@ -24,6 +24,7 @@
 // anon INSERT policy any more.
 
 import crypto from 'crypto';
+import { checkIpThrottle } from './ipThrottle.js';
 
 // Every issued path gets an unguessable component spliced into its final
 // segment. Before this, paths were fully determined by the caller-supplied
@@ -250,13 +251,33 @@ const ALLOWED_EXTENSIONS = {
 // server-lib/signedUrls.js) signs whatever path is actually stored, not a
 // path it reconstructs, so an old flat path and a new namespaced one
 // resolve exactly the same way.
-export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId = null) {
+// Signed upload slots are cheap to mint and each one allows a file up to the
+// bucket's size limit, so a session could fill a bucket by minting slots in a
+// loop. This caps how many one company can be issued per hour. It is a backstop
+// well above real use (a document plus its signature and photos is a handful of
+// slots), not a tuned quota. `rateKey` lets a caller that builds its own prefix
+// and omits `companyId` (api/certifications.js) still count against the company.
+export const UPLOAD_SLOTS_MAX_PER_COMPANY_PER_HOUR = 2000;
+const UPLOAD_SLOTS_WINDOW_MS = 60 * 60 * 1000;
+
+export async function createUploadUrl(supabaseAdmin, bucket, filename, companyId = null, rateKey = companyId) {
   const clean = sanitizeFilename(filename);
   if (!clean) return { error: 'Invalid filename.' };
   const allowed = ALLOWED_EXTENSIONS[bucket];
   const ext = clean.includes('.') ? clean.split('.').pop().toLowerCase() : '';
   if (allowed && !allowed.includes(ext)) {
     return { error: `Unsupported file type for this upload (.${ext || 'none'}).` };
+  }
+  if (rateKey !== null && rateKey !== undefined) {
+    // A counter that cannot be read must not stop a crew uploading a safety
+    // document, so a throttle failure lets the request through (and is logged).
+    let withinLimit = true;
+    try {
+      withinLimit = await checkIpThrottle(supabaseAdmin, `upslot:${rateKey}`, UPLOAD_SLOTS_MAX_PER_COMPANY_PER_HOUR, UPLOAD_SLOTS_WINDOW_MS);
+    } catch (e) {
+      console.error('Upload slot throttle unavailable, allowing the request:', e.message);
+    }
+    if (!withinLimit) return { error: 'Too many uploads this hour. Please try again later.', rateLimited: true };
   }
   const segmented = withUnguessableSegment(clean);
   const path = (companyId !== null && companyId !== undefined) ? `${companyId}/${segmented}` : segmented;

@@ -113,6 +113,26 @@ export default async function handler(req, res) {
     return res.status(200).send(renderConfirmedPage(scope));
   }
 
+  // Claim the approval before touching Stripe. The 'sent' check above only
+  // reads, so two simultaneous POSTs (a double click, a retried request) both
+  // passed it and each created a customer and sent an invoice. Moving the row
+  // from 'sent' to 'approved' is one conditional UPDATE; only the request that
+  // changes the row goes on, and the loser sees the same confirmation page.
+  const { data: claimed, error: claimErr } = await supabaseAdmin
+    .from('portal_scope_requests')
+    .update({ status: 'approved', approved_at: new Date().toISOString() })
+    .eq('id', scope.id)
+    .eq('status', 'sent')
+    .select('id');
+  if (claimErr) {
+    console.error('scope-approval claim failed:', scope.id, claimErr.message);
+    return res.status(500).send('Something went wrong sending your invoice. FORA has been notified and will follow up directly.');
+  }
+  if (!claimed || claimed.length === 0) {
+    return res.status(200).send(renderConfirmedPage({ ...scope, status: 'approved' }));
+  }
+
+  let invoiceSent = false;
   try {
     const customer = await stripe.customers.create({
       name: scope.client_name,
@@ -140,6 +160,7 @@ export default async function handler(req, res) {
     });
     const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
     await stripe.invoices.sendInvoice(finalized.id);
+    invoiceSent = true;
 
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin
@@ -165,6 +186,18 @@ export default async function handler(req, res) {
     return res.status(200).send(renderConfirmedPage({ ...scope, status: 'invoiced' }));
   } catch (e) {
     console.error('scope-approval approve failed:', scope.id, e.message);
+    // Hand the claim back so the client (or a retry) can approve again, but
+    // only if no invoice went out: once Stripe has sent one, re-opening the
+    // row would let a second approval send a second invoice. That case stays
+    // 'approved' for a person to reconcile.
+    if (!invoiceSent) {
+      const { error: releaseErr } = await supabaseAdmin
+        .from('portal_scope_requests')
+        .update({ status: 'sent', approved_at: null })
+        .eq('id', scope.id)
+        .eq('status', 'approved');
+      if (releaseErr) console.error('scope-approval claim release failed:', scope.id, releaseErr.message);
+    }
     return res.status(500).send('Something went wrong sending your invoice. FORA has been notified and will follow up directly.');
   }
 }
@@ -194,7 +227,9 @@ export function renderScopePage(scope) {
 function renderConfirmedPage(scope) {
   const message = scope.status === 'paid'
     ? 'Payment received. FORA will be in touch shortly to collect your documents and get started.'
-    : 'Approved. An invoice for the setup fee has been sent to your email.';
+    : scope.status === 'approved'
+      ? 'Approved. Your invoice for the setup fee is on its way to your email.'
+      : 'Approved. An invoice for the setup fee has been sent to your email.';
   return pageShell({
     title: `Proposal for ${scope.client_name}`,
     body: `<h1>Thanks, ${escapeHtml(scope.client_name)}.</h1><p class="sub">${escapeHtml(message)}</p>`,

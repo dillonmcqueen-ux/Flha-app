@@ -15,7 +15,7 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { checkIpThrottle as sharedCheckIpThrottle, peekIpThrottle, ipBucket } from '../server-lib/ipThrottle.js';
-import { validateOnboardingIntake, randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { validateOnboardingIntake, randomToken, isValidEmail, safeDisplayName } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
 import { withDecryptedEmail, encryptField, decryptField, keyProblemMessage } from '../server-lib/fieldCrypto.js';
@@ -137,6 +137,18 @@ const ONBOARDING_THROTTLE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const ONBOARDING_INTAKE_MAX_PER_HOUR = 10;
 const ONBOARDING_GET_MAX_PER_HOUR = 60;
 const ONBOARDING_UPLOAD_MAX_PER_HOUR = 40;
+// Claim-link actions (PIN assignment, draft confirmation) sit behind a bearer
+// token only, so they get the same per-IP ceiling the other public onboarding
+// actions have. A real contact sets a handful of PINs and retries a typo or two.
+// The submitter confirmation goes to an address the form's author typed, so one
+// address only ever gets a few of them a day, whatever IPs the requests come from.
+const ONBOARDING_CONFIRMATION_MAX_PER_ADDRESS = 3;
+const ONBOARDING_CONFIRMATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CLAIM_WRITE_MAX_PER_HOUR = 60;
+const CLAIM_GET_MAX_PER_HOUR = 60;
+const CLAIM_MAX_LIST_ITEMS = 200;
+const CLAIM_MAX_FIELD_CHARS = 200;
+const CLAIM_MAX_POLICY_CHARS = 5000;
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -423,18 +435,27 @@ async function sendOnboardingNotification(record) {
 // been created from the request — Onboarding.jsx hides the edit form once
 // the record shows created_company_id.
 async function sendSubmitterConfirmation(req, record, editToken) {
+  // Hashed so the throttle table never holds the address itself.
+  const addressKey = crypto.createHash('sha256').update(String(record.contact_email || '').trim().toLowerCase()).digest('hex');
+  const allowed = await checkIpThrottle(`onbmail:${addressKey}`, ONBOARDING_CONFIRMATION_MAX_PER_ADDRESS, ONBOARDING_CONFIRMATION_WINDOW_MS);
+  if (!allowed) {
+    console.warn('Onboarding submitter confirmation skipped: per-address cap reached.');
+    return false;
+  }
   const editUrl = `${siteOrigin(req)}/onboarding?edit=${editToken}`;
+  const name = safeDisplayName(record.company_name);
   const text = [
-    `Thanks — we've got your submission for ${record.company_name || 'your company'}.`,
+    `Thanks, we've got your submission for ${name}.`,
     "We'll email you within one business day once your company is live on FORA.",
     '',
     `Need to fix or add something first? Edit your submission any time before then: ${editUrl}`,
   ].join('\n');
   await sendEmail({
     to: record.contact_email,
-    subject: `We've got your FORA onboarding request — ${record.company_name || ''}`,
+    subject: `We've got your FORA onboarding request: ${name}`,
     text,
   });
+  return true;
 }
 
 // The one place a roster login turns into a session, after the PIN and (when
@@ -1030,11 +1051,16 @@ async function loginHandler(req, res) {
       }
     }
 
+    // A confirmation email only goes to a submitter whose purchase we have
+    // verified (a claimed Stripe checkout). The form is public and the address
+    // is whatever the author typed, so an unpaid submission must not make FORA's
+    // domain send anything to a third party. They still see the edit link on screen.
+    let purchaseVerified = !!record.stripe_customer_id;
     let requestId;
     if (editToken) {
       const { data: existingRows, error: findErr } = await supabaseAdmin
         .from('onboarding_requests')
-        .select('id, created_company_id')
+        .select('id, created_company_id, stripe_customer_id')
         .eq('edit_token', editToken)
         .limit(1);
       if (findErr) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
@@ -1049,6 +1075,7 @@ async function loginHandler(req, res) {
       const { error } = await supabaseAdmin.from('onboarding_requests').update({ ...record, status: 'new', admin_note: null }).eq('id', existing.id);
       if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
       requestId = existing.id;
+      purchaseVerified = purchaseVerified || !!existing.stripe_customer_id;
     } else {
       record.edit_token = randomToken();
       let { data, error } = await supabaseAdmin
@@ -1123,13 +1150,16 @@ async function loginHandler(req, res) {
     }
 
     await sendOnboardingNotification({ ...record, skippedUserLines });
-    try {
-      await sendSubmitterConfirmation(req, record, editToken || record.edit_token);
-    } catch (e) {
-      console.error('Onboarding submitter confirmation email failed:', e.message);
+    let confirmationEmailed = false;
+    if (purchaseVerified) {
+      try {
+        confirmationEmailed = (await sendSubmitterConfirmation(req, record, editToken || record.edit_token)) === true;
+      } catch (e) {
+        console.error('Onboarding submitter confirmation email failed:', e.message);
+      }
     }
 
-    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines, autoApproved: false });
+    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines, autoApproved: false, confirmationEmailed });
   }
 
   // ── Fetch an in-progress request for self-serve editing. Public, but
@@ -1178,6 +1208,10 @@ async function loginHandler(req, res) {
   // resolves companyId strictly from the claim token server-side — never
   // from a client-supplied id. ═══════════════════════════════════════════
 
+  async function claimThrottleOk(kind, max) {
+    return checkIpThrottle(`${kind}:${ipBucket(clientIp(req))}`, max, ONBOARDING_THROTTLE_WINDOW_MS);
+  }
+
   async function resolveClaimRequest(claimToken) {
     if (!claimToken) return { error: 'Missing claim link.' };
     const { data: rows, error } = await supabaseAdmin
@@ -1191,11 +1225,19 @@ async function loginHandler(req, res) {
     if (!request.claim_token_expires_at || new Date(request.claim_token_expires_at) < new Date()) {
       return { error: 'This claim link has expired — contact FORA support for a new one.' };
     }
+    // One use: once the contact finishes (claim_finalize), the link is dead.
+    // Support reissues a fresh one from the Admin Panel (get_claim_link).
+    if (request.claimed_at) {
+      return { error: 'This claim link has already been used. Contact FORA support for a new one.' };
+    }
     return { request };
   }
 
   if (action === 'claim_get_details') {
     const { claimToken } = req.body;
+    if (!(await claimThrottleOk('claimget', CLAIM_GET_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
 
@@ -1248,6 +1290,9 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_set_roster_pin') {
     const { claimToken, rosterId, pin } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     if (!rosterId || !/^\d{6}$/.test(String(pin || ''))) {
@@ -1259,28 +1304,63 @@ async function loginHandler(req, res) {
     // this claim token resolved to, never trusted from the client alone.
     const { data: memberRows, error: memberErr } = await supabaseAdmin
       .from('roster')
-      .select('id, company_id')
+      .select('id, company_id, pin_set_at, pin_assigned_at, pin_link_sent_at, email, active, role')
       .eq('id', rosterId)
       .limit(1);
     if (memberErr || !memberRows || memberRows.length === 0 || memberRows[0].company_id !== request.created_company_id) {
       return res.status(404).json({ error: 'Roster member not found.' });
     }
+    // A PIN somebody chose (through their own setup link, or set by an
+    // administrator or the person while signed in) is not this link's to
+    // replace. It only fills in the placeholders written at company creation,
+    // or PINs typed here.
+    if (memberRows[0].pin_set_at || memberRows[0].pin_assigned_at) {
+      return res.status(409).json({ error: 'That person has already set their own PIN.' });
+    }
+    // The claim page only offers a typed PIN to people with no email. Anyone
+    // with an address gets (or already got) a setup link and chooses their own,
+    // so the server holds the same line: a hire added by email later, or anyone
+    // whose link is out, is not this link's to set a PIN for.
+    if (memberRows[0].email || memberRows[0].pin_link_sent_at) {
+      return res.status(409).json({ error: 'That person sets their own PIN through an emailed setup link.' });
+    }
+    // Nobody who cannot sign in (deactivated) or who is not company staff
+    // (auditor) is someone this link assigns a PIN to.
+    if (memberRows[0].active === false || memberRows[0].role === 'auditor') {
+      return res.status(404).json({ error: 'Roster member not found.' });
+    }
 
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = hashPin(pin, salt);
-    const { error: updateErr } = await supabaseAdmin
+    // The guard is part of the UPDATE, not just the read above, so a person
+    // finishing their own setup link between the two cannot be overwritten.
+    const { data: updated, error: updateErr } = await supabaseAdmin
       .from('roster')
       .update({ pin_hash: hash, pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
-      .eq('id', rosterId);
+      .eq('id', rosterId)
+      .eq('company_id', request.created_company_id)
+      .is('pin_set_at', null)
+      .is('pin_assigned_at', null)
+      .is('pin_link_sent_at', null)
+      .select('id');
     if (updateErr) return res.status(500).json({ error: "Couldn't save that PIN." });
+    if (!updated || updated.length === 0) {
+      return res.status(409).json({ error: 'That person has already set their own PIN.' });
+    }
     return res.status(200).json({ ok: true });
   }
 
   if (action === 'claim_confirm_equipment') {
     const { claimToken, items } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     if (!Array.isArray(items)) return res.status(400).json({ error: 'Missing equipment list.' });
+    const tooBig = items.length > CLAIM_MAX_LIST_ITEMS || items.some((it) => it && typeof it === 'object'
+      && ['year', 'make', 'model', 'type', 'unitNumber'].some((k) => String(it[k] ?? '').length > CLAIM_MAX_FIELD_CHARS));
+    if (tooBig) return res.status(400).json({ error: 'That equipment list is too large.' });
 
     const rows = items
       .filter((it) => it && ((it.make || '').trim() || (it.model || '').trim() || (it.type || '').trim() || (it.unitNumber || '').trim()))
@@ -1305,9 +1385,15 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_confirm_sops') {
     const { claimToken, policies } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     if (!Array.isArray(policies)) return res.status(400).json({ error: 'Missing policy list.' });
+    if (policies.length > CLAIM_MAX_LIST_ITEMS || policies.some((p) => typeof p !== 'string' || p.length > CLAIM_MAX_POLICY_CHARS)) {
+      return res.status(400).json({ error: 'That policy list is too large.' });
+    }
 
     const rows = policies.filter((p) => (p || '').trim()).map((policy_text) => ({ company_id: request.created_company_id, policy_text: policy_text.trim() }));
     if (rows.length > 0) {
@@ -1320,6 +1406,9 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_finalize') {
     const { claimToken } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     await supabaseAdmin.from('onboarding_requests').update({ claimed_at: new Date().toISOString() }).eq('id', request.id);

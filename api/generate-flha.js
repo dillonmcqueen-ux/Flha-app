@@ -48,7 +48,22 @@ const MAX_PROMPT_CHARS = 40000;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 const RATE_LIMIT_MAX_REQUESTS = 20;
 
+// The count is bumped by one atomic statement inside bump_ai_rate_limit
+// (docs/schema/ai-rate-limit-atomic-migration.sql) and the decision is made
+// on the value it returns. If the function is missing (a deploy landing
+// before the migration is applied) fall back to the old read-then-write path
+// rather than failing closed and blocking every AI call.
 async function checkRateLimit(key) {
+  const { data, error } = await supabaseAdmin.rpc('bump_ai_rate_limit', {
+    p_key: key,
+    p_window_seconds: Math.round(RATE_LIMIT_WINDOW_MS / 1000),
+  });
+  if (!error && typeof data === 'number') return data <= RATE_LIMIT_MAX_REQUESTS;
+  if (error) console.error('bump_ai_rate_limit RPC unavailable, using non-atomic fallback:', error.message);
+  return legacyCheckRateLimit(key);
+}
+
+async function legacyCheckRateLimit(key) {
   const now = Date.now();
   const { data: rows } = await supabaseAdmin
     .from('ai_rate_limits')
@@ -203,6 +218,15 @@ function logSafeSubtype(documentType) {
     : 'other';
 }
 
+// The field is client-supplied and selects the model, so an unrecognised value
+// is refused outright instead of falling back to Opus: otherwise any session
+// could use this endpoint as a free Opus proxy by sending a made-up type.
+// Every caller in src/ sends a key from MODEL_BY_DOCUMENT_TYPE.
+export function isKnownDocumentType(documentType) {
+  return typeof documentType === 'string'
+    && Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType);
+}
+
 export function modelForDocumentType(documentType) {
   if (typeof documentType !== 'string') return DEFAULT_MODEL;
   return Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType)
@@ -291,6 +315,10 @@ export default async function handler(req, res) {
   }
   if (typeof prompt !== 'string' || prompt.length > MAX_PROMPT_CHARS) {
     return res.status(400).json({ error: "Prompt too long." });
+  }
+
+  if (!isKnownDocumentType(documentType)) {
+    return res.status(400).json({ error: "Unknown document type." });
   }
 
   const rateLimitKey = session.userId ? `user:${session.userId}` : `company:${session.companyId}`;

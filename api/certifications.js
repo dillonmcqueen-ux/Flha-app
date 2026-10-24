@@ -15,6 +15,7 @@ import { isWeakPin, WEAK_PIN_MESSAGE } from '../server-lib/weakPins.js';
 import { sessionExpired } from '../server-lib/sessionTtl.js';
 import { SENT_DOC_ACTIONS, handleSentDocument } from '../server-lib/sentDocuments.js';
 import { siteOrigin } from '../server-lib/email.js';
+import { isOwnedPath } from '../server-lib/ownedPath.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -181,7 +182,7 @@ export default async function handler(req, res) {
       // Namespaced by company/roster so one company's uploads can never
       // collide with (or be pointed at) another's inside the shared bucket.
       const namespacedName = `${companyId}/${rosterId}/${Date.now()}-${filename}`;
-      const result = await createUploadUrl(supabaseAdmin, BUCKET, namespacedName);
+      const result = await createUploadUrl(supabaseAdmin, BUCKET, namespacedName, null, companyId);
       if (result.error) return res.status(500).json({ error: result.error });
       return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
     }
@@ -201,7 +202,7 @@ export default async function handler(req, res) {
       // The uploaded path must actually live under this company/roster's
       // own namespace — stops a caller from recording a cert that points
       // at a path it never uploaded (or one from another company/roster).
-      if (!filePath.startsWith(`${companyId}/${rosterId}/`)) {
+      if (!isOwnedPath(filePath, `${companyId}/${rosterId}/`)) {
         return res.status(400).json({ error: 'Invalid file path.' });
       }
       const { data, error } = await supabaseAdmin
@@ -438,7 +439,7 @@ export default async function handler(req, res) {
       const salt = genSalt();
       const { error } = await supabaseAdmin
         .from('roster')
-        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_link_jti_hash: null, pin_link_expires_at: null })
+        .update({ pin_hash: hashPin(pin, salt), pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null, pin_assigned_at: new Date().toISOString(), pin_link_jti_hash: null, pin_link_expires_at: null })
         .eq('id', session.userId)
         .eq('company_id', session.companyId);
       if (error) return res.status(500).json({ error: 'Could not save your PIN.' });
@@ -449,7 +450,7 @@ export default async function handler(req, res) {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const { filename } = req.body;
       const namespacedName = `${session.companyId}/${session.userId}/${Date.now()}-${filename}`;
-      const result = await createUploadUrl(supabaseAdmin, PHOTO_BUCKET, namespacedName);
+      const result = await createUploadUrl(supabaseAdmin, PHOTO_BUCKET, namespacedName, null, session.companyId);
       if (result.error) return res.status(500).json({ error: result.error });
       return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
     }
@@ -457,7 +458,7 @@ export default async function handler(req, res) {
     if (action === 'set_profile_photo') {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const { photoPath } = req.body;
-      if (!photoPath || !photoPath.startsWith(`${session.companyId}/${session.userId}/`)) {
+      if (!isOwnedPath(photoPath, `${session.companyId}/${session.userId}/`)) {
         return res.status(400).json({ error: 'Invalid file path.' });
       }
       const { error } = await supabaseAdmin.from('roster').update({ photo_path: photoPath }).eq('id', session.userId).eq('company_id', session.companyId);
