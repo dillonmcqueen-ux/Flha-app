@@ -48,7 +48,22 @@ const MAX_PROMPT_CHARS = 40000;
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 const RATE_LIMIT_MAX_REQUESTS = 20;
 
+// The count is bumped by one atomic statement inside bump_ai_rate_limit
+// (docs/schema/ai-rate-limit-atomic-migration.sql) and the decision is made
+// on the value it returns. If the function is missing (a deploy landing
+// before the migration is applied) fall back to the old read-then-write path
+// rather than failing closed and blocking every AI call.
 async function checkRateLimit(key) {
+  const { data, error } = await supabaseAdmin.rpc('bump_ai_rate_limit', {
+    p_key: key,
+    p_window_seconds: Math.round(RATE_LIMIT_WINDOW_MS / 1000),
+  });
+  if (!error && typeof data === 'number') return data <= RATE_LIMIT_MAX_REQUESTS;
+  if (error) console.error('bump_ai_rate_limit RPC unavailable, using non-atomic fallback:', error.message);
+  return legacyCheckRateLimit(key);
+}
+
+async function legacyCheckRateLimit(key) {
   const now = Date.now();
   const { data: rows } = await supabaseAdmin
     .from('ai_rate_limits')
