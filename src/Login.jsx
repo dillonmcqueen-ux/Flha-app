@@ -491,7 +491,6 @@ export default function Login() {
             alt="FORA Field Solutions"
             style={{ maxWidth: 220, maxHeight: 110, objectFit: "contain", marginBottom: 8 }}
           />
-          <div style={{ fontSize: 13, color: C.text.muted }}>No suits. No bs. Just results.</div>
         </div>
 
         {enrollLinkHint ? (
