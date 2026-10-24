@@ -141,3 +141,19 @@ export function validateOnboardingIntake({ companyName, contactEmail, sitesList,
 export function randomToken(bytes = 24) {
   return crypto.randomBytes(bytes).toString('base64url');
 }
+
+// The public intake form lets anyone put any text in the company name, and the
+// submitter confirmation email carries it in the subject and body from FORA's
+// verified domain. Keep only what a company name needs: no links, no line
+// breaks, no markup, and a hard length cap, so the email cannot be used to
+// deliver a message of the sender's choosing.
+export function safeDisplayName(value, fallback = 'your company') {
+  const cleaned = String(value ?? '')
+    .replace(/https?:\/\/\S+|www\.\S+|\S+@\S+/gi, ' ')
+    .replace(/[^\p{L}\p{N} .,&'()#/-]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .trim();
+  return cleaned || fallback;
+}

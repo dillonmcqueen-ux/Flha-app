@@ -15,7 +15,7 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { createUploadUrl } from '../server-lib/uploadUrls.js';
 import { checkIpThrottle as sharedCheckIpThrottle, peekIpThrottle, ipBucket } from '../server-lib/ipThrottle.js';
-import { validateOnboardingIntake, randomToken, isValidEmail } from '../server-lib/onboardingHelpers.js';
+import { validateOnboardingIntake, randomToken, isValidEmail, safeDisplayName } from '../server-lib/onboardingHelpers.js';
 import { runOnboardingDrafts } from '../server-lib/onboardingDrafting.js';
 import { sendEmail, siteOrigin } from '../server-lib/email.js';
 import { withDecryptedEmail, encryptField, decryptField, keyProblemMessage } from '../server-lib/fieldCrypto.js';
@@ -140,6 +140,10 @@ const ONBOARDING_UPLOAD_MAX_PER_HOUR = 40;
 // Claim-link actions (PIN assignment, draft confirmation) sit behind a bearer
 // token only, so they get the same per-IP ceiling the other public onboarding
 // actions have. A real contact sets a handful of PINs and retries a typo or two.
+// The submitter confirmation goes to an address the form's author typed, so one
+// address only ever gets a few of them a day, whatever IPs the requests come from.
+const ONBOARDING_CONFIRMATION_MAX_PER_ADDRESS = 3;
+const ONBOARDING_CONFIRMATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CLAIM_WRITE_MAX_PER_HOUR = 60;
 const CLAIM_GET_MAX_PER_HOUR = 60;
 const CLAIM_MAX_LIST_ITEMS = 200;
@@ -431,16 +435,24 @@ async function sendOnboardingNotification(record) {
 // been created from the request — Onboarding.jsx hides the edit form once
 // the record shows created_company_id.
 async function sendSubmitterConfirmation(req, record, editToken) {
+  // Hashed so the throttle table never holds the address itself.
+  const addressKey = crypto.createHash('sha256').update(String(record.contact_email || '').trim().toLowerCase()).digest('hex');
+  const allowed = await checkIpThrottle(`onbmail:${addressKey}`, ONBOARDING_CONFIRMATION_MAX_PER_ADDRESS, ONBOARDING_CONFIRMATION_WINDOW_MS);
+  if (!allowed) {
+    console.warn('Onboarding submitter confirmation skipped: per-address cap reached.');
+    return;
+  }
   const editUrl = `${siteOrigin(req)}/onboarding?edit=${editToken}`;
+  const name = safeDisplayName(record.company_name);
   const text = [
-    `Thanks — we've got your submission for ${record.company_name || 'your company'}.`,
+    `Thanks, we've got your submission for ${name}.`,
     "We'll email you within one business day once your company is live on FORA.",
     '',
     `Need to fix or add something first? Edit your submission any time before then: ${editUrl}`,
   ].join('\n');
   await sendEmail({
     to: record.contact_email,
-    subject: `We've got your FORA onboarding request — ${record.company_name || ''}`,
+    subject: `We've got your FORA onboarding request: ${name}`,
     text,
   });
 }
