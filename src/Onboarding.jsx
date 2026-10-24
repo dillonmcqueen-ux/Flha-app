@@ -327,7 +327,7 @@ export default function Onboarding() {
       return;
     }
     if (siteLines.length === 0) {
-      setError("List at least one site, yard, or location — one per line.");
+      setError("List at least one site, yard, or location, one per line.");
       return;
     }
     if (rosterProblem) {
@@ -402,7 +402,7 @@ export default function Onboarding() {
   if (alreadyApproved) {
     return (
       <StatusCard icon={ShieldCheck} title="Already set up">
-        This request has already been approved and your company is live — check your email for your claim link, or contact FORA support for help.
+        This request has already been approved and your company is live. Check your email for your claim link, or contact FORA support for help.
       </StatusCard>
     );
   }
@@ -411,8 +411,8 @@ export default function Onboarding() {
     return (
       <StatusCard icon={CheckCircle2} iconColor={C.status.success.solid} title={autoApproved ? "You're already live!" : "You're all set"}>
         {autoApproved
-          ? "Your FORA account is ready right now — check your email for a link to finish setup: assign your team's PINs and review what we drafted from what you sent."
-          : "Thanks — we've got everything. We'll email you within one business day once your company is live on FORA."}
+          ? "Your FORA account is ready right now. Check your email for a link to finish setup: assign your team's PINs and review what we drafted from what you sent."
+          : "Thanks, we've got everything. We'll email you within one business day once your company is live on FORA."}
         {!autoApproved && savedEditToken && (
           <div style={{ fontSize: 12, color: C.text.faint, lineHeight: 1.6, marginTop: 16, borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
             Need to fix or add something first? {confirmationEmailed ? "We also emailed this, but you can bookmark it now:" : "Bookmark this link to come back and edit:"}
@@ -458,8 +458,8 @@ export default function Onboarding() {
             </div>
             <div style={{ fontSize: 14, color: C.text.muted, maxWidth: 480 }}>
               {editToken
-                ? "Update your submission and resubmit — we'll pick up right where you left off."
-                : "Tell us about your company. However messy, send it as-is — we'll sort it out."}
+                ? "Update your submission and resubmit. We'll pick up right where you left off."
+                : "Tell us about your company. However messy, send it as-is and we'll sort it out."}
             </div>
           </div>
         </div>
@@ -505,7 +505,7 @@ export default function Onboarding() {
             </div>
 
             <div style={styles.label}>Company logo</div>
-            <div style={styles.hint}>Optional — shows on your login screen and generated PDFs.</div>
+            <div style={styles.hint}>Optional. Shows on your login screen and generated PDFs.</div>
             <label style={styles.fileBtn}>
               <UploadCloud size={16} color={C.text.muted} style={{ flexShrink: 0 }} />
               {logoFile ? logoFile.name : "Choose a file…"}
@@ -521,12 +521,12 @@ export default function Onboarding() {
             </div>
 
             <div style={styles.label}>Sites <span style={styles.required}>*</span></div>
-            <div style={styles.hint}>One per line — job sites, yards, or locations your crew works out of. At least one is required.</div>
+            <div style={styles.hint}>One per line: job sites, yards, or locations your crew works out of. At least one is required.</div>
             <textarea style={styles.textarea} value={form.sitesList} onChange={set("sitesList")} placeholder={"Red Deer County\nMain Yard"} />
 
             <div style={styles.label}>Units / equipment</div>
-            <div style={styles.hint}>One per line — year, make, model, and unit number if you have one. We'll draft an editable equipment list from this for you to confirm later.</div>
-            <textarea style={styles.textarea} value={form.unitsList} onChange={set("unitsList")} placeholder={"2026 Chevrolet 2500 Pick up\n2005 John Deere 624H Loader — Unit 4"} />
+            <div style={styles.hint}>One per line: year, make, model, and unit number if you have one. We'll draft an editable equipment list from this for you to confirm later.</div>
+            <textarea style={styles.textarea} value={form.unitsList} onChange={set("unitsList")} placeholder={"2026 Chevrolet 2500 Pick up\n2005 John Deere 624H Loader, Unit 4"} />
             <div style={{ marginBottom: 6 }} />
           </div>
 
@@ -592,7 +592,7 @@ export default function Onboarding() {
               <div style={styles.sectionIcon}><FileText size={16} color={C.orange} strokeWidth={2.25} /></div>
               <div style={styles.sectionTitle}>SOPs</div>
             </div>
-            <div style={styles.hint}>Upload however you have them — PDFs, Word docs, scans, photos. Messy is fine.</div>
+            <div style={styles.hint}>Upload however you have them: PDFs, Word docs, scans, photos. Messy is fine.</div>
             <label style={styles.fileBtn}>
               <UploadCloud size={16} color={C.text.muted} style={{ flexShrink: 0 }} />
               {files.length > 0 ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "Choose files…"}

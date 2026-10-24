@@ -228,16 +228,16 @@ export default function ClaimAccount() {
         )}
 
         <div style={styles.card}>
-          <div style={styles.h2}>Equipment — confirm the draft we parsed</div>
+          <div style={styles.h2}>Equipment: confirm the draft we parsed</div>
           {draftStatus === "pending" ? (
-            <div style={styles.hint}>Still preparing your equipment draft — <button style={{ ...styles.ghostBtn, padding: "2px 8px" }} onClick={load}>refresh</button></div>
+            <div style={styles.hint}>Still preparing your equipment draft. <button style={{ ...styles.ghostBtn, padding: "2px 8px" }} onClick={load}>refresh</button></div>
           ) : equipmentDraft.length === 0 ? (
-            <div style={styles.hint}>{equipmentConfirmed ? "No equipment to add — you can add units any time from the app." : "We couldn't draft anything from what was submitted — you can add equipment later from the app."}</div>
+            <div style={styles.hint}>{equipmentConfirmed ? "No equipment to add. You can add units any time from the app." : "We couldn't draft anything from what was submitted. You can add equipment later from the app."}</div>
           ) : equipmentConfirmed ? (
             <div style={styles.hint}>✓ Equipment saved.</div>
           ) : (
             <>
-              <div style={styles.hint}>Edit anything that's off, remove anything that's wrong, then confirm — nothing is saved until you do.</div>
+              <div style={styles.hint}>Edit anything that's off, remove anything that's wrong, then confirm. Nothing is saved until you do.</div>
               {equipmentDraft.map((eq, i) => (
                 <div key={i} style={styles.row}>
                   <input style={{ ...styles.input, width: 70 }} placeholder="Year" value={eq.year || ""} onChange={(e) => updateEquipmentField(i, "year", e.target.value)} />
@@ -253,11 +253,11 @@ export default function ClaimAccount() {
         </div>
 
         <div style={styles.card}>
-          <div style={styles.h2}>SOPs — review before your team sees them</div>
+          <div style={styles.h2}>SOPs: review before your team sees them</div>
           {draftStatus === "pending" ? (
-            <div style={styles.hint}>Still preparing your SOP draft — <button style={{ ...styles.ghostBtn, padding: "2px 8px" }} onClick={load}>refresh</button></div>
+            <div style={styles.hint}>Still preparing your SOP draft. <button style={{ ...styles.ghostBtn, padding: "2px 8px" }} onClick={load}>refresh</button></div>
           ) : sopDrafts.length === 0 ? (
-            <div style={styles.hint}>{sopsConfirmed ? "No SOPs added yet — you can add them any time from the app." : "We couldn't draft anything from your uploaded files — your raw files are still saved on file; add SOPs manually from the app."}</div>
+            <div style={styles.hint}>{sopsConfirmed ? "No SOPs added yet. You can add them any time from the app." : "We couldn't draft anything from your uploaded files. Your raw files are still saved on file; add SOPs manually from the app."}</div>
           ) : sopsConfirmed ? (
             <div style={styles.hint}>✓ SOPs saved.</div>
           ) : (
