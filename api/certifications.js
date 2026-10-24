@@ -182,7 +182,7 @@ export default async function handler(req, res) {
       // Namespaced by company/roster so one company's uploads can never
       // collide with (or be pointed at) another's inside the shared bucket.
       const namespacedName = `${companyId}/${rosterId}/${Date.now()}-${filename}`;
-      const result = await createUploadUrl(supabaseAdmin, BUCKET, namespacedName);
+      const result = await createUploadUrl(supabaseAdmin, BUCKET, namespacedName, null, companyId);
       if (result.error) return res.status(500).json({ error: result.error });
       return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
     }
@@ -450,7 +450,7 @@ export default async function handler(req, res) {
       if (!session.userId) return res.status(403).json({ error: 'Not allowed.' });
       const { filename } = req.body;
       const namespacedName = `${session.companyId}/${session.userId}/${Date.now()}-${filename}`;
-      const result = await createUploadUrl(supabaseAdmin, PHOTO_BUCKET, namespacedName);
+      const result = await createUploadUrl(supabaseAdmin, PHOTO_BUCKET, namespacedName, null, session.companyId);
       if (result.error) return res.status(500).json({ error: result.error });
       return res.status(200).json({ ok: true, path: result.path, uploadToken: result.uploadToken });
     }
