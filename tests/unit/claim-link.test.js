@@ -15,6 +15,7 @@ process.env.ADMIN_CODE = 'a-long-admin-code-123456';
 let throttleCount;
 let rosterRow;
 let seen; // { method, table }
+let patchMatches; // whether the guarded UPDATE finds a row
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -27,7 +28,7 @@ const server = http.createServer(async (req, res) => {
   if (table === 'onboarding_requests') {
     return send(200, [{ id: 5, created_company_id: 1, claim_token: 'tok', claim_token_expires_at: new Date(Date.now() + 3600e3).toISOString(), draft_status: 'done' }]);
   }
-  if (table === 'roster') return send(200, [rosterRow]);
+  if (table === 'roster') return send(200, req.method === 'GET' ? [rosterRow] : (rosterRow.pin_set_at || !patchMatches ? [] : [{ id: rosterRow.id }]));
   return send(200, []);
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -47,8 +48,9 @@ async function call(body) {
 
 test.beforeEach(() => {
   throttleCount = 1;
-  rosterRow = { id: 11, company_id: 1, pin_set_at: null };
+  rosterRow = { id: 11, company_id: 1, pin_set_at: null, active: true, role: 'worker' };
   seen = [];
+  patchMatches = true;
 });
 
 const writes = (table) => seen.filter(r => r.table === table && r.method !== 'GET');
@@ -94,4 +96,20 @@ test('a normal confirmation still goes through', async () => {
   const out = await call({ action: 'claim_confirm_equipment', claimToken: 'tok', items: [{ make: 'CAT', model: '320', type: 'Excavator' }] });
   assert.equal(out.statusCode, 200, JSON.stringify(out.body));
   assert.equal(out.body.added, 1);
+});
+
+test('a deactivated person or an auditor is not assigned a PIN', async () => {
+  rosterRow.active = false;
+  assert.equal((await setPin()).statusCode, 404);
+  rosterRow = { id: 11, company_id: 1, pin_set_at: null, active: true, role: 'auditor' };
+  assert.equal((await setPin()).statusCode, 404);
+  assert.equal(writes('roster').length, 0);
+});
+
+test('a setup link finished between the read and the write wins', async () => {
+  // The read saw no PIN; by the time the guarded UPDATE runs the person has
+  // set their own, so it matches no row and the claim link must not report success.
+  patchMatches = false;
+  const out = await setPin();
+  assert.equal(out.statusCode, 409);
 });

@@ -1277,7 +1277,7 @@ async function loginHandler(req, res) {
     // this claim token resolved to, never trusted from the client alone.
     const { data: memberRows, error: memberErr } = await supabaseAdmin
       .from('roster')
-      .select('id, company_id, pin_set_at')
+      .select('id, company_id, pin_set_at, active, role')
       .eq('id', rosterId)
       .limit(1);
     if (memberErr || !memberRows || memberRows.length === 0 || memberRows[0].company_id !== request.created_company_id) {
@@ -1288,14 +1288,27 @@ async function loginHandler(req, res) {
     if (memberRows[0].pin_set_at) {
       return res.status(409).json({ error: 'That person has already set their own PIN.' });
     }
+    // Nobody who cannot sign in (deactivated) or who is not company staff
+    // (auditor) is someone this link assigns a PIN to.
+    if (memberRows[0].active === false || memberRows[0].role === 'auditor') {
+      return res.status(404).json({ error: 'Roster member not found.' });
+    }
 
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = hashPin(pin, salt);
-    const { error: updateErr } = await supabaseAdmin
+    // The guard is part of the UPDATE, not just the read above, so a person
+    // finishing their own setup link between the two cannot be overwritten.
+    const { data: updated, error: updateErr } = await supabaseAdmin
       .from('roster')
       .update({ pin_hash: hash, pin_salt: salt, failed_pin_attempts: 0, pin_locked_until: null })
-      .eq('id', rosterId);
+      .eq('id', rosterId)
+      .eq('company_id', request.created_company_id)
+      .is('pin_set_at', null)
+      .select('id');
     if (updateErr) return res.status(500).json({ error: "Couldn't save that PIN." });
+    if (!updated || updated.length === 0) {
+      return res.status(409).json({ error: 'That person has already set their own PIN.' });
+    }
     return res.status(200).json({ ok: true });
   }
 
