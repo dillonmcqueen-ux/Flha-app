@@ -251,3 +251,11 @@ test('the request actually sends the model, max_tokens and system prompt', async
   // The shape that 400s on this model.
   assert.ok(!('budget_tokens' in (anthropicBody.thinking || {})));
 });
+
+test('isKnownDocumentType accepts routing-table keys only', async () => {
+  const { isKnownDocumentType } = await import('../../api/generate-flha.js');
+  for (const key of Object.keys(MODEL_BY_DOCUMENT_TYPE)) assert.equal(isKnownDocumentType(key), true, key);
+  for (const bad of [undefined, null, '', 'opus', '__proto__', 'toString', 42, {}]) {
+    assert.equal(isKnownDocumentType(bad), false, JSON.stringify(bad));
+  }
+});

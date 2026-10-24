@@ -218,6 +218,15 @@ function logSafeSubtype(documentType) {
     : 'other';
 }
 
+// The field is client-supplied and selects the model, so an unrecognised value
+// is refused outright instead of falling back to Opus: otherwise any session
+// could use this endpoint as a free Opus proxy by sending a made-up type.
+// Every caller in src/ sends a key from MODEL_BY_DOCUMENT_TYPE.
+export function isKnownDocumentType(documentType) {
+  return typeof documentType === 'string'
+    && Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType);
+}
+
 export function modelForDocumentType(documentType) {
   if (typeof documentType !== 'string') return DEFAULT_MODEL;
   return Object.prototype.hasOwnProperty.call(MODEL_BY_DOCUMENT_TYPE, documentType)
@@ -306,6 +315,10 @@ export default async function handler(req, res) {
   }
   if (typeof prompt !== 'string' || prompt.length > MAX_PROMPT_CHARS) {
     return res.status(400).json({ error: "Prompt too long." });
+  }
+
+  if (!isKnownDocumentType(documentType)) {
+    return res.status(400).json({ error: "Unknown document type." });
   }
 
   const rateLimitKey = session.userId ? `user:${session.userId}` : `company:${session.companyId}`;

@@ -6,7 +6,7 @@
 -- INSERT ... ON CONFLICT DO UPDATE, and the caller decides on the value the
 -- statement returns.
 --
--- NOT YET APPLIED to the live FORA project. api/generate-flha.js falls back
+-- APPLIED to the live FORA project (wzyvbtzxxdcxgvbkcqmt) on 2026-10-24 as "ai_rate_limit_atomic". api/generate-flha.js falls back
 -- to the old non-atomic path while this function is missing, so deploy order
 -- does not matter. Verify after applying: prosecdef true, EXECUTE held by
 -- service_role only, and three calls on a throwaway key return 1, 2, 3
