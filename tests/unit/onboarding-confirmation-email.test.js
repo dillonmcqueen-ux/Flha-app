@@ -13,6 +13,7 @@ process.env.ADMIN_CODE = 'a-long-admin-code-123456';
 process.env.RESEND_API_KEY = 'test-resend-key';
 
 let throttleCount;
+let paidCheckout; // whether the claimed Stripe checkout session exists
 let seenKeys; // p_key of every bump_ip_throttle call
 const sent = []; // bodies sent to Resend
 
@@ -23,6 +24,7 @@ const server = http.createServer(async (req, res) => {
   await new Promise(r => { req.on('data', c => { raw += c; }); req.on('end', r); });
   const send = (code, payload) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(payload)); };
   if (table === 'rpc/bump_ip_throttle') { seenKeys.push(JSON.parse(raw).p_key); return send(200, throttleCount(JSON.parse(raw).p_key)); }
+  if (table === 'stripe_checkouts') return send(200, paidCheckout ? [{ customer_id: 'cus_test', plan_tier: 'basic', modules: null }] : []);
   if (table === 'onboarding_requests' && req.method === 'POST') return send(201, [{ id: 7 }]);
   return send(200, []);
 });
@@ -49,7 +51,7 @@ async function submit(overrides = {}) {
     method: 'POST', headers: {},
     body: {
       action: 'submit_onboarding_intake',
-      companyName: 'ABC Earthworks Company', contactEmail: 'owner@abc.example',
+      companyName: 'ABC Earthworks Company', contactEmail: 'owner@abc.example', stripeSessionId: 'cs_test_1',
       sitesList: 'Yard', usersList: 'Jamie Worker, worker', ...overrides,
     },
   }, {
@@ -61,6 +63,7 @@ async function submit(overrides = {}) {
 
 test.beforeEach(() => {
   throttleCount = () => 1;
+  paidCheckout = true;
   seenKeys = [];
   sent.length = 0;
 });
@@ -97,4 +100,19 @@ test('safeDisplayName strips links, markup, line breaks and length', () => {
   assert.equal(safeDisplayName(''), 'your company');
   assert.equal(safeDisplayName(null), 'your company');
   assert.equal(safeDisplayName('x'.repeat(500)).length, 80);
+});
+
+test('no verified purchase means no confirmation email', async () => {
+  paidCheckout = false;
+  const out = await submit();
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.equal(out.body.confirmationEmailed, false);
+  assert.equal(sent.length, 0);
+  assert.ok(out.body.editToken, 'the edit link is still handed back for the page to show');
+});
+
+test('a verified purchase gets the email and the response says so', async () => {
+  const out = await submit();
+  assert.equal(out.body.confirmationEmailed, true);
+  assert.equal(sent.length, 1);
 });

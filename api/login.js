@@ -440,7 +440,7 @@ async function sendSubmitterConfirmation(req, record, editToken) {
   const allowed = await checkIpThrottle(`onbmail:${addressKey}`, ONBOARDING_CONFIRMATION_MAX_PER_ADDRESS, ONBOARDING_CONFIRMATION_WINDOW_MS);
   if (!allowed) {
     console.warn('Onboarding submitter confirmation skipped: per-address cap reached.');
-    return;
+    return false;
   }
   const editUrl = `${siteOrigin(req)}/onboarding?edit=${editToken}`;
   const name = safeDisplayName(record.company_name);
@@ -455,6 +455,7 @@ async function sendSubmitterConfirmation(req, record, editToken) {
     subject: `We've got your FORA onboarding request: ${name}`,
     text,
   });
+  return true;
 }
 
 // The one place a roster login turns into a session, after the PIN and (when
@@ -1050,11 +1051,16 @@ async function loginHandler(req, res) {
       }
     }
 
+    // A confirmation email only goes to a submitter whose purchase we have
+    // verified (a claimed Stripe checkout). The form is public and the address
+    // is whatever the author typed, so an unpaid submission must not make FORA's
+    // domain send anything to a third party. They still see the edit link on screen.
+    let purchaseVerified = !!record.stripe_customer_id;
     let requestId;
     if (editToken) {
       const { data: existingRows, error: findErr } = await supabaseAdmin
         .from('onboarding_requests')
-        .select('id, created_company_id')
+        .select('id, created_company_id, stripe_customer_id')
         .eq('edit_token', editToken)
         .limit(1);
       if (findErr) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
@@ -1069,6 +1075,7 @@ async function loginHandler(req, res) {
       const { error } = await supabaseAdmin.from('onboarding_requests').update({ ...record, status: 'new', admin_note: null }).eq('id', existing.id);
       if (error) return res.status(500).json({ error: 'Could not save your submission. Please try again.' });
       requestId = existing.id;
+      purchaseVerified = purchaseVerified || !!existing.stripe_customer_id;
     } else {
       record.edit_token = randomToken();
       let { data, error } = await supabaseAdmin
@@ -1143,13 +1150,16 @@ async function loginHandler(req, res) {
     }
 
     await sendOnboardingNotification({ ...record, skippedUserLines });
-    try {
-      await sendSubmitterConfirmation(req, record, editToken || record.edit_token);
-    } catch (e) {
-      console.error('Onboarding submitter confirmation email failed:', e.message);
+    let confirmationEmailed = false;
+    if (purchaseVerified) {
+      try {
+        confirmationEmailed = (await sendSubmitterConfirmation(req, record, editToken || record.edit_token)) === true;
+      } catch (e) {
+        console.error('Onboarding submitter confirmation email failed:', e.message);
+      }
     }
 
-    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines, autoApproved: false });
+    return res.status(200).json({ ok: true, id: requestId, editToken: editToken || record.edit_token, skippedUserLines, autoApproved: false, confirmationEmailed });
   }
 
   // ── Fetch an in-progress request for self-serve editing. Public, but

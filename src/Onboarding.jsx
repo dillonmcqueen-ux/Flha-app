@@ -197,6 +197,7 @@ export default function Onboarding() {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const [autoApproved, setAutoApproved] = useState(false);
+  const [confirmationEmailed, setConfirmationEmailed] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(!!editToken);
   const [alreadyApproved, setAlreadyApproved] = useState(false);
@@ -381,6 +382,7 @@ export default function Onboarding() {
       }
       setSavedEditToken(data.editToken || editToken || "");
       setAutoApproved(!!data.autoApproved);
+      setConfirmationEmailed(!!data.confirmationEmailed);
       setDone(true);
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
@@ -413,7 +415,7 @@ export default function Onboarding() {
           : "Thanks — we've got everything. We'll email you within one business day once your company is live on FORA."}
         {!autoApproved && savedEditToken && (
           <div style={{ fontSize: 12, color: C.text.faint, lineHeight: 1.6, marginTop: 16, borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
-            Need to fix or add something first? We also emailed this, but you can bookmark it now:
+            Need to fix or add something first? {confirmationEmailed ? "We also emailed this, but you can bookmark it now:" : "Bookmark this link to come back and edit:"}
             <br />
             <a
               href={`/onboarding?edit=${savedEditToken}`}
