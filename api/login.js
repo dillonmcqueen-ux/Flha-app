@@ -137,6 +137,14 @@ const ONBOARDING_THROTTLE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const ONBOARDING_INTAKE_MAX_PER_HOUR = 10;
 const ONBOARDING_GET_MAX_PER_HOUR = 60;
 const ONBOARDING_UPLOAD_MAX_PER_HOUR = 40;
+// Claim-link actions (PIN assignment, draft confirmation) sit behind a bearer
+// token only, so they get the same per-IP ceiling the other public onboarding
+// actions have. A real contact sets a handful of PINs and retries a typo or two.
+const CLAIM_WRITE_MAX_PER_HOUR = 60;
+const CLAIM_GET_MAX_PER_HOUR = 60;
+const CLAIM_MAX_LIST_ITEMS = 200;
+const CLAIM_MAX_FIELD_CHARS = 200;
+const CLAIM_MAX_POLICY_CHARS = 5000;
 
 // Hash-then-compare so mismatched-length inputs never short-circuit —
 // timingSafeEqual itself throws on unequal-length buffers, and fixed-length
@@ -1178,6 +1186,10 @@ async function loginHandler(req, res) {
   // resolves companyId strictly from the claim token server-side — never
   // from a client-supplied id. ═══════════════════════════════════════════
 
+  async function claimThrottleOk(kind, max) {
+    return checkIpThrottle(`${kind}:${ipBucket(clientIp(req))}`, max, ONBOARDING_THROTTLE_WINDOW_MS);
+  }
+
   async function resolveClaimRequest(claimToken) {
     if (!claimToken) return { error: 'Missing claim link.' };
     const { data: rows, error } = await supabaseAdmin
@@ -1196,6 +1208,9 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_get_details') {
     const { claimToken } = req.body;
+    if (!(await claimThrottleOk('claimget', CLAIM_GET_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
 
@@ -1248,6 +1263,9 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_set_roster_pin') {
     const { claimToken, rosterId, pin } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     if (!rosterId || !/^\d{6}$/.test(String(pin || ''))) {
@@ -1259,11 +1277,16 @@ async function loginHandler(req, res) {
     // this claim token resolved to, never trusted from the client alone.
     const { data: memberRows, error: memberErr } = await supabaseAdmin
       .from('roster')
-      .select('id, company_id')
+      .select('id, company_id, pin_set_at')
       .eq('id', rosterId)
       .limit(1);
     if (memberErr || !memberRows || memberRows.length === 0 || memberRows[0].company_id !== request.created_company_id) {
       return res.status(404).json({ error: 'Roster member not found.' });
+    }
+    // A PIN the person chose themselves through their own setup link is theirs.
+    // This link only fills in PINs nobody has set yet, or ones typed here.
+    if (memberRows[0].pin_set_at) {
+      return res.status(409).json({ error: 'That person has already set their own PIN.' });
     }
 
     const salt = crypto.randomBytes(16).toString('hex');
@@ -1278,9 +1301,15 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_confirm_equipment') {
     const { claimToken, items } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     if (!Array.isArray(items)) return res.status(400).json({ error: 'Missing equipment list.' });
+    const tooBig = items.length > CLAIM_MAX_LIST_ITEMS || items.some((it) => it && typeof it === 'object'
+      && ['year', 'make', 'model', 'type', 'unitNumber'].some((k) => String(it[k] ?? '').length > CLAIM_MAX_FIELD_CHARS));
+    if (tooBig) return res.status(400).json({ error: 'That equipment list is too large.' });
 
     const rows = items
       .filter((it) => it && ((it.make || '').trim() || (it.model || '').trim() || (it.type || '').trim() || (it.unitNumber || '').trim()))
@@ -1305,9 +1334,15 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_confirm_sops') {
     const { claimToken, policies } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     if (!Array.isArray(policies)) return res.status(400).json({ error: 'Missing policy list.' });
+    if (policies.length > CLAIM_MAX_LIST_ITEMS || policies.some((p) => typeof p !== 'string' || p.length > CLAIM_MAX_POLICY_CHARS)) {
+      return res.status(400).json({ error: 'That policy list is too large.' });
+    }
 
     const rows = policies.filter((p) => (p || '').trim()).map((policy_text) => ({ company_id: request.created_company_id, policy_text: policy_text.trim() }));
     if (rows.length > 0) {
@@ -1320,6 +1355,9 @@ async function loginHandler(req, res) {
 
   if (action === 'claim_finalize') {
     const { claimToken } = req.body;
+    if (!(await claimThrottleOk('claimw', CLAIM_WRITE_MAX_PER_HOUR))) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a bit and try again.' });
+    }
     const { request, error } = await resolveClaimRequest(claimToken);
     if (error) return res.status(400).json({ error });
     await supabaseAdmin.from('onboarding_requests').update({ claimed_at: new Date().toISOString() }).eq('id', request.id);
