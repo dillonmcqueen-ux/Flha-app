@@ -1304,7 +1304,7 @@ async function loginHandler(req, res) {
     // this claim token resolved to, never trusted from the client alone.
     const { data: memberRows, error: memberErr } = await supabaseAdmin
       .from('roster')
-      .select('id, company_id, pin_set_at, pin_assigned_at, active, role')
+      .select('id, company_id, pin_set_at, pin_assigned_at, pin_link_sent_at, email, active, role')
       .eq('id', rosterId)
       .limit(1);
     if (memberErr || !memberRows || memberRows.length === 0 || memberRows[0].company_id !== request.created_company_id) {
@@ -1316,6 +1316,13 @@ async function loginHandler(req, res) {
     // or PINs typed here.
     if (memberRows[0].pin_set_at || memberRows[0].pin_assigned_at) {
       return res.status(409).json({ error: 'That person has already set their own PIN.' });
+    }
+    // The claim page only offers a typed PIN to people with no email. Anyone
+    // with an address gets (or already got) a setup link and chooses their own,
+    // so the server holds the same line: a hire added by email later, or anyone
+    // whose link is out, is not this link's to set a PIN for.
+    if (memberRows[0].email || memberRows[0].pin_link_sent_at) {
+      return res.status(409).json({ error: 'That person sets their own PIN through an emailed setup link.' });
     }
     // Nobody who cannot sign in (deactivated) or who is not company staff
     // (auditor) is someone this link assigns a PIN to.
@@ -1334,6 +1341,7 @@ async function loginHandler(req, res) {
       .eq('company_id', request.created_company_id)
       .is('pin_set_at', null)
       .is('pin_assigned_at', null)
+      .is('pin_link_sent_at', null)
       .select('id');
     if (updateErr) return res.status(500).json({ error: "Couldn't save that PIN." });
     if (!updated || updated.length === 0) {

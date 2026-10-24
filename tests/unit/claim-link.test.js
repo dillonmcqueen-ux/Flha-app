@@ -49,7 +49,7 @@ async function call(body) {
 
 test.beforeEach(() => {
   throttleCount = 1;
-  rosterRow = { id: 11, company_id: 1, pin_set_at: null, pin_assigned_at: null, active: true, role: 'worker' };
+  rosterRow = { id: 11, company_id: 1, pin_set_at: null, pin_assigned_at: null, pin_link_sent_at: null, email: null, active: true, role: 'worker' };
   seen = [];
   patchMatches = true;
   claimedAt = null;
@@ -84,6 +84,16 @@ test('the guarded UPDATE requires both pin_set_at and pin_assigned_at to be null
   assert.ok(patch);
   assert.match(patch.url, /pin_set_at=is\.null/);
   assert.match(patch.url, /pin_assigned_at=is\.null/);
+  assert.match(patch.url, /pin_link_sent_at=is\.null/);
+});
+
+test('anyone with an email or an emailed setup link is left to set their own PIN', async () => {
+  rosterRow.email = 'v1:encrypted-blob';
+  assert.equal((await setPin()).statusCode, 409);
+  rosterRow.email = null;
+  rosterRow.pin_link_sent_at = '2026-10-24T20:00:00Z';
+  assert.equal((await setPin()).statusCode, 409);
+  assert.equal(writes('roster').length, 0);
 });
 
 test('a spent per-IP budget refuses every claim action', async () => {
